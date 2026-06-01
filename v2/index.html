@@ -2,117 +2,17 @@
 <html lang="fi">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pesäpallo Voice Watcher</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1C7A43" />
+  <title>Pesistulokset Voice</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <header>
-    <h1>⚾ Pesäpallo Voice Watcher</h1>
-    <p class="subtitle">Seuraa ottelua ja kuule tapahtumat ääneen</p>
-  </header>
-
-  <main>
-    <!-- Status bar -->
-    <div class="card status-card">
-      <div class="status-row">
-        <div id="status-dot" class="dot stopped"></div>
-        <span id="status-text">Ei seurantaa</span>
-      </div>
-      <div id="match-info" style="display:none" class="match-info-text"></div>
-      <div id="error-msg" style="display:none" class="error-msg"></div>
-    </div>
-
-    <!-- Live matches -->
-    <div class="card">
-      <div class="card-header">
-        <h2>Live-ottelut tänään</h2>
-        <button id="refresh-matches-btn" class="btn btn-sm btn-secondary" title="Päivitä lista">↻</button>
-      </div>
-      <div id="match-list" class="match-list">
-        <p class="no-matches">Ladataan…</p>
-      </div>
-    </div>
-
-    <!-- Match input & controls -->
-    <div class="card">
-      <div class="input-row">
-        <input
-          id="match-input"
-          type="text"
-          placeholder="Ottelun ID tai URL (esim. 12345)"
-          autocomplete="off"
-          autocorrect="off"
-          spellcheck="false"
-        />
-      </div>
-      <div class="btn-row">
-        <button id="toggle-btn" class="btn btn-start">Käynnistä</button>
-        <button id="unlock-btn" class="btn btn-unlock" style="display:none">
-          🔊 Käynnistä ääni
-        </button>
-      </div>
-    </div>
-
-    <!-- Log -->
-    <div class="card log-card">
-      <div class="card-header">
-        <h2>Tapahtumaloki</h2>
-      </div>
-      <div id="log" class="log"></div>
-    </div>
-
-    <!-- Suosikit (collapsible) -->
-    <div class="card">
-      <button class="collapsible-header">Suosikit <span class="chevron">▸</span></button>
-      <div class="collapsible-content" style="display:none">
-        <p class="hint">Suosikkijoukkueet — vain niiden ottelut näytetään oletuksena.</p>
-        <div id="favorites-list" class="favorites-list"></div>
-        <div class="fav-input-row">
-          <input id="fav-input" type="text" placeholder="Joukkueen nimi tai osa siitä" />
-          <button id="add-fav-btn" class="btn btn-sm btn-secondary">Lisää</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Ääntämiskorjaukset (collapsible) -->
-    <div class="card">
-      <button class="collapsible-header">Ääntämiskorjaukset <span class="chevron">▸</span></button>
-      <div class="collapsible-content" style="display:none">
-        <p class="hint">TTS lausuu nämä termit virheellisesti — korjaa tässä.</p>
-        <div id="pronunciation-list"></div>
-        <div class="pron-actions">
-          <button id="add-pron-btn" class="btn btn-sm btn-secondary">+ Lisää rivi</button>
-          <button id="save-pron-btn" class="btn btn-sm btn-primary">Tallenna</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Asetukset (collapsible) -->
-    <div class="card">
-      <button class="collapsible-header">Asetukset <span class="chevron">▸</span></button>
-      <div class="collapsible-content" style="display:none">
-        <div class="setting-row">
-          <label for="setting-api-base">API-osoite</label>
-          <input id="setting-api-base" type="text" spellcheck="false" />
-        </div>
-        <div class="setting-row">
-          <label for="setting-poll-interval">Pollausväli (s)</label>
-          <input id="setting-poll-interval" type="number" min="1" max="60" />
-        </div>
-        <div class="setting-row">
-          <label for="setting-batter-changes">Ilmoita lyöjänvaihdot</label>
-          <input id="setting-batter-changes" type="checkbox" />
-        </div>
-        <button id="save-settings-btn" class="btn btn-sm btn-primary">Tallenna asetukset</button>
-      </div>
-    </div>
-  </main>
-
-  <footer>
-    <p>Pesistulokset.fi · Ei virallinen sovellus</p>
-  </footer>
-
+  <div id="root"></div>
   <script type="module" src="./src/main.ts"></script>
 </body>
 </html>
