@@ -243,7 +243,6 @@ function unlockAudio(): void {
 // ── Settings panel ────────────────────────────────────────────────────────────
 
 function initSettings(): void {
-  el<HTMLInputElement>("setting-api-key").value = settings.apiKey;
   el<HTMLInputElement>("setting-api-base").value = settings.apiBase;
   el<HTMLInputElement>("setting-poll-interval").value = String(settings.pollInterval);
   el<HTMLInputElement>("setting-batter-changes").checked = settings.announceBatterChanges;
@@ -251,7 +250,7 @@ function initSettings(): void {
 
 function saveSettingsFromForm(): void {
   settings = {
-    apiKey: el<HTMLInputElement>("setting-api-key").value.trim() || DEFAULT_API_KEY,
+    apiKey: settings.apiKey || DEFAULT_API_KEY,
     apiBase: el<HTMLInputElement>("setting-api-base").value.trim() || DEFAULT_API_BASE,
     pollInterval: Math.max(1, parseInt(el<HTMLInputElement>("setting-poll-interval").value) || 6),
     announceBatterChanges: el<HTMLInputElement>("setting-batter-changes").checked,
