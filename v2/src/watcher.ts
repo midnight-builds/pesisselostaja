@@ -22,7 +22,7 @@ import {
   periodsWon,
   type WatcherState,
 } from "./state.js";
-import type { LiveEvent, MatchMetadata } from "./types.js";
+import type { LiveEvent, MatchMetadata, SubEvent } from "./types.js";
 
 const SUMMARY_INTERVAL_MS = 5 * 60 * 1000;
 const SUMMARY_EVERY_N = 10;
@@ -34,11 +34,36 @@ export interface WatcherConfig {
   apiBase: string;
 }
 
+export type FeedType = "run" | "out" | "period" | "bat" | "summary" | "info" | "end";
+
+export interface FeedItem {
+  type: FeedType;
+  text: string;
+}
+
+export interface MatchSnapshot {
+  homeName: string;
+  awayName: string;
+  homeShort: string;
+  awayShort: string;
+  seriesName: string | null;
+  period: number;
+  homeRuns: number;
+  awayRuns: number;
+  homePeriodsWon: number;
+  awayPeriodsWon: number;
+  palot: number;
+  battingSide: "home" | "away" | null;
+  finished: boolean;
+}
+
 export interface WatcherCallbacks {
   onLog: (msg: string) => void;
   onMatchInfo: (info: { matchInfo: string; seriesName: string | null; stadiumName: string }) => void;
   onFinished: () => void;
   onError: (err: string) => void;
+  onState?: (snapshot: MatchSnapshot) => void;
+  onFeed?: (item: FeedItem) => void;
 }
 
 export class BrowserWatcher {
@@ -48,6 +73,9 @@ export class BrowserWatcher {
   private _pronunciations: PronunciationRule[] = [];
   private _audioUnlocked = false;
   private _audioUnlockResolve: (() => void) | null = null;
+  private _muted = false;
+  private _meta: MatchMetadata | null = null;
+  private _state: WatcherState | null = null;
 
   constructor(
     private config: WatcherConfig,
@@ -55,9 +83,22 @@ export class BrowserWatcher {
   ) {}
 
   get running(): boolean { return this._running; }
+  get muted(): boolean { return this._muted; }
 
   setPronunciations(rules: PronunciationRule[]): void {
     this._pronunciations = rules;
+  }
+
+  setMuted(muted: boolean): void {
+    this._muted = muted;
+    if (muted && "speechSynthesis" in window) window.speechSynthesis.cancel();
+  }
+
+  /** Speak the current situation summary now (used when the listener un-mutes). */
+  announceSituation(): void {
+    if (this._muted || !this._meta || !this._state) return;
+    const summary = formatSituationSummary(this._meta, this.buildContext(this._state));
+    this.speakRaw(applyPronunciations(summary, this._pronunciations));
   }
 
   markAudioUnlocked(): void {
@@ -106,6 +147,7 @@ export class BrowserWatcher {
 
     this.log(`Haetaan ottelutietoja (ID: ${matchId})…`);
     const meta = await fetchMatchMetadata(matchId, apiOpts);
+    this._meta = meta;
     const lookup = buildPlayerLookup(meta);
 
     const matchInfo = `${meta.home.name} vs ${meta.away.name}`;
@@ -118,6 +160,7 @@ export class BrowserWatcher {
     this.log(`Pelaajia: ${lookup.byId.size}`);
 
     const state = loadState(matchId);
+    this._state = state;
 
     this.log("Ohitetaan historialliset tapahtumat…");
     const initial = await fetchLiveEvents(matchId, apiOpts);
@@ -133,6 +176,7 @@ export class BrowserWatcher {
 
     saveState(matchId, state);
     this.log(`Ohitettu ${initial.events.length} tapahtumaa`);
+    this.emitState(state, meta);
 
     if (!meta.live && meta.started) {
       this.log("Ottelu on jo päättynyt.");
@@ -142,7 +186,7 @@ export class BrowserWatcher {
     }
 
     // Wait for audio unlock (browser requires user gesture before speech)
-    if (!this._audioUnlocked) {
+    if (!this._audioUnlocked && !this._muted) {
       this.log("Odotetaan laitteen äänen käynnistystä…");
       await Promise.race([
         new Promise<void>((resolve) => { this._audioUnlockResolve = resolve; }),
@@ -153,6 +197,7 @@ export class BrowserWatcher {
 
     const startupMsg = formatStartupSpeech(meta, this.buildContext(state));
     this.say(startupMsg, state);
+    this.emitFeed("info", startupMsg);
 
     this.log("Seuranta käynnissä…");
 
@@ -174,6 +219,7 @@ export class BrowserWatcher {
             meta, state.currentBatTeamId, newBatTeam, cur.home, cur.away
           );
           this.say(msg, state);
+          this.emitFeed("period", msg);
           state.currentBatTeamId = newBatTeam;
           state.currentOuts = 0;
         }
@@ -187,6 +233,7 @@ export class BrowserWatcher {
         if ((data.period ?? 0) > 0) state.currentPeriod = data.period!;
 
         saveState(matchId, state);
+        this.emitState(state, meta);
       } catch (err) {
         this.log(`Hakuvirhe: ${err instanceof Error ? err.message : err}`);
       }
@@ -265,6 +312,7 @@ export class BrowserWatcher {
         if (!speech) continue;
 
         this.say(speech, state);
+        this.emitFeed(this.classifyFeed(sub, speech), speech);
 
         const now = Date.now();
         const needsSummary =
@@ -273,7 +321,8 @@ export class BrowserWatcher {
         if (needsSummary && state.announcementCount > 0) {
           state.lastSummaryTime = now;
           const summary = formatSituationSummary(meta, this.buildContext(state));
-          setTimeout(() => this.speakRaw(applyPronunciations(summary, this._pronunciations)), 800);
+          this.emitFeed("summary", summary);
+          if (!this._muted) setTimeout(() => this.speakRaw(applyPronunciations(summary, this._pronunciations)), 800);
         }
       }
 
@@ -281,6 +330,44 @@ export class BrowserWatcher {
         state.lastTimestamp = event.timestamp;
       }
     }
+  }
+
+  private classifyFeed(sub: SubEvent, speech: string): FeedType {
+    if (isMatchEndSubEvent(sub)) return "end";
+    if (isRunScoringSubEvent(sub)) return "run";
+    if (isOutSubEvent(sub)) return "out";
+    if (/^Vuorossa /.test(speech)) return "bat";
+    if (/(jakso|supervuoro|vuoro)/i.test(speech)) return "period";
+    return "info";
+  }
+
+  private emitFeed(type: FeedType, text: string): void {
+    this.callbacks.onFeed?.({ type, text });
+  }
+
+  private emitState(state: WatcherState, meta: MatchMetadata): void {
+    if (!this.callbacks.onState) return;
+    const cur = getPeriodScore(state, state.currentPeriod);
+    const won = periodsWon(state);
+    const battingSide =
+      state.currentBatTeamId === meta.home.id ? "home"
+      : state.currentBatTeamId === meta.away.id ? "away"
+      : null;
+    this.callbacks.onState({
+      homeName: meta.home.name,
+      awayName: meta.away.name,
+      homeShort: meta.home.shorthand,
+      awayShort: meta.away.shorthand,
+      seriesName: meta.series.custom_name ?? meta.series.name ?? null,
+      period: state.currentPeriod,
+      homeRuns: cur.home,
+      awayRuns: cur.away,
+      homePeriodsWon: won.home,
+      awayPeriodsWon: won.away,
+      palot: state.currentOuts,
+      battingSide,
+      finished: state.finished,
+    });
   }
 
   private buildContext(state: WatcherState): SpeechContext {
@@ -306,6 +393,7 @@ export class BrowserWatcher {
   }
 
   private speakRaw(text: string): void {
+    if (this._muted) return;
     if (!("speechSynthesis" in window)) return;
     const utt = new SpeechSynthesisUtterance(text);
     utt.lang = "fi-FI";
