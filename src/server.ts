@@ -1,6 +1,55 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFile } from "node:fs/promises";
+import { join, normalize, extname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { fetchLiveMatches } from "./api.js";
 import type { WatcherController } from "./watcher.js";
+
+const V2_DIST = fileURLToPath(new URL("../v2/dist", import.meta.url));
+
+const MIME: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".map": "application/json; charset=utf-8",
+};
+
+async function serveV2(url: string, res: ServerResponse): Promise<void> {
+  // Strip query/hash, drop the "/v2" prefix, default to index.html.
+  const rel = url.replace(/[?#].*$/, "").replace(/^\/v2\/?/, "") || "index.html";
+  const filePath = normalize(join(V2_DIST, rel));
+  if (filePath !== V2_DIST && !filePath.startsWith(V2_DIST + "/")) {
+    res.writeHead(403, { "Content-Type": "text/plain" });
+    res.end("Forbidden");
+    return;
+  }
+  try {
+    const buf = await readFile(filePath);
+    res.writeHead(200, {
+      "Content-Type": MIME[extname(filePath)] ?? "application/octet-stream",
+      "Content-Length": buf.length,
+    });
+    res.end(buf);
+  } catch {
+    // SPA fallback: unknown paths render the app shell.
+    try {
+      const buf = await readFile(join(V2_DIST, "index.html"));
+      res.writeHead(200, { "Content-Type": MIME[".html"], "Content-Length": buf.length });
+      res.end(buf);
+    } catch {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("v2 build not found — run `npm run build` in v2/");
+    }
+  }
+}
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
