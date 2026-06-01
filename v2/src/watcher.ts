@@ -13,7 +13,7 @@ import {
   periodName,
   type SpeechContext,
 } from "./speech.js";
-import { applyPronunciations, type PronunciationRule } from "./pronunciation.js";
+import { applyPronunciations, preventOrdinalReading, type PronunciationRule } from "./pronunciation.js";
 import {
   loadState,
   saveState,
@@ -395,7 +395,7 @@ export class BrowserWatcher {
   private speakRaw(text: string): void {
     if (this._muted) return;
     if (!("speechSynthesis" in window)) return;
-    const utt = new SpeechSynthesisUtterance(text);
+    const utt = new SpeechSynthesisUtterance(preventOrdinalReading(text));
     utt.lang = "fi-FI";
     window.speechSynthesis.speak(utt);
   }
