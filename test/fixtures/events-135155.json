@@ -1,0 +1,705 @@
+{
+  "events": [
+    {
+      "id": 36022497,
+      "groupType": "m",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": null,
+      "hTeam": 17305,
+      "batter": null,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            {
+              "type": "event",
+              "text": "Ottelu alkoi"
+            },
+            {
+              "hide": true,
+              "type": "stat",
+              "match-started": "2026-05-14T12:00:00+03:00"
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 0
+    },
+    {
+      "id": 36022498,
+      "groupType": "m",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": null,
+      "hTeam": 17305,
+      "batter": null,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            {
+              "type": "event",
+              "text": "Ensimmäinen jakso alkoi"
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 0
+    },
+    {
+      "id": "drawofchoice",
+      "groupType": "doc",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": null,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Joukkueen",
+            {
+              "type": "team",
+              "id": 17305
+            },
+            "kapteeni",
+            {
+              "type": "player",
+              "id": 17865
+            },
+            "voitti hutunkeiton ja valitsi sisävuoron"
+          ]
+        }
+      ],
+      "timestamp": null,
+      "updated": null
+    },
+    {
+      "id": 36022499,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": 17865,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Lyöntivuorossa",
+            {
+              "settling-at-bat": true,
+              "team": 17305,
+              "type": "player",
+              "number": 17865
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 20
+    },
+    {
+      "id": 36022500,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": 17862,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Lyöntivuorossa",
+            {
+              "settling-at-bat": true,
+              "team": 17305,
+              "type": "player",
+              "number": 17862
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 55
+    },
+    {
+      "id": 36022501,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": 17862,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            {
+              "team": 17305,
+              "type": "player",
+              "number": 17862,
+              "role": "batter"
+            },
+            {
+              "type": "event",
+              "text": "löi juoksun, tuojana",
+              "base": null
+            },
+            {
+              "team": 17305,
+              "type": "player",
+              "number": 17865
+            },
+            {
+              "type": "stat",
+              "score": 1
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 102
+    },
+    {
+      "id": 36022502,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": 17870,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Lyöntivuorossa",
+            {
+              "settling-at-bat": true,
+              "team": 17305,
+              "type": "player",
+              "number": 17870
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 107
+    },
+    {
+      "id": 36022503,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": null,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            {
+              "type": "event",
+              "text": "Palo",
+              "base": null
+            },
+            {
+              "type": "stat",
+              "out": 1
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 124
+    },
+    {
+      "id": 36022504,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": 17869,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Lyöntivuorossa",
+            {
+              "settling-at-bat": true,
+              "team": 17305,
+              "type": "player",
+              "number": 17869
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 135
+    },
+    {
+      "id": 36022505,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": null,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            {
+              "type": "event",
+              "text": "Palo",
+              "base": null
+            },
+            {
+              "type": "stat",
+              "out": 1
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 145
+    },
+    {
+      "id": 36022506,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": 17866,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Lyöntivuorossa",
+            {
+              "settling-at-bat": true,
+              "team": 17305,
+              "type": "player",
+              "number": 17866
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 159
+    },
+    {
+      "id": 36022507,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": 19683,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Lyöntivuorossa",
+            {
+              "settling-at-bat": true,
+              "team": 17305,
+              "type": "player",
+              "number": 19683
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 211
+    },
+    {
+      "id": 36022508,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": 17864,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Lyöntivuorossa",
+            {
+              "settling-at-bat": true,
+              "team": 17305,
+              "type": "player",
+              "number": 17864
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 270
+    },
+    {
+      "id": 36022509,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": 17867,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Lyöntivuorossa",
+            {
+              "settling-at-bat": true,
+              "team": 17305,
+              "type": "player",
+              "number": 17867
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 325
+    },
+    {
+      "id": 36022510,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": 20580,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Lyöntivuorossa",
+            {
+              "settling-at-bat": true,
+              "team": 17305,
+              "type": "player",
+              "number": 20580
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 373
+    },
+    {
+      "id": 36022511,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 0,
+      "team": 17305,
+      "hTeam": 17305,
+      "batter": null,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            {
+              "type": "event",
+              "text": "Palo",
+              "base": null
+            },
+            {
+              "type": "stat",
+              "out": 1
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 436
+    },
+    {
+      "id": 36022512,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 1,
+      "team": 17669,
+      "hTeam": 17669,
+      "batter": 16780,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Lyöntivuorossa",
+            {
+              "settling-at-bat": true,
+              "team": 17669,
+              "type": "player",
+              "number": 16780
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 512
+    },
+    {
+      "id": 36022513,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 1,
+      "team": 17669,
+      "hTeam": 17669,
+      "batter": 14551,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Lyöntivuorossa",
+            {
+              "settling-at-bat": true,
+              "team": 17669,
+              "type": "player",
+              "number": 14551
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 518
+    },
+    {
+      "id": 36022514,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 1,
+      "team": 17669,
+      "hTeam": 17669,
+      "batter": 14548,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Lyöntivuorossa",
+            {
+              "settling-at-bat": true,
+              "team": 17669,
+              "type": "player",
+              "number": 14548
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 539
+    },
+    {
+      "id": 36022515,
+      "groupType": "sm",
+      "period": 0,
+      "inning": 0,
+      "batTurn": 1,
+      "team": 17669,
+      "hTeam": 17669,
+      "batter": 14549,
+      "pairIndex": null,
+      "hitNumber": null,
+      "hit": null,
+      "events": [
+        {
+          "texts": [
+            "Lyöntivuorossa",
+            {
+              "settling-at-bat": true,
+              "team": 17669,
+              "type": "player",
+              "number": 14549
+            }
+          ],
+          "runnersAtBases": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "timestamp": 571
+    }
+  ],
+  "period": null,
+  "inning": null,
+  "team": null,
+  "bat_turn": null,
+  "finished": true
+}

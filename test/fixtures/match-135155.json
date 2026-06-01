@@ -1,0 +1,511 @@
+{
+  "id": 135155,
+  "date": "2026-05-14T12:00:00+03:00",
+  "home": {
+    "id": 17305,
+    "sport_club_id": 68,
+    "icon": "https://www.pesistulokset.fi/storage/seuralogot/867dc6e796334c53156deaa222f4b206-icon.png",
+    "logo": "https://www.pesistulokset.fi/storage/seuralogot/867dc6e796334c53156deaa222f4b206.png",
+    "name": "Imatran Pallo-Veikot",
+    "shorthand": "IPV",
+    "all_players": [
+      17865,
+      21509,
+      19683,
+      17864,
+      17866,
+      17862,
+      17869,
+      26354,
+      17867,
+      20580,
+      17870,
+      28269
+    ],
+    "players": [
+      {
+        "id": 17865,
+        "number": 1,
+        "name": "Aada Virtanen",
+        "first_name": "Aada",
+        "last_name": "Virtanen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Ykkösvahti",
+          "short_name": "1V"
+        }
+      },
+      {
+        "id": 17862,
+        "number": 2,
+        "name": "Sofia Korhonen",
+        "first_name": "Sofia",
+        "last_name": "Korhonen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Kakkoskoppari",
+          "short_name": "2K"
+        }
+      },
+      {
+        "id": 17870,
+        "number": 3,
+        "name": "Olivia Mäkinen",
+        "first_name": "Olivia",
+        "last_name": "Mäkinen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Kakkosvahti",
+          "short_name": "2V"
+        }
+      },
+      {
+        "id": 17869,
+        "number": 4,
+        "name": "Emma Nieminen",
+        "first_name": "Emma",
+        "last_name": "Nieminen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Lukkari",
+          "short_name": "L"
+        }
+      },
+      {
+        "id": 17866,
+        "number": 5,
+        "name": "Ella Mäkelä",
+        "first_name": "Ella",
+        "last_name": "Mäkelä",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Kakkospolttaja",
+          "short_name": "2P"
+        }
+      },
+      {
+        "id": 19683,
+        "number": 6,
+        "name": "Aino Hämäläinen",
+        "first_name": "Aino",
+        "last_name": "Hämäläinen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Kolmospolttaja",
+          "short_name": "3P"
+        }
+      },
+      {
+        "id": 17864,
+        "number": 7,
+        "name": "Helmi Laine",
+        "first_name": "Helmi",
+        "last_name": "Laine",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Kolmoskoppari",
+          "short_name": "3K"
+        }
+      },
+      {
+        "id": 17867,
+        "number": 8,
+        "name": "Iida Heikkinen",
+        "first_name": "Iida",
+        "last_name": "Heikkinen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Kolmosvahti",
+          "short_name": "3V"
+        }
+      },
+      {
+        "id": 28269,
+        "number": 9,
+        "name": "Venla Koskinen",
+        "first_name": "Venla",
+        "last_name": "Koskinen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Sieppari",
+          "short_name": "S"
+        }
+      },
+      {
+        "id": 20580,
+        "number": 10,
+        "name": "Lotta Järvinen",
+        "first_name": "Lotta",
+        "last_name": "Järvinen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": null,
+          "short_name": null
+        }
+      },
+      {
+        "id": 26354,
+        "number": 11,
+        "name": "Pinja Lehtonen",
+        "first_name": "Pinja",
+        "last_name": "Lehtonen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": null,
+          "short_name": null
+        }
+      },
+      {
+        "id": 21509,
+        "number": 12,
+        "name": "Siiri Lehtinen",
+        "first_name": "Siiri",
+        "last_name": "Lehtinen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": null,
+          "short_name": null
+        }
+      }
+    ],
+    "managers": [
+      {
+        "id": 5174,
+        "name": "Antti Saarinen",
+        "first_name": "Antti",
+        "last_name": "Saarinen",
+        "role": {
+          "long_name": "1. Pelinjohtaja",
+          "short_name": "1PJ"
+        }
+      },
+      {
+        "id": 4964,
+        "name": "Juha Salminen",
+        "first_name": "Juha",
+        "last_name": "Salminen",
+        "role": {
+          "long_name": "2. Pelinjohtaja",
+          "short_name": "2PJ"
+        }
+      }
+    ]
+  },
+  "away": {
+    "id": 17669,
+    "sport_club_id": 136,
+    "icon": "https://www.pesistulokset.fi/storage/seuralogot/7dd7aa4f7b71242de1e18154e861c2ab-icon.png",
+    "logo": "https://www.pesistulokset.fi/storage/seuralogot/7dd7aa4f7b71242de1e18154e861c2ab.png",
+    "name": "Kiteen Pallo -90",
+    "shorthand": "KiPa",
+    "all_players": [
+      28135,
+      14549,
+      14553,
+      14548,
+      14550,
+      14551,
+      14555,
+      13800,
+      13799,
+      16780,
+      14224,
+      16572
+    ],
+    "players": [
+      {
+        "id": 16780,
+        "number": 1,
+        "name": "Nea Räsänen",
+        "first_name": "Nea",
+        "last_name": "Räsänen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Kolmoskoppari",
+          "short_name": "3K"
+        }
+      },
+      {
+        "id": 14551,
+        "number": 2,
+        "name": "Veera Karjalainen",
+        "first_name": "Veera",
+        "last_name": "Karjalainen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Ykkösvahti",
+          "short_name": "1V"
+        }
+      },
+      {
+        "id": 14548,
+        "number": 3,
+        "name": "Sanni Jokinen",
+        "first_name": "Sanni",
+        "last_name": "Jokinen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Kolmospolttaja",
+          "short_name": "3P"
+        }
+      },
+      {
+        "id": 14549,
+        "number": 4,
+        "name": "Kerttu Mattila",
+        "first_name": "Kerttu",
+        "last_name": "Mattila",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Lukkari",
+          "short_name": "L"
+        }
+      },
+      {
+        "id": 14553,
+        "number": 5,
+        "name": "Vilma Ahonen",
+        "first_name": "Vilma",
+        "last_name": "Ahonen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Kakkoskoppari",
+          "short_name": "2K"
+        }
+      },
+      {
+        "id": 28135,
+        "number": 6,
+        "name": "Peppi Turunen",
+        "first_name": "Peppi",
+        "last_name": "Turunen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Kakkospolttaja",
+          "short_name": "2P"
+        }
+      },
+      {
+        "id": 13799,
+        "number": 7,
+        "name": "Linnea Laitinen",
+        "first_name": "Linnea",
+        "last_name": "Laitinen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Sieppari",
+          "short_name": "S"
+        }
+      },
+      {
+        "id": 14555,
+        "number": 8,
+        "name": "Senja Toivonen",
+        "first_name": "Senja",
+        "last_name": "Toivonen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Kakkosvahti",
+          "short_name": "2V"
+        }
+      },
+      {
+        "id": 14550,
+        "number": 9,
+        "name": "Minna Rantanen",
+        "first_name": "Minna",
+        "last_name": "Rantanen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": "Kolmosvahti",
+          "short_name": "3V"
+        }
+      },
+      {
+        "id": 13800,
+        "number": 10,
+        "name": "Reetta Halonen",
+        "first_name": "Reetta",
+        "last_name": "Halonen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": null,
+          "short_name": null
+        }
+      },
+      {
+        "id": 14224,
+        "number": 11,
+        "name": "Eveliina Väisänen",
+        "first_name": "Eveliina",
+        "last_name": "Väisänen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": null,
+          "short_name": null
+        }
+      },
+      {
+        "id": 16572,
+        "number": 12,
+        "name": "Elsa Manninen",
+        "first_name": "Elsa",
+        "last_name": "Manninen",
+        "image": {
+          "medium": null,
+          "small": null
+        },
+        "defensive_position": {
+          "long_name": null,
+          "short_name": null
+        }
+      }
+    ],
+    "managers": [
+      {
+        "id": 3679,
+        "name": "Markku Hakala",
+        "first_name": "Markku",
+        "last_name": "Hakala",
+        "role": {
+          "long_name": "1. Pelinjohtaja",
+          "short_name": "1PJ"
+        }
+      },
+      {
+        "id": 5081,
+        "name": "Timo Lähteenmäki",
+        "first_name": "Timo",
+        "last_name": "Lähteenmäki",
+        "role": {
+          "long_name": "2. Pelinjohtaja",
+          "short_name": "2PJ"
+        }
+      }
+    ]
+  },
+  "series": {
+    "id": 3003,
+    "slug": "2026-koko-suomi-aluesarjat-2026-d-tytot-kilpasarja",
+    "custom_name": "Aluesarjat 2026: D-tytöt, kilpasarja",
+    "region": "Koko Suomi",
+    "name": "Tytöt, kilpasarja",
+    "level": "D-juniorit",
+    "phase": "Runkosarja",
+    "seasonId": 110,
+    "seasonName": 2026,
+    "regionId": 76,
+    "levelId": 9,
+    "seriesId": 7,
+    "phaseId": 1,
+    "groupId": 5870
+  },
+  "stadium": {
+    "id": 2817,
+    "name": "Imatrankosken tekonurmi",
+    "address": "Puomikuja 2, 55100 Imatra"
+  },
+  "result": {
+    "match_id": 135155,
+    "details": {
+      "periods_home": 2,
+      "periods_away": 0,
+      "runs_home_first_period": 16,
+      "runs_away_first_period": 2,
+      "runs_home_second_period": 14,
+      "runs_away_second_period": 7,
+      "runs_home_super_inning": null,
+      "runs_away_super_inning": null,
+      "runs_home_scoring_contest": null,
+      "runs_away_scoring_contest": null,
+      "super_inning_is_not_played": false
+    },
+    "manually_set": false,
+    "created_at": "2026-05-14T08:50:03.000000Z",
+    "result_string": "2-0 (16-2, 14-7)",
+    "result_string_periods": "16-2, 14-7",
+    "result_string_suffix": null,
+    "periods_home": 2,
+    "periods_away": 0,
+    "runs_home_first_period": 16,
+    "runs_away_first_period": 2,
+    "runs_home_second_period": 14,
+    "runs_away_second_period": 7,
+    "runs_home_super_inning": null,
+    "runs_away_super_inning": null,
+    "runs_home_scoring_contest": null,
+    "runs_away_scoring_contest": null,
+    "super_inning_is_not_played": false
+  },
+  "live": false,
+  "started": true
+}
