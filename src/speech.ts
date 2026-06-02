@@ -56,10 +56,10 @@ export function getTeamName(meta: MatchMetadata, teamId: number | null): string 
 }
 
 function formatScore(meta: MatchMetadata, homeRuns: number, awayRuns: number): string {
-  if (homeRuns > awayRuns) return `${meta.home.shorthand} johtaa, ${homeRuns}, ${awayRuns}`;
-  if (awayRuns > homeRuns) return `${meta.away.shorthand} johtaa, ${awayRuns}, ${homeRuns}`;
+  if (homeRuns > awayRuns) return `${homeRuns}, ${awayRuns}, ${meta.home.shorthand} johtaa`;
+  if (awayRuns > homeRuns) return `${awayRuns}, ${homeRuns}, ${meta.away.shorthand} johtaa`;
   if (homeRuns === 0 && awayRuns === 0) return "nolla nolla";
-  return `tasatilanne, ${homeRuns}, ${awayRuns}`;
+  return `${homeRuns}, ${awayRuns}, tasatilanne`;
 }
 
 function resolvePlayerName(lookup: PlayerLookup, el: EventTextElement): string | null {

@@ -7,6 +7,7 @@ Web app for following Finnish pesapallo live events with spoken voice announceme
 ## Lyhyesti suomeksi
 
 Pesis Live Voice on selaimessa toimiva pesapallon live-seuranta, joka lukee ottelun tärkeimmät tapahtumat ääneen suomeksi. Se on tarkoitettu tilanteisiin, joissa haluat seurata peliä ilman että katsot koko ajan tulospalvelua.
+Jaksojen ja palojen seuranta on vielä vajaa ja kertoo välillä vääriä arvoja.
 
 Käyttö:
 
@@ -148,14 +149,18 @@ npm run build
 
 ## Limitations
 
+- Player name resolution depends on the match metadata. If a player ID in an event doesn't match the roster, the name will show as "?".
 - The app depends on public pesistulokset.fi endpoints observed from the website frontend. These endpoints may change, rate-limit, or stop working without notice.
+- The events API structure is reverse-engineered from the frontend; it may change.
+- Score summaries are only available for completed matches (from the result field).
+- Jakso- and palo-tracking is based on heuristics derived from the event stream and may still have edge cases — particularly in youth game variants where the rules differ from standard pesäpallo (e.g. more than three palot per turn).
 - Player name resolution depends on match metadata. If a player ID in an event does not match the roster, the app falls back to a less specific announcement.
 - Browser speech quality depends on the user's device, browser, and installed Finnish voices.
 - Home Assistant usage requires a user-managed Home Assistant instance and a long-lived access token.
 
 ## Roadmap
 
-- Redesigned public web UI.
+- Redesigned public v2 web UI.
 - Clearer separation between the public web app and the Home Assistant voice watcher if both continue to grow.
 - Stronger demo/test fixtures for public examples.
 

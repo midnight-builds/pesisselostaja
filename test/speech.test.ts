@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { eventToSpeech, buildPlayerLookup, eventFingerprint } from "../src/speech.js";
+import { preventOrdinalReading } from "../src/pronunciation.js";
 import type { LiveEventsResponse, MatchMetadata, LiveEvent } from "../src/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -24,6 +25,21 @@ describe("buildPlayerLookup", () => {
     const player = lookup.byId.get(17865);
     expect(player).toBeDefined();
     expect(player?.last_name).toBe("Virtanen");
+  });
+});
+
+describe("preventOrdinalReading", () => {
+  it("detaches a sentence-final period from a digit so TTS reads a cardinal", () => {
+    expect(preventOrdinalReading("Roihu EP johtaa, 10, 6.")).toBe("Roihu EP johtaa, 10, 6 .");
+  });
+
+  it("handles a digit before a period followed by another sentence", () => {
+    expect(preventOrdinalReading("Jaksot Roihu EP 1, PuMu 0. Sisävuorossa PuMu."))
+      .toBe("Jaksot Roihu EP 1, PuMu 0 . Sisävuorossa PuMu.");
+  });
+
+  it("leaves decimals untouched", () => {
+    expect(preventOrdinalReading("arvo 6.5 metriä")).toBe("arvo 6.5 metriä");
   });
 });
 

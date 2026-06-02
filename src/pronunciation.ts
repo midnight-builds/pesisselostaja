@@ -46,6 +46,14 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** Finnish TTS reads a digit glued to a period ("6.") as an ordinal ("kuudes").
+ *  Every number we speak is a score (a cardinal), so detach a sentence-final
+ *  period from the preceding digit to force cardinal reading ("kuusi"). Decimals
+ *  ("6.5") are left untouched since the period is followed by another digit. */
+export function preventOrdinalReading(text: string): string {
+  return text.replace(/(\d)\.(?=\s|$)/g, "$1 .");
+}
+
 /** Replace each rule's term with its spoken form. Matching is case-sensitive.
  *  Alphanumeric terms match whole-word only (so "KPL" won't touch "KPLX"); terms
  *  with punctuation/spaces match literally. Later rules see earlier rules' output. */

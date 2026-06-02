@@ -12,6 +12,8 @@ export interface WatcherState {
   currentOuts: number;
   currentPeriod: number;
   currentBatTeamId: number | null;
+  currentInning: number;
+  currentBatTurn: number;
   finished: boolean;
   announcementCount: number;
   lastSummaryTime: number;
@@ -53,6 +55,8 @@ export function loadState(matchId: number): WatcherState {
       currentOuts: parsed.currentOuts ?? 0,
       currentPeriod: parsed.currentPeriod ?? 0,
       currentBatTeamId: parsed.currentBatTeamId ?? null,
+      currentInning: parsed.currentInning ?? 0,
+      currentBatTurn: parsed.currentBatTurn ?? 0,
       finished: parsed.finished ?? false,
       announcementCount: 0,
       lastSummaryTime: 0,
@@ -70,6 +74,8 @@ export function saveState(matchId: number, state: WatcherState): void {
     currentOuts: state.currentOuts,
     currentPeriod: state.currentPeriod,
     currentBatTeamId: state.currentBatTeamId,
+    currentInning: state.currentInning,
+    currentBatTurn: state.currentBatTurn,
     finished: state.finished,
   };
   localStorage.setItem(LS_PREFIX + matchId, JSON.stringify(data));
@@ -93,6 +99,8 @@ function emptyState(): WatcherState {
     currentOuts: 0,
     currentPeriod: 0,
     currentBatTeamId: null,
+    currentInning: 0,
+    currentBatTurn: 0,
     finished: false,
     announcementCount: 0,
     lastSummaryTime: 0,

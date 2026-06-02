@@ -18,6 +18,7 @@ import {
   loadPronunciations,
   savePronunciations,
   applyPronunciations,
+  preventOrdinalReading,
   type PronunciationRule,
 } from "./pronunciation.js";
 import {
@@ -395,7 +396,7 @@ export class WatcherController {
     this._lastSpeech = speech;
     // Apply pronunciation overrides to the spoken text only; the log keeps the
     // readable original.
-    const spoken = applyPronunciations(speech, this._pronunciations);
+    const spoken = preventOrdinalReading(applyPronunciations(speech, this._pronunciations));
     if (this._speechMode === 'browser') {
       this.addLog(`Puhe: ${speech}`);
       this._onSpeech?.(spoken);

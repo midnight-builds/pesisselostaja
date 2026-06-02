@@ -13,6 +13,8 @@ export interface SpeechContext {
   currentOuts: number;
   currentPeriod: number;
   currentBatTeamId: number | null;
+  currentInning: number;
+  currentBatTurn: number;
 }
 
 export function periodName(period: number): string {
@@ -53,10 +55,10 @@ export function getTeamName(meta: MatchMetadata, teamId: number | null): string 
 }
 
 function formatScore(meta: MatchMetadata, homeRuns: number, awayRuns: number): string {
-  if (homeRuns > awayRuns) return `${meta.home.shorthand} johtaa, ${homeRuns}, ${awayRuns}`;
-  if (awayRuns > homeRuns) return `${meta.away.shorthand} johtaa, ${awayRuns}, ${homeRuns}`;
+  if (homeRuns > awayRuns) return `${homeRuns}, ${awayRuns}, ${meta.home.shorthand} johtaa`;
+  if (awayRuns > homeRuns) return `${awayRuns}, ${homeRuns}, ${meta.away.shorthand} johtaa`;
   if (homeRuns === 0 && awayRuns === 0) return "nolla nolla";
-  return `tasatilanne, ${homeRuns}, ${awayRuns}`;
+  return `${homeRuns}, ${awayRuns}, tasatilanne`;
 }
 
 function resolvePlayerName(lookup: PlayerLookup, el: EventTextElement): string | null {
@@ -86,6 +88,12 @@ const FI_ORDINAL: Record<number, string> = {
 function ordinalPalo(n: number): string {
   const ord = FI_ORDINAL[n];
   return ord ? `${ord} palo` : `${n}. palo`;
+}
+
+function vuoropariLabel(inning: number, batTurn: number): string {
+  const ord = FI_ORDINAL[inning + 1] ?? `${inning + 1}.`;
+  const role = batTurn === 0 ? "aloittava" : "lopettava";
+  return `${capitalize(ord)} vuoropari, ${role}.`;
 }
 
 function ttsClean(text: string): string {
@@ -152,7 +160,10 @@ export function formatStartupSpeech(meta: MatchMetadata, ctx: SpeechContext): st
   const hasProgress =
     ctx.currentPeriod > 0 || ctx.periodHomeRuns > 0 || ctx.periodAwayRuns > 0 ||
     ctx.homePeriodsWon > 0 || ctx.awayPeriodsWon > 0;
-  if (hasProgress) parts.push(`Menossa ${periodName(ctx.currentPeriod)}.`);
+  if (hasProgress) {
+    parts.push(`Menossa ${periodName(ctx.currentPeriod)}.`);
+    parts.push(vuoropariLabel(ctx.currentInning, ctx.currentBatTurn));
+  }
 
   const scoreStr = ctx.periodHomeRuns === 0 && ctx.periodAwayRuns === 0
     ? "Tilanne nolla nolla."
@@ -172,19 +183,22 @@ export function formatBatTurnChangeSpeech(
   prevTeamId: number | null,
   nextTeamId: number | null,
   periodHomeRuns: number,
-  periodAwayRuns: number
+  periodAwayRuns: number,
+  newInning: number,
+  newBatTurn: number,
 ): string {
+  const label = vuoropariLabel(newInning, newBatTurn);
   const prev = prevTeamId ? getTeamName(meta, prevTeamId) : null;
   const next = nextTeamId ? getTeamName(meta, nextTeamId) : null;
   const score = formatScore(meta, periodHomeRuns, periodAwayRuns);
   const scoreStr = `${capitalize(score)}.`;
   if (prev && next) {
-    return `${prev}:n vuoro päättyi. ${scoreStr} Nyt sisävuoroon ${next}.`;
+    return `${label} ${prev}:n vuoro päättyi. ${scoreStr} Nyt sisävuoroon ${next}.`;
   }
   if (next) {
-    return `${scoreStr} Sisävuoroon ${next}.`;
+    return `${label} ${scoreStr} Sisävuoroon ${next}.`;
   }
-  return scoreStr;
+  return `${label} ${scoreStr}`;
 }
 
 export function formatSituationSummary(meta: MatchMetadata, ctx: SpeechContext): string {
@@ -381,6 +395,22 @@ function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
 
 export function eventFingerprint(event: LiveEvent, subIndex: number): string {
   const sub = event.events[subIndex];
-  if (!sub) return `${event.id}:${subIndex}`;
-  return `${event.id}:${JSON.stringify(sub.texts)}`;
+  const prefix = `${event.inning}:${event.batTurn}:${event.id}`;
+  if (!sub) return `${prefix}:${subIndex}`;
+  return `${prefix}:${JSON.stringify(sub.texts)}`;
+}
+
+export function recomputeCurrentOuts(events: LiveEvent[]): number {
+  let outs = 0;
+  let team: number | null = null;
+  for (const event of events) {
+    if (event.team != null && event.team !== team) {
+      team = event.team;
+      outs = 0;
+    }
+    for (const sub of event.events) {
+      if (isOutSubEvent(sub) && event.team !== null) outs++;
+    }
+  }
+  return outs;
 }
