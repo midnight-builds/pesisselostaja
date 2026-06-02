@@ -11,7 +11,6 @@ import {
   formatBatTurnChangeSpeech,
   formatSituationSummary,
   periodName,
-  getTeamName,
   type SpeechContext,
 } from "./speech.js";
 import { speak, waitForIdle, type HaConfig } from "./ha.js";

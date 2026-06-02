@@ -1,7 +1,7 @@
 {
   "name": "pesistulokset-voice-watcher",
   "version": "1.0.0",
-  "description": "Watch Finnish pesäpallo matches live and speak events through Home Assistant TTS",
+  "description": "Web app for following Finnish pesäpallo live events with spoken voice announcements",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -18,12 +18,12 @@
     "dotenv": "^16.4.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
     "@types/node": "^22.0.0",
     "eslint": "^9.0.0",
-    "@eslint/js": "^9.0.0",
-    "typescript-eslint": "^8.0.0",
-    "typescript": "^5.6.0",
     "tsx": "^4.19.0",
-    "vitest": "^3.0.0"
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^4.1.8"
   }
 }

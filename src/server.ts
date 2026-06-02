@@ -814,7 +814,7 @@ const HTML = `<!DOCTYPE html>
     function classifyLine(line) {
       if (/Puhe:/.test(line)) return 'speech';
       if (/Virhe|virhe|error/i.test(line)) return 'error';
-      if (/\[TESTI\]/.test(line)) return 'test';
+      if (line.includes('[TESTI]')) return 'test';
       if (/Haetaan|Ohitetaan|Seuranta|pelaaj|Sarja|Kenttä/i.test(line)) return 'info';
       return '';
     }

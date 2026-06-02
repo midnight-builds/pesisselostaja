@@ -1,85 +1,169 @@
-# pesistulokset-voice-watcher
+# Pesis Live Voice
 
-Watch Finnish pesäpallo matches live from [pesistulokset.fi](https://www.pesistulokset.fi) and speak important events through Home Assistant TTS.
+Web app for following Finnish pesapallo live events with spoken voice announcements.
 
-## Features
+[Try the web app](https://midnight-builds.github.io/pesistulokset-voice-watcher/)
 
-- Polls the Pesistulokset live events API for match updates
-- Converts events to natural Finnish speech
-- Speaks through Home Assistant Cloud TTS (or any HA TTS entity)
-- Deduplicates events with a persistent state file (safe to restart)
-- Supports dry-run mode for testing without HA
+## Lyhyesti suomeksi
 
-### Spoken events
+Pesis Live Voice on selaimessa toimiva pesapallon live-seuranta, joka lukee ottelun tärkeimmät tapahtumat ääneen suomeksi. Se on tarkoitettu tilanteisiin, joissa haluat seurata peliä ilman että katsot koko ajan tulospalvelua.
+Jaksojen ja palojen seuranta on vielä vajaa ja kertoo välillä vääriä arvoja.
 
-- **Juoksut** (runs): "Korhonen löi juoksun, tuojana Virtanen."
-- **Kunnarit** (home runs): "Nieminen löi kunnarin!"
-- **Palot** (outs): "Palo! IPV."
-- **Jakson alku/loppu** (period start/end)
-- **Ottelu alkoi/päättyi** (match start/end with score)
-- **Hutunkeiton voitto** (draw of choice)
+Käyttö:
 
-### Not spoken
+1. Avaa web-sovellus.
+2. Valitse käynnissä oleva ottelu tai syötä ottelun tunnus.
+3. Käynnistä seuranta ja salli selaimen puhetoiminto, jos selain pyytää lupaa.
+4. Sovellus ilmoittaa ääneen esimerkiksi juoksut, palot, vuoronvaihdot ja jakson tilanteen.
 
-- Lyöntivuorossa (at-bat announcements) — too frequent
-- Stats-only updates
+Sovellus käyttää pesistulokset.fi-palvelun otteludataa. Tämä projekti on itsenäinen, eikä se ole pesistulokset.fi:n tekemä, hyväksymä tai sponsoroima.
 
-## Setup
+## Overview
 
-```bash
+Pesis Live Voice turns live Finnish pesapallo match updates into spoken Finnish announcements. The public web UI runs in the browser and can speak important match events with the Web Speech API.
+
+The repository also contains an advanced Node.js watcher that can send announcements through Home Assistant TTS.
+
+## Status
+
+Alpha / public preview.
+
+What works now:
+
+- Browser-based live match following from pesistulokset.fi data.
+- Spoken Finnish announcements for important live events.
+- Favorites and local settings stored in the browser.
+- Advanced Node.js watcher for Home Assistant TTS output.
+
+Known limitations:
+
+- The current web UI is a public preview.
+- A redesigned UI is planned.
+- The project depends on public pesistulokset.fi endpoints observed from the website frontend.
+
+## Data Source And Affiliation
+
+Pesis Live Voice uses live match data from pesistulokset.fi. This project is independent and is not affiliated with, endorsed by, or sponsored by pesistulokset.fi. The data source and API behavior may change without notice.
+
+## Web App Usage
+
+Open the public web app:
+
+~~~text
+https://midnight-builds.github.io/pesistulokset-voice-watcher/
+~~~
+
+The web app can:
+
+- list live matches for the current day
+- open a match by match ID or pesistulokset.fi match URL
+- announce key events with browser speech synthesis
+- save favorite matches and pronunciation settings in local browser storage
+
+No server account is required. The web app stores settings locally in the browser.
+
+## Advanced Usage: Home Assistant Voice Watcher
+
+The root Node.js app can watch a match from the command line and speak events through Home Assistant TTS.
+
+### Setup
+
+~~~bash
 npm install
 npm run build
 cp .env.example .env
-# Edit .env with your Home Assistant URL and token
-```
+~~~
 
-## Usage
+Edit .env with your Home Assistant URL and long-lived access token.
 
-```bash
-# Dry run (logs speech to console)
-npm run dev -- --match-url https://www.pesistulokset.fi/ottelut/135155 --dry-run
+### Run
 
-# With Home Assistant TTS
-npm start -- --match-id 135155
+Dry run:
 
-# Custom poll interval (seconds)
-npm run dev -- --match-id 135155 --dry-run --poll-interval 10
-```
+~~~bash
+npm run dev -- --match-id <match-id> --dry-run
+~~~
 
-### CLI options
+With Home Assistant TTS:
+
+~~~bash
+npm start -- --match-id <match-id>
+~~~
+
+Custom poll interval:
+
+~~~bash
+npm run dev -- --match-id <match-id> --dry-run --poll-interval 10
+~~~
+
+### CLI Options
 
 | Option | Description |
-|---|---|
-| `--match-url <url>` | Pesistulokset match page URL |
-| `--match-id <id>` | Match ID (numeric) |
-| `--dry-run` | Log speech instead of calling HA TTS |
-| `--poll-interval <s>` | Poll interval in seconds (default: 6) |
-| `--state-file <path>` | State file path (default: `.state-<matchId>.json`) |
-| `--api-key <key>` | Override API key |
+| --- | --- |
+| --match-url <url> | pesistulokset.fi match page URL |
+| --match-id <id> | Numeric match ID |
+| --dry-run | Log speech instead of calling Home Assistant TTS |
+| --poll-interval <s> | Poll interval in seconds. Default: 6 |
+| --state-file <path> | State file path. Default: .state-<matchId>.json |
+| --api-key <key> | Override the observed public API key |
 
-### Environment variables
+### Environment Variables
 
 | Variable | Description |
-|---|---|
-| `HOMEASSISTANT_URL` | Home Assistant base URL |
-| `HOMEASSISTANT_TOKEN` | Long-lived access token |
-| `HA_TTS_ENTITY` | TTS entity (default: `tts.home_assistant_cloud`) |
-| `HA_MEDIA_PLAYER_ENTITY` | Media player entity |
-| `PESISTULOKSET_API_KEY` | API key override |
-| `PESISTULOKSET_API_BASE` | API base URL override |
+| --- | --- |
+| HOMEASSISTANT_URL | Home Assistant base URL |
+| HOMEASSISTANT_TOKEN | Home Assistant long-lived access token |
+| HA_TTS_ENTITY | TTS entity. Default: tts.home_assistant_cloud |
+| HA_MEDIA_PLAYER_ENTITY | Media player entity |
+| PESISTULOKSET_API_KEY | Optional API key override |
+| PESISTULOKSET_API_BASE | Optional API base URL override |
+
+## How It Works
+
+- The browser app and Node.js watcher fetch match metadata and live events from pesistulokset.fi endpoints.
+- Event data is converted into short Finnish announcement text.
+- The browser app speaks announcements with the Web Speech API.
+- The Node.js watcher can send the same style of announcements to Home Assistant TTS.
+- Deduplication state prevents the same event from being announced repeatedly.
 
 ## Development
 
-```bash
-npm run dev -- --match-id 135155 --dry-run  # Run with tsx
-npm run typecheck                            # Type check
-npm run lint                                 # Lint
-npm test                                     # Run tests
-```
+Root watcher:
+
+~~~bash
+npm ci
+npm run lint
+npm test
+npm run typecheck
+npm run build
+~~~
+
+Public web app:
+
+~~~bash
+cd v2
+npm ci
+npm run typecheck
+npm run build
+~~~
 
 ## Limitations
 
 - Player name resolution depends on the match metadata. If a player ID in an event doesn't match the roster, the name will show as "?".
+- The app depends on public pesistulokset.fi endpoints observed from the website frontend. These endpoints may change, rate-limit, or stop working without notice.
 - The events API structure is reverse-engineered from the frontend; it may change.
 - Score summaries are only available for completed matches (from the result field).
 - Jakso- and palo-tracking is based on heuristics derived from the event stream and may still have edge cases — particularly in youth game variants where the rules differ from standard pesäpallo (e.g. more than three palot per turn).
+- Player name resolution depends on match metadata. If a player ID in an event does not match the roster, the app falls back to a less specific announcement.
+- Browser speech quality depends on the user's device, browser, and installed Finnish voices.
+- Home Assistant usage requires a user-managed Home Assistant instance and a long-lived access token.
+
+## Roadmap
+
+- Redesigned public v2 web UI.
+- Clearer separation between the public web app and the Home Assistant voice watcher if both continue to grow.
+- Stronger demo/test fixtures for public examples.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
