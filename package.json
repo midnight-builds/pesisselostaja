@@ -2,6 +2,7 @@
   "name": "pesistulokset-voice-watcher",
   "version": "1.0.0",
   "description": "Web app for following Finnish pesäpallo live events with spoken voice announcements",
+  "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
