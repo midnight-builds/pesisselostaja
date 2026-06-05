@@ -10,6 +10,7 @@ import {
   type PronunciationRule,
 } from "./pronunciation.js";
 import { fetchTodayMatches } from "./api.js";
+import { PIPER_VOICES, piperStored, piperDownload } from "./piper.js";
 import type { LiveMatchSummary } from "./types.js";
 
 const DEFAULT_API_BASE = "https://api.pesistulokset.fi/api/v1";
@@ -24,7 +25,11 @@ interface Settings {
   pollInterval: number;
   announceBatterChanges: boolean;
   voiceName: string;
+  voiceEngine: "browser" | "piper";
+  piperVoiceId: string;
 }
+
+const DEFAULT_PIPER_VOICE = "fi_FI-harri-medium";
 
 interface FeedEntry {
   id: number;
@@ -46,10 +51,12 @@ function loadSettings(): Settings {
         pollInterval: p.pollInterval ?? 6,
         announceBatterChanges: p.announceBatterChanges ?? true,
         voiceName: p.voiceName ?? "",
+        voiceEngine: p.voiceEngine === "piper" ? "piper" : "browser",
+        piperVoiceId: p.piperVoiceId ?? DEFAULT_PIPER_VOICE,
       };
     }
   } catch { /* ignore */ }
-  return { apiKey: DEFAULT_API_KEY, apiBase: DEFAULT_API_BASE, pollInterval: 6, announceBatterChanges: true, voiceName: "" };
+  return { apiKey: DEFAULT_API_KEY, apiBase: DEFAULT_API_BASE, pollInterval: 6, announceBatterChanges: true, voiceName: "", voiceEngine: "browser", piperVoiceId: DEFAULT_PIPER_VOICE };
 }
 
 function saveSettings(): void {
@@ -186,12 +193,33 @@ function toast(msg: string): void {
 // ── Audio unlock (browsers require a user gesture before TTS) ────────────────
 
 let audioUnlocked = false;
+let audioCtx: AudioContext | null = null;
+
+function getAudioCtx(): AudioContext | null {
+  const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctx) return null;
+  return (audioCtx ??= new Ctx());
+}
+
+// Must run inside a user gesture. Unlocks both Web Speech and the Piper audio
+// path (resuming an AudioContext + playing a silent buffer counts as user
+// activation for later HTMLAudioElement.play() calls on iOS).
 function unlockAudio(): void {
-  if (audioUnlocked || !("speechSynthesis" in window)) return;
-  const u = new SpeechSynthesisUtterance("");
-  u.lang = "fi-FI";
-  u.volume = 0;
-  window.speechSynthesis.speak(u);
+  if (audioUnlocked) return;
+  if ("speechSynthesis" in window) {
+    const u = new SpeechSynthesisUtterance("");
+    u.lang = "fi-FI";
+    u.volume = 0;
+    window.speechSynthesis.speak(u);
+  }
+  const ctx = getAudioCtx();
+  if (ctx) {
+    if (ctx.state === "suspended") void ctx.resume();
+    const src = ctx.createBufferSource();
+    src.buffer = ctx.createBuffer(1, 1, 22050);
+    src.connect(ctx.destination);
+    src.start(0);
+  }
   audioUnlocked = true;
 }
 
@@ -281,9 +309,10 @@ function openMatch(id: number, withListen: boolean): void {
   });
 
   watcher.setPronunciations(pronunciations);
-  watcher.setVoice(getVoiceByName(settings.voiceName));
+  applyVoiceEngine();
   watcher.setMuted(!withListen);
   if (withListen) { unlockAudio(); watcher.markAudioUnlocked(); }
+  if (settings.voiceEngine === "piper") void ensurePiperModel(settings.piperVoiceId);
   watcher.start(String(id));
   render();
 }
@@ -596,6 +625,72 @@ function voiceSelectHtml(): string {
   </div>`;
 }
 
+// Voice-engine area: a toggle for the advanced Piper voice, and either the
+// browser-voice picker or the Piper model picker + download status.
+function voiceEngineHtml(): string {
+  const piper = settings.voiceEngine === "piper";
+  const row = `<div class="set-row">
+      <div class="ic">${icon("speaker", 18)}</div>
+      <div class="lab"><div class="a">Edistynyt ääni (Piper)</div><div class="b">Luonnollisempi suomenkielinen ääni, vaatii kertalatauksen</div></div>
+      <div class="switch${piper ? " on" : ""}" data-toggle="voiceEngine"><div class="knob"></div></div>
+    </div>`;
+  if (!piper) return row + voiceSelectHtml();
+  const opts = PIPER_VOICES.map((v) =>
+    `<option value="${esc(v.id)}"${settings.piperVoiceId === v.id ? " selected" : ""}>${esc(v.label)}</option>`
+  ).join("");
+  return row + `<div class="adv-field" style="border-top:1px solid var(--line)">
+    <div class="a">Piper-ääni</div>
+    <select id="piper-voice-select">${opts}</select>
+    <div id="piper-status" class="b" style="margin-top:6px"></div>
+  </div>`;
+}
+
+function setPiperStatus(msg: string): void {
+  const el = root.querySelector<HTMLElement>("#piper-status");
+  if (el) el.textContent = msg;
+}
+
+// Ensure the selected Piper model is downloaded, surfacing progress in the
+// settings sheet. Cached models report "ready" instantly.
+let piperStatusBusy = false;
+async function ensurePiperModel(voiceId: string): Promise<void> {
+  piperStatusBusy = true;
+  try {
+    const stored = await piperStored();
+    if (stored.includes(voiceId)) { setPiperStatus("Ääni valmis ✓"); return; }
+    setPiperStatus("Ladataan ääntä… 0 %");
+    await piperDownload(voiceId, (p) => {
+      const pct = p.total ? Math.round((p.loaded / p.total) * 100) : 0;
+      setPiperStatus(`Ladataan ääntä… ${pct} %`);
+    });
+    setPiperStatus("Ääni valmis ✓");
+  } catch {
+    setPiperStatus("Lataus epäonnistui — käytetään selaimen ääntä");
+  } finally {
+    piperStatusBusy = false;
+  }
+}
+
+// Reflect whether the selected model is already cached, without downloading.
+// Skips while a download is in flight so it can't clobber the progress text.
+function reflectPiperStatus(): void {
+  if (piperStatusBusy) return;
+  piperStored().then((s) => {
+    if (piperStatusBusy) return;
+    setPiperStatus(s.includes(settings.piperVoiceId) ? "Ääni valmis ✓" : "Ei vielä ladattu");
+  }).catch(() => { /* ignore */ });
+}
+
+// Push the current voice settings into the watcher.
+function applyVoiceEngine(): void {
+  watcher?.setVoiceEngine(settings.voiceEngine);
+  if (settings.voiceEngine === "piper") {
+    watcher?.setPiperVoice(settings.piperVoiceId);
+  } else {
+    watcher?.setVoice(getVoiceByName(settings.voiceName));
+  }
+}
+
 function settingsSheet(): string {
   const adv = advancedOpen ? `
     <div class="adv-field">
@@ -625,7 +720,7 @@ function settingsSheet(): string {
         <div class="lab"><div class="a">Kerro lyöjänvaihdot</div><div class="b">Ilmoittaa, kuka on lyöntivuorossa</div></div>
         <div class="switch${settings.announceBatterChanges ? " on" : ""}" data-toggle="announceBatterChanges"><div class="knob"></div></div>
       </div>
-      ${voiceSelectHtml()}
+      ${voiceEngineHtml()}
       <div class="adv-field" style="border-top:1px solid var(--line)">
         <div class="a">Suosikkijoukkueet</div>
         <input id="set-fav-teams" type="text" spellcheck="false" placeholder="IPV, KiPa, Roihu EP, …" value="${esc(favTeams.join(', '))}" />
@@ -699,12 +794,32 @@ function bindSettings(): void {
     render();
   };
 
+  const engineToggle = root.querySelector<HTMLElement>('[data-toggle="voiceEngine"]');
+  if (engineToggle) engineToggle.onclick = () => {
+    settings.voiceEngine = settings.voiceEngine === "piper" ? "browser" : "piper";
+    saveSettings();
+    applyVoiceEngine();
+    render();
+    if (settings.voiceEngine === "piper") void ensurePiperModel(settings.piperVoiceId);
+  };
+
   const voiceSel = root.querySelector<HTMLSelectElement>("#voice-select");
   if (voiceSel) {
     voiceSel.onchange = () => {
       settings.voiceName = voiceSel.value;
       saveSettings();
       watcher?.setVoice(getVoiceByName(settings.voiceName));
+    };
+  }
+
+  const piperSel = root.querySelector<HTMLSelectElement>("#piper-voice-select");
+  if (piperSel) {
+    reflectPiperStatus();
+    piperSel.onchange = () => {
+      settings.piperVoiceId = piperSel.value;
+      saveSettings();
+      watcher?.setPiperVoice(settings.piperVoiceId);
+      void ensurePiperModel(settings.piperVoiceId);
     };
   }
 

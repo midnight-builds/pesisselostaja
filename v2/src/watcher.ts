@@ -15,6 +15,7 @@ import {
   type SpeechContext,
 } from "./speech.js";
 import { applyPronunciations, preventOrdinalReading, type PronunciationRule } from "./pronunciation.js";
+import { piperSynthesize } from "./piper.js";
 import {
   loadState,
   saveState,
@@ -82,6 +83,11 @@ export class BrowserWatcher {
   private _speechQueue: string[] = [];
   private _speechBusy = false;
   private _selectedVoice: SpeechSynthesisVoice | null = null;
+  private _voiceEngine: "browser" | "piper" = "browser";
+  private _piperVoiceId = "fi_FI-harri-medium";
+  private _piperFailed = false;            // sticky fallback to browser this session
+  private _currentAudio: HTMLAudioElement | null = null;
+  private _drainToken = 0;                 // generation counter; bump to abort in-flight work
 
   constructor(
     private config: WatcherConfig,
@@ -102,6 +108,15 @@ export class BrowserWatcher {
 
   setVoice(voice: SpeechSynthesisVoice | null): void {
     this._selectedVoice = voice;
+  }
+
+  setVoiceEngine(engine: "browser" | "piper"): void {
+    this._voiceEngine = engine;
+  }
+
+  setPiperVoice(voiceId: string): void {
+    if (voiceId !== this._piperVoiceId) this._piperFailed = false;
+    this._piperVoiceId = voiceId;
   }
 
   /** Speak the current situation summary now (used when the listener un-mutes). */
@@ -455,27 +470,82 @@ export class BrowserWatcher {
 
   private speakRaw(text: string): void {
     if (this._muted) return;
-    if (!("speechSynthesis" in window)) return;
     this._speechQueue.push(preventOrdinalReading(text));
-    if (!this._speechBusy) this._drainQueue();
+    if (!this._speechBusy) void this._drainQueue();
   }
 
-  private _drainQueue(): void {
-    if (this._speechQueue.length === 0) { this._speechBusy = false; return; }
+  /** Serial async loop: synthesize + play each item to completion before the next. */
+  private async _drainQueue(): Promise<void> {
     this._speechBusy = true;
-    const text = this._speechQueue.shift()!;
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang = "fi-FI";
-    if (this._selectedVoice) utt.voice = this._selectedVoice;
-    utt.onend = () => this._drainQueue();
-    utt.onerror = () => this._drainQueue();
-    window.speechSynthesis.speak(utt);
+    const token = ++this._drainToken;
+    while (this._speechQueue.length > 0) {
+      if (this._muted || token !== this._drainToken) break;   // cancelled
+      const text = this._speechQueue.shift()!;
+      try {
+        if (this._voiceEngine === "piper" && !this._piperFailed) {
+          await this._speakPiper(text, token);
+        } else {
+          await this._speakBrowser(text);
+        }
+      } catch {
+        // Piper threw: switch to the browser voice for the rest of the session
+        // and re-speak this item so nothing is lost.
+        if (this._voiceEngine === "piper" && !this._piperFailed) {
+          this._piperFailed = true;
+          this.log("Edistynyt ääni epäonnistui, vaihdetaan selaimen ääneen.");
+          if (token === this._drainToken && !this._muted) {
+            try { await this._speakBrowser(text); } catch { /* give up on this item */ }
+          }
+        }
+      }
+    }
+    if (token === this._drainToken) this._speechBusy = false;
+  }
+
+  private _speakBrowser(text: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!("speechSynthesis" in window)) { reject(new Error("no speechSynthesis")); return; }
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.lang = "fi-FI";
+      if (this._selectedVoice) utt.voice = this._selectedVoice;
+      utt.onend = () => resolve();
+      utt.onerror = () => resolve();   // resolve (don't trip the piper fallback)
+      window.speechSynthesis.speak(utt);
+    });
+  }
+
+  private async _speakPiper(text: string, token: number): Promise<void> {
+    const blob = await piperSynthesize(text, this._piperVoiceId);
+    if (this._muted || token !== this._drainToken) return;   // cancelled during synth
+    await this._playBlob(blob);
+  }
+
+  private _playBlob(blob: Blob): Promise<void> {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      this._currentAudio = audio;
+      const done = () => {
+        URL.revokeObjectURL(url);
+        if (this._currentAudio === audio) this._currentAudio = null;
+        resolve();
+      };
+      audio.onended = done;
+      audio.onerror = done;
+      void audio.play().catch(done);   // autoplay block → continue the queue
+    });
   }
 
   private _cancelSpeech(): void {
     this._speechQueue = [];
     this._speechBusy = false;
+    this._drainToken++;   // invalidate any in-flight drain/synth so late audio is dropped
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    if (this._currentAudio) {
+      this._currentAudio.pause();
+      this._currentAudio.src = "";
+      this._currentAudio = null;
+    }
   }
 
   private sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
