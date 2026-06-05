@@ -6,7 +6,7 @@ Web app for following Finnish pesapallo live events with spoken voice announceme
 
 ## Lyhyesti suomeksi
 
-Pesis Live Voice on selaimessa toimiva pesapallon live-seuranta, joka lukee ottelun tärkeimmät tapahtumat ääneen suomeksi. Se on tarkoitettu tilanteisiin, joissa haluat seurata peliä ilman että katsot koko ajan tulospalvelua.
+Pesis Live Voice on selaimessa toimiva pesäpallon live-seuranta, joka lukee ottelun tärkeimmät tapahtumat ääneen suomeksi. Se on tarkoitettu tilanteisiin, joissa haluat seurata peliä ilman että katsot koko ajan tulospalvelua.
 Jaksojen ja palojen seuranta on vielä vajaa ja kertoo välillä vääriä arvoja.
 
 Käyttö:
@@ -20,9 +20,19 @@ Sovellus käyttää pesistulokset.fi-palvelun otteludataa. Tämä projekti on it
 
 ## Overview
 
-Pesis Live Voice turns live Finnish pesapallo match updates into spoken Finnish announcements. The public web UI runs in the browser and can speak important match events with the Web Speech API.
+Pesis Live Voice turns live Finnish pesäpallo match updates into spoken Finnish announcements. The public web UI runs in the browser and can speak important match events with the Web Speech API.
 
 The repository also contains an advanced Node.js watcher that can send announcements through Home Assistant TTS.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/match-list.jpg" width="270" alt="Live matches list" />
+  <img src="docs/screenshots/match-list-favorites.jpg" width="270" alt="Favorites view" />
+  <img src="docs/screenshots/match-live.jpg" width="270" alt="Live match with voice active" />
+</p>
+
+*Left to right: live match list, favorites tab, voice-active match view.*
 
 ## Status
 
