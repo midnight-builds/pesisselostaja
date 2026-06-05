@@ -51,7 +51,7 @@ export async function fetchLiveMatches(opts: ApiOptions = {}): Promise<LiveMatch
     const seriesName = item.seasonSeries?.name;
     for (const group of item.groups ?? []) {
       for (const m of group.matches ?? []) {
-        if (m.live) result.push({ id: m.id, home: m.home, away: m.away, live: true, seriesName });
+        if (m.live) result.push({ id: m.id, home: m.home, away: m.away, live: true, matchStatus: "live", startTime: null, seriesName });
       }
     }
   }
@@ -66,9 +66,17 @@ export async function fetchTodayMatches(opts: ApiOptions = {}): Promise<LiveMatc
   const res = await fetchWithTimeout(url, 10000);
   if (!res.ok) return [];
 
+  type RawMatch = {
+    id: number;
+    home: { id: number; name: string; shorthand: string };
+    away: { id: number; name: string; shorthand: string };
+    live: boolean;
+    date?: string | null;
+    result?: { result_string?: string | null } | null;
+  };
   type RawItem = {
     seasonSeries?: { name?: string };
-    groups?: Array<{ matches?: Array<{ id: number; home: { id: number; name: string; shorthand: string }; away: { id: number; name: string; shorthand: string }; live: boolean }> }>;
+    groups?: Array<{ matches?: RawMatch[] }>;
   };
 
   const data = await res.json() as RawItem[];
@@ -79,7 +87,13 @@ export async function fetchTodayMatches(opts: ApiOptions = {}): Promise<LiveMatc
     const seriesName = item.seasonSeries?.name;
     for (const group of item.groups ?? []) {
       for (const m of group.matches ?? []) {
-        result.push({ id: m.id, home: m.home, away: m.away, live: m.live, seriesName });
+        const matchStatus = m.live ? "live"
+          : m.result?.result_string ? "finished"
+          : "upcoming";
+        result.push({
+          id: m.id, home: m.home, away: m.away, live: m.live,
+          matchStatus, startTime: m.date ?? null, seriesName,
+        });
       }
     }
   }

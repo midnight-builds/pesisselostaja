@@ -220,6 +220,12 @@ body {
   font-weight: 700; font-size: calc(10px * var(--ts));
   text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
 }
+.upcoming-mini {
+  display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px;
+  font-weight: 700; font-size: calc(10px * var(--ts));
+  text-transform: uppercase; letter-spacing: .04em; color: var(--primary-ink);
+}
+.upcoming-mini .utime { font-size: calc(13px * var(--ts)); letter-spacing: 0; }
 .mrow-meta .per { font-size: calc(11px * var(--ts)); color: var(--muted); font-weight: 600; white-space: nowrap; }
 
 .dot {

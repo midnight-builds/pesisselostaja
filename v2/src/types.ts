@@ -78,5 +78,7 @@ export interface LiveMatchSummary {
   home: { id: number; name: string; shorthand: string };
   away: { id: number; name: string; shorthand: string };
   live: boolean;
+  matchStatus: "live" | "upcoming" | "finished";
+  startTime: string | null;
   seriesName?: string;
 }

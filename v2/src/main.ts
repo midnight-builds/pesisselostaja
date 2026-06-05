@@ -348,7 +348,7 @@ function render(): void {
   if (view === "list") bindList(); else bindMatch();
   if (settingsOpen) { root.insertAdjacentHTML("beforeend", settingsSheet()); bindSettings(); }
   const sc = root.querySelector<HTMLElement>(".scroll");
-  if (sc && view === "match") sc.scrollTop = prevScroll;
+  if (sc) sc.scrollTop = prevScroll;
 }
 
 let renderPending = false;
@@ -360,6 +360,13 @@ function deferredRender(): void {
 
 // ── List screen ───────────────────────────────────────────────────────────────
 
+function formatStartTime(dateStr: string): string {
+  const d = new Date(dateStr);
+  const h = String(d.getUTCHours()).padStart(2, "0");
+  const m = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
 function teamLine(name: string, shorthand: string): string {
   return `<div class="trow">
       <div class="badge-sm" style="background:${teamColor(name)}">${esc(badgeText(shorthand, name))}</div>
@@ -369,19 +376,26 @@ function teamLine(name: string, shorthand: string): string {
 
 function matchRow(m: LiveMatchSummary): string {
   const isFav = favs.includes(m.id);
-  const meta = m.live
-    ? `<span class="live-mini"><span class="dot"></span>Live</span>`
-    : `<span class="ended-mini">Päättynyt</span>`;
-  const listenBtn = m.live
-    ? `<button class="listen-fab" data-listen="${m.id}" aria-label="Kuuntele: ${esc(m.home.name)} vastaan ${esc(m.away.name)}">${icon("speaker", 22)}</button>`
-    : ``;
+  let metaHtml: string;
+  let listenBtn: string;
+  if (m.matchStatus === "live") {
+    metaHtml = `<span class="live-mini"><span class="dot"></span>Live</span>`;
+    listenBtn = `<button class="listen-fab" data-listen="${m.id}" aria-label="Kuuntele: ${esc(m.home.name)} vastaan ${esc(m.away.name)}">${icon("speaker", 22)}</button>`;
+  } else if (m.matchStatus === "upcoming") {
+    const time = m.startTime ? formatStartTime(m.startTime) : "";
+    metaHtml = `<span class="upcoming-mini">${time ? `<span class="utime">${esc(time)}</span>` : ""}Tulossa</span>`;
+    listenBtn = `<button class="listen-fab" data-listen="${m.id}" aria-label="Kuuntele: ${esc(m.home.name)} vastaan ${esc(m.away.name)}">${icon("speaker", 22)}</button>`;
+  } else {
+    metaHtml = `<span class="ended-mini">Päättynyt</span>`;
+    listenBtn = ``;
+  }
   return `<div class="mrow" data-open="${m.id}">
     <button class="lead-star${isFav ? " on" : ""}" data-fav="${m.id}" aria-label="Seuraa">${icon(isFav ? "star-fill" : "star", 18)}</button>
     <div class="teams">
       ${teamLine(m.home.name, m.home.shorthand)}
       ${teamLine(m.away.name, m.away.shorthand)}
     </div>
-    <div class="mrow-meta">${meta}</div>
+    <div class="mrow-meta">${metaHtml}</div>
     ${listenBtn}
   </div>`;
 }
