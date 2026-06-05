@@ -118,6 +118,22 @@ body {
   color: var(--live); font-weight: 700; font-size: calc(12.5px * var(--ts));
   text-transform: uppercase; letter-spacing: .04em;
 }
+.scope-seg {
+  display: inline-flex; gap: 2px;
+  background: #EAE4D7; border-radius: 10px; padding: 3px;
+}
+.scope-seg button {
+  border: none; background: transparent; cursor: pointer;
+  font-family: "Hanken Grotesk", sans-serif; font-weight: 600;
+  font-size: calc(12px * var(--ts)); color: var(--muted);
+  padding: 5px 10px; border-radius: 8px; transition: .15s;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.scope-seg button.on {
+  background: var(--card); color: var(--ink);
+  box-shadow: 0 1px 3px rgba(26,24,16,.12);
+}
+.scope-seg button .dot { width: 6px; height: 6px; flex-shrink: 0; }
 
 .seg {
   display: flex; gap: 4px; margin: 0 20px 16px;
@@ -200,6 +216,10 @@ body {
   text-transform: uppercase; letter-spacing: .04em;
 }
 .live-mini .dot { width: 6px; height: 6px; }
+.ended-mini {
+  font-weight: 700; font-size: calc(10px * var(--ts));
+  text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+}
 .mrow-meta .per { font-size: calc(11px * var(--ts)); color: var(--muted); font-weight: 600; white-space: nowrap; }
 
 .dot {

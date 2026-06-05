@@ -58,6 +58,34 @@ export async function fetchLiveMatches(opts: ApiOptions = {}): Promise<LiveMatch
   return result;
 }
 
+export async function fetchTodayMatches(opts: ApiOptions = {}): Promise<LiveMatchSummary[]> {
+  const base = opts.apiBase ?? DEFAULT_API_BASE;
+  const key = opts.apiKey ?? DEFAULT_API_KEY;
+  const date = new Date().toISOString().slice(0, 10);
+  const url = `${base}/public/matches-list?date=${date}&apikey=${key}`;
+  const res = await fetchWithTimeout(url, 10000);
+  if (!res.ok) return [];
+
+  type RawItem = {
+    seasonSeries?: { name?: string };
+    groups?: Array<{ matches?: Array<{ id: number; home: { id: number; name: string; shorthand: string }; away: { id: number; name: string; shorthand: string }; live: boolean }> }>;
+  };
+
+  const data = await res.json() as RawItem[];
+  if (!Array.isArray(data)) return [];
+
+  const result: LiveMatchSummary[] = [];
+  for (const item of data) {
+    const seriesName = item.seasonSeries?.name;
+    for (const group of item.groups ?? []) {
+      for (const m of group.matches ?? []) {
+        result.push({ id: m.id, home: m.home, away: m.away, live: m.live, seriesName });
+      }
+    }
+  }
+  return result;
+}
+
 export async function fetchLiveEvents(
   matchId: number,
   opts: ApiOptions & { after?: number } = {}

@@ -9,7 +9,7 @@ import {
   savePronunciations,
   type PronunciationRule,
 } from "./pronunciation.js";
-import { fetchLiveMatches } from "./api.js";
+import { fetchTodayMatches } from "./api.js";
 import type { LiveMatchSummary } from "./types.js";
 
 const DEFAULT_API_BASE = "https://api.pesistulokset.fi/api/v1";
@@ -88,7 +88,8 @@ let favTeams: string[] = loadFavTeams();
 
 let view: "list" | "match" = "list";
 let filter: "all" | "fav" = "all";
-let liveMatches: LiveMatchSummary[] = [];
+let scope: "live" | "all" = "live";
+let todayMatches: LiveMatchSummary[] = [];
 let matchesLoaded = false;
 
 let watcher: BrowserWatcher | null = null;
@@ -194,18 +195,18 @@ function unlockAudio(): void {
 
 // ── Live match list ───────────────────────────────────────────────────────────
 
-async function refreshLiveMatches(): Promise<void> {
+async function refreshTodayMatches(): Promise<void> {
   try {
-    liveMatches = await fetchLiveMatches({ apiBase: settings.apiBase, apiKey: settings.apiKey });
+    todayMatches = await fetchTodayMatches({ apiBase: settings.apiBase, apiKey: settings.apiKey });
   } catch {
-    liveMatches = [];
+    todayMatches = [];
   }
   matchesLoaded = true;
   if (view === "list") render();
 }
 
 function matchById(id: number): LiveMatchSummary | undefined {
-  return liveMatches.find((m) => m.id === id);
+  return todayMatches.find((m) => m.id === id);
 }
 
 function isMatchFav(m: LiveMatchSummary): boolean {
@@ -368,29 +369,38 @@ function teamLine(name: string, shorthand: string): string {
 
 function matchRow(m: LiveMatchSummary): string {
   const isFav = favs.includes(m.id);
+  const meta = m.live
+    ? `<span class="live-mini"><span class="dot"></span>Live</span>`
+    : `<span class="ended-mini">Päättynyt</span>`;
+  const listenBtn = m.live
+    ? `<button class="listen-fab" data-listen="${m.id}" aria-label="Kuuntele: ${esc(m.home.name)} vastaan ${esc(m.away.name)}">${icon("speaker", 22)}</button>`
+    : ``;
   return `<div class="mrow" data-open="${m.id}">
     <button class="lead-star${isFav ? " on" : ""}" data-fav="${m.id}" aria-label="Seuraa">${icon(isFav ? "star-fill" : "star", 18)}</button>
     <div class="teams">
       ${teamLine(m.home.name, m.home.shorthand)}
       ${teamLine(m.away.name, m.away.shorthand)}
     </div>
-    <div class="mrow-meta">
-      <span class="live-mini"><span class="dot"></span>Live</span>
-    </div>
-    <button class="listen-fab" data-listen="${m.id}" aria-label="Kuuntele: ${esc(m.home.name)} vastaan ${esc(m.away.name)}">${icon("speaker", 22)}</button>
+    <div class="mrow-meta">${meta}</div>
+    ${listenBtn}
   </div>`;
 }
 
 function listScreen(): string {
-  const shown = filter === "fav" ? liveMatches.filter(isMatchFav) : liveMatches;
-  const favCount = liveMatches.filter(isMatchFav).length;
+  const liveMatches = todayMatches.filter((m) => m.live);
+  const scopeMatches = scope === "live" ? liveMatches : todayMatches;
+  const shown = filter === "fav" ? scopeMatches.filter(isMatchFav) : scopeMatches;
+  const favCount = scopeMatches.filter(isMatchFav).length;
   const groups = groupBySeries(shown);
+  const liveCount = liveMatches.length;
 
   let body = "";
   if (!matchesLoaded) {
     body = `<div class="empty">Ladataan otteluita…</div>`;
-  } else if (liveMatches.length === 0) {
+  } else if (scope === "live" && liveCount === 0) {
     body = `<div class="empty"><div class="big">${icon("ball", 34)}</div>Ei live-otteluita juuri nyt.<br/>Päivitä myöhemmin uudelleen.</div>`;
+  } else if (scope === "all" && todayMatches.length === 0) {
+    body = `<div class="empty"><div class="big">${icon("ball", 34)}</div>Ei otteluita tänään.<br/>Päivitä myöhemmin uudelleen.</div>`;
   } else if (filter === "fav" && shown.length === 0) {
     body = `<div class="empty"><div class="big">${icon("star", 34)}</div>Et seuraa vielä yhtään ottelua.<br/>Merkitse ottelu tähdellä, niin löydät sen täältä.<br/><span class="link" data-allfilter="1">Näytä kaikki ottelut</span></div>`;
   } else {
@@ -412,7 +422,10 @@ function listScreen(): string {
       </div>
       <div class="daterow">
         <span class="d">Tänään · ${esc(todayLabel())}</span>
-        <span class="live-count"><span class="dot"></span>${liveMatches.length} käynnissä</span>
+        <div class="scope-seg">
+          <button class="${scope === "live" ? "on" : ""}" data-scope="live"><span class="dot"></span>Live${liveCount > 0 ? ` (${liveCount})` : ""}</button>
+          <button class="${scope === "all" ? "on" : ""}" data-scope="all">Kaikki tänään</button>
+        </div>
       </div>
       <div class="seg">
         <button class="${filter === "all" ? "on" : ""}" data-filter="all">Kaikki ottelut</button>
@@ -599,6 +612,9 @@ function bindCommon(): void {
 }
 
 function bindList(): void {
+  root.querySelectorAll<HTMLElement>("[data-scope]").forEach((b) => {
+    b.onclick = () => { scope = b.dataset.scope as "live" | "all"; render(); };
+  });
   root.querySelectorAll<HTMLElement>("[data-filter]").forEach((b) => {
     b.onclick = () => { filter = b.dataset.filter as "all" | "fav"; render(); };
   });
@@ -606,7 +622,7 @@ function bindList(): void {
   if (allLink) allLink.onclick = () => { filter = "all"; render(); };
 
   root.querySelectorAll<HTMLElement>("[data-refresh]").forEach((b) => {
-    b.onclick = () => { matchesLoaded = false; render(); refreshLiveMatches(); };
+    b.onclick = () => { matchesLoaded = false; render(); refreshTodayMatches(); };
   });
 
   root.querySelectorAll<HTMLElement>("[data-fav]").forEach((b) => {
@@ -694,8 +710,8 @@ function closeSettings(): void {
 
 function init(): void {
   render();
-  refreshLiveMatches();
-  window.setInterval(() => { if (view === "list") refreshLiveMatches(); }, 30000);
+  refreshTodayMatches();
+  window.setInterval(() => { if (view === "list") refreshTodayMatches(); }, 30000);
 }
 
 init();
