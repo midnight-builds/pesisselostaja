@@ -309,6 +309,7 @@ function openMatch(id: number, withListen: boolean): void {
   });
 
   watcher.setPronunciations(pronunciations);
+  watcher.setAudioContext(getAudioCtx());
   applyVoiceEngine();
   watcher.setMuted(!withListen);
   if (withListen) { unlockAudio(); watcher.markAudioUnlocked(); }

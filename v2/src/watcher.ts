@@ -87,6 +87,8 @@ export class BrowserWatcher {
   private _piperVoiceId = "fi_FI-harri-medium";
   private _piperFailed = false;            // sticky fallback to browser this session
   private _currentAudio: HTMLAudioElement | null = null;
+  private _currentSource: AudioBufferSourceNode | null = null;
+  private _audioCtx: AudioContext | null = null;
   private _drainToken = 0;                 // generation counter; bump to abort in-flight work
 
   constructor(
@@ -117,6 +119,11 @@ export class BrowserWatcher {
   setPiperVoice(voiceId: string): void {
     if (voiceId !== this._piperVoiceId) this._piperFailed = false;
     this._piperVoiceId = voiceId;
+  }
+
+  /** Share the AudioContext unlocked on the user gesture, for Piper playback. */
+  setAudioContext(ctx: AudioContext | null): void {
+    this._audioCtx = ctx;
   }
 
   /** Speak the current situation summary now (used when the listener un-mutes). */
@@ -520,8 +527,28 @@ export class BrowserWatcher {
     await this._playBlob(blob);
   }
 
-  private _playBlob(blob: Blob): Promise<void> {
-    return new Promise((resolve) => {
+  private async _playBlob(blob: Blob): Promise<void> {
+    // Prefer the AudioContext unlocked on the user gesture — more reliable than a
+    // detached <audio> element under autoplay policies (esp. iOS Safari).
+    const ctx = this._audioCtx;
+    if (ctx) {
+      try {
+        if (ctx.state === "suspended") await ctx.resume();
+        const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+        await new Promise<void>((resolve) => {
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(ctx.destination);
+          this._currentSource = src;
+          src.onended = () => { if (this._currentSource === src) this._currentSource = null; resolve(); };
+          src.start(0);
+        });
+        return;
+      } catch {
+        // fall through to the <audio> path below
+      }
+    }
+    await new Promise<void>((resolve) => {
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       this._currentAudio = audio;
@@ -545,6 +572,10 @@ export class BrowserWatcher {
       this._currentAudio.pause();
       this._currentAudio.src = "";
       this._currentAudio = null;
+    }
+    if (this._currentSource) {
+      try { this._currentSource.stop(); } catch { /* already stopped */ }
+      this._currentSource = null;
     }
   }
 
