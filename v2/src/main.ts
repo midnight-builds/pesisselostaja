@@ -23,6 +23,7 @@ interface Settings {
   apiBase: string;
   pollInterval: number;
   announceBatterChanges: boolean;
+  voiceName: string;
 }
 
 interface FeedEntry {
@@ -44,10 +45,11 @@ function loadSettings(): Settings {
         apiBase: p.apiBase ?? DEFAULT_API_BASE,
         pollInterval: p.pollInterval ?? 6,
         announceBatterChanges: p.announceBatterChanges ?? true,
+        voiceName: p.voiceName ?? "",
       };
     }
   } catch { /* ignore */ }
-  return { apiKey: DEFAULT_API_KEY, apiBase: DEFAULT_API_BASE, pollInterval: 6, announceBatterChanges: true };
+  return { apiKey: DEFAULT_API_KEY, apiBase: DEFAULT_API_BASE, pollInterval: 6, announceBatterChanges: true, voiceName: "" };
 }
 
 function saveSettings(): void {
@@ -279,6 +281,7 @@ function openMatch(id: number, withListen: boolean): void {
   });
 
   watcher.setPronunciations(pronunciations);
+  watcher.setVoice(getVoiceByName(settings.voiceName));
   watcher.setMuted(!withListen);
   if (withListen) { unlockAudio(); watcher.markAudioUnlocked(); }
   watcher.start(String(id));
@@ -565,6 +568,34 @@ function matchScreen(): string {
 
 // ── Settings sheet ──────────────────────────────────────────────────────────
 
+function getVoiceByName(name: string): SpeechSynthesisVoice | null {
+  if (!name || !("speechSynthesis" in window)) return null;
+  return window.speechSynthesis.getVoices().find((v) => v.name === name) ?? null;
+}
+
+function voiceSelectHtml(): string {
+  if (!("speechSynthesis" in window)) return "";
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length === 0) return "";
+  const fi = voices.filter((v) => v.lang.startsWith("fi"));
+  const other = voices.filter((v) => !v.lang.startsWith("fi"));
+  const opt = (v: SpeechSynthesisVoice) =>
+    `<option value="${esc(v.name)}"${settings.voiceName === v.name ? " selected" : ""}>${esc(v.name)} (${v.lang})</option>`;
+  const fiOpts = fi.map(opt).join("");
+  const otherOpts = other.length
+    ? `<optgroup label="Muut kielet">${other.map(opt).join("")}</optgroup>`
+    : "";
+  const defaultSel = settings.voiceName === "" ? " selected" : "";
+  return `<div class="adv-field" style="border-top:1px solid var(--line)">
+    <div class="a">Puheääni</div>
+    <select id="voice-select">
+      <option value=""${defaultSel}>Selaimen oletusääni</option>
+      ${fiOpts ? `<optgroup label="Suomi">${fiOpts}</optgroup>` : ""}
+      ${otherOpts}
+    </select>
+  </div>`;
+}
+
 function settingsSheet(): string {
   const adv = advancedOpen ? `
     <div class="adv-field">
@@ -594,6 +625,7 @@ function settingsSheet(): string {
         <div class="lab"><div class="a">Kerro lyöjänvaihdot</div><div class="b">Ilmoittaa, kuka on lyöntivuorossa</div></div>
         <div class="switch${settings.announceBatterChanges ? " on" : ""}" data-toggle="announceBatterChanges"><div class="knob"></div></div>
       </div>
+      ${voiceSelectHtml()}
       <div class="adv-field" style="border-top:1px solid var(--line)">
         <div class="a">Suosikkijoukkueet</div>
         <input id="set-fav-teams" type="text" spellcheck="false" placeholder="IPV, KiPa, Roihu EP, …" value="${esc(favTeams.join(', '))}" />
@@ -666,6 +698,15 @@ function bindSettings(): void {
     saveSettings();
     render();
   };
+
+  const voiceSel = root.querySelector<HTMLSelectElement>("#voice-select");
+  if (voiceSel) {
+    voiceSel.onchange = () => {
+      settings.voiceName = voiceSel.value;
+      saveSettings();
+      watcher?.setVoice(getVoiceByName(settings.voiceName));
+    };
+  }
 
   const favTeamsEl = root.querySelector<HTMLInputElement>("#set-fav-teams");
   if (favTeamsEl) {

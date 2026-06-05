@@ -81,6 +81,7 @@ export class BrowserWatcher {
   private _state: WatcherState | null = null;
   private _speechQueue: string[] = [];
   private _speechBusy = false;
+  private _selectedVoice: SpeechSynthesisVoice | null = null;
 
   constructor(
     private config: WatcherConfig,
@@ -97,6 +98,10 @@ export class BrowserWatcher {
   setMuted(muted: boolean): void {
     this._muted = muted;
     if (muted) this._cancelSpeech();
+  }
+
+  setVoice(voice: SpeechSynthesisVoice | null): void {
+    this._selectedVoice = voice;
   }
 
   /** Speak the current situation summary now (used when the listener un-mutes). */
@@ -461,6 +466,7 @@ export class BrowserWatcher {
     const text = this._speechQueue.shift()!;
     const utt = new SpeechSynthesisUtterance(text);
     utt.lang = "fi-FI";
+    if (this._selectedVoice) utt.voice = this._selectedVoice;
     utt.onend = () => this._drainQueue();
     utt.onerror = () => this._drainQueue();
     window.speechSynthesis.speak(utt);
