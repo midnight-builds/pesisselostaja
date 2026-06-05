@@ -365,7 +365,8 @@ export class BrowserWatcher {
           now - state.lastSummaryTime > SUMMARY_INTERVAL_MS;
         if (needsSummary && state.announcementCount > 0) {
           state.lastSummaryTime = now;
-          const summary = formatSituationSummary(meta, this.buildContext(state));
+          const summaryCtx = { ...this.buildContext(state), currentOuts: recomputeCurrentOuts(events) };
+          const summary = formatSituationSummary(meta, summaryCtx);
           this.emitFeed("summary", summary);
           if (!this._muted) setTimeout(() => this.speakRaw(applyPronunciations(summary, this._pronunciations)), 800);
         }
