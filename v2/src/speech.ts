@@ -298,10 +298,13 @@ export function subEventToSpeech(
     const standing = ctx && (ctx.homePeriodsWon > 0 || ctx.awayPeriodsWon > 0)
       ? ` ${formatPeriodsWon(meta, ctx.homePeriodsWon, ctx.awayPeriodsWon)}.`
       : "";
+    const pair = ctx && rawText.includes("jakso")
+      ? ` ${vuoropariLabel(ctx.currentInning, ctx.currentBatTurn)}`
+      : "";
     const batting = ctx?.currentBatTeamId
       ? ` Sisävuorossa ${getTeamName(meta, ctx.currentBatTeamId)}.`
       : "";
-    return `${ttsClean(rawText)}.${standing}${batting}`;
+    return `${ttsClean(rawText)}.${standing}${pair}${batting}`;
   }
 
   if (rawText === "Ottelu alkoi") {

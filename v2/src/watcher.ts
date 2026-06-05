@@ -221,7 +221,9 @@ export class BrowserWatcher {
           data.events.length === 0
         ) {
           const newBatTurn = (state.currentBatTurn + 1) % 2;
-          const newInning = state.currentBatTurn === 1 ? state.currentInning + 1 : state.currentInning;
+          const periodAdvanced = (data.period ?? 0) > state.currentPeriod;
+          const newInning = periodAdvanced ? 0
+            : state.currentBatTurn === 1 ? state.currentInning + 1 : state.currentInning;
           const cur = getPeriodScore(state, state.currentPeriod);
           const msg = formatBatTurnChangeSpeech(
             meta, state.currentBatTeamId, newBatTeam, cur.home, cur.away, newInning, newBatTurn
@@ -275,7 +277,14 @@ export class BrowserWatcher {
         state.currentBatTurn = event.batTurn;
         state.currentOuts = 0;
       }
-      if (event.period > 0) state.currentPeriod = event.period;
+      if (event.period > 0) {
+        if (event.period !== state.currentPeriod) {
+          state.currentInning = event.inning;
+          state.currentBatTurn = event.batTurn;
+          state.currentOuts = 0;
+        }
+        state.currentPeriod = event.period;
+      }
 
       for (let i = 0; i < event.events.length; i++) {
         const sub = event.events[i];
@@ -309,7 +318,14 @@ export class BrowserWatcher {
         state.currentBatTurn = event.batTurn;
         state.currentOuts = 0;
       }
-      if (event.period > 0) state.currentPeriod = event.period;
+      if (event.period > 0) {
+        if (event.period !== state.currentPeriod) {
+          state.currentInning = event.inning;
+          state.currentBatTurn = event.batTurn;
+          state.currentOuts = 0;
+        }
+        state.currentPeriod = event.period;
+      }
 
       for (let i = 0; i < event.events.length; i++) {
         const sub = event.events[i];
