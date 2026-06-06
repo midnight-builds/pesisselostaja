@@ -8,6 +8,7 @@ import {
   runValueOfSubEvent,
   eventFingerprint,
   recomputeCurrentOuts,
+  outsThroughSubEvent,
   formatStartupSpeech,
   formatBatTurnChangeSpeech,
   formatSituationSummary,
@@ -207,6 +208,7 @@ export class BrowserWatcher {
 
     if (initial.team != null) state.currentBatTeamId = initial.team;
     if ((initial.period ?? 0) > 0) state.currentPeriod = initial.period!;
+    state.currentOuts = recomputeCurrentOuts(initial.events);
 
     saveState(matchId, state);
     this.log(`Ohitettu ${initial.events.length} tapahtumaa`);
@@ -352,7 +354,8 @@ export class BrowserWatcher {
     meta: MatchMetadata,
     lookup: ReturnType<typeof buildPlayerLookup>
   ): void {
-    for (const event of events) {
+    for (let ei = 0; ei < events.length; ei++) {
+      const event = events[ei];
       if (event.team != null && (event.team !== state.currentBatTeamId || event.inning !== state.currentInning || event.batTurn !== state.currentBatTurn)) {
         state.currentBatTeamId = event.team;
         state.currentInning = event.inning;
@@ -383,15 +386,17 @@ export class BrowserWatcher {
             this.log(`Pisteet (${periodName(event.period)}): ${meta.home.shorthand} ${s.home}–${s.away} ${meta.away.shorthand}`);
           }
         }
-        if (isOutSubEvent(sub)) {
-          if (event.team !== null) {
-            state.currentOuts++;
-            const team = event.team === meta.home.id ? meta.home.shorthand : meta.away.shorthand;
-            this.log(`Palo: ${team} ${state.currentOuts}`);
-          }
+
+        // Build context per sub-event. For an out, the spoken ordinal must come
+        // from the turn-key recompute (same source as the scoreboard), not the
+        // running state.currentOuts which can drift across polls.
+        const ctx = this.buildContext(state);
+        if (isOutSubEvent(sub) && event.team !== null) {
+          ctx.currentOuts = outsThroughSubEvent(events, ei, i);
+          const team = event.team === meta.home.id ? meta.home.shorthand : meta.away.shorthand;
+          this.log(`Palo: ${team} ${ctx.currentOuts}`);
         }
 
-        const ctx = this.buildContext(state);
         const speech = subEventToSpeech(
           event, sub, meta, lookup, this.config.announceBatterChanges, ctx
         );

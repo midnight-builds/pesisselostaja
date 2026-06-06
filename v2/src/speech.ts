@@ -405,16 +405,45 @@ export function eventFingerprint(event: LiveEvent, subIndex: number): string {
   return `${prefix}:${JSON.stringify(sub.texts)}`;
 }
 
+/** True when two events belong to the same batting turn (per API fields). */
+function sameTurn(a: LiveEvent, b: LiveEvent): boolean {
+  return a.period === b.period && a.inning === b.inning && a.batTurn === b.batTurn && a.team === b.team;
+}
+
+/**
+ * Palot in the current turn. Palot reset every turn, so we count out sub-events
+ * only in the latest turn — identified by the API's (period, inning, batTurn,
+ * team) on each event, never guessed. Single source of truth for both the
+ * scoreboard and the spoken ordinal (see {@link outsThroughSubEvent}).
+ */
 export function recomputeCurrentOuts(events: LiveEvent[]): number {
+  let last: LiveEvent | null = null;
+  for (const e of events) if (e.team != null) last = e;
+  if (!last) return 0;
   let outs = 0;
-  let team: number | null = null;
-  for (const event of events) {
-    if (event.team != null && event.team !== team) {
-      team = event.team;
-      outs = 0;
-    }
-    for (const sub of event.events) {
-      if (isOutSubEvent(sub) && event.team !== null) outs++;
+  for (const e of events) {
+    if (e.team == null || !sameTurn(e, last)) continue;
+    for (const sub of e.events) if (isOutSubEvent(sub)) outs++;
+  }
+  return outs;
+}
+
+/**
+ * The out count in the current turn up to and including
+ * `events[eventIdx].events[subIdx]` — i.e. the palo's ordinal at the moment it
+ * happens. Computed from the same turn-key logic as {@link recomputeCurrentOuts}
+ * so the spoken "kolmas palo" can never disagree with the scoreboard.
+ */
+export function outsThroughSubEvent(events: LiveEvent[], eventIdx: number, subIdx: number): number {
+  const target = events[eventIdx];
+  if (!target || target.team == null) return 0;
+  let outs = 0;
+  for (let ei = 0; ei <= eventIdx; ei++) {
+    const e = events[ei];
+    if (e.team == null || !sameTurn(e, target)) continue;
+    const limit = ei === eventIdx ? subIdx + 1 : e.events.length;
+    for (let si = 0; si < limit; si++) {
+      if (isOutSubEvent(e.events[si])) outs++;
     }
   }
   return outs;
