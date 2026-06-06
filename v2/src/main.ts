@@ -27,6 +27,7 @@ interface Settings {
   voiceName: string;
   voiceEngine: "browser" | "piper";
   piperVoiceId: string;
+  keepScreenOn: boolean;
 }
 
 const DEFAULT_PIPER_VOICE = "fi_FI-harri-medium";
@@ -53,10 +54,11 @@ function loadSettings(): Settings {
         voiceName: p.voiceName ?? "",
         voiceEngine: p.voiceEngine === "piper" ? "piper" : "browser",
         piperVoiceId: p.piperVoiceId ?? DEFAULT_PIPER_VOICE,
+        keepScreenOn: p.keepScreenOn ?? true,
       };
     }
   } catch { /* ignore */ }
-  return { apiKey: DEFAULT_API_KEY, apiBase: DEFAULT_API_BASE, pollInterval: 6, announceBatterChanges: true, voiceName: "", voiceEngine: "browser", piperVoiceId: DEFAULT_PIPER_VOICE };
+  return { apiKey: DEFAULT_API_KEY, apiBase: DEFAULT_API_BASE, pollInterval: 6, announceBatterChanges: true, voiceName: "", voiceEngine: "browser", piperVoiceId: DEFAULT_PIPER_VOICE, keepScreenOn: true };
 }
 
 function saveSettings(): void {
@@ -223,6 +225,46 @@ function unlockAudio(): void {
   audioUnlocked = true;
 }
 
+// ── Screen wake lock ─────────────────────────────────────────────────────────
+// Keep the screen awake while watching a match — when the phone screen sleeps,
+// the browser suspends the page and speech stops.
+
+interface WakeLockSentinelLike {
+  released: boolean;
+  release(): Promise<void>;
+  addEventListener(type: "release", listener: () => void): void;
+}
+interface WakeLockNavigator {
+  wakeLock?: { request(type: "screen"): Promise<WakeLockSentinelLike> };
+}
+
+let wakeLock: WakeLockSentinelLike | null = null;
+
+async function requestWakeLock(): Promise<void> {
+  const nav = navigator as Navigator & WakeLockNavigator;
+  if (!nav.wakeLock) return;
+  if (wakeLock && !wakeLock.released) return;
+  try {
+    wakeLock = await nav.wakeLock.request("screen");
+    wakeLock.addEventListener("release", () => { wakeLock = null; });
+  } catch {
+    wakeLock = null;
+  }
+}
+
+function releaseWakeLock(): void {
+  void wakeLock?.release().catch(() => { /* ignore */ });
+  wakeLock = null;
+}
+
+// The OS drops the lock when the page is hidden; re-acquire on return if the
+// user still wants the screen kept on while in a match.
+function onVisibilityChange(): void {
+  if (document.visibilityState === "visible" && settings.keepScreenOn && view === "match") {
+    void requestWakeLock();
+  }
+}
+
 // ── Live match list ───────────────────────────────────────────────────────────
 
 async function refreshTodayMatches(): Promise<void> {
@@ -314,6 +356,7 @@ function openMatch(id: number, withListen: boolean): void {
   watcher.setMuted(!withListen);
   if (withListen) { unlockAudio(); watcher.markAudioUnlocked(); }
   if (settings.voiceEngine === "piper") void ensurePiperModel(settings.piperVoiceId);
+  if (settings.keepScreenOn) void requestWakeLock();
   watcher.start(String(id));
   render();
 }
@@ -325,6 +368,7 @@ function stopWatcher(): void {
   }
   window.clearTimeout(speakingTimer);
   speakingActive = false;
+  releaseWakeLock();
 }
 
 function backToList(): void {
@@ -588,6 +632,10 @@ function matchScreen(): string {
       <div class="listen-wrap">
         <button class="listen-btn${listening ? " on" : ""}" data-togglelisten="1">${listenBtn}</button>
         <div class="now-speaking">${nowSpeakingHtml()}</div>
+        <div class="keep-awake" data-keepawake="1">
+          <div class="switch sm${settings.keepScreenOn ? " on" : ""}"><div class="knob"></div></div>
+          <span>Pidä ruutu päällä</span>
+        </div>
       </div>
       ${errorHtml}
       <div class="feed-label">Tapahtumat</div>
@@ -780,6 +828,17 @@ function bindMatch(): void {
   if (back) back.onclick = backToList;
   const tl = root.querySelector<HTMLElement>("[data-togglelisten]");
   if (tl) tl.onclick = toggleListen;
+  const ka = root.querySelector<HTMLElement>("[data-keepawake]");
+  if (ka) ka.onclick = toggleKeepScreenOn;
+}
+
+function toggleKeepScreenOn(): void {
+  settings.keepScreenOn = !settings.keepScreenOn;
+  saveSettings();
+  if (settings.keepScreenOn) void requestWakeLock();
+  else releaseWakeLock();
+  toast(settings.keepScreenOn ? "Ruutu pidetään päällä" : "Ruutu voi sammua");
+  render();
 }
 
 function bindSettings(): void {
@@ -882,6 +941,7 @@ function init(): void {
   document.addEventListener("gesturestart", (e) => e.preventDefault(), { passive: false });
   document.addEventListener("gesturechange", (e) => e.preventDefault(), { passive: false });
   document.addEventListener("touchmove", (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+  document.addEventListener("visibilitychange", onVisibilityChange);
 
   render();
   refreshTodayMatches();
