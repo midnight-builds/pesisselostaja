@@ -1,15 +1,15 @@
-# Pesis Live Voice
+# Pesisselostaja
 
 Web app for following Finnish pesapallo live events with spoken voice announcements.
 
-[Try the web app](https://midnight-builds.github.io/pesistulokset-voice-watcher/)
+[Try the web app](https://midnight-builds.github.io/pesisselostaja/)
 
 ## Lyhyesti suomeksi
 
-Pesis Live Voice on selaimessa toimiva pesäpallon live-seuranta, joka lukee ottelun tärkeimmät tapahtumat ääneen suomeksi. Se on tarkoitettu tilanteisiin, joissa haluat seurata peliä ilman että katsot koko ajan tulospalvelua.
+Pesisselostaja on selaimessa toimiva pesäpallon live-seuranta, joka lukee ottelun tärkeimmät tapahtumat ääneen suomeksi. Se on tarkoitettu tilanteisiin, joissa haluat seurata peliä ilman että katsot koko ajan tulospalvelua.
 Jaksojen ja palojen seuranta on vielä vajaa ja kertoo välillä vääriä arvoja.
 
-**👉 Avaa sovellus: https://midnight-builds.github.io/pesistulokset-voice-watcher/**
+**👉 Avaa sovellus: https://midnight-builds.github.io/pesisselostaja/**
 
 Käyttö:
 
@@ -24,7 +24,7 @@ Sovellus käyttää pesistulokset.fi-palvelun otteludataa. Tämä projekti on it
 
 ## Overview
 
-Pesis Live Voice turns live Finnish pesäpallo match updates into spoken Finnish announcements. The public web UI runs in the browser and can speak important match events with the Web Speech API. You can pick which voice to use in the settings, including an optional **advanced neural voice (Piper)** that produces a more natural Finnish voice entirely in the browser.
+Pesisselostaja turns live Finnish pesäpallo match updates into spoken Finnish announcements. The public web UI runs in the browser and can speak important match events with the Web Speech API. You can pick which voice to use in the settings, including an optional **advanced neural voice (Piper)** that produces a more natural Finnish voice entirely in the browser.
 
 The repository also contains an advanced Node.js watcher that can send announcements through Home Assistant TTS.
 
@@ -58,14 +58,14 @@ Known limitations:
 
 ## Data Source And Affiliation
 
-Pesis Live Voice uses live match data from pesistulokset.fi. This project is independent and is not affiliated with, endorsed by, or sponsored by pesistulokset.fi. The data source and API behavior may change without notice.
+Pesisselostaja uses live match data from pesistulokset.fi. This project is independent and is not affiliated with, endorsed by, or sponsored by pesistulokset.fi. The data source and API behavior may change without notice.
 
 ## Web App Usage
 
 Open the public web app:
 
 ~~~text
-https://midnight-builds.github.io/pesistulokset-voice-watcher/
+https://midnight-builds.github.io/pesisselostaja/
 ~~~
 
 The web app can:

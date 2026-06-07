@@ -1,4 +1,4 @@
-const LS_KEY = "pesistulokset-v2-pronunciations";
+const LS_KEY = "pesisselostaja-v2-pronunciations";
 
 export interface PronunciationRule {
   from: string;

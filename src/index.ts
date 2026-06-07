@@ -120,7 +120,7 @@ async function processEvents(
 async function runCli(): Promise<void> {
   const config = parseCliArgs();
 
-  console.log(`Pesistulokset Voice Watcher`);
+  console.log(`Pesisselostaja`);
   console.log(`Match ID: ${config.matchId}`);
   console.log(`Poll interval: ${config.pollInterval / 1000}s`);
   console.log(`Dry run: ${config.dryRun}`);

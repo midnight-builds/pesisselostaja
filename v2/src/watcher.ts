@@ -7,7 +7,7 @@ import {
   isMatchEndSubEvent,
   runValueOfSubEvent,
   eventFingerprint,
-  recomputeCurrentOuts,
+  recomputeCurrentOutsKeyed,
   outsThroughSubEvent,
   formatStartupSpeech,
   formatBatTurnChangeSpeech,
@@ -201,6 +201,8 @@ export class BrowserWatcher {
     const initial = await fetchLiveEvents(matchId, apiOpts);
     state.periodRuns = {};
     state.currentOuts = 0;
+    state.paloTurnKey = null;
+    state.paloTurnMax = 0;
     state.currentPeriod = 0;
     state.currentBatTeamId = null;
     state.finished = false;
@@ -208,7 +210,12 @@ export class BrowserWatcher {
 
     if (initial.team != null) state.currentBatTeamId = initial.team;
     if ((initial.period ?? 0) > 0) state.currentPeriod = initial.period!;
-    state.currentOuts = recomputeCurrentOuts(initial.events);
+    {
+      const { outs, turnKey } = recomputeCurrentOutsKeyed(initial.events);
+      state.paloTurnKey = turnKey;
+      state.paloTurnMax = outs;
+      state.currentOuts = outs;
+    }
 
     saveState(matchId, state);
     this.log(`Ohitettu ${initial.events.length} tapahtumaa`);
@@ -270,14 +277,28 @@ export class BrowserWatcher {
           state.currentBatTurn = newBatTurn;
           if (periodAdvanced) state.currentPeriod = data.period!;
           state.currentOuts = 0;
+          state.paloTurnKey = null;
+          state.paloTurnMax = 0;
         }
 
         this.processEventsLive(data.events, state, meta, lookup);
 
-        // Recompute outs from all events — processEventsLive only counts NEW sub-events
-        // but the team-change reset runs for every event, leaving currentOuts at 0.
+        // Outs for the current turn, kept monotonic per turn. Outs never decrease
+        // while the same team bats, but the API briefly re-keys a turn-ending palo
+        // into the next sub-inning for a few polls; the raw recompute then under-counts
+        // the current turn and visibly rewinds the scoreboard (e.g. 3 → 2) after the
+        // 3rd palo was already announced. Keying the running max to the counted turn
+        // resets cleanly on a real turn change (new key) but never drops mid-turn.
+        // (A plain Math.max on currentOuts is not enough: processEventsLive zeroes
+        // currentOuts whenever it iterates past a re-keyed event, losing the memory.)
         if (data.events.length > 0) {
-          state.currentOuts = recomputeCurrentOuts(data.events);
+          const { outs, turnKey } = recomputeCurrentOutsKeyed(data.events);
+          if (turnKey !== state.paloTurnKey) {
+            state.paloTurnKey = turnKey;
+            state.paloTurnMax = 0;
+          }
+          state.paloTurnMax = Math.max(state.paloTurnMax, outs);
+          state.currentOuts = state.paloTurnMax;
         }
 
         // Reconcile with the API's authoritative fields BEFORE emitting state.
@@ -290,6 +311,8 @@ export class BrowserWatcher {
         if (data.team != null && data.team !== state.currentBatTeamId) {
           state.currentBatTeamId = data.team;
           state.currentOuts = 0;
+          state.paloTurnKey = null;
+          state.paloTurnMax = 0;
         }
 
         this.emitState(state, meta);

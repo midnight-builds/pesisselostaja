@@ -75,7 +75,7 @@ const HTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title>Pesistulokset Voice</title>
+  <title>Pesisselostaja</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -594,7 +594,7 @@ const HTML = `<!DOCTYPE html>
   <div class="app">
 
     <div class="header">
-      <h1>Pesistulokset <span>Voice</span></h1>
+      <h1>Pesis<span>selostaja</span></h1>
       <div class="subtitle">Live-äänikommentaari</div>
     </div>
 
@@ -673,6 +673,10 @@ const HTML = `<!DOCTYPE html>
       <div class="log-terminal" id="logTerminal">
         <div class="log-empty">Odottaa käynnistystä…</div>
       </div>
+    </div>
+
+    <div class="disclaimer" style="margin-top:16px;font-size:12px;line-height:1.5;opacity:0.6;text-align:center">
+      Sovellus käyttää pesistulokset.fi-palvelun otteludataa. Tämä projekti on itsenäinen, eikä se ole pesistulokset.fi:n tekemä, hyväksymä tai sponsoroima.
     </div>
 
   </div>
@@ -888,7 +892,7 @@ const HTML = `<!DOCTYPE html>
       if (e.key === 'Enter' && !isRunning) handleToggle();
     });
 
-    const FAV_KEY = 'pesistulokset-favorites';
+    const FAV_KEY = 'pesisselostaja-favorites';
     const FAV_DEFAULT = 'Pesä Ysit,IPV';
 
     function getFavorites() {

@@ -15,9 +15,9 @@ import type { LiveMatchSummary } from "./types.js";
 
 const DEFAULT_API_BASE = "https://api.pesistulokset.fi/api/v1";
 const DEFAULT_API_KEY = "wRX0tTke3DZ8RLKAMntjZ81LwgNQuSN9";
-const LS_SETTINGS = "pesistulokset-v2-settings";
-const LS_FAVS = "pesistulokset-v2-favs";
-const LS_FAV_TEAMS = "pesistulokset-v2-fav-teams";
+const LS_SETTINGS = "pesisselostaja-v2-settings";
+const LS_FAVS = "pesisselostaja-v2-favs";
+const LS_FAV_TEAMS = "pesisselostaja-v2-fav-teams";
 
 interface Settings {
   apiKey: string;
@@ -503,7 +503,7 @@ function listScreen(): string {
     <div class="scroll">
       <div class="topbar">
         <div class="mark">${icon("ball", 22, 1.8)}</div>
-        <div class="wordmark"><span class="b">Pesistulokset</span><span class="s">Kuuntele ottelut suorana</span></div>
+        <div class="wordmark"><span class="b">Pesisselostaja</span><span class="s">Kuuntele ottelut suorana</span></div>
         <span class="spacer"></span>
         <button class="icon-btn" data-refresh="1" aria-label="Päivitä">${icon("refresh", 19)}</button>
         <button class="icon-btn" data-settings="1" aria-label="Asetukset">${icon("gear", 19)}</button>

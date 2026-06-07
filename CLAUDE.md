@@ -35,12 +35,12 @@ non-`src/` changes (tests, configs) need a manual commit.
 
 ## Running
 Runs as a systemd **user** unit. Restart with
-`systemctl --user restart pesistulokset-voice-watcher.service` (not `sudo`). UI on :3000.
+`systemctl --user restart pesisselostaja.service` (not `sudo`). UI on :3000.
 
 ## After completing a feature
 1. `src/` changes build and commit themselves (hook above) — verify build was clean.
 2. Commit any non-`src/` changes (tests, configs, docs) manually.
-3. Restart the service: `systemctl --user restart pesistulokset-voice-watcher.service`
-4. Confirm `systemctl --user is-active pesistulokset-voice-watcher.service` → `active`.
+3. Restart the service: `systemctl --user restart pesisselostaja.service`
+4. Confirm `systemctl --user is-active pesisselostaja.service` → `active`.
 
 Do this automatically at the end of every successful feature, without waiting to be asked.

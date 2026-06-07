@@ -417,15 +417,26 @@ function sameTurn(a: LiveEvent, b: LiveEvent): boolean {
  * scoreboard and the spoken ordinal (see {@link outsThroughSubEvent}).
  */
 export function recomputeCurrentOuts(events: LiveEvent[]): number {
+  return recomputeCurrentOutsKeyed(events).outs;
+}
+
+/**
+ * Like {@link recomputeCurrentOuts} but also returns a stable key identifying the
+ * turn it counted (the `last` event's period/inning/batTurn/team). The watcher uses
+ * the key to keep the scoreboard's palot monotonic within a turn: the API briefly
+ * re-keys a turn-ending palo into the next sub-inning, which would otherwise make the
+ * count rewind mid-turn (e.g. 3 → 2) after the palo was already announced.
+ */
+export function recomputeCurrentOutsKeyed(events: LiveEvent[]): { outs: number; turnKey: string | null } {
   let last: LiveEvent | null = null;
   for (const e of events) if (e.team != null) last = e;
-  if (!last) return 0;
+  if (!last) return { outs: 0, turnKey: null };
   let outs = 0;
   for (const e of events) {
     if (e.team == null || !sameTurn(e, last)) continue;
     for (const sub of e.events) if (isOutSubEvent(sub)) outs++;
   }
-  return outs;
+  return { outs, turnKey: `${last.period}:${last.inning}:${last.batTurn}:${last.team}` };
 }
 
 /**

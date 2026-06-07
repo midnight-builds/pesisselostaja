@@ -1,4 +1,4 @@
-const LS_PREFIX = "pesistulokset-v2-state-";
+const LS_PREFIX = "pesisselostaja-v2-state-";
 
 export interface PeriodScore {
   home: number;
@@ -10,6 +10,10 @@ export interface WatcherState {
   lastTimestamp: number;
   periodRuns: Record<number, PeriodScore>;
   currentOuts: number;
+  /** Turn key the current palot count belongs to; keeps palot monotonic per turn. */
+  paloTurnKey: string | null;
+  /** Highest palot count seen for {@link paloTurnKey} (never decreases mid-turn). */
+  paloTurnMax: number;
   currentPeriod: number;
   currentBatTeamId: number | null;
   currentInning: number;
@@ -53,6 +57,8 @@ export function loadState(matchId: number): WatcherState {
       lastTimestamp: parsed.lastTimestamp ?? 0,
       periodRuns: normalizePeriodRuns(parsed.periodRuns),
       currentOuts: parsed.currentOuts ?? 0,
+      paloTurnKey: parsed.paloTurnKey ?? null,
+      paloTurnMax: parsed.paloTurnMax ?? 0,
       currentPeriod: parsed.currentPeriod ?? 0,
       currentBatTeamId: parsed.currentBatTeamId ?? null,
       currentInning: parsed.currentInning ?? 0,
@@ -72,6 +78,8 @@ export function saveState(matchId: number, state: WatcherState): void {
     lastTimestamp: state.lastTimestamp,
     periodRuns: state.periodRuns,
     currentOuts: state.currentOuts,
+    paloTurnKey: state.paloTurnKey,
+    paloTurnMax: state.paloTurnMax,
     currentPeriod: state.currentPeriod,
     currentBatTeamId: state.currentBatTeamId,
     currentInning: state.currentInning,
@@ -97,6 +105,8 @@ function emptyState(): WatcherState {
     lastTimestamp: 0,
     periodRuns: {},
     currentOuts: 0,
+    paloTurnKey: null,
+    paloTurnMax: 0,
     currentPeriod: 0,
     currentBatTeamId: null,
     currentInning: 0,
