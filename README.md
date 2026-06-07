@@ -18,7 +18,7 @@ Käyttö:
 3. Käynnistä seuranta ja salli selaimen puhetoiminto, jos selain pyytää lupaa.
 4. Sovellus ilmoittaa ääneen esimerkiksi juoksut, palot, vuoronvaihdot ja jakson tilanteen.
 
-**Vinkki – parempi ääni:** Asetuksista voit valita käytettävän puheäänen. Oletuksena käytetään selaimen omaa puhesyntetisaattoria, mutta ottamalla käyttöön **Edistynyt ääni (Piper)** saat luonnollisemman suomenkielisen neuroverkkoäänen, joka toimii kokonaan selaimessa. Valittavana on kolme suomenkielistä ääntä (Harri ja yhteisömalli Asmo). Ääni ladataan kerran ja tallennetaan selaimeen, joten se on heti käytössä seuraavilla kerroilla. Jos lataus ei onnistu, sovellus palaa selaimen omaan ääneen.
+**Vinkki – parempi ääni:** Asetuksista voit valita käytettävän puheäänen. Oletuksena käytetään selaimen omaa puhesyntetisaattoria, mutta ottamalla käyttöön **Edistynyt ääni (Piper)** saat luonnollisemman suomenkielisen neuroverkkoäänen, joka toimii kokonaan selaimessa. Valittavana on Harri-ääni (CC0, lähde rhasspy/Piper) sekä yhteisömalli Asmo (CC BY-NC 4.0, tekijä AsmoKoskinen, epäkaupalliseen käyttöön). Ääni ladataan kerran ja tallennetaan selaimeen, joten se on heti käytössä seuraavilla kerroilla. Jos lataus ei onnistu, sovellus palaa selaimen omaan ääneen. Äänten lähteet ja lisenssit: [CREDITS.md](CREDITS.md).
 
 Sovellus käyttää pesistulokset.fi-palvelun otteludataa. Tämä projekti on itsenäinen, eikä se ole pesistulokset.fi:n tekemä, hyväksymä tai sponsoroima.
 
@@ -180,6 +180,20 @@ npm run build
 - Clearer separation between the public web app and the Home Assistant voice watcher if both continue to grow.
 - Stronger demo/test fixtures for public examples.
 
+## Voices, Sources And Licenses
+
+The optional advanced neural voice uses Piper voice models and a speech stack that
+have their own licenses. They are downloaded in the browser at runtime and are not
+bundled in this repository:
+
+- **Harri** (`fi_FI-harri`) — CC0 1.0, from rhasspy/Piper (Finnish Single Speaker Speech Dataset).
+- **Asmo** (`fi_FI-asmo-medium`) — CC BY-NC 4.0 by AsmoKoskinen; a non-commercial community model, used with attribution.
+- Speech stack: Piper (MIT), `@diffusionstudio/piper-wasm` (embeds espeak-ng, GPL-3.0-or-later), onnxruntime-web (MIT).
+
+Full attribution, source links and license notes are in [CREDITS.md](CREDITS.md).
+The canonical machine-readable list lives in [`v2/src/piper.ts`](v2/src/piper.ts).
+
 ## License
 
-MIT. See [LICENSE](LICENSE).
+This project's own code is MIT. See [LICENSE](LICENSE). Third-party voices and
+libraries keep their own licenses — see [CREDITS.md](CREDITS.md).

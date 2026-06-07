@@ -15,6 +15,8 @@ import type { LiveMatchSummary } from "./types.js";
 
 const DEFAULT_API_BASE = "https://api.pesistulokset.fi/api/v1";
 const DEFAULT_API_KEY = "wRX0tTke3DZ8RLKAMntjZ81LwgNQuSN9";
+const REPO_URL = "https://github.com/midnight-builds/pesisselostaja";
+const CREDITS_URL = `${REPO_URL}/blob/main/CREDITS.md`;
 const LS_SETTINGS = "pesisselostaja-v2-settings";
 const LS_FAVS = "pesisselostaja-v2-favs";
 const LS_FAV_TEAMS = "pesisselostaja-v2-fav-teams";
@@ -520,7 +522,7 @@ function listScreen(): string {
         <button class="${filter === "fav" ? "on" : ""}" data-filter="fav">Suosikit${favCount > 0 ? ` (${favCount})` : ""}</button>
       </div>
       ${body}
-      <div class="foot-note">Sovellus käyttää pesistulokset.fi-palvelun otteludataa. Tämä projekti on itsenäinen, eikä se ole pesistulokset.fi:n tekemä, hyväksymä tai sponsoroima.</div>
+      <div class="foot-note">Sovellus käyttää pesistulokset.fi-palvelun otteludataa. Tämä projekti on itsenäinen, eikä se ole pesistulokset.fi:n tekemä, hyväksymä tai sponsoroima.<br/><a href="${REPO_URL}" target="_blank" rel="noopener">Lähdekoodi GitHubissa</a> · <a href="${CREDITS_URL}" target="_blank" rel="noopener">Äänet ja lisenssit</a></div>
     </div>
   </div></div>`;
 }
@@ -691,6 +693,24 @@ function voiceEngineHtml(): string {
     <div class="a">Piper-ääni</div>
     <select id="piper-voice-select">${opts}</select>
     <div id="piper-status" class="b" style="margin-top:6px"></div>
+    ${voiceCreditsHtml()}
+  </div>`;
+}
+
+// Attribution for the neural voices. CC BY-NC 4.0 (Asmo) requires crediting the
+// author; CC0 (Harri) doesn't but we credit it too. One row per distinct source.
+function voiceCreditsHtml(): string {
+  const seen = new Set<string>();
+  const rows: string[] = [];
+  for (const v of PIPER_VOICES) {
+    if (seen.has(v.sourceUrl)) continue;
+    seen.add(v.sourceUrl);
+    const nc = v.nonCommercial ? " · epäkaupallinen" : "";
+    rows.push(`<div>${esc(v.name)} — ${esc(v.author)} (<a href="${esc(v.sourceUrl)}" target="_blank" rel="noopener">${esc(v.license)}${nc}</a>)</div>`);
+  }
+  return `<div class="b voice-credits" style="margin-top:8px;line-height:1.5">
+    Äänimallit: ${rows.join("")}
+    <div style="margin-top:4px"><a href="${esc(CREDITS_URL)}" target="_blank" rel="noopener">Äänet ja lisenssit</a></div>
   </div>`;
 }
 
@@ -776,6 +796,10 @@ function settingsSheet(): string {
       </div>
       <div class="adv-link" data-advtoggle="1">${advancedOpen ? "Piilota lisäasetukset" : "Lisäasetukset (kehittäjille)"}</div>
       ${adv}
+      <div class="set-foot">
+        <a href="${REPO_URL}" target="_blank" rel="noopener">Pesisselostaja GitHubissa</a>
+        · <a href="${CREDITS_URL}" target="_blank" rel="noopener">Äänet ja lisenssit</a>
+      </div>
     </div>
   </div>`;
 }

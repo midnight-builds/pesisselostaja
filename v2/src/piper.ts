@@ -12,13 +12,31 @@
 // onnxruntime-web (the only bundled heavy dep) is dynamically imported so the
 // default browser-speech path never pulls it. Models/phonemizer load from CDN.
 
-export interface PiperVoiceOption { id: string; label: string; }
+export interface PiperVoiceOption {
+  id: string;
+  label: string;
+  /** Display name of the voice (without the quality/size suffix). */
+  name: string;
+  /** Who made the model / dataset, for attribution. */
+  author: string;
+  /** Short license label, e.g. "CC0 1.0" or "CC BY-NC 4.0". */
+  license: string;
+  /** Where the model and its license live (HuggingFace page). */
+  sourceUrl: string;
+  /** True for non-commercial-only licenses; surfaced in the UI. */
+  nonCommercial?: boolean;
+}
+
+// Attribution + licensing lives here next to the model URLs so the UI, the
+// README and CREDITS.md can all draw from one source. See CREDITS.md.
+const HARRI_SOURCE = "https://huggingface.co/rhasspy/piper-voices/tree/main/fi/fi_FI/harri";
+const ASMO_SOURCE = "https://huggingface.co/AsmoKoskinen/Piper_Finnish_Model";
 
 /** Drives the settings dropdown. Order = display order. */
 export const PIPER_VOICES: PiperVoiceOption[] = [
-  { id: "fi_FI-harri-medium", label: "Harri – laadukas (~60 MB)" },
-  { id: "fi_FI-harri-low", label: "Harri – kevyt (~20 MB)" },
-  { id: "fi_FI-asmo-medium", label: "Asmo – laadukas (~60 MB)" },
+  { id: "fi_FI-harri-medium", label: "Harri – laadukas (~60 MB)", name: "Harri", author: "rhasspy / Piper (Finnish Single Speaker Speech Dataset)", license: "CC0 1.0", sourceUrl: HARRI_SOURCE },
+  { id: "fi_FI-harri-low", label: "Harri – kevyt (~20 MB)", name: "Harri", author: "rhasspy / Piper (Finnish Single Speaker Speech Dataset)", license: "CC0 1.0", sourceUrl: HARRI_SOURCE },
+  { id: "fi_FI-asmo-medium", label: "Asmo – laadukas (~60 MB)", name: "Asmo", author: "AsmoKoskinen", license: "CC BY-NC 4.0", sourceUrl: ASMO_SOURCE, nonCommercial: true },
 ];
 
 export interface PiperProgress { url: string; total: number; loaded: number; }
