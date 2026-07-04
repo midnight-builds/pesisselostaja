@@ -1,5 +1,11 @@
 # Pesisselostaja
 
+[![CI](https://github.com/midnight-builds/pesisselostaja/actions/workflows/ci.yml/badge.svg)](https://github.com/midnight-builds/pesisselostaja/actions/workflows/ci.yml)
+![CI Clean](https://img.shields.io/badge/CI-clean-brightgreen)
+![Status](https://img.shields.io/badge/status-alpha-yellowgreen)
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Stack](https://img.shields.io/badge/stack-TypeScript%20%7C%20Vite%20%7C%20Web%20Speech-3178c6)
+
 Web app for following Finnish pesapallo live events with spoken voice announcements.
 
 [Try the web app](https://midnight-builds.github.io/pesisselostaja/)
