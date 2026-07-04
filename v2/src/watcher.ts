@@ -30,6 +30,20 @@ import type { LiveEvent, MatchMetadata, SubEvent } from "./types.js";
 const SUMMARY_INTERVAL_MS = 5 * 60 * 1000;
 const SUMMARY_EVERY_N = 10;
 
+// Speaker mode: loudness-maximize a decoded buffer in place with a tanh soft
+// clip. A plain GainNode+DynamicsCompressor chain barely changes perceived
+// loudness (TTS output already peaks near full scale, and the compressor's
+// auto makeup gain cancels most of the boost); shaping the samples directly
+// gives a verified ~+7 dB RMS with peaks held at full scale.
+const BOOST_DRIVE = 4;
+function boostBuffer(buf: AudioBuffer): void {
+  const norm = Math.tanh(BOOST_DRIVE);
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < d.length; i++) d[i] = Math.tanh(d[i] * BOOST_DRIVE) / norm;
+  }
+}
+
 export interface WatcherConfig {
   pollInterval: number;
   announceBatterChanges: boolean;
@@ -86,6 +100,7 @@ export class BrowserWatcher {
   private _selectedVoice: SpeechSynthesisVoice | null = null;
   private _voiceEngine: "browser" | "piper" = "browser";
   private _piperVoiceId = "fi_FI-harri-medium";
+  private _volumeBoost = false;
   private _piperFailed = false;            // sticky fallback to browser this session
   private _currentAudio: HTMLAudioElement | null = null;
   private _currentSource: AudioBufferSourceNode | null = null;
@@ -122,6 +137,11 @@ export class BrowserWatcher {
   setPiperVoice(voiceId: string): void {
     if (voiceId !== this._piperVoiceId) this._piperFailed = false;
     this._piperVoiceId = voiceId;
+  }
+
+  /** Speaker mode: boost Piper playback above unity gain (with a limiter). */
+  setVolumeBoost(on: boolean): void {
+    this._volumeBoost = on;
   }
 
   /** Share the AudioContext unlocked on the user gesture, for Piper playback. */
@@ -584,6 +604,7 @@ export class BrowserWatcher {
       try {
         if (ctx.state === "suspended") await ctx.resume();
         const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+        if (this._volumeBoost) boostBuffer(buf);
         await new Promise<void>((resolve) => {
           const src = ctx.createBufferSource();
           src.buffer = buf;

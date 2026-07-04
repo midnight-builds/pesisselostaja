@@ -260,6 +260,7 @@ body {
   font-size: calc(11.5px * var(--ts)); padding: 14px 20px 26px;
 }
 .foot-note a, .set-foot a, .voice-credits a { color: var(--primary-ink); text-decoration: underline; }
+.foot-note a svg { vertical-align: -2px; margin-right: 1px; }
 .set-foot {
   text-align: center; color: var(--muted);
   font-size: calc(12px * var(--ts)); margin-top: 20px; line-height: 1.6;
