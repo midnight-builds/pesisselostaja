@@ -267,7 +267,7 @@ export class WatcherController {
           state.currentBatTeamId = data.team;
           state.currentOuts = 0;
         }
-        if ((data.period ?? 0) > 0) state.currentPeriod = data.period!;
+        if ((data.period ?? 0) > state.currentPeriod) state.currentPeriod = data.period!;
 
         saveState(stateFile, state);
       } catch (err) {

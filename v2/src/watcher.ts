@@ -92,6 +92,7 @@ export class BrowserWatcher {
   private _audioCtx: AudioContext | null = null;
   private _drainToken = 0;                 // generation counter; bump to abort in-flight work
   private _lastSummaryCount = 0;           // announcementCount at the last periodic summary
+  private _matchEndSeen = false;           // true after first poll that contains "Ottelu päättyi"
 
   constructor(
     private config: WatcherConfig,
@@ -147,6 +148,7 @@ export class BrowserWatcher {
     this._abort = new AbortController();
     this._running = true;
     this._lastSpeech = null;
+    this._matchEndSeen = false;
     this.runWatcher(matchId, this._abort.signal).catch((err) => {
       const msg = err instanceof Error ? err.message : String(err);
       this.callbacks.onError(msg);
@@ -209,7 +211,7 @@ export class BrowserWatcher {
     this.processEventsSilent(initial.events, state, meta);
 
     if (initial.team != null) state.currentBatTeamId = initial.team;
-    if ((initial.period ?? 0) > 0) state.currentPeriod = initial.period!;
+    if ((initial.period ?? 0) > state.currentPeriod) state.currentPeriod = initial.period!;
     {
       const { outs, turnKey } = recomputeCurrentOutsKeyed(initial.events);
       state.paloTurnKey = turnKey;
@@ -306,8 +308,9 @@ export class BrowserWatcher {
         // reports the new batting team / period before any explicit bat-change
         // event arrives. Doing this here means the scoreboard shows the team now
         // batting, and the periodic summary below never names the team whose turn
-        // just ended. (Period only advances, never resets.)
-        if ((data.period ?? 0) > 0) state.currentPeriod = data.period!;
+        // just ended. Period only advances — the response-level period can lag
+        // behind individual event periods, so never let it go backward.
+        if ((data.period ?? 0) > state.currentPeriod) state.currentPeriod = data.period!;
         if (data.team != null && data.team !== state.currentBatTeamId) {
           state.currentBatTeamId = data.team;
           state.currentOuts = 0;
@@ -323,9 +326,16 @@ export class BrowserWatcher {
         this.maybeAnnounceSummary(state, meta);
 
         if (state.finished) {
-          this._running = false;
-          this.callbacks.onFinished();
-          return;
+          if (this._matchEndSeen) {
+            // Second poll since "Ottelu päättyi" — all trailing events should now
+            // be in the API (the first extra poll gave them time to appear).
+            this._running = false;
+            this.callbacks.onFinished();
+            return;
+          }
+          // First poll containing "Ottelu päättyi": do one more poll to catch
+          // events the API retrospectively inserts after the match-end marker.
+          this._matchEndSeen = true;
         }
       } catch (err) {
         this.log(`Hakuvirhe: ${err instanceof Error ? err.message : err}`);

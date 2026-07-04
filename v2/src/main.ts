@@ -179,6 +179,7 @@ function icon(name: string, size = 20, stroke = 2): string {
     case "flag": return `${open}<path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg>`;
     case "trophy": return `${open}<path d="M7 4h10v4a5 5 0 0 1-10 0zM7 6H4v2a3 3 0 0 0 3 3M17 6h3v2a3 3 0 0 1-3 3M9 17h6M10 17v-2M14 17v-2M8 21h8"/></svg>`;
     case "info": return `${open}<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>`;
+    case "sun": return `${open}<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>`;
     default: return "";
   }
 }
@@ -627,6 +628,7 @@ function matchScreen(): string {
         <div class="s2">${esc(series)}</div>
       </div>
       <span class="spacer"></span>
+      <button class="icon-btn keepawake-btn${settings.keepScreenOn ? " on" : ""}" data-keepawake="1" aria-label="Pidä ruutu päällä" aria-pressed="${settings.keepScreenOn}" title="Pidä ruutu päällä">${icon("sun", 19)}</button>
       <button class="icon-btn" data-settings="1" aria-label="Asetukset">${icon("gear", 19)}</button>
     </div>
     <div class="scroll">
@@ -634,10 +636,6 @@ function matchScreen(): string {
       <div class="listen-wrap">
         <button class="listen-btn${listening ? " on" : ""}" data-togglelisten="1">${listenBtn}</button>
         <div class="now-speaking">${nowSpeakingHtml()}</div>
-        <div class="keep-awake" data-keepawake="1">
-          <div class="switch sm${settings.keepScreenOn ? " on" : ""}"><div class="knob"></div></div>
-          <span>Pidä ruutu päällä</span>
-        </div>
       </div>
       ${errorHtml}
       <div class="feed-label">Tapahtumat</div>

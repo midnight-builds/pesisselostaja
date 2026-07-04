@@ -397,15 +397,12 @@ body {
 }
 .now-speaking .live-text { color: var(--primary-ink); font-weight: 700; }
 
-.keep-awake {
-  display: flex; align-items: center; justify-content: center; gap: 9px;
-  margin-top: 12px; cursor: pointer;
-  font-size: calc(13px * var(--ts)); color: var(--muted); font-weight: 600;
-  user-select: none;
+/* Keep-screen-on toggle, top bar (lm-bar). Off = muted icon; on = brand fill. */
+.keepawake-btn { transition: background .18s, color .18s, border-color .18s, box-shadow .18s; }
+.keepawake-btn.on {
+  background: var(--primary); border-color: var(--primary); color: #fff;
+  box-shadow: 0 3px 10px rgba(28,122,67,.30);
 }
-.switch.sm { width: 40px; height: 24px; }
-.switch.sm .knob { width: 18px; height: 18px; }
-.switch.sm.on .knob { left: 19px; }
 
 /* situation summary */
 .situation {
