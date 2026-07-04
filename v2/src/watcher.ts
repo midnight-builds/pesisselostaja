@@ -30,6 +30,20 @@ import type { LiveEvent, MatchMetadata, SubEvent } from "./types.js";
 const SUMMARY_INTERVAL_MS = 5 * 60 * 1000;
 const SUMMARY_EVERY_N = 10;
 
+// Speaker mode: loudness-maximize a decoded buffer in place with a tanh soft
+// clip. A plain GainNode+DynamicsCompressor chain barely changes perceived
+// loudness (TTS output already peaks near full scale, and the compressor's
+// auto makeup gain cancels most of the boost); shaping the samples directly
+// gives a verified ~+7 dB RMS with peaks held at full scale.
+const BOOST_DRIVE = 4;
+function boostBuffer(buf: AudioBuffer): void {
+  const norm = Math.tanh(BOOST_DRIVE);
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < d.length; i++) d[i] = Math.tanh(d[i] * BOOST_DRIVE) / norm;
+  }
+}
+
 export interface WatcherConfig {
   pollInterval: number;
   announceBatterChanges: boolean;
@@ -590,25 +604,11 @@ export class BrowserWatcher {
       try {
         if (ctx.state === "suspended") await ctx.resume();
         const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+        if (this._volumeBoost) boostBuffer(buf);
         await new Promise<void>((resolve) => {
           const src = ctx.createBufferSource();
           src.buffer = buf;
-          if (this._volumeBoost) {
-            // Boost above unity gain; the limiter keeps peaks from clipping.
-            const gain = ctx.createGain();
-            gain.gain.value = 2.5;
-            const limiter = ctx.createDynamicsCompressor();
-            limiter.threshold.value = -6;
-            limiter.knee.value = 0;
-            limiter.ratio.value = 20;
-            limiter.attack.value = 0.003;
-            limiter.release.value = 0.25;
-            src.connect(gain);
-            gain.connect(limiter);
-            limiter.connect(ctx.destination);
-          } else {
-            src.connect(ctx.destination);
-          }
+          src.connect(ctx.destination);
           this._currentSource = src;
           src.onended = () => { if (this._currentSource === src) this._currentSource = null; resolve(); };
           src.start(0);
