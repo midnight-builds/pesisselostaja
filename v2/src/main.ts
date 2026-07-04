@@ -29,6 +29,7 @@ interface Settings {
   voiceName: string;
   voiceEngine: "browser" | "piper";
   piperVoiceId: string;
+  volumeBoost: boolean;
   keepScreenOn: boolean;
 }
 
@@ -56,11 +57,12 @@ function loadSettings(): Settings {
         voiceName: p.voiceName ?? "",
         voiceEngine: p.voiceEngine === "piper" ? "piper" : "browser",
         piperVoiceId: p.piperVoiceId ?? DEFAULT_PIPER_VOICE,
+        volumeBoost: p.volumeBoost ?? false,
         keepScreenOn: p.keepScreenOn ?? true,
       };
     }
   } catch { /* ignore */ }
-  return { apiKey: DEFAULT_API_KEY, apiBase: DEFAULT_API_BASE, pollInterval: 6, announceBatterChanges: true, voiceName: "", voiceEngine: "browser", piperVoiceId: DEFAULT_PIPER_VOICE, keepScreenOn: true };
+  return { apiKey: DEFAULT_API_KEY, apiBase: DEFAULT_API_BASE, pollInterval: 6, announceBatterChanges: true, voiceName: "", voiceEngine: "browser", piperVoiceId: DEFAULT_PIPER_VOICE, volumeBoost: false, keepScreenOn: true };
 }
 
 function saveSettings(): void {
@@ -687,7 +689,14 @@ function voiceEngineHtml(): string {
   const opts = PIPER_VOICES.map((v) =>
     `<option value="${esc(v.id)}"${settings.piperVoiceId === v.id ? " selected" : ""}>${esc(v.label)}</option>`
   ).join("");
-  return row + `<div class="adv-field" style="border-top:1px solid var(--line)">
+  // The boost runs through Web Audio, so it only exists on the Piper path —
+  // browser speechSynthesis caps at volume 1.0 and can't be amplified.
+  const boostRow = `<div class="set-row">
+      <div class="ic">${icon("speaker", 18)}</div>
+      <div class="lab"><div class="a">Kaiutintila</div><div class="b">Vahvistaa selostusta kovemmalle, esim. ulkona kännykän kaiuttimesta</div></div>
+      <div class="switch${settings.volumeBoost ? " on" : ""}" data-toggle="volumeBoost"><div class="knob"></div></div>
+    </div>`;
+  return row + boostRow + `<div class="adv-field" style="border-top:1px solid var(--line)">
     <div class="a">Piper-ääni</div>
     <select id="piper-voice-select">${opts}</select>
     <div id="piper-status" class="b" style="margin-top:6px"></div>
@@ -751,6 +760,7 @@ function reflectPiperStatus(): void {
 // Push the current voice settings into the watcher.
 function applyVoiceEngine(): void {
   watcher?.setVoiceEngine(settings.voiceEngine);
+  watcher?.setVolumeBoost(settings.volumeBoost);
   if (settings.voiceEngine === "piper") {
     watcher?.setPiperVoice(settings.piperVoiceId);
   } else {
@@ -883,6 +893,14 @@ function bindSettings(): void {
     applyVoiceEngine();
     render();
     if (settings.voiceEngine === "piper") void ensurePiperModel(settings.piperVoiceId);
+  };
+
+  const boostToggle = root.querySelector<HTMLElement>('[data-toggle="volumeBoost"]');
+  if (boostToggle) boostToggle.onclick = () => {
+    settings.volumeBoost = !settings.volumeBoost;
+    saveSettings();
+    watcher?.setVolumeBoost(settings.volumeBoost);
+    render();
   };
 
   const voiceSel = root.querySelector<HTMLSelectElement>("#voice-select");

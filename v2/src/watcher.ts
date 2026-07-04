@@ -86,6 +86,7 @@ export class BrowserWatcher {
   private _selectedVoice: SpeechSynthesisVoice | null = null;
   private _voiceEngine: "browser" | "piper" = "browser";
   private _piperVoiceId = "fi_FI-harri-medium";
+  private _volumeBoost = false;
   private _piperFailed = false;            // sticky fallback to browser this session
   private _currentAudio: HTMLAudioElement | null = null;
   private _currentSource: AudioBufferSourceNode | null = null;
@@ -122,6 +123,11 @@ export class BrowserWatcher {
   setPiperVoice(voiceId: string): void {
     if (voiceId !== this._piperVoiceId) this._piperFailed = false;
     this._piperVoiceId = voiceId;
+  }
+
+  /** Speaker mode: boost Piper playback above unity gain (with a limiter). */
+  setVolumeBoost(on: boolean): void {
+    this._volumeBoost = on;
   }
 
   /** Share the AudioContext unlocked on the user gesture, for Piper playback. */
@@ -587,7 +593,22 @@ export class BrowserWatcher {
         await new Promise<void>((resolve) => {
           const src = ctx.createBufferSource();
           src.buffer = buf;
-          src.connect(ctx.destination);
+          if (this._volumeBoost) {
+            // Boost above unity gain; the limiter keeps peaks from clipping.
+            const gain = ctx.createGain();
+            gain.gain.value = 2.5;
+            const limiter = ctx.createDynamicsCompressor();
+            limiter.threshold.value = -6;
+            limiter.knee.value = 0;
+            limiter.ratio.value = 20;
+            limiter.attack.value = 0.003;
+            limiter.release.value = 0.25;
+            src.connect(gain);
+            gain.connect(limiter);
+            limiter.connect(ctx.destination);
+          } else {
+            src.connect(ctx.destination);
+          }
           this._currentSource = src;
           src.onended = () => { if (this._currentSource === src) this._currentSource = null; resolve(); };
           src.start(0);
