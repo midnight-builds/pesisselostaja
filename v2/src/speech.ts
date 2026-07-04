@@ -400,9 +400,11 @@ function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
 
 export function eventFingerprint(event: LiveEvent, subIndex: number): string {
   const sub = event.events[subIndex];
-  const prefix = `${event.inning}:${event.batTurn}:${event.id}`;
-  if (!sub) return `${prefix}:${subIndex}`;
-  return `${prefix}:${JSON.stringify(sub.texts)}`;
+  // Keyed on event.id + subIndex only, NOT inning/batTurn: the API briefly
+  // re-keys a turn-ending palo to the next inning which would produce a new
+  // fingerprint and cause the event to be re-processed.
+  if (!sub) return `${event.id}:${subIndex}`;
+  return `${event.id}:${subIndex}:${JSON.stringify(sub.texts)}`;
 }
 
 /** True when two events belong to the same batting turn (per API fields). */
