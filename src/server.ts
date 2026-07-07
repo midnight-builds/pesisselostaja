@@ -1,11 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, appendFile } from "node:fs/promises";
 import { join, normalize, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchLiveMatches } from "./api.js";
 import type { WatcherController } from "./watcher.js";
 
 const V2_DIST = fileURLToPath(new URL("../v2/dist", import.meta.url));
+const DEBUG_LOG_FILE = fileURLToPath(new URL("../debug.log", import.meta.url));
+const DEBUG_LOG_MAX_BODY = 8 * 1024;
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
