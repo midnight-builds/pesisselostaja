@@ -163,6 +163,29 @@ export class BrowserWatcher {
     this._audioUnlocked = true;
   }
 
+  /**
+   * Recover audio after the page returns to the foreground. iOS Safari pauses
+   * speechSynthesis and suspends the AudioContext while the tab is hidden; when
+   * we come back, both new and already-queued utterances stay silent until we
+   * explicitly resume them. Called from the visibilitychange handler.
+   */
+  resumeAudio(): void {
+    if (this._muted) return;
+    const speechPaused = "speechSynthesis" in window ? window.speechSynthesis.paused : undefined;
+    debugLog("resume-audio", {
+      speechPaused,
+      audioCtxState: this._audioCtx?.state ?? null,
+      queueLen: this._speechQueue.length,
+      speechBusy: this._speechBusy,
+    });
+    // resume() is a no-op when not paused, so call it unconditionally.
+    if ("speechSynthesis" in window) window.speechSynthesis.resume();
+    if (this._audioCtx && this._audioCtx.state === "suspended") void this._audioCtx.resume();
+    // If the queue wedged while hidden (items waiting but the drain loop is not
+    // running), re-kick it so pending speech plays.
+    if (!this._speechBusy && this._speechQueue.length > 0) void this._drainQueue();
+  }
+
   start(matchInput: string): void {
     if (this._running) return;
     const matchId = this.parseMatchInput(matchInput);

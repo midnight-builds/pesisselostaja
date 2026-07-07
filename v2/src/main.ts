@@ -277,8 +277,12 @@ function onVisibilityChange(): void {
     listening,
     audioCtxState: audioCtx?.state ?? null,
   });
-  if (document.visibilityState === "visible" && settings.keepScreenOn && view === "match") {
-    void requestWakeLock();
+  if (document.visibilityState === "visible") {
+    if (settings.keepScreenOn && view === "match") void requestWakeLock();
+    // iOS Safari pauses speechSynthesis and suspends the AudioContext while the
+    // tab is hidden; nudge everything back to life so speech resumes on return.
+    if (audioCtx && audioCtx.state === "suspended") void audioCtx.resume();
+    watcher?.resumeAudio();
   }
 }
 
