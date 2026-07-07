@@ -17,6 +17,7 @@ import {
 } from "./speech.js";
 import { applyPronunciations, preventOrdinalReading, type PronunciationRule } from "./pronunciation.js";
 import { piperSynthesize } from "./piper.js";
+import { debugLog } from "./debuglog.js";
 import {
   loadState,
   saveState,
@@ -271,10 +272,21 @@ export class BrowserWatcher {
     this.log("Seuranta käynnissä…");
 
     while (!signal.aborted) {
+      const pollStartedAt = Date.now();
       await this.sleepAbortable(this.config.pollInterval * 1000, signal);
       if (signal.aborted) break;
       try {
+        const fetchStartedAt = Date.now();
         const data = await fetchLiveEvents(matchId, apiOpts);
+        debugLog("poll", {
+          matchId,
+          events: data.events.length,
+          period: data.period,
+          team: data.team,
+          sinceLastPollMs: fetchStartedAt - pollStartedAt,
+          fetchMs: Date.now() - fetchStartedAt,
+          visibility: typeof document !== "undefined" ? document.visibilityState : undefined,
+        });
 
         const newBatTeam = data.team ?? null;
         if (
@@ -358,7 +370,9 @@ export class BrowserWatcher {
           this._matchEndSeen = true;
         }
       } catch (err) {
-        this.log(`Hakuvirhe: ${err instanceof Error ? err.message : err}`);
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log(`Hakuvirhe: ${msg}`);
+        debugLog("poll-error", { matchId, error: msg });
       }
     }
 
@@ -540,6 +554,7 @@ export class BrowserWatcher {
     if (speech === this._lastSpeech) return;
     this._lastSpeech = speech;
     this.log(`Puhe: ${speech}`);
+    debugLog("say", { text: speech, muted: this._muted, queueLen: this._speechQueue.length });
     this.speakRaw(applyPronunciations(speech, this._pronunciations));
     state.announcementCount++;
   }
@@ -559,9 +574,9 @@ export class BrowserWatcher {
       const text = this._speechQueue.shift()!;
       try {
         if (this._voiceEngine === "piper" && !this._piperFailed) {
-          await this._speakPiper(text, token);
+          await this._withWatchdog(text, () => this._speakPiper(text, token));
         } else {
-          await this._speakBrowser(text);
+          await this._withWatchdog(text, () => this._speakBrowser(text));
         }
       } catch {
         // Piper threw: switch to the browser voice for the rest of the session
@@ -570,7 +585,7 @@ export class BrowserWatcher {
           this._piperFailed = true;
           this.log("Edistynyt ääni epäonnistui, vaihdetaan selaimen ääneen.");
           if (token === this._drainToken && !this._muted) {
-            try { await this._speakBrowser(text); } catch { /* give up on this item */ }
+            try { await this._withWatchdog(text, () => this._speakBrowser(text)); } catch { /* give up on this item */ }
           }
         }
       }
@@ -578,22 +593,52 @@ export class BrowserWatcher {
     if (token === this._drainToken) this._speechBusy = false;
   }
 
+  // Mobile browsers sometimes silently drop the onend/onerror callback (or an
+  // AudioContext/HTMLAudioElement completion event) when the tab is backgrounded
+  // mid-utterance — that permanently wedges the queue with _speechBusy stuck
+  // true, even after the page returns to the foreground. Race every speak
+  // attempt against a generous, length-based timeout so the queue can always
+  // recover instead of going silent forever.
+  private _withWatchdog(text: string, fn: () => Promise<void>): Promise<void> {
+    const timeoutMs = Math.max(8000, text.length * 150);
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this.log("Puhe jumissa — pakotetaan jono jatkumaan.");
+        debugLog("speech-watchdog-timeout", { text, timeoutMs });
+        this._forceStopStuckPlayback();
+        resolve();
+      }, timeoutMs);
+      fn().then(
+        () => { if (settled) return; settled = true; clearTimeout(timer); resolve(); },
+        (err: unknown) => { if (settled) return; settled = true; clearTimeout(timer); reject(err); }
+      );
+    });
+  }
+
   private _speakBrowser(text: string): Promise<void> {
     return new Promise((resolve, reject) => {
       if (!("speechSynthesis" in window)) { reject(new Error("no speechSynthesis")); return; }
+      const startedAt = Date.now();
+      debugLog("speak-browser-start", { text });
       const utt = new SpeechSynthesisUtterance(text);
       utt.lang = "fi-FI";
       if (this._selectedVoice) utt.voice = this._selectedVoice;
-      utt.onend = () => resolve();
-      utt.onerror = () => resolve();   // resolve (don't trip the piper fallback)
+      utt.onend = () => { debugLog("speak-browser-end", { text, ms: Date.now() - startedAt }); resolve(); };
+      utt.onerror = (e) => { debugLog("speak-browser-error", { text, error: e.error }); resolve(); };   // resolve (don't trip the piper fallback)
       window.speechSynthesis.speak(utt);
     });
   }
 
   private async _speakPiper(text: string, token: number): Promise<void> {
+    const startedAt = Date.now();
+    debugLog("speak-piper-start", { text });
     const blob = await piperSynthesize(text, this._piperVoiceId);
     if (this._muted || token !== this._drainToken) return;   // cancelled during synth
     await this._playBlob(blob);
+    debugLog("speak-piper-end", { text, ms: Date.now() - startedAt });
   }
 
   private async _playBlob(blob: Blob): Promise<void> {
@@ -602,7 +647,11 @@ export class BrowserWatcher {
     const ctx = this._audioCtx;
     if (ctx) {
       try {
-        if (ctx.state === "suspended") await ctx.resume();
+        if (ctx.state === "suspended") {
+          debugLog("audiocontext-resume", { stateBefore: ctx.state });
+          await ctx.resume();
+          debugLog("audiocontext-resume-done", { stateAfter: ctx.state });
+        }
         const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
         if (this._volumeBoost) boostBuffer(buf);
         await new Promise<void>((resolve) => {
@@ -614,7 +663,8 @@ export class BrowserWatcher {
           src.start(0);
         });
         return;
-      } catch {
+      } catch (err) {
+        debugLog("playblob-audiocontext-error", { error: err instanceof Error ? err.message : String(err) });
         // fall through to the <audio> path below
       }
     }
@@ -633,10 +683,7 @@ export class BrowserWatcher {
     });
   }
 
-  private _cancelSpeech(): void {
-    this._speechQueue = [];
-    this._speechBusy = false;
-    this._drainToken++;   // invalidate any in-flight drain/synth so late audio is dropped
+  private _forceStopStuckPlayback(): void {
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     if (this._currentAudio) {
       this._currentAudio.pause();
@@ -647,6 +694,13 @@ export class BrowserWatcher {
       try { this._currentSource.stop(); } catch { /* already stopped */ }
       this._currentSource = null;
     }
+  }
+
+  private _cancelSpeech(): void {
+    this._speechQueue = [];
+    this._speechBusy = false;
+    this._drainToken++;   // invalidate any in-flight drain/synth so late audio is dropped
+    this._forceStopStuckPlayback();
   }
 
   private sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {

@@ -3,6 +3,7 @@ dist/
 .env
 .state-*.json
 .pronunciations.json
+debug.log
 .claude/
 .claude-remote-control.log
 .claude-remote-control.pid
