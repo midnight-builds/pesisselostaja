@@ -1,11 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, appendFile } from "node:fs/promises";
 import { join, normalize, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchLiveMatches } from "./api.js";
 import type { WatcherController } from "./watcher.js";
 
 const V2_DIST = fileURLToPath(new URL("../v2/dist", import.meta.url));
+const DEBUG_LOG_FILE = fileURLToPath(new URL("../debug.log", import.meta.url));
+const DEBUG_LOG_MAX_BODY = 8 * 1024;
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -1136,6 +1138,17 @@ export function startServer(watcher: WatcherController, port: number): void {
 
     if (url === "/api/audio-ready" && method === "POST") {
       watcher.markBrowserReady();
+      json(res, { ok: true });
+      return;
+    }
+
+    if (url === "/api/debug-log" && method === "POST") {
+      try {
+        const raw = await readBody(req);
+        const body = JSON.parse(raw.slice(0, DEBUG_LOG_MAX_BODY));
+        const line = JSON.stringify({ receivedAt: new Date().toISOString(), ...body });
+        await appendFile(DEBUG_LOG_FILE, line + "\n", "utf-8");
+      } catch { /* malformed entry — drop it, logging must never break the client */ }
       json(res, { ok: true });
       return;
     }

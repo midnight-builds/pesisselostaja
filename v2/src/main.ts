@@ -11,6 +11,7 @@ import {
 } from "./pronunciation.js";
 import { fetchTodayMatches } from "./api.js";
 import { PIPER_VOICES, piperStored, piperDownload } from "./piper.js";
+import { debugLog } from "./debuglog.js";
 import type { LiveMatchSummary } from "./types.js";
 
 const DEFAULT_API_BASE = "https://api.pesistulokset.fi/api/v1";
@@ -217,6 +218,7 @@ function getAudioCtx(): AudioContext | null {
 // activation for later HTMLAudioElement.play() calls on iOS).
 function unlockAudio(): void {
   if (audioUnlocked) return;
+  debugLog("unlock-audio");
   if ("speechSynthesis" in window) {
     const u = new SpeechSynthesisUtterance("");
     u.lang = "fi-FI";
@@ -269,8 +271,18 @@ function releaseWakeLock(): void {
 // The OS drops the lock when the page is hidden; re-acquire on return if the
 // user still wants the screen kept on while in a match.
 function onVisibilityChange(): void {
-  if (document.visibilityState === "visible" && settings.keepScreenOn && view === "match") {
-    void requestWakeLock();
+  debugLog("visibilitychange", {
+    state: document.visibilityState,
+    view,
+    listening,
+    audioCtxState: audioCtx?.state ?? null,
+  });
+  if (document.visibilityState === "visible") {
+    if (settings.keepScreenOn && view === "match") void requestWakeLock();
+    // iOS Safari pauses speechSynthesis and suspends the AudioContext while the
+    // tab is hidden; nudge everything back to life so speech resumes on return.
+    if (audioCtx && audioCtx.state === "suspended") void audioCtx.resume();
+    watcher?.resumeAudio();
   }
 }
 
@@ -426,6 +438,7 @@ async function shareMatch(): Promise<void> {
 
 function toggleListen(): void {
   if (!watcher) return;
+  debugLog("toggle-listen", { from: listening, audioCtxState: audioCtx?.state ?? null });
   if (listening) {
     listening = false;
     watcher.setMuted(true);

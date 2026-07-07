@@ -17,6 +17,7 @@ import {
 } from "./speech.js";
 import { applyPronunciations, preventOrdinalReading, type PronunciationRule } from "./pronunciation.js";
 import { piperSynthesize } from "./piper.js";
+import { debugLog } from "./debuglog.js";
 import {
   loadState,
   saveState,
@@ -162,6 +163,29 @@ export class BrowserWatcher {
     this._audioUnlocked = true;
   }
 
+  /**
+   * Recover audio after the page returns to the foreground. iOS Safari pauses
+   * speechSynthesis and suspends the AudioContext while the tab is hidden; when
+   * we come back, both new and already-queued utterances stay silent until we
+   * explicitly resume them. Called from the visibilitychange handler.
+   */
+  resumeAudio(): void {
+    if (this._muted) return;
+    const speechPaused = "speechSynthesis" in window ? window.speechSynthesis.paused : undefined;
+    debugLog("resume-audio", {
+      speechPaused,
+      audioCtxState: this._audioCtx?.state ?? null,
+      queueLen: this._speechQueue.length,
+      speechBusy: this._speechBusy,
+    });
+    // resume() is a no-op when not paused, so call it unconditionally.
+    if ("speechSynthesis" in window) window.speechSynthesis.resume();
+    if (this._audioCtx && this._audioCtx.state === "suspended") void this._audioCtx.resume();
+    // If the queue wedged while hidden (items waiting but the drain loop is not
+    // running), re-kick it so pending speech plays.
+    if (!this._speechBusy && this._speechQueue.length > 0) void this._drainQueue();
+  }
+
   start(matchInput: string): void {
     if (this._running) return;
     const matchId = this.parseMatchInput(matchInput);
@@ -238,6 +262,10 @@ export class BrowserWatcher {
       state.paloTurnMax = outs;
       state.currentOuts = outs;
     }
+    // The turn we're already in at watch-start is covered by the startup
+    // speech itself — mark it announced so processEventsLive's turn-change
+    // detector doesn't repeat it on the first live poll.
+    state.announcedTurnKey = `${state.currentPeriod}:${state.currentInning}:${state.currentBatTurn}:${state.currentBatTeamId}`;
 
     saveState(matchId, state);
     this.log(`Ohitettu ${initial.events.length} tapahtumaa`);
@@ -271,38 +299,26 @@ export class BrowserWatcher {
     this.log("Seuranta käynnissä…");
 
     while (!signal.aborted) {
+      const pollStartedAt = Date.now();
       await this.sleepAbortable(this.config.pollInterval * 1000, signal);
       if (signal.aborted) break;
       try {
+        const fetchStartedAt = Date.now();
         const data = await fetchLiveEvents(matchId, apiOpts);
+        debugLog("poll", {
+          matchId,
+          events: data.events.length,
+          period: data.period,
+          team: data.team,
+          sinceLastPollMs: fetchStartedAt - pollStartedAt,
+          fetchMs: Date.now() - fetchStartedAt,
+          visibility: typeof document !== "undefined" ? document.visibilityState : undefined,
+        });
 
-        const newBatTeam = data.team ?? null;
-        if (
-          newBatTeam != null &&
-          state.currentBatTeamId != null &&
-          newBatTeam !== state.currentBatTeamId &&
-          data.events.length === 0
-        ) {
-          // Trust the API for the new bat turn / period instead of guessing.
-          const periodAdvanced = (data.period ?? 0) > state.currentPeriod;
-          const newBatTurn = data.bat_turn ?? (state.currentBatTurn + 1) % 2;
-          const newInning = periodAdvanced ? 0
-            : state.currentBatTurn === 1 ? state.currentInning + 1 : state.currentInning;
-          const cur = getPeriodScore(state, state.currentPeriod);
-          const msg = formatBatTurnChangeSpeech(
-            meta, state.currentBatTeamId, newBatTeam, cur.home, cur.away, newInning, newBatTurn
-          );
-          this.say(msg, state);
-          this.emitFeed("period", msg);
-          state.currentBatTeamId = newBatTeam;
-          state.currentInning = newInning;
-          state.currentBatTurn = newBatTurn;
-          if (periodAdvanced) state.currentPeriod = data.period!;
-          state.currentOuts = 0;
-          state.paloTurnKey = null;
-          state.paloTurnMax = 0;
-        }
-
+        // Ordinary bat-turn changes (no dedicated API text marker) are
+        // detected and announced inside processEventsLive, keyed off
+        // seenFingerprints — see the comment there for why this can't be
+        // done from the raw poll response.
         this.processEventsLive(data.events, state, meta, lookup);
 
         // Outs for the current turn, kept monotonic per turn. Outs never decrease
@@ -358,7 +374,9 @@ export class BrowserWatcher {
           this._matchEndSeen = true;
         }
       } catch (err) {
-        this.log(`Hakuvirhe: ${err instanceof Error ? err.message : err}`);
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log(`Hakuvirhe: ${msg}`);
+        debugLog("poll-error", { matchId, error: msg });
       }
     }
 
@@ -409,7 +427,14 @@ export class BrowserWatcher {
   ): void {
     for (let ei = 0; ei < events.length; ei++) {
       const event = events[ei];
-      if (event.team != null && (event.team !== state.currentBatTeamId || event.inning !== state.currentInning || event.batTurn !== state.currentBatTurn)) {
+      const prevBatTeamId = state.currentBatTeamId;
+      const turnChanged = event.team != null && (event.team !== state.currentBatTeamId || event.inning !== state.currentInning || event.batTurn !== state.currentBatTurn);
+      // The very first turn of a period (inning 0, aloittava) is announced by
+      // the "X jakso alkoi" / "Ottelu alkoi" text handling in subEventToSpeech
+      // instead — skip it here to avoid saying it twice.
+      const isFirstTurnOfPeriod = event.inning === 0 && event.batTurn === 0;
+
+      if (turnChanged) {
         state.currentBatTeamId = event.team;
         state.currentInning = event.inning;
         state.currentBatTurn = event.batTurn;
@@ -422,6 +447,31 @@ export class BrowserWatcher {
           state.currentOuts = 0;
         }
         state.currentPeriod = event.period;
+      }
+
+      // Ordinary mid-period bat-turn changes have no dedicated API text
+      // marker (unlike period boundaries), so they have to be inferred from
+      // the team/inning/batTurn fields. Those fields flip on *every* event
+      // belonging to the new turn, and processEventsLive replays the full
+      // match history on every poll — so gate the announcement on this being
+      // a genuinely new event (not yet in seenFingerprints) and on the turn
+      // not having been announced yet (announcedTurnKey), or this would fire
+      // once per poll for every historical turn change.
+      const turnKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}`;
+      if (
+        turnChanged &&
+        !isFirstTurnOfPeriod &&
+        event.team != null &&
+        turnKey !== state.announcedTurnKey &&
+        event.events.some((_, i) => !state.seenFingerprints.has(eventFingerprint(event, i)))
+      ) {
+        const cur = getPeriodScore(state, state.currentPeriod);
+        const msg = formatBatTurnChangeSpeech(
+          meta, prevBatTeamId, event.team, cur.home, cur.away, state.currentInning, state.currentBatTurn
+        );
+        this.say(msg, state);
+        this.emitFeed("period", msg);
+        state.announcedTurnKey = turnKey;
       }
 
       for (let i = 0; i < event.events.length; i++) {
@@ -540,6 +590,7 @@ export class BrowserWatcher {
     if (speech === this._lastSpeech) return;
     this._lastSpeech = speech;
     this.log(`Puhe: ${speech}`);
+    debugLog("say", { text: speech, muted: this._muted, queueLen: this._speechQueue.length });
     this.speakRaw(applyPronunciations(speech, this._pronunciations));
     state.announcementCount++;
   }
@@ -559,9 +610,9 @@ export class BrowserWatcher {
       const text = this._speechQueue.shift()!;
       try {
         if (this._voiceEngine === "piper" && !this._piperFailed) {
-          await this._speakPiper(text, token);
+          await this._withWatchdog(text, () => this._speakPiper(text, token));
         } else {
-          await this._speakBrowser(text);
+          await this._withWatchdog(text, () => this._speakBrowser(text));
         }
       } catch {
         // Piper threw: switch to the browser voice for the rest of the session
@@ -570,7 +621,7 @@ export class BrowserWatcher {
           this._piperFailed = true;
           this.log("Edistynyt ääni epäonnistui, vaihdetaan selaimen ääneen.");
           if (token === this._drainToken && !this._muted) {
-            try { await this._speakBrowser(text); } catch { /* give up on this item */ }
+            try { await this._withWatchdog(text, () => this._speakBrowser(text)); } catch { /* give up on this item */ }
           }
         }
       }
@@ -578,22 +629,52 @@ export class BrowserWatcher {
     if (token === this._drainToken) this._speechBusy = false;
   }
 
+  // Mobile browsers sometimes silently drop the onend/onerror callback (or an
+  // AudioContext/HTMLAudioElement completion event) when the tab is backgrounded
+  // mid-utterance — that permanently wedges the queue with _speechBusy stuck
+  // true, even after the page returns to the foreground. Race every speak
+  // attempt against a generous, length-based timeout so the queue can always
+  // recover instead of going silent forever.
+  private _withWatchdog(text: string, fn: () => Promise<void>): Promise<void> {
+    const timeoutMs = Math.max(8000, text.length * 150);
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this.log("Puhe jumissa — pakotetaan jono jatkumaan.");
+        debugLog("speech-watchdog-timeout", { text, timeoutMs });
+        this._forceStopStuckPlayback();
+        resolve();
+      }, timeoutMs);
+      fn().then(
+        () => { if (settled) return; settled = true; clearTimeout(timer); resolve(); },
+        (err: unknown) => { if (settled) return; settled = true; clearTimeout(timer); reject(err); }
+      );
+    });
+  }
+
   private _speakBrowser(text: string): Promise<void> {
     return new Promise((resolve, reject) => {
       if (!("speechSynthesis" in window)) { reject(new Error("no speechSynthesis")); return; }
+      const startedAt = Date.now();
+      debugLog("speak-browser-start", { text });
       const utt = new SpeechSynthesisUtterance(text);
       utt.lang = "fi-FI";
       if (this._selectedVoice) utt.voice = this._selectedVoice;
-      utt.onend = () => resolve();
-      utt.onerror = () => resolve();   // resolve (don't trip the piper fallback)
+      utt.onend = () => { debugLog("speak-browser-end", { text, ms: Date.now() - startedAt }); resolve(); };
+      utt.onerror = (e) => { debugLog("speak-browser-error", { text, error: e.error }); resolve(); };   // resolve (don't trip the piper fallback)
       window.speechSynthesis.speak(utt);
     });
   }
 
   private async _speakPiper(text: string, token: number): Promise<void> {
+    const startedAt = Date.now();
+    debugLog("speak-piper-start", { text });
     const blob = await piperSynthesize(text, this._piperVoiceId);
     if (this._muted || token !== this._drainToken) return;   // cancelled during synth
     await this._playBlob(blob);
+    debugLog("speak-piper-end", { text, ms: Date.now() - startedAt });
   }
 
   private async _playBlob(blob: Blob): Promise<void> {
@@ -602,7 +683,11 @@ export class BrowserWatcher {
     const ctx = this._audioCtx;
     if (ctx) {
       try {
-        if (ctx.state === "suspended") await ctx.resume();
+        if (ctx.state === "suspended") {
+          debugLog("audiocontext-resume", { stateBefore: ctx.state });
+          await ctx.resume();
+          debugLog("audiocontext-resume-done", { stateAfter: ctx.state });
+        }
         const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
         if (this._volumeBoost) boostBuffer(buf);
         await new Promise<void>((resolve) => {
@@ -614,7 +699,8 @@ export class BrowserWatcher {
           src.start(0);
         });
         return;
-      } catch {
+      } catch (err) {
+        debugLog("playblob-audiocontext-error", { error: err instanceof Error ? err.message : String(err) });
         // fall through to the <audio> path below
       }
     }
@@ -633,10 +719,7 @@ export class BrowserWatcher {
     });
   }
 
-  private _cancelSpeech(): void {
-    this._speechQueue = [];
-    this._speechBusy = false;
-    this._drainToken++;   // invalidate any in-flight drain/synth so late audio is dropped
+  private _forceStopStuckPlayback(): void {
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     if (this._currentAudio) {
       this._currentAudio.pause();
@@ -647,6 +730,13 @@ export class BrowserWatcher {
       try { this._currentSource.stop(); } catch { /* already stopped */ }
       this._currentSource = null;
     }
+  }
+
+  private _cancelSpeech(): void {
+    this._speechQueue = [];
+    this._speechBusy = false;
+    this._drainToken++;   // invalidate any in-flight drain/synth so late audio is dropped
+    this._forceStopStuckPlayback();
   }
 
   private sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {

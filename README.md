@@ -171,6 +171,20 @@ npm run typecheck
 npm run build
 ~~~
 
+### Debugging mobile issues (missed speech, audio going silent)
+
+The root Node server also serves the public web app at `/v2/` from the same origin,
+so a phone on the same network (e.g. over Tailscale) can log debug events straight
+to a file on the server — useful for chasing bugs that only show up after the app
+has been backgrounded and resumed on a phone.
+
+Open the app with `?debug=1` (e.g. `http://<server>:3000/v2/?debug=1`) to enable it.
+The web app then posts structured events — API poll timing, what was spoken and
+when, `visibilitychange`/audio-unlock state — to `POST /api/debug-log`, which
+appends them as JSON lines to `debug.log` in the project root (gitignored). Watch
+it live with `tail -f debug.log`. Without `?debug=1`, or on the public GitHub Pages
+deployment (which has no such endpoint), nothing is sent.
+
 ## Limitations
 
 - Player name resolution depends on the match metadata. If a player ID in an event doesn't match the roster, the name will show as "?".

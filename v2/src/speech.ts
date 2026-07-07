@@ -400,11 +400,24 @@ function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
 
 export function eventFingerprint(event: LiveEvent, subIndex: number): string {
   const sub = event.events[subIndex];
-  // Keyed on event.id + subIndex only, NOT inning/batTurn: the API briefly
-  // re-keys a turn-ending palo to the next inning which would produce a new
-  // fingerprint and cause the event to be re-processed.
-  if (!sub) return `${event.id}:${subIndex}`;
-  return `${event.id}:${subIndex}:${JSON.stringify(sub.texts)}`;
+  // event.id restarts at 0 every turn and palot reset every turn, so the first
+  // palo of two different vuoroparit share both id and texts (`Palo` + out:1).
+  // The turn coordinates (period/inning/batTurn/team) are what tell them apart —
+  // without them the later palo collides on an already-seen fingerprint and is
+  // silently dropped from the feed and speech (scoreboard still counts it, since
+  // that recomputes from the raw stream — hence "palo näkyy herossa muttei
+  // teksteissä").
+  //
+  // Exception: kotiutuslyöntikilpailu (period 3). There the API briefly re-keys
+  // a turn-ending palo into the next sisävuoro; including the coordinates would
+  // give that transient a fresh fingerprint and double-announce it. Palot don't
+  // recur across turns there the way they do in normal vuoroparit, so the
+  // coordinate-free key is both safe and necessary in that period. See 38d30cc.
+  const coords = event.period === 3
+    ? ""
+    : `${event.period}:${event.inning}:${event.batTurn}:${event.team}:`;
+  if (!sub) return `${coords}${event.id}:${subIndex}`;
+  return `${coords}${event.id}:${subIndex}:${JSON.stringify(sub.texts)}`;
 }
 
 /** True when two events belong to the same batting turn (per API fields). */
