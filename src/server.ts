@@ -1142,6 +1142,17 @@ export function startServer(watcher: WatcherController, port: number): void {
       return;
     }
 
+    if (url === "/api/debug-log" && method === "POST") {
+      try {
+        const raw = await readBody(req);
+        const body = JSON.parse(raw.slice(0, DEBUG_LOG_MAX_BODY));
+        const line = JSON.stringify({ receivedAt: new Date().toISOString(), ...body });
+        await appendFile(DEBUG_LOG_FILE, line + "\n", "utf-8");
+      } catch { /* malformed entry — drop it, logging must never break the client */ }
+      json(res, { ok: true });
+      return;
+    }
+
     if (url === "/api/pronunciations" && method === "GET") {
       json(res, watcher.getPronunciations());
       return;
