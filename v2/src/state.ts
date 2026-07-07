@@ -21,6 +21,8 @@ export interface WatcherState {
   finished: boolean;
   announcementCount: number;
   lastSummaryTime: number;
+  /** Turn key (period:inning:batTurn:team) of the last bat-turn change spoken aloud. */
+  announcedTurnKey: string | null;
 }
 
 export function getPeriodScore(state: WatcherState, period: number): PeriodScore {
@@ -66,6 +68,7 @@ export function loadState(matchId: number): WatcherState {
       finished: parsed.finished ?? false,
       announcementCount: 0,
       lastSummaryTime: 0,
+      announcedTurnKey: parsed.announcedTurnKey ?? null,
     };
   } catch {
     return emptyState();
@@ -85,6 +88,7 @@ export function saveState(matchId: number, state: WatcherState): void {
     currentInning: state.currentInning,
     currentBatTurn: state.currentBatTurn,
     finished: state.finished,
+    announcedTurnKey: state.announcedTurnKey,
   };
   localStorage.setItem(LS_PREFIX + matchId, JSON.stringify(data));
 }
@@ -114,5 +118,6 @@ function emptyState(): WatcherState {
     finished: false,
     announcementCount: 0,
     lastSummaryTime: 0,
+    announcedTurnKey: null,
   };
 }

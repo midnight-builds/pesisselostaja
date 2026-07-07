@@ -239,6 +239,10 @@ export class BrowserWatcher {
       state.paloTurnMax = outs;
       state.currentOuts = outs;
     }
+    // The turn we're already in at watch-start is covered by the startup
+    // speech itself — mark it announced so processEventsLive's turn-change
+    // detector doesn't repeat it on the first live poll.
+    state.announcedTurnKey = `${state.currentPeriod}:${state.currentInning}:${state.currentBatTurn}:${state.currentBatTeamId}`;
 
     saveState(matchId, state);
     this.log(`Ohitettu ${initial.events.length} tapahtumaa`);
@@ -288,33 +292,10 @@ export class BrowserWatcher {
           visibility: typeof document !== "undefined" ? document.visibilityState : undefined,
         });
 
-        const newBatTeam = data.team ?? null;
-        if (
-          newBatTeam != null &&
-          state.currentBatTeamId != null &&
-          newBatTeam !== state.currentBatTeamId &&
-          data.events.length === 0
-        ) {
-          // Trust the API for the new bat turn / period instead of guessing.
-          const periodAdvanced = (data.period ?? 0) > state.currentPeriod;
-          const newBatTurn = data.bat_turn ?? (state.currentBatTurn + 1) % 2;
-          const newInning = periodAdvanced ? 0
-            : state.currentBatTurn === 1 ? state.currentInning + 1 : state.currentInning;
-          const cur = getPeriodScore(state, state.currentPeriod);
-          const msg = formatBatTurnChangeSpeech(
-            meta, state.currentBatTeamId, newBatTeam, cur.home, cur.away, newInning, newBatTurn
-          );
-          this.say(msg, state);
-          this.emitFeed("period", msg);
-          state.currentBatTeamId = newBatTeam;
-          state.currentInning = newInning;
-          state.currentBatTurn = newBatTurn;
-          if (periodAdvanced) state.currentPeriod = data.period!;
-          state.currentOuts = 0;
-          state.paloTurnKey = null;
-          state.paloTurnMax = 0;
-        }
-
+        // Ordinary bat-turn changes (no dedicated API text marker) are
+        // detected and announced inside processEventsLive, keyed off
+        // seenFingerprints — see the comment there for why this can't be
+        // done from the raw poll response.
         this.processEventsLive(data.events, state, meta, lookup);
 
         // Outs for the current turn, kept monotonic per turn. Outs never decrease
@@ -423,7 +404,14 @@ export class BrowserWatcher {
   ): void {
     for (let ei = 0; ei < events.length; ei++) {
       const event = events[ei];
-      if (event.team != null && (event.team !== state.currentBatTeamId || event.inning !== state.currentInning || event.batTurn !== state.currentBatTurn)) {
+      const prevBatTeamId = state.currentBatTeamId;
+      const turnChanged = event.team != null && (event.team !== state.currentBatTeamId || event.inning !== state.currentInning || event.batTurn !== state.currentBatTurn);
+      // The very first turn of a period (inning 0, aloittava) is announced by
+      // the "X jakso alkoi" / "Ottelu alkoi" text handling in subEventToSpeech
+      // instead — skip it here to avoid saying it twice.
+      const isFirstTurnOfPeriod = event.inning === 0 && event.batTurn === 0;
+
+      if (turnChanged) {
         state.currentBatTeamId = event.team;
         state.currentInning = event.inning;
         state.currentBatTurn = event.batTurn;
@@ -436,6 +424,31 @@ export class BrowserWatcher {
           state.currentOuts = 0;
         }
         state.currentPeriod = event.period;
+      }
+
+      // Ordinary mid-period bat-turn changes have no dedicated API text
+      // marker (unlike period boundaries), so they have to be inferred from
+      // the team/inning/batTurn fields. Those fields flip on *every* event
+      // belonging to the new turn, and processEventsLive replays the full
+      // match history on every poll — so gate the announcement on this being
+      // a genuinely new event (not yet in seenFingerprints) and on the turn
+      // not having been announced yet (announcedTurnKey), or this would fire
+      // once per poll for every historical turn change.
+      const turnKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}`;
+      if (
+        turnChanged &&
+        !isFirstTurnOfPeriod &&
+        event.team != null &&
+        turnKey !== state.announcedTurnKey &&
+        event.events.some((_, i) => !state.seenFingerprints.has(eventFingerprint(event, i)))
+      ) {
+        const cur = getPeriodScore(state, state.currentPeriod);
+        const msg = formatBatTurnChangeSpeech(
+          meta, prevBatTeamId, event.team, cur.home, cur.away, state.currentInning, state.currentBatTurn
+        );
+        this.say(msg, state);
+        this.emitFeed("period", msg);
+        state.announcedTurnKey = turnKey;
       }
 
       for (let i = 0; i < event.events.length; i++) {
