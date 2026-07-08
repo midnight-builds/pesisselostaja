@@ -14,6 +14,17 @@ export interface FfmpegMixerOptions {
   urlRefreshMs?: number;
 }
 
+/** Shared amix/limiter graph: original audio (input 0) + gained narration
+ *  (input 1) -> [aout]. Used both by the live RTMP mixer and simulate.ts's
+ *  offline replay, so the two stay acoustically identical. */
+export function buildMixFilterComplex(narrationGain: number): string {
+  return (
+    `[0:a]aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo[orig];` +
+    `[1:a]volume=${narrationGain}[narr];` +
+    `[orig][narr]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[aout]`
+  );
+}
+
 function buildFfmpegArgs(sourceUrl: string, opts: FfmpegMixerOptions): string[] {
   const rtmpDest = `${opts.rtmpUrl.replace(/\/$/, "")}/${opts.streamKey}`;
   return [
@@ -27,10 +38,7 @@ function buildFfmpegArgs(sourceUrl: string, opts: FfmpegMixerOptions): string[] 
     "-i", sourceUrl,
     "-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "4096",
     "-i", opts.fifoPath,
-    "-filter_complex",
-    `[0:a]aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo[orig];` +
-      `[1:a]volume=${opts.narrationGain}[narr];` +
-      `[orig][narr]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[aout]`,
+    "-filter_complex", buildMixFilterComplex(opts.narrationGain),
     "-map", "0:v", "-map", "[aout]",
     "-c:v", "copy",
     "-c:a", "aac", "-b:a", "160k", "-ar", "48000",

@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "relay:dev": "tsx relay/src/index.ts",
+    "relay:simulate": "tsx relay/src/simulate.ts",
     "relay:typecheck": "tsc -p relay/tsconfig.json --noEmit",
     "relay:lint": "eslint relay/src relay/test"
   },
