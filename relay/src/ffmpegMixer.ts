@@ -97,25 +97,42 @@ export class FfmpegMixer {
     this.child.stdout?.on("data", (d: Buffer) => process.stdout.write(d));
     this.child.stderr?.on("data", (d: Buffer) => process.stderr.write(d));
 
-    await this.fifo.open();
-
+    // Covers both a normal exit and a failed spawn (bad binary/args): if
+    // spawn() itself fails, Node emits "error" but never "exit", so without
+    // this the supervisor would hang forever awaiting an exit that never
+    // comes — no backoff, no log, stuck silently.
     const startedAt = Date.now();
-    await new Promise<void>((resolve) => {
-      this.child!.once("exit", (code, signal) => {
-        this.fifo.closeIo();
-        const ranMs = Date.now() - startedAt;
-        if (ranMs > 60000) this.backoffMs = 1000; // reset backoff after a healthy run
-        log(`ffmpeg päättyi (code=${code}, signal=${signal}), ajoaika ${Math.round(ranMs / 1000)}s`);
-        resolve();
-      });
-
-      const refreshMs = this.opts.urlRefreshMs ?? 15 * 60 * 1000;
-      this.refreshTimer = setTimeout(() => {
-        log("Määräaikainen URL-päivitys — käynnistetään ffmpeg uudelleen.");
-        this.child?.kill("SIGTERM");
-      }, refreshMs);
+    const childDone = new Promise<{ code: number | null; signal: NodeJS.Signals | null; error?: Error }>((resolve) => {
+      this.child!.once("error", (err) => resolve({ code: null, signal: null, error: err }));
+      this.child!.once("exit", (code, signal) => resolve({ code, signal }));
     });
 
+    const raceResult = await Promise.race([
+      this.fifo.open().then(() => "opened" as const),
+      childDone.then(() => "died" as const),
+    ]);
+
+    if (raceResult === "died") {
+      // ffmpeg died before the FIFO handshake even completed — the pending
+      // open() call will never get a reader now; drop it rather than await it.
+      this.fifo.closeIo();
+      const result = await childDone;
+      const detail = result.error ? result.error.message : `code=${result.code}, signal=${result.signal}`;
+      throw new Error(`ffmpeg ei käynnistynyt: ${detail}`);
+    }
+
+    const refreshMs = this.opts.urlRefreshMs ?? 15 * 60 * 1000;
+    this.refreshTimer = setTimeout(() => {
+      log("Määräaikainen URL-päivitys — käynnistetään ffmpeg uudelleen.");
+      this.child?.kill("SIGTERM");
+    }, refreshMs);
+
+    const result = await childDone;
+    this.fifo.closeIo();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    const ranMs = Date.now() - startedAt;
+    if (ranMs > 60000) this.backoffMs = 1000; // reset backoff after a healthy run
+    const detail = result.error ? result.error.message : `code=${result.code}, signal=${result.signal}`;
+    log(`ffmpeg päättyi (${detail}), ajoaika ${Math.round(ranMs / 1000)}s`);
   }
 }
