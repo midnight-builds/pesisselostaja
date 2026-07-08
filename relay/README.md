@@ -5,8 +5,8 @@ Pesisselostaja's spoken commentary (synthesized with the same Piper voice v2
 uses), and republishes the result as a **second, separate** YouTube live
 broadcast. The original broadcast is never touched — this only reads it.
 
-See the design plan for the full architecture/rationale. This file is the
-day-to-day operator runbook.
+See [DESIGN.md](DESIGN.md) for the full architecture/rationale and the
+decisions behind it. This file is the day-to-day operator runbook.
 
 ## One-time setup
 

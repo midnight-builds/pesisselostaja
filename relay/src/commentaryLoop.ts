@@ -42,7 +42,7 @@ export type SpeechSink = (spokenText: string, readableText: string) => Promise<v
  *  but hands each announcement to a SpeechSink (narration synthesis) instead
  *  of Home Assistant/browser output. Deliberately a separate implementation,
  *  not a reuse of WatcherController, since that class is wired to HA/browser
- *  output — see the relay design plan. */
+ *  output — see relay/DESIGN.md. */
 export class CommentaryLoop {
   private state: WatcherState;
   private pronunciations: PronunciationRule[];

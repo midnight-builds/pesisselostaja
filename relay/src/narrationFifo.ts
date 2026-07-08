@@ -60,8 +60,8 @@ export class NarrationQueue {
 /** Owns a named pipe that ffmpeg reads as a raw PCM input, and a perpetual
  *  20ms-frame writer that never stops: silence when nothing is queued,
  *  queued narration audio otherwise. ffmpeg's `amix` needs data from every
- *  input to produce output, so this pipe must never starve it — see the plan
- *  (relay design doc) for why an on-demand pusher would stall the whole
+ *  input to produce output, so this pipe must never starve it — see
+ *  relay/DESIGN.md for why an on-demand pusher would stall the whole
  *  filter graph instead. */
 export class NarrationFifo {
   private stream: WriteStream | null = null;
