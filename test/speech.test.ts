@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { eventToSpeech, buildPlayerLookup, eventFingerprint } from "../src/speech.js";
+import { eventToSpeech, subEventToSpeech, buildPlayerLookup, eventFingerprint, type SpeechContext } from "../src/speech.js";
 import { preventOrdinalReading } from "../src/pronunciation.js";
 import type { LiveEventsResponse, MatchMetadata, LiveEvent } from "../src/types.js";
 
@@ -112,6 +112,38 @@ describe("eventToSpeech", () => {
     const speech = eventToSpeech(doc!, matchMeta, lookup);
     expect(speech).toBeDefined();
     expect(speech).toContain("IPV");
+  });
+});
+
+describe("formatMatchEnd (via subEventToSpeech)", () => {
+  const matchEndEvent: LiveEvent = {
+    id: 999, groupType: "info", period: 0, inning: 0, batTurn: 0,
+    team: null, hTeam: matchMeta.home.id, batter: null, pairIndex: null,
+    hitNumber: null, hit: null, timestamp: 2820,
+    events: [{ texts: [{ type: "event", text: "Ottelu päättyi" }] }],
+  };
+  const sub = matchEndEvent.events[0];
+
+  it("reports the actual score for a single-jakso match, not the meaningless 0-1 periodsWon split", () => {
+    const ctx: SpeechContext = {
+      periodHomeRuns: 2, periodAwayRuns: 22,
+      homePeriodsWon: 0, awayPeriodsWon: 1, periodsPlayed: 1,
+      currentOuts: 0, currentPeriod: 0, currentBatTeamId: null,
+    };
+    const speech = subEventToSpeech(matchEndEvent, sub, matchMeta, lookup, true, ctx);
+    expect(speech).toContain(`${matchMeta.away.shorthand} voitti`);
+    expect(speech).toContain(`${matchMeta.home.shorthand} 2, ${matchMeta.away.shorthand} 22`);
+  });
+
+  it("reports periods won for a multi-jakso match", () => {
+    const ctx: SpeechContext = {
+      periodHomeRuns: 3, periodAwayRuns: 5,
+      homePeriodsWon: 2, awayPeriodsWon: 1, periodsPlayed: 3,
+      currentOuts: 0, currentPeriod: 2, currentBatTeamId: null,
+    };
+    const speech = subEventToSpeech(matchEndEvent, sub, matchMeta, lookup, true, ctx);
+    expect(speech).toContain(`${matchMeta.home.shorthand} voitti`);
+    expect(speech).toContain(`${matchMeta.home.shorthand} 2, ${matchMeta.away.shorthand} 1`);
   });
 });
 

@@ -12,7 +12,7 @@ import {
   runValueOfSubEvent,
   type SpeechContext,
 } from "../../src/speech.js";
-import { loadState, addRun, getPeriodScore, periodsWon, type WatcherState } from "../../src/state.js";
+import { loadState, addRun, getPeriodScore, periodsWon, periodsPlayed, type WatcherState } from "../../src/state.js";
 import { loadPronunciations, applyPronunciations, preventOrdinalReading } from "../../src/pronunciation.js";
 import { PiperTts } from "./piperTts.js";
 import { buildMixFilterComplex } from "./ffmpegMixer.js";
@@ -134,6 +134,7 @@ async function buildTimeline(
         periodAwayRuns: periodScore.away,
         homePeriodsWon: won.home,
         awayPeriodsWon: won.away,
+        periodsPlayed: periodsPlayed(state),
         currentOuts: state.currentOuts,
         currentPeriod: state.currentPeriod,
         currentBatTeamId: state.currentBatTeamId,

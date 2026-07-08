@@ -49,6 +49,12 @@ export function periodsWon(state: WatcherState): PeriodScore {
   return { home, away };
 }
 
+/** Distinct periods with any recorded runs — used to tell a single-jakso
+ *  camp/tournament match apart from a normal multi-jakso one. */
+export function periodsPlayed(state: WatcherState): number {
+  return Object.keys(state.periodRuns).length;
+}
+
 export function loadState(matchId: number): WatcherState {
   try {
     const raw = localStorage.getItem(LS_PREFIX + matchId);

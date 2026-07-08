@@ -24,6 +24,7 @@ import {
   getPeriodScore,
   addRun,
   periodsWon,
+  periodsPlayed,
   type WatcherState,
 } from "./state.js";
 import type { LiveEvent, MatchMetadata, SubEvent } from "./types.js";
@@ -563,6 +564,7 @@ export class BrowserWatcher {
       periodAwayRuns: cur.away,
       homePeriodsWon: won.home,
       awayPeriodsWon: won.away,
+      periodsPlayed: periodsPlayed(state),
       currentOuts: state.currentOuts,
       currentPeriod: state.currentPeriod,
       currentBatTeamId: state.currentBatTeamId,

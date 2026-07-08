@@ -20,6 +20,7 @@ import {
   getPeriodScore,
   addRun,
   periodsWon,
+  periodsPlayed,
   type WatcherState,
 } from "../../src/state.js";
 import {
@@ -202,6 +203,7 @@ export class CommentaryLoop {
       periodAwayRuns: cur.away,
       homePeriodsWon: won.home,
       awayPeriodsWon: won.away,
+      periodsPlayed: periodsPlayed(this.state),
       currentOuts: this.state.currentOuts,
       currentPeriod: this.state.currentPeriod,
       currentBatTeamId: this.state.currentBatTeamId,
