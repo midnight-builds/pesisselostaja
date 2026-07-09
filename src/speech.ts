@@ -20,6 +20,11 @@ export interface SpeechContext {
   currentOuts: number;
   currentPeriod: number;
   currentBatTeamId: number | null;
+  /** Last-used phrasing-variant index per announcement key (see pickVariant).
+   *  Optional so callers that don't care about variety (tests, the deprecated
+   *  eventToSpeech wrapper) can omit it — variants are then just picked fresh
+   *  each time with no repeat-avoidance across calls. */
+  variantHistory?: Record<string, number>;
 }
 
 /** Period label for speech. event.period is 0-indexed. */
