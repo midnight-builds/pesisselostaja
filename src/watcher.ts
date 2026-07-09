@@ -253,7 +253,8 @@ export class WatcherController {
             state.currentBatTeamId,
             newBatTeam,
             cur.home,
-            cur.away
+            cur.away,
+            state.variantHistory
           );
           await this.say(haConfig, msg, state);
           state.currentBatTeamId = newBatTeam;
