@@ -51,8 +51,10 @@ describe("eventToSpeech", () => {
       )
     );
     expect(matchStart).toBeDefined();
+    // Match-start phrasing rotates between a few variants (see pickVariant in
+    // speech.ts), so this only pins down what must hold across all of them.
     const speech = eventToSpeech(matchStart!, matchMeta, lookup);
-    expect(speech).toContain("Ottelu alkoi");
+    expect(speech).toMatch(/ottelu/i);
     expect(speech).toContain("IPV");
     expect(speech).toContain("KiPa");
   });
@@ -75,9 +77,11 @@ describe("eventToSpeech", () => {
       )
     );
     expect(runEvent).toBeDefined();
+    // Phrasing rotates between variants; "juoksu" and "tuojana" are the parts
+    // common to all of them.
     const speech = eventToSpeech(runEvent!, matchMeta, lookup);
     expect(speech).toBeDefined();
-    expect(speech).toContain("löi juoksun");
+    expect(speech).toContain("juoksu");
     expect(speech).toContain("tuojana");
     // Should contain player names
     expect(speech).toMatch(/[A-ZÄÖÅ][a-zäöå]+/);
@@ -91,7 +95,7 @@ describe("eventToSpeech", () => {
     );
     expect(paloEvent).toBeDefined();
     const speech = eventToSpeech(paloEvent!, matchMeta, lookup);
-    expect(speech).toContain("Palo");
+    expect(speech?.toLowerCase()).toContain("palo");
   });
 
   it("should skip Lyöntivuorossa events", () => {
@@ -131,7 +135,9 @@ describe("formatMatchEnd (via subEventToSpeech)", () => {
       currentOuts: 0, currentPeriod: 0, currentBatTeamId: null,
     };
     const speech = subEventToSpeech(matchEndEvent, sub, matchMeta, lookup, true, ctx);
-    expect(speech).toContain(`${matchMeta.away.shorthand} voitti`);
+    // Phrasing rotates between variants (see pickVariant); "voitti"/"vei
+    // voiton" attributed to the winner's name is common to all of them.
+    expect(speech).toMatch(new RegExp(`${matchMeta.away.shorthand} (voitti|vei voiton)`));
     expect(speech).toContain(`${matchMeta.home.shorthand} 2, ${matchMeta.away.shorthand} 22`);
   });
 
@@ -142,7 +148,7 @@ describe("formatMatchEnd (via subEventToSpeech)", () => {
       currentOuts: 0, currentPeriod: 2, currentBatTeamId: null,
     };
     const speech = subEventToSpeech(matchEndEvent, sub, matchMeta, lookup, true, ctx);
-    expect(speech).toContain(`${matchMeta.home.shorthand} voitti`);
+    expect(speech).toMatch(new RegExp(`${matchMeta.home.shorthand} (voitti|vei voiton)`));
     expect(speech).toContain(`${matchMeta.home.shorthand} 2, ${matchMeta.away.shorthand} 1`);
   });
 });
@@ -161,6 +167,43 @@ describe("eventFingerprint", () => {
     const fp0 = eventFingerprint(event, 0);
     const fp1 = eventFingerprint(event, 1); // non-existent sub-event
     expect(fp0).not.toBe(fp1);
+  });
+});
+
+describe("phrasing variety (pickVariant)", () => {
+  const paloEvent = eventsData.events.find(
+    (e) => e.events[0]?.texts?.some(
+      (t) => typeof t === "object" && "type" in t && t.type === "event" && "text" in t && t.text === "Palo"
+    )
+  )!;
+  const sub = paloEvent.events[0];
+
+  function paloCtx(history: Record<string, number>): SpeechContext {
+    return {
+      periodHomeRuns: 0, periodAwayRuns: 0, homePeriodsWon: 0, awayPeriodsWon: 0,
+      periodsPlayed: 1, currentOuts: 2, currentPeriod: 0, currentBatTeamId: null,
+      variantHistory: history,
+    };
+  }
+
+  it("never repeats the same palo phrasing twice in a row", () => {
+    const history: Record<string, number> = {};
+    let prev: string | null = null;
+    for (let i = 0; i < 50; i++) {
+      const speech = subEventToSpeech(paloEvent, sub, matchMeta, lookup, true, paloCtx(history));
+      expect(speech).not.toBeNull();
+      expect(speech).not.toBe(prev);
+      prev = speech;
+    }
+  });
+
+  it("eventually cycles through more than one phrasing", () => {
+    const history: Record<string, number> = {};
+    const seen = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      seen.add(subEventToSpeech(paloEvent, sub, matchMeta, lookup, true, paloCtx(history))!);
+    }
+    expect(seen.size).toBeGreaterThan(1);
   });
 });
 
