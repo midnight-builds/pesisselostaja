@@ -494,14 +494,26 @@ function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
       : [ctx.homePeriodsWon, ctx.awayPeriodsWon];
     const winner = homeVal > awayVal ? meta.home.shorthand : awayVal > homeVal ? meta.away.shorthand : null;
     const result = `${meta.home.shorthand} ${homeVal}, ${meta.away.shorthand} ${awayVal}`;
-    return winner
-      ? `Ottelu päättyi! ${winner} voitti, ${result}.`
-      : `Ottelu päättyi! Tasatilanne, ${result}.`;
+    if (winner) {
+      return pickVariant(ctx.variantHistory, "match-end-winner", [
+        `Ottelu päättyi! ${winner} voitti, ${result}.`,
+        `Ottelu on päättynyt. ${winner} vei voiton lukemin ${result}.`,
+        `Tilasto lopussa: ${winner} voitti, ${result}.`,
+      ]);
+    }
+    return pickVariant(ctx.variantHistory, "match-end-tie", [
+      `Ottelu päättyi! Tasatilanne, ${result}.`,
+      `Ottelu on päättynyt tasan, ${result}.`,
+      `Tilasto lopussa: tasatilanne, ${result}.`,
+    ]);
   }
   const result = meta.result;
   if (result) {
     const d = result.details;
-    return `Ottelu päättyi! ${meta.home.shorthand} ${d.periods_home}, ${meta.away.shorthand} ${d.periods_away}.`;
+    return pickVariant(undefined, "match-end-historical", [
+      `Ottelu päättyi! ${meta.home.shorthand} ${d.periods_home}, ${meta.away.shorthand} ${d.periods_away}.`,
+      `Ottelu on päättynyt. ${meta.home.shorthand} ${d.periods_home}, ${meta.away.shorthand} ${d.periods_away}.`,
+    ]);
   }
   return `Ottelu päättyi! ${meta.home.shorthand} vastaan ${meta.away.shorthand}.`;
 }
