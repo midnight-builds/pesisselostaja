@@ -103,6 +103,23 @@ function ordinalPalo(n: number): string {
   return ord ? `${ord} palo` : `${n}. palo`;
 }
 
+/** Picks one of several phrasing variants for an announcement, never repeating
+ *  the same wording twice in a row for a given `key`. The event feed is never
+ *  quite in sync with the video it's narrating, so a fixed "this just
+ *  happened!" phrasing per event type would read as more real-time than it
+ *  actually is — rotating between a livelier take and a calmer, more
+ *  stats-report-style one keeps that honest. `history` is per-match state
+ *  (WatcherState.variantHistory); omit it (tests, the deprecated
+ *  eventToSpeech path) to just pick randomly with no repeat-avoidance. */
+function pickVariant(history: Record<string, number> | undefined, key: string, variants: readonly string[]): string {
+  if (variants.length <= 1) return variants[0] ?? "";
+  const last = history?.[key];
+  const candidates = variants.map((_, i) => i).filter((i) => i !== last);
+  const idx = candidates[Math.floor(Math.random() * candidates.length)];
+  if (history) history[key] = idx;
+  return variants[idx];
+}
+
 function ttsClean(text: string): string {
   return text
     .replace(/\s*[–—]\s*/g, ", ")   // en/em dash → comma
