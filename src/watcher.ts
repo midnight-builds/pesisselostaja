@@ -373,6 +373,7 @@ export class WatcherController {
       currentOuts: state.currentOuts,
       currentPeriod: state.currentPeriod,
       currentBatTeamId: state.currentBatTeamId,
+      variantHistory: state.variantHistory,
     };
   }
 
