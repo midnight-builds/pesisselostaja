@@ -211,17 +211,25 @@ export function formatBatTurnChangeSpeech(
   prevTeamId: number | null,
   nextTeamId: number | null,
   periodHomeRuns: number,
-  periodAwayRuns: number
+  periodAwayRuns: number,
+  variantHistory?: Record<string, number>
 ): string {
   const prev = prevTeamId ? getTeamName(meta, prevTeamId) : null;
   const next = nextTeamId ? getTeamName(meta, nextTeamId) : null;
   const score = formatScore(meta, periodHomeRuns, periodAwayRuns);
   const scoreStr = `${capitalize(score)}.`;
   if (prev && next) {
-    return `${prev}:n vuoro päättyi. ${scoreStr} Nyt sisävuoroon ${next}.`;
+    return pickVariant(variantHistory, "turn-change-both", [
+      `${prev}:n vuoro päättyi. ${scoreStr} Nyt sisävuoroon ${next}.`,
+      `${prev} siirtyy ulos. ${scoreStr} Sisävuorossa jatkaa ${next}.`,
+      `Vuoro vaihtui: ${next} sisävuoroon. ${scoreStr}`,
+    ]);
   }
   if (next) {
-    return `${scoreStr} Sisävuoroon ${next}.`;
+    return pickVariant(variantHistory, "turn-change-next", [
+      `${scoreStr} Sisävuoroon ${next}.`,
+      `${scoreStr} Sisävuorossa ${next}.`,
+    ]);
   }
   return scoreStr;
 }
