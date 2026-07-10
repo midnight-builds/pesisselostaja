@@ -11,6 +11,7 @@ export interface RelayConfig {
   narrationGain: number;
   dryRun: boolean;
   recordFile?: string;
+  urlRefreshMs?: number;
   apiKey: string;
   apiBase: string;
   stateFile: string;
@@ -71,6 +72,12 @@ export function parseRelayConfig(): RelayConfig {
   const piperBin = values["piper-bin"] ?? process.env.RELAY_PIPER_BIN ?? "piper";
   const pollInterval = parseInt(values["poll-interval"] ?? process.env.RELAY_POLL_INTERVAL ?? "6000", 10);
   const narrationGain = parseFloat(values["narration-gain"] ?? process.env.RELAY_NARRATION_GAIN ?? "1.3");
+  // Source URLs from yt-dlp carry an `expire` param ~6 h out, so the proactive
+  // refresh only needs to beat that — each refresh is a visible few-second
+  // break in the output stream, so err toward fewer of them.
+  const urlRefreshMs = process.env.RELAY_URL_REFRESH_MS
+    ? parseInt(process.env.RELAY_URL_REFRESH_MS, 10)
+    : undefined;
   const apiKey = process.env.PESISTULOKSET_API_KEY ?? "wRX0tTke3DZ8RLKAMntjZ81LwgNQuSN9";
   const apiBase = process.env.PESISTULOKSET_API_BASE ?? "https://api.pesistulokset.fi/api/v1";
 
@@ -91,6 +98,7 @@ export function parseRelayConfig(): RelayConfig {
     narrationGain,
     dryRun,
     recordFile,
+    urlRefreshMs,
     apiKey,
     apiBase,
     stateFile,

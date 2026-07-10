@@ -65,6 +65,61 @@ Kaksi bugia löydettiin ja korjattiin edellisessä testissä (yksityiskohdat
   samaan aikaan — varmista aina että edellinen ajo on oikeasti kuollut
   (`TaskStop`/`kill` + `ps`-tarkistus, ei pelkkä oletus).
 
+## Havainnot 2026-07-10 live-testistä (ottelu 143280, ensimmäinen oikea RTMP-julkaisu)
+
+M5 vietiin loppuun: relay työnsi RTMP:llä toiseen YouTube-lähetykseen ja se
+näkyi katsojille. Löydökset, korjaamattomat ensin:
+
+1. **BUGI: palojen määrä selostetaan väärin.** Käyttäjä kuuli toistuvasti
+   "nolla paloa" vaikka sisävuorossa oli 1–2 paloa. Lokista kaksi erillistä
+   oiretta:
+   - Määräaikainen tilannekuulutus sanoo "0 paloa" vaikka samassa
+     sisävuorossa on juuri kirjattu palo: esim. 12:17:17 `Palo: PomPy/OuHu 1`
+     → 12:19:03 kuulutus "Sisävuorossa PomPy / OuHu, **0 paloa**". Sama myös
+     12:12:22 ja 12:14:02 (12:04 palojen jälkeen).
+   - Palolaskuri hyppii taaksepäin ja toistaa ykköspaloa: 12:04:08
+     `Palo: PomPy/OuHu 2` → 12:04:45 taas `Palo: PomPy/OuHu 1`; IPV:n
+     "ensimmäinen palo" kuulutettiin kolmesti (12:06:48, 12:07:13, 12:10:16).
+   Epäilyssuunta: sisävuoron tunnistus / palojen nollaus vuoronvaihdossa
+   (vrt. event.id-resetit per vuoro ja issue #18:n nopeat team-flipit) —
+   sisävuoro näytti lokissa vaihtuvan IPV↔PomPy useita kertoja muutamassa
+   minuutissa samalla kun laskuri nollautui. Selvitä ja korjaa ennen
+   seuraavaa livetestiä; toistettavissa ottelun 143280 event-datalla.
+2. **BUGI: selostus katkeaa kesken lauseen ffmpeg-respawnissa.** FIFO:on
+   kirjoitettu puhe menetetään kun ffmpeg vaihdetaan (URL-rotaatio tai muu
+   respawn) — käyttäjä kuuli lauseen katkeavan. Korjausidea: puskuroi
+   kesken jäänyt utterance ja puhu uudelleen respawnin jälkeen, tai viivytä
+   respawnia kunnes FIFO on tyhjä.
+3. **Korjattu ajossa: 15 min URL-rotaatio aiheutti näkyvän ~8 s katkon joka
+   kerta.** Lähde-URL:n `expire` on ~6 h, joten tiheä rotaatio oli turha.
+   Lisätty `RELAY_URL_REFRESH_MS`-env-ohitus (config.ts + index.ts +
+   .env.relay.example), livetestissä käytettiin 4 h. Rotaatio itsessään
+   toimi molemmilla kerroilla siististi (~6–8 s respawn, ffmpeg ajoi 902 s
+   ja 903 s täsmälleen ajastetusti).
+4. **Opittu: YouTube-lähetys ei ala ilman auto-starttia.** Ingest voi olla
+   terve ja data ACKattu, mutta ajastettu lähetys jää ikuisesti "alkaa
+   hetken kuluttua" -tilaan ellei joko (a) lähetyksen "Ota automaattinen
+   aloitus käyttöön" ole päällä tai (b) joku paina Go Livea Live Control
+   Roomissa (suora osoite: `https://studio.youtube.com/video/<VIDEO_ID>/livestreaming`
+   — tavallisesta Studio-videolistasta tätä EI löydä). Laita auto-start
+   päälle kun luot lähetyksen, niin pelkkä relayn käynnistys riittää.
+5. **Restart kesken ottelun toimii:** systemd-restart 12:21 ohitti 69 jo
+   selostettua tapahtumaa tilatiedoston perusteella ja jatkoi oikeasta
+   tilanteesta. Katsojalle yksi lyhyt katko.
+6. Googlevideon HLS-luku lokittaa jatkuvasti `keepalive request failed …
+   retrying with new connection` -varoitusta (edge-hostit rotatoivat).
+   Harmiton mutta täyttää lokin — harkitse suodatusta.
+7. **Ottelun/lähteen loppu ei pysäytä relaytä.** Kun alkuperäinen lähetys
+   päättyi (ffmpeg exit code 0, HLS EOF), relay jäi ikuiseen
+   yt-dlp-uudelleenyritysluuppiin ("Requested format is not available",
+   backoff 1s→30s) ja selostettu lähetys jäi katsojille pyörivään
+   puskurointitilaan. Relay oli ehtinyt itse kuuluttaa lopputilaston
+   ("Tilasto lopussa: … voitti") — eli ottelun loppu on jo tunnistettavissa.
+   Korjausidea: kun ottelu on API:n mukaan päättynyt JA lähde palauttaa
+   EOF:n, lopeta siististi (exit 0, ei respawnia) sen sijaan että jäädään
+   luuppiin. Toisen lähetyksen päättäminen jää silti käyttäjälle (tai
+   auto-stop päälle YouTube-lähetystä luodessa, ks. kohta 4).
+
 ## Tausta
 
 - Täysi arkkitehtuuri, päätökset ja koko riskilista: [DESIGN.md](DESIGN.md)
