@@ -68,7 +68,7 @@ export async function fetchLiveEvents(
   if (opts.after !== undefined) params.set("after", String(opts.after));
   const qs = params.toString();
   if (qs) url += `?${qs}`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error(`Live events fetch failed: ${res.status}`);
   return res.json() as Promise<LiveEventsResponse>;
 }
