@@ -15,6 +15,7 @@ async function main(): Promise<void> {
   log(`YouTube-lähde: ${config.youtubeUrl}`);
   log(`Ääni: ${config.voice}`);
   log(`Dry run: ${config.dryRun}`);
+  if (config.recordFile) log(`Tallennetaan paikalliseen tiedostoon: ${config.recordFile}`);
 
   const voicesDir = new URL("../voices/", import.meta.url).pathname;
   const piper = new PiperTts({ piperBin: config.piperBin, voice: config.voice, voicesDir });
@@ -28,6 +29,7 @@ async function main(): Promise<void> {
       streamKey: config.streamKey,
       narrationGain: config.narrationGain,
       fifoPath,
+      recordFile: config.recordFile,
     });
     mixer.start().catch((err) => {
       log(`ffmpeg-valvoja päättyi virheeseen: ${err instanceof Error ? err.message : err}`);

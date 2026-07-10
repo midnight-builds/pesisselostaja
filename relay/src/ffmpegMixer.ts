@@ -12,6 +12,10 @@ export interface FfmpegMixerOptions {
   /** Force a respawn on this cadence even if ffmpeg looks healthy, so a
    *  rotated source URL gets picked up (default 15 min). */
   urlRefreshMs?: number;
+  /** Local-file test mode: write the mixed result to this path instead of
+   *  pushing RTMP, so the mix can be reviewed before a second broadcast
+   *  exists. Takes precedence over rtmpUrl/streamKey when set. */
+  recordFile?: string;
 }
 
 /** Shared amix/limiter graph: original audio (input 0) + gained narration
@@ -26,14 +30,10 @@ export function buildMixFilterComplex(narrationGain: number): string {
 }
 
 function buildFfmpegArgs(sourceUrl: string, opts: FfmpegMixerOptions): string[] {
-  const rtmpDest = `${opts.rtmpUrl.replace(/\/$/, "")}/${opts.streamKey}`;
-  return [
+  const args = [
     "-nostdin",
+    "-y",
     "-loglevel", "warning",
-    "-reconnect", "1",
-    "-reconnect_streamed", "1",
-    "-reconnect_delay_max", "5",
-    "-reconnect_at_eof", "1",
     "-thread_queue_size", "4096",
     "-i", sourceUrl,
     "-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "4096",
@@ -42,8 +42,16 @@ function buildFfmpegArgs(sourceUrl: string, opts: FfmpegMixerOptions): string[] 
     "-map", "0:v", "-map", "[aout]",
     "-c:v", "copy",
     "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
-    "-f", "flv", rtmpDest,
   ];
+  if (opts.recordFile) {
+    // Fragmented mp4 stays playable even if the process is killed mid-write
+    // (no trailing moov atom to lose), unlike a plain -f mp4 output.
+    args.push("-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", opts.recordFile);
+  } else {
+    const rtmpDest = `${opts.rtmpUrl.replace(/\/$/, "")}/${opts.streamKey}`;
+    args.push("-f", "flv", rtmpDest);
+  }
+  return args;
 }
 
 function delay(ms: number): Promise<void> {

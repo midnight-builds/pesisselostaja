@@ -10,6 +10,7 @@ export interface RelayConfig {
   pollInterval: number;
   narrationGain: number;
   dryRun: boolean;
+  recordFile?: string;
   apiKey: string;
   apiBase: string;
   stateFile: string;
@@ -38,6 +39,7 @@ export function parseRelayConfig(): RelayConfig {
       "poll-interval": { type: "string" },
       "narration-gain": { type: "string" },
       "dry-run": { type: "boolean", default: false },
+      "record-file": { type: "string" },
     },
     strict: true,
   });
@@ -50,15 +52,18 @@ export function parseRelayConfig(): RelayConfig {
   }
 
   const dryRun = values["dry-run"] || process.env.RELAY_DRY_RUN === "true";
+  const recordFile = values["record-file"] ?? process.env.RELAY_RECORD_FILE;
 
   const youtubeUrl = requireValue("youtubeUrl", values["youtube-url"], "RELAY_YOUTUBE_URL");
 
   // The RTMP destination is only needed once we actually push a stream, so
-  // dry runs (which never touch ffmpeg/RTMP) don't need to supply it.
-  const rtmpUrl = dryRun
+  // dry runs (never touch ffmpeg/RTMP) and local-file record tests (write to
+  // recordFile instead) don't need to supply it.
+  const skipRtmpRequirement = dryRun || !!recordFile;
+  const rtmpUrl = skipRtmpRequirement
     ? (values["rtmp-url"] ?? process.env.RELAY_RTMP_URL ?? "")
     : requireValue("rtmpUrl", values["rtmp-url"], "RELAY_RTMP_URL");
-  const streamKey = dryRun
+  const streamKey = skipRtmpRequirement
     ? (values["stream-key"] ?? process.env.RELAY_STREAM_KEY ?? "")
     : requireValue("streamKey", values["stream-key"], "RELAY_STREAM_KEY");
 
@@ -85,6 +90,7 @@ export function parseRelayConfig(): RelayConfig {
     pollInterval,
     narrationGain,
     dryRun,
+    recordFile,
     apiKey,
     apiBase,
     stateFile,
