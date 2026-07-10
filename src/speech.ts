@@ -20,6 +20,11 @@ export interface SpeechContext {
   currentOuts: number;
   currentPeriod: number;
   currentBatTeamId: number | null;
+  /** Last-used phrasing-variant index per announcement key (see pickVariant).
+   *  Optional so callers that don't care about variety (tests, the deprecated
+   *  eventToSpeech wrapper) can omit it — variants are then just picked fresh
+   *  each time with no repeat-avoidance across calls. */
+  variantHistory?: Record<string, number>;
 }
 
 /** Period label for speech. event.period is 0-indexed. */
@@ -96,6 +101,23 @@ const FI_ORDINAL: Record<number, string> = {
 function ordinalPalo(n: number): string {
   const ord = FI_ORDINAL[n];
   return ord ? `${ord} palo` : `${n}. palo`;
+}
+
+/** Picks one of several phrasing variants for an announcement, never repeating
+ *  the same wording twice in a row for a given `key`. The event feed is never
+ *  quite in sync with the video it's narrating, so a fixed "this just
+ *  happened!" phrasing per event type would read as more real-time than it
+ *  actually is — rotating between a livelier take and a calmer, more
+ *  stats-report-style one keeps that honest. `history` is per-match state
+ *  (WatcherState.variantHistory); omit it (tests, the deprecated
+ *  eventToSpeech path) to just pick randomly with no repeat-avoidance. */
+function pickVariant(history: Record<string, number> | undefined, key: string, variants: readonly string[]): string {
+  if (variants.length <= 1) return variants[0] ?? "";
+  const last = history?.[key];
+  const candidates = variants.map((_, i) => i).filter((i) => i !== last);
+  const idx = candidates[Math.floor(Math.random() * candidates.length)];
+  if (history) history[key] = idx;
+  return variants[idx];
 }
 
 function ttsClean(text: string): string {
@@ -189,17 +211,25 @@ export function formatBatTurnChangeSpeech(
   prevTeamId: number | null,
   nextTeamId: number | null,
   periodHomeRuns: number,
-  periodAwayRuns: number
+  periodAwayRuns: number,
+  variantHistory?: Record<string, number>
 ): string {
   const prev = prevTeamId ? getTeamName(meta, prevTeamId) : null;
   const next = nextTeamId ? getTeamName(meta, nextTeamId) : null;
   const score = formatScore(meta, periodHomeRuns, periodAwayRuns);
   const scoreStr = `${capitalize(score)}.`;
   if (prev && next) {
-    return `${prev}:n vuoro päättyi. ${scoreStr} Nyt sisävuoroon ${next}.`;
+    return pickVariant(variantHistory, "turn-change-both", [
+      `${prev}:n vuoro päättyi. ${scoreStr} Nyt sisävuoroon ${next}.`,
+      `${prev} siirtyy ulos. ${scoreStr} Sisävuorossa jatkaa ${next}.`,
+      `Vuoro vaihtui: ${next} sisävuoroon. ${scoreStr}`,
+    ]);
   }
   if (next) {
-    return `${scoreStr} Sisävuoroon ${next}.`;
+    return pickVariant(variantHistory, "turn-change-next", [
+      `${scoreStr} Sisävuoroon ${next}.`,
+      `${scoreStr} Sisävuorossa ${next}.`,
+    ]);
   }
   return scoreStr;
 }
@@ -267,26 +297,32 @@ export function subEventToSpeech(
   if (!rawText) return null;
 
   if (rawText.includes("löi juoksun")) {
-    const base = formatRunScored(texts, meta, lookup);
+    const base = formatRunScored(texts, meta, lookup, ctx?.variantHistory);
     return ctx ? `${base} ${formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns)}.` : base;
   }
 
   if (rawText.includes("löi kunnarin")) {
-    const base = formatKunnari(texts, meta, lookup);
+    const base = formatKunnari(texts, meta, lookup, ctx?.variantHistory);
     return ctx ? `${base} ${formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns)}.` : base;
   }
 
   if (rawText.includes("toi juoksun")) {
-    const base = formatRunBrought(texts, meta, lookup);
+    const base = formatRunBrought(texts, meta, lookup, ctx?.variantHistory);
     return ctx ? `${base} ${formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns)}.` : base;
   }
 
   if (rawText.includes("Palo")) {
     const teamName = getTeamName(meta, event.team);
     if (ctx) {
-      return `Palo! ${teamName}, ${ordinalPalo(ctx.currentOuts)}.`;
+      const n = ctx.currentOuts;
+      return pickVariant(ctx.variantHistory, "palo", [
+        `Palo! ${teamName}, ${ordinalPalo(n)}.`,
+        `${teamName}:lle tuli ${ordinalPalo(n)}.`,
+        `Tilastoihin kirjautui ${teamName}:n ${ordinalPalo(n)}.`,
+        `${capitalize(ordinalPalo(n))} joukkueelle ${teamName}.`,
+      ]);
     }
-    return `Palo! ${teamName}.`;
+    return pickVariant(undefined, "palo-noctx", [`Palo! ${teamName}.`, `${teamName}:lle palo.`]);
   }
 
   // Period or supervuoro ended: announce who won that period.
@@ -295,7 +331,16 @@ export function subEventToSpeech(
       const score = `${ctx.periodHomeRuns}, ${ctx.periodAwayRuns}`;
       const winner = ctx.periodHomeRuns > ctx.periodAwayRuns ? meta.home.shorthand
         : ctx.periodAwayRuns > ctx.periodHomeRuns ? meta.away.shorthand : null;
-      const verdict = winner ? ` ${winner} voitti, ${score}.` : ` Tasan, ${score}.`;
+      const verdict = winner
+        ? pickVariant(ctx.variantHistory, "period-end-winner", [
+            ` ${winner} voitti, ${score}.`,
+            ` Tilasto: ${winner} vei jakson lukemin ${score}.`,
+            ` ${winner} jäi voitolle, ${score}.`,
+          ])
+        : pickVariant(ctx.variantHistory, "period-end-tie", [
+            ` Tasan, ${score}.`,
+            ` Jakso päättyi tasan, ${score}.`,
+          ]);
       return `${ttsClean(rawText)}.${verdict}`;
     }
     return `${ttsClean(rawText)}.`;
@@ -312,7 +357,11 @@ export function subEventToSpeech(
   }
 
   if (rawText === "Ottelu alkoi") {
-    return `Ottelu alkoi! ${meta.home.shorthand} vastaan ${meta.away.shorthand}.`;
+    return pickVariant(ctx?.variantHistory, "match-start", [
+      `Ottelu alkoi! ${meta.home.shorthand} vastaan ${meta.away.shorthand}.`,
+      `Ottelu on alkanut. ${meta.home.shorthand} vastaan ${meta.away.shorthand}.`,
+      `Tilanne päivittyi: ottelu ${meta.home.shorthand} vastaan ${meta.away.shorthand} on käynnistynyt.`,
+    ]);
   }
   if (rawText === "Ottelu päättyi") {
     return formatMatchEnd(meta, ctx);
@@ -345,7 +394,12 @@ export function eventToSpeech(
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
-function formatRunScored(texts: EventTextElement[], meta: MatchMetadata, lookup: PlayerLookup): string {
+function formatRunScored(
+  texts: EventTextElement[],
+  meta: MatchMetadata,
+  lookup: PlayerLookup,
+  history?: Record<string, number>
+): string {
   const players: string[] = [];
   let eventText = "";
   for (const el of texts) {
@@ -357,21 +411,46 @@ function formatRunScored(texts: EventTextElement[], meta: MatchMetadata, lookup:
   }
   const batter = players[0] ?? "?";
   const runner = players[1] ?? "?";
-  if (eventText.includes("tuojana")) return `${batter} löi juoksun, tuojana ${runner}.`;
-  return `${batter} ${eventText}.`;
+  if (eventText.includes("tuojana")) {
+    return pickVariant(history, "run-scored", [
+      `${batter} löi juoksun, tuojana ${runner}.`,
+      `Tilastoihin juoksu pelaajalle ${batter}, tuojana ${runner}.`,
+      `${batter} sai juoksun kirjattua, tuojana ${runner}.`,
+    ]);
+  }
+  return pickVariant(history, "run-scored-other", [
+    `${batter} ${eventText}.`,
+    `Tilastoihin: ${batter} ${eventText}.`,
+  ]);
 }
 
-function formatKunnari(texts: EventTextElement[], _meta: MatchMetadata, lookup: PlayerLookup): string {
+function formatKunnari(
+  texts: EventTextElement[],
+  _meta: MatchMetadata,
+  lookup: PlayerLookup,
+  history?: Record<string, number>
+): string {
   for (const el of texts) {
     if (typeof el === "object" && el.type === "player") {
       const name = resolvePlayerName(lookup, el);
-      if (name) return `${name} löi kunnarin!`;
+      if (name) {
+        return pickVariant(history, "kunnari", [
+          `${name} löi kunnarin!`,
+          `Tilastoihin kunnari pelaajalle ${name}.`,
+          `${name} löi kunnarin, juoksu kirjautuu.`,
+        ]);
+      }
     }
   }
-  return "Kunnari!";
+  return pickVariant(history, "kunnari-anon", ["Kunnari!", "Kunnari kirjattu tilastoihin."]);
 }
 
-function formatRunBrought(texts: EventTextElement[], _meta: MatchMetadata, lookup: PlayerLookup): string {
+function formatRunBrought(
+  texts: EventTextElement[],
+  _meta: MatchMetadata,
+  lookup: PlayerLookup,
+  history?: Record<string, number>
+): string {
   let eventText = "";
   const players: string[] = [];
   for (const el of texts) {
@@ -382,7 +461,13 @@ function formatRunBrought(texts: EventTextElement[], _meta: MatchMetadata, looku
     }
   }
   const who = players[0] ?? "";
-  return who ? `${who} ${eventText}.` : `${eventText}.`;
+  if (who) {
+    return pickVariant(history, "run-brought", [
+      `${who} ${eventText}.`,
+      `Tilastoihin: ${who} ${eventText}.`,
+    ]);
+  }
+  return pickVariant(history, "run-brought-anon", [`${eventText}.`, `Tilastoihin: ${eventText}.`]);
 }
 
 function formatDrawOfChoice(texts: EventTextElement[], meta: MatchMetadata, lookup: PlayerLookup): string {
@@ -409,14 +494,26 @@ function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
       : [ctx.homePeriodsWon, ctx.awayPeriodsWon];
     const winner = homeVal > awayVal ? meta.home.shorthand : awayVal > homeVal ? meta.away.shorthand : null;
     const result = `${meta.home.shorthand} ${homeVal}, ${meta.away.shorthand} ${awayVal}`;
-    return winner
-      ? `Ottelu päättyi! ${winner} voitti, ${result}.`
-      : `Ottelu päättyi! Tasatilanne, ${result}.`;
+    if (winner) {
+      return pickVariant(ctx.variantHistory, "match-end-winner", [
+        `Ottelu päättyi! ${winner} voitti, ${result}.`,
+        `Ottelu on päättynyt. ${winner} vei voiton lukemin ${result}.`,
+        `Tilasto lopussa: ${winner} voitti, ${result}.`,
+      ]);
+    }
+    return pickVariant(ctx.variantHistory, "match-end-tie", [
+      `Ottelu päättyi! Tasatilanne, ${result}.`,
+      `Ottelu on päättynyt tasan, ${result}.`,
+      `Tilasto lopussa: tasatilanne, ${result}.`,
+    ]);
   }
   const result = meta.result;
   if (result) {
     const d = result.details;
-    return `Ottelu päättyi! ${meta.home.shorthand} ${d.periods_home}, ${meta.away.shorthand} ${d.periods_away}.`;
+    return pickVariant(undefined, "match-end-historical", [
+      `Ottelu päättyi! ${meta.home.shorthand} ${d.periods_home}, ${meta.away.shorthand} ${d.periods_away}.`,
+      `Ottelu on päättynyt. ${meta.home.shorthand} ${d.periods_home}, ${meta.away.shorthand} ${d.periods_away}.`,
+    ]);
   }
   return `Ottelu päättyi! ${meta.home.shorthand} vastaan ${meta.away.shorthand}.`;
 }

@@ -17,6 +17,11 @@ export interface WatcherState {
   finished: boolean;
   announcementCount: number;
   lastSummaryTime: number;
+  /** Last-used phrasing-variant index per announcement key, so consecutive
+   *  announcements of the same kind don't repeat the same wording. Reset on
+   *  restart, like announcementCount — variety doesn't need to survive a
+   *  process restart, only within one running match. */
+  variantHistory: Record<string, number>;
 }
 
 /** Runs scored in a given period (zero if the period hasn't started). */
@@ -70,6 +75,7 @@ export function loadState(filePath: string): WatcherState {
       finished: raw.finished ?? false,
       announcementCount: 0,
       lastSummaryTime: 0,
+      variantHistory: {},
     };
   } catch {
     return emptyState();
@@ -110,5 +116,6 @@ function emptyState(): WatcherState {
     finished: false,
     announcementCount: 0,
     lastSummaryTime: 0,
+    variantHistory: {},
   };
 }
