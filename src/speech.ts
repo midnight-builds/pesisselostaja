@@ -12,6 +12,11 @@ export interface SpeechContext {
   /** Periods won so far (best-of, including supervuoro / shoot-out). */
   homePeriodsWon: number;
   awayPeriodsWon: number;
+  /** Distinct periods with any recorded runs. Camp/tournament matches are
+   *  often a single jakso, where periodsWon is always 0-1 or 1-0 regardless
+   *  of margin — formatMatchEnd needs this to know when to report the actual
+   *  score instead. */
+  periodsPlayed: number;
   currentOuts: number;
   currentPeriod: number;
   currentBatTeamId: number | null;
@@ -395,10 +400,15 @@ function formatDrawOfChoice(texts: EventTextElement[], meta: MatchMetadata, look
 
 function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
   if (ctx) {
-    const winner = ctx.homePeriodsWon > ctx.awayPeriodsWon
-      ? meta.home.shorthand
-      : ctx.awayPeriodsWon > ctx.homePeriodsWon ? meta.away.shorthand : null;
-    const result = `${meta.home.shorthand} ${ctx.homePeriodsWon}, ${meta.away.shorthand} ${ctx.awayPeriodsWon}`;
+    // A single-jakso match (camps/tournaments) never reaches a second period,
+    // so periodsWon is always 0-1 or 1-0 regardless of margin — report the
+    // actual score instead. Multi-jakso matches are decided by periods won,
+    // not summed runs, so that stays the headline number there.
+    const [homeVal, awayVal] = ctx.periodsPlayed <= 1
+      ? [ctx.periodHomeRuns, ctx.periodAwayRuns]
+      : [ctx.homePeriodsWon, ctx.awayPeriodsWon];
+    const winner = homeVal > awayVal ? meta.home.shorthand : awayVal > homeVal ? meta.away.shorthand : null;
+    const result = `${meta.home.shorthand} ${homeVal}, ${meta.away.shorthand} ${awayVal}`;
     return winner
       ? `Ottelu päättyi! ${winner} voitti, ${result}.`
       : `Ottelu päättyi! Tasatilanne, ${result}.`;
