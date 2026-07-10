@@ -25,7 +25,7 @@ export async function fetchMatchMetadata(
   const base = opts.apiBase ?? DEFAULT_API_BASE;
   const key = opts.apiKey ?? DEFAULT_API_KEY;
   const url = `${base}/public/match?id=${matchId}&apikey=${key}`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error(`Match metadata fetch failed: ${res.status}`);
   return res.json() as Promise<MatchMetadata>;
 }
