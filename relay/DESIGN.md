@@ -120,26 +120,41 @@ ohjauskanavan, eikä poistaisi reaaliaikatahdituksen ongelmaa.
 ## Riskit ja avoimet kysymykset
 
 - **HLS-URL:n vanhenemiskäyttäytyminen** ei ole varmuudella tiedossa —
-  suunnitelma olettaa pahimman (voi vaihtua kesken ottelun); vahvistettava
-  oikealla monituntisella testistriimillä.
+  suunnitelma olettaa pahimman (voi vaihtua kesken ottelun); 5 min testiajo
+  (2026-07-10, ottelu 143277) ei osunut URL-rotaatioon (15 min kynnys ei
+  ehtinyt täyttyä) — vahvistettava vielä pidemmällä testistriimillä.
+- **`-reconnect`/`-reconnect_streamed`/`-reconnect_at_eof`-liput jumittivat
+  HLS-luvun kokonaan** googlevideon m3u8-lähteen kanssa (löytyi 2026-07-10
+  ensimmäisessä live-testissä: ffmpeg söi CPU:ta muttei tuottanut mitään).
+  Poistettu — `hls`-demukserilla on jo oma segmenttikohtainen
+  reconnect-logiikkansa, ja sama testi osoitti sen selviävän itse lyhyestä
+  TLS-katkosta ilman näitä lippuja.
 - **YouTuben ingest voi olla nirso keyframe-välistä** `-c:v copy`:n kanssa
   (alkuperäinen striimaaja määrää GOP-rakenteen) — tarkista YouTube Studion
-  ingest-terveys ensimmäisessä live-testissä.
-- **FIFO:n 20 ms -tahditus** on suunnitelman testaamattomin osa: Noden
-  GC-tauot tai CPU-kilpailu voivat aiheuttaa kuuluvia häiriöitä pitkässä
-  ajossa — vaatii tuntien soak-testin ennen oikeaa lähetystä.
+  ingest-terveys ensimmäisessä oikeassa RTMP-live-testissä (ei vielä tehty,
+  koska toista YouTube-lähetystä ei ole ollut käytettävissä).
+- **FIFO:n 20 ms -tahditus**: 5 min testiajo tuotti jatkuvan, validin
+  mp4:n (98 Mt, kesto täsmäsi ajoaikaan) ilman havaittuja katkoja, mutta
+  ääntä ei kuunneltu läpi — pidempi soak-testi ja kuuntelu suositeltavaa
+  ennen oikeaa lähetystä.
 - **Resurssit**: `-c:v copy` on kevyt, mutta HLS-pull + RTMP-push + piper
   vievät muistia/verkkoa jaetulla koneella — seuraa RSS/CPU:ta live-testeissä.
+- **`fetchLiveEvents`/`fetchMatchMetadata` ilman aikakatkaisua** (`src/api.ts`)
+  aiheutti live-testissä 4 min 9 s:n selostuskatkon (hetkellinen verkkohikka
+  jätti `fetch()`-kutsun roikkumaan rajattomasti), minkä jälkeen kaikki sinä
+  aikana kertyneet tapahtumat purskahtivat ulos kerralla — kuulosti
+  satunnaiselta selostukselta. Korjattu 2026-07-10: molemmat käyttävät nyt
+  samaa 8 s `fetchWithTimeout`-apuria mitä `fetchLiveMatches` jo käytti.
 
 ## Välietapit ja tila
 
 | # | Sisältö | Tila |
 |---|---|---|
-| M0 | Käsin ajettu yt-dlp/piper/ffmpeg-savutesti | piper+äänimalli+resample testattu ✅; yt-dlp+ffmpeg-osuus vaatii oikean livestriimin |
+| M0 | Käsin ajettu yt-dlp/piper/ffmpeg-savutesti | ✅ (2026-07-10, oikea livestriimi, ottelu 143277) |
 | M1 | Runko: config, logitus, systemd | ✅ |
-| M2 | Passthrough pull/republish valvottuna | vaatii testistriimin |
-| M3 | FIFO-putkitus testiäänellä | koodi + yksikkötestit ✅; soak-testi tekemättä |
-| M4 | Selostussilmukka dry-runilla | koodi ✅; ajo oikealla ottelulla tekemättä |
-| M5 | Täysi päästä-päähän-integraatio | vaatii oikean ottelun + molemmat lähetykset |
-| M6 | Sietokykytestaus (kaatumiset, URL-rotaatio, RTMP-katkot) | tekemättä |
+| M2 | Passthrough pull/republish valvottuna | ✅ (2026-07-10, `--record-file`-tila, 5 min, löytyi+korjattiin reconnect-lippu-bugi) |
+| M3 | FIFO-putkitus testiäänellä | koodi + yksikkötestit ✅; pidempi soak-testi + kuuntelu tekemättä |
+| M4 | Selostussilmukka dry-runilla | ✅ (dry-run + oikea synteesi molemmat ajettu oikealla ottelulla) |
+| M5 | Täysi päästä-päähän-integraatio | osittain: pull+mix+paikallistallennus testattu oikealla ottelulla (M2); RTMP-julkaisu toiseen YouTube-lähetykseen vielä testaamatta (ei toista lähetystä käytettävissä) |
+| M6 | Sietokykytestaus (kaatumiset, URL-rotaatio, RTMP-katkot) | tekemättä; yksi verkkokatko selvisi testissä itsestään (ks. riskit) |
 | M7 | Dokumentaatio | ✅ (README.md + tämä tiedosto) |
