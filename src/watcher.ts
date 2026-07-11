@@ -291,12 +291,18 @@ export class WatcherController {
   ): Promise<void> {
     for (const event of events) {
       // Palot kuuluvat vain sisävuorossa olevalle joukkueelle ja nollautuvat aina
-      // kun vuoro vaihtuu (uusi sisävuoro aloittaa nollasta).
-      if (event.team != null && event.team !== state.currentBatTeamId) {
-        state.currentBatTeamId = event.team;
-        state.currentOuts = 0;
+      // kun vuoro vaihtuu (uusi sisävuoro aloittaa nollasta). Only act on this
+      // for events that are new this poll — the endpoint always returns full
+      // history, so re-applying it to already-processed events on every poll
+      // lets a single reordered/corrected historical entry falsely reset
+      // currentOuts mid-turn (see relay/HANDOFF.md).
+      if (!isEventFullyProcessed(state.seenFingerprints, event)) {
+        if (event.team != null && event.team !== state.currentBatTeamId) {
+          state.currentBatTeamId = event.team;
+          state.currentOuts = 0;
+        }
+        if (event.period > 0) state.currentPeriod = event.period;
       }
-      if (event.period > 0) state.currentPeriod = event.period;
 
       for (let i = 0; i < event.events.length; i++) {
         const sub = event.events[i];
