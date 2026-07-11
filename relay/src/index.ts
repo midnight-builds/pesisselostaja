@@ -4,7 +4,7 @@ import { parseRelayConfig } from "./config.js";
 import { log } from "./log.js";
 import { CommentaryLoop } from "./commentaryLoop.js";
 import { PiperTts } from "./piperTts.js";
-import { FfmpegMixer } from "./ffmpegMixer.js";
+import { FfmpegMixer, SourceExhaustedError } from "./ffmpegMixer.js";
 
 async function main(): Promise<void> {
   const config = parseRelayConfig();
@@ -21,22 +21,6 @@ async function main(): Promise<void> {
   const piper = new PiperTts({ piperBin: config.piperBin, voice: config.voice, voicesDir });
 
   let mixer: FfmpegMixer | null = null;
-  if (!config.dryRun) {
-    const fifoPath = `${config.runDir}relay-${config.matchId}.pcm`;
-    mixer = new FfmpegMixer({
-      youtubeUrl: config.youtubeUrl,
-      rtmpUrl: config.rtmpUrl,
-      streamKey: config.streamKey,
-      narrationGain: config.narrationGain,
-      fifoPath,
-      recordFile: config.recordFile,
-    });
-    mixer.start().catch((err) => {
-      log(`ffmpeg-valvoja päättyi virheeseen: ${err instanceof Error ? err.message : err}`);
-    });
-  } else {
-    log("Dry-run: ffmpegiä/RTMP:ää ei käynnistetä, selostus vain lokitetaan.");
-  }
 
   const loop = new CommentaryLoop(config, async (spoken, readable) => {
     if (config.dryRun || !mixer) {
@@ -58,6 +42,28 @@ async function main(): Promise<void> {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+
+  if (!config.dryRun) {
+    const fifoPath = `${config.runDir}relay-${config.matchId}.pcm`;
+    mixer = new FfmpegMixer({
+      youtubeUrl: config.youtubeUrl,
+      rtmpUrl: config.rtmpUrl,
+      streamKey: config.streamKey,
+      narrationGain: config.narrationGain,
+      urlRefreshMs: config.urlRefreshMs,
+      fifoPath,
+      recordFile: config.recordFile,
+    });
+    mixer.start().catch((err) => {
+      log(`ffmpeg-valvoja päättyi virheeseen: ${err instanceof Error ? err.message : err}`);
+      if (err instanceof SourceExhaustedError) {
+        log("Alkuperäinen lähde ei palautunut — sammutetaan koko relay.");
+        shutdown();
+      }
+    });
+  } else {
+    log("Dry-run: ffmpegiä/RTMP:ää ei käynnistetä, selostus vain lokitetaan.");
+  }
 
   await loop.run();
 }

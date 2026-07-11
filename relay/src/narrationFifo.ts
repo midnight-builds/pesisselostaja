@@ -103,6 +103,13 @@ export class NarrationFifo {
     this.queue.enqueue(pcm);
   }
 
+  /** Clips still queued (not yet handed to the write stream). Used to let a
+   *  scheduled ffmpeg respawn wait for a natural gap instead of severing
+   *  mid-sentence — see FfmpegMixer's refresh handling. */
+  get pendingClips(): number {
+    return this.queue.pendingClips;
+  }
+
   /** Tears down the current pipe's I/O without touching the queue, so
    *  pending narration survives a respawn. Caller must prepare()+open()
    *  again around the fresh ffmpeg process. */

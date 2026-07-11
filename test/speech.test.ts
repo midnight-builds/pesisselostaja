@@ -2,9 +2,17 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { eventToSpeech, subEventToSpeech, buildPlayerLookup, eventFingerprint, type SpeechContext } from "../src/speech.js";
+import {
+  eventToSpeech,
+  subEventToSpeech,
+  buildPlayerLookup,
+  eventFingerprint,
+  isEventFullyProcessed,
+  isOutSubEvent,
+  type SpeechContext,
+} from "../src/speech.js";
 import { preventOrdinalReading } from "../src/pronunciation.js";
-import type { LiveEventsResponse, MatchMetadata, LiveEvent } from "../src/types.js";
+import type { LiveEventsResponse, MatchMetadata, LiveEvent, SubEvent } from "../src/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixturesDir = join(__dirname, "fixtures");
@@ -167,6 +175,79 @@ describe("eventFingerprint", () => {
     const fp0 = eventFingerprint(event, 0);
     const fp1 = eventFingerprint(event, 1); // non-existent sub-event
     expect(fp0).not.toBe(fp1);
+  });
+});
+
+describe("isEventFullyProcessed / palo-counter stability across polls", () => {
+  const paloSub = (): SubEvent => ({
+    texts: [{ type: "event", text: "Palo", base: null }, { type: "stat", out: 1 }],
+  });
+  const batterSub = (team: number): SubEvent => ({
+    texts: ["Lyöntivuorossa", { "settling-at-bat": true, team, type: "player", number: 2 }],
+  });
+
+  function makeEvent(id: number, team: number, sub: SubEvent): LiveEvent {
+    return {
+      id, groupType: "x", period: 0, inning: 0, batTurn: 1, team, hTeam: team,
+      batter: null, pairIndex: null, hitNumber: null, hit: null,
+      events: [sub], timestamp: id, updated: null,
+    };
+  }
+
+  it("reports an event as processed only once all its sub-events are fingerprinted", () => {
+    const seen = new Set<string>();
+    const event = makeEvent(1, 100, paloSub());
+    expect(isEventFullyProcessed(seen, event)).toBe(false);
+    seen.add(eventFingerprint(event, 0));
+    expect(isEventFullyProcessed(seen, event)).toBe(true);
+  });
+
+  it("keeps counting outs 1,2,3 across repeated full-history polls, matching the palolaskuri bug seen live on match 143280 (relay/HANDOFF.md)", () => {
+    // The live-events endpoint always returns the full match history, so
+    // real callers (watcher.ts / relay's commentaryLoop.ts) re-walk this
+    // whole array on every poll. Live, a since-corrected/reordered historical
+    // entry can carry a `team` field that no longer matches what was
+    // originally seen for it. This reducer mirrors the production
+    // team/outs bookkeeping to prove that gating it on isEventFullyProcessed
+    // keeps the count monotonic (1, 2, 3) instead of resetting mid-turn.
+    const seenFingerprints = new Set<string>();
+    let currentBatTeamId: number | null = 999;
+    let currentOuts = 0;
+
+    function processPoll(events: LiveEvent[]): void {
+      for (const event of events) {
+        if (!isEventFullyProcessed(seenFingerprints, event)) {
+          if (event.team != null && event.team !== currentBatTeamId) {
+            currentBatTeamId = event.team;
+            currentOuts = 0;
+          }
+        }
+        for (let i = 0; i < event.events.length; i++) {
+          const fp = eventFingerprint(event, i);
+          const alreadySeen = seenFingerprints.has(fp);
+          seenFingerprints.add(fp);
+          if (alreadySeen) continue;
+          if (isOutSubEvent(event.events[i])) currentOuts++;
+        }
+      }
+    }
+
+    const out1 = makeEvent(1, 100, paloSub());
+    const out2 = makeEvent(2, 100, paloSub());
+    const batterChange = makeEvent(3, 100, batterSub(100));
+    const out3 = makeEvent(4, 100, paloSub());
+
+    processPoll([out1, out2, batterChange]);
+    expect(currentOuts).toBe(2);
+
+    // Next poll re-fetches the *entire* history again, and the already-seen
+    // batter-change event now carries a different `team` value (its content/
+    // fingerprint is unchanged, so it's still recognized as already seen).
+    const correctedBatterChange = { ...batterChange, team: 200 };
+    processPoll([out1, out2, correctedBatterChange, out3]);
+
+    expect(currentOuts).toBe(3);
+    expect(currentBatTeamId).toBe(100);
   });
 });
 

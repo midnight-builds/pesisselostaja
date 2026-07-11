@@ -7,6 +7,7 @@ import {
   isMatchEndSubEvent,
   runValueOfSubEvent,
   eventFingerprint,
+  isEventFullyProcessed,
   formatStartupSpeech,
   formatBatTurnChangeSpeech,
   formatSituationSummary,
@@ -136,11 +137,18 @@ export class CommentaryLoop {
     silent: boolean
   ): Promise<void> {
     for (const event of events) {
-      if (event.team != null && event.team !== this.state.currentBatTeamId) {
-        this.state.currentBatTeamId = event.team;
-        this.state.currentOuts = 0;
+      // Only act on team/outs bookkeeping for events new this poll — the
+      // endpoint always returns full history, so re-applying this to
+      // already-processed events on every poll lets a single
+      // reordered/corrected historical entry falsely reset currentOuts
+      // mid-turn (see relay/HANDOFF.md, "palolaskuri"-bugi).
+      if (!isEventFullyProcessed(this.state.seenFingerprints, event)) {
+        if (event.team != null && event.team !== this.state.currentBatTeamId) {
+          this.state.currentBatTeamId = event.team;
+          this.state.currentOuts = 0;
+        }
+        if (event.period > 0) this.state.currentPeriod = event.period;
       }
-      if (event.period > 0) this.state.currentPeriod = event.period;
 
       for (let i = 0; i < event.events.length; i++) {
         const sub = event.events[i];

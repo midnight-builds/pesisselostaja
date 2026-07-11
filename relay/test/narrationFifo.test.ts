@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { NarrationQueue } from "../src/narrationFifo.js";
+import { NarrationQueue, NarrationFifo } from "../src/narrationFifo.js";
 
 const FRAME_BYTES = 8;
 
@@ -37,5 +37,16 @@ describe("NarrationQueue", () => {
     q.enqueue(Buffer.from([2, 2, 2, 2, 2, 2, 2, 2]));
     expect(q.nextFrame()[0]).toBe(1);
     expect(q.nextFrame()[0]).toBe(2);
+  });
+});
+
+describe("NarrationFifo.pendingClips", () => {
+  it("reports queued clips without requiring an open pipe, so a scheduled ffmpeg refresh can wait for a narration gap", () => {
+    const fifo = new NarrationFifo("/tmp/unused-for-this-test.pcm");
+    expect(fifo.pendingClips).toBe(0);
+    fifo.enqueue(Buffer.from([1, 2, 3, 4]));
+    expect(fifo.pendingClips).toBe(1);
+    fifo.enqueue(Buffer.from([5, 6, 7, 8]));
+    expect(fifo.pendingClips).toBe(2);
   });
 });

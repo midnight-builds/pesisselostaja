@@ -9,6 +9,7 @@ export interface RelayConfig {
   piperBin: string;
   pollInterval: number;
   narrationGain: number;
+  urlRefreshMs: number;
   dryRun: boolean;
   recordFile?: string;
   apiKey: string;
@@ -38,6 +39,7 @@ export function parseRelayConfig(): RelayConfig {
       "piper-bin": { type: "string" },
       "poll-interval": { type: "string" },
       "narration-gain": { type: "string" },
+      "url-refresh-ms": { type: "string" },
       "dry-run": { type: "boolean", default: false },
       "record-file": { type: "string" },
     },
@@ -71,6 +73,7 @@ export function parseRelayConfig(): RelayConfig {
   const piperBin = values["piper-bin"] ?? process.env.RELAY_PIPER_BIN ?? "piper";
   const pollInterval = parseInt(values["poll-interval"] ?? process.env.RELAY_POLL_INTERVAL ?? "6000", 10);
   const narrationGain = parseFloat(values["narration-gain"] ?? process.env.RELAY_NARRATION_GAIN ?? "1.3");
+  const urlRefreshMs = parseInt(values["url-refresh-ms"] ?? process.env.RELAY_URL_REFRESH_MS ?? String(15 * 60 * 1000), 10);
   const apiKey = process.env.PESISTULOKSET_API_KEY ?? "wRX0tTke3DZ8RLKAMntjZ81LwgNQuSN9";
   const apiBase = process.env.PESISTULOKSET_API_BASE ?? "https://api.pesistulokset.fi/api/v1";
 
@@ -89,6 +92,7 @@ export function parseRelayConfig(): RelayConfig {
     piperBin,
     pollInterval,
     narrationGain,
+    urlRefreshMs,
     dryRun,
     recordFile,
     apiKey,

@@ -12,6 +12,10 @@ export interface FfmpegMixerOptions {
   /** Force a respawn on this cadence even if ffmpeg looks healthy, so a
    *  rotated source URL gets picked up (default 15 min). */
   urlRefreshMs?: number;
+  /** Give up and stop retrying after this many milliseconds of unbroken
+   *  start-up failures — protects against retrying forever once the source
+   *  broadcast has genuinely ended (default 5 min). */
+  maxFailureWindowMs?: number;
   /** Local-file test mode: write the mixed result to this path instead of
    *  pushing RTMP, so the mix can be reviewed before a second broadcast
    *  exists. Takes precedence over rtmpUrl/streamKey when set. */
@@ -58,6 +62,12 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Thrown once resolveSourceUrl/ffmpeg-start has failed continuously for too
+ *  long — signals the original broadcast is gone for good (not a transient
+ *  network blip), so the caller should stop retrying and shut the relay down
+ *  instead of hammering yt-dlp every 30s forever. */
+export class SourceExhaustedError extends Error {}
+
 /** Supervises the long-running ffmpeg pull+mix+republish process: resolves a
  *  fresh source URL and respawns with exponential backoff whenever ffmpeg
  *  exits (crash, source URL rotation, RTMP drop — ffmpeg has no automatic
@@ -68,9 +78,14 @@ export class FfmpegMixer {
   private stopped = false;
   private backoffMs = 1000;
   private refreshTimer: NodeJS.Timeout | null = null;
+  /** When the current unbroken run of start-up failures began, or null if
+   *  the last attempt succeeded. Used to give up after maxFailureWindowMs. */
+  private failingSince: number | null = null;
+  private readonly maxFailureWindowMs: number;
 
   constructor(private opts: FfmpegMixerOptions) {
     this.fifo = new NarrationFifo(opts.fifoPath);
+    this.maxFailureWindowMs = opts.maxFailureWindowMs ?? 5 * 60 * 1000;
   }
 
   enqueueNarration(pcm: Buffer): void {
@@ -82,8 +97,16 @@ export class FfmpegMixer {
     while (!this.stopped) {
       try {
         await this.spawnOnce();
+        this.failingSince = null;
       } catch (err) {
         log(`ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
+        if (this.failingSince === null) this.failingSince = Date.now();
+        if (Date.now() - this.failingSince > this.maxFailureWindowMs) {
+          this.stopped = true;
+          throw new SourceExhaustedError(
+            `Lähde ei ole vastannut ${Math.round(this.maxFailureWindowMs / 60000)} minuuttiin — luovutetaan.`
+          );
+        }
       }
       if (this.stopped) break;
       log(`Uudelleenyritys ${this.backoffMs}ms kuluttua…`);
@@ -138,9 +161,9 @@ export class FfmpegMixer {
     }
 
     const refreshMs = this.opts.urlRefreshMs ?? 15 * 60 * 1000;
+    const childForRefresh = this.child;
     this.refreshTimer = setTimeout(() => {
-      log("Määräaikainen URL-päivitys — käynnistetään ffmpeg uudelleen.");
-      this.child?.kill("SIGTERM");
+      void this.killForRefresh(childForRefresh);
     }, refreshMs);
 
     const result = await childDone;
@@ -150,5 +173,25 @@ export class FfmpegMixer {
     if (ranMs > 60000) this.backoffMs = 1000; // reset backoff after a healthy run
     const detail = result.error ? result.error.message : `code=${result.code}, signal=${result.signal}`;
     log(`ffmpeg päättyi (${detail}), ajoaika ${Math.round(ranMs / 1000)}s`);
+  }
+
+  /** Waits for a natural gap in the narration before killing ffmpeg for a
+   *  scheduled URL refresh, so a respawn doesn't cut off a clip mid-word.
+   *  ffmpeg crashes/RTMP drops still die immediately (unavoidable) — this
+   *  only guards the respawn we schedule ourselves. Bounded so a refresh
+   *  can't be postponed forever by back-to-back announcements. */
+  private async killForRefresh(childToKill: ChildProcess | null): Promise<void> {
+    if (!childToKill || childToKill !== this.child) return;
+    const deadline = Date.now() + 10000;
+    while (this.fifo.pendingClips > 0 && Date.now() < deadline && !this.stopped && this.child === childToKill) {
+      await delay(200);
+    }
+    if (this.stopped || this.child !== childToKill) return;
+    // Give ffmpeg a moment to actually drain what's already sitting in the
+    // pipe buffer before we pull it out from under it.
+    await delay(500);
+    if (this.stopped || this.child !== childToKill) return;
+    log("Määräaikainen URL-päivitys — käynnistetään ffmpeg uudelleen.");
+    childToKill.kill("SIGTERM");
   }
 }
