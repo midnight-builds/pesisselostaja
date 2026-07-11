@@ -523,3 +523,15 @@ export function eventFingerprint(event: LiveEvent, subIndex: number): string {
   if (!sub) return `${event.id}:${subIndex}`;
   return `${event.id}:${JSON.stringify(sub.texts)}`;
 }
+
+/** True if every sub-event of this event was already fingerprinted in an
+ *  earlier poll. The live-events endpoint always returns the full match
+ *  history (never windowed), so callers re-walk the entire array on every
+ *  poll — team/outs bookkeeping must only react to events that are new this
+ *  round, or a single stale/reordered historical entry (API corrections,
+ *  eventual consistency) can spuriously reset currentOuts mid-turn even
+ *  though nothing about the real game state changed. */
+export function isEventFullyProcessed(seenFingerprints: Set<string>, event: LiveEvent): boolean {
+  if (event.events.length === 0) return false;
+  return event.events.every((_, i) => seenFingerprints.has(eventFingerprint(event, i)));
+}
