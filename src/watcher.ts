@@ -7,6 +7,7 @@ import {
   isMatchEndSubEvent,
   runValueOfSubEvent,
   eventFingerprint,
+  isEventFullyProcessed,
   formatStartupSpeech,
   formatBatTurnChangeSpeech,
   formatSituationSummary,
