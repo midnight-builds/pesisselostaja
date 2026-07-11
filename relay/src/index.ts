@@ -30,6 +30,7 @@ async function main(): Promise<void> {
       narrationGain: config.narrationGain,
       fifoPath,
       recordFile: config.recordFile,
+      urlRefreshMs: config.urlRefreshMs,
     });
     mixer.start().catch((err) => {
       log(`ffmpeg-valvoja päättyi virheeseen: ${err instanceof Error ? err.message : err}`);
