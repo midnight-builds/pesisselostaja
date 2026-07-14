@@ -1,16 +1,14 @@
-// Node file-based persistence adapter for v2's pronunciation rules.
-//
-// The substitution/ordinal logic is canonical in v2 and reused verbatim
-// (applyPronunciations/preventOrdinalReading/sanitize). v2's own load/save go
-// to localStorage; the relay reads its rules from a JSON file instead.
+// File adapter for core's pronunciation rules (PronunciationStore port):
+// the relay reads its rules from a JSON file. The substitution/ordinal logic
+// lives in @pesisselostaja/core.
 import { existsSync, readFileSync } from "node:fs";
-import { DEFAULT_PRONUNCIATIONS, sanitize, type PronunciationRule } from "../../v2/src/pronunciation.js";
+import { DEFAULT_PRONUNCIATIONS, sanitize, type PronunciationRule } from "@pesisselostaja/core";
 
 export {
   applyPronunciations,
   preventOrdinalReading,
   type PronunciationRule,
-} from "../../v2/src/pronunciation.js";
+} from "@pesisselostaja/core";
 
 export function loadPronunciations(filePath: string): PronunciationRule[] {
   if (!existsSync(filePath)) return [...DEFAULT_PRONUNCIATIONS];

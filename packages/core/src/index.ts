@@ -6,3 +6,4 @@ export * from "./types.js";
 export * from "./api.js";
 export * from "./speech.js";
 export * from "./state.js";
+export * from "./pronunciation.js";
