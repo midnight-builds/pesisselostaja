@@ -1,0 +1,22 @@
+{
+  "name": "@pesisselostaja/broadcast",
+  "version": "1.0.0",
+  "description": "YouTube broadcast pipeline: pulls a live stream, mixes Piper-synthesized pesäpallo narration on top, republishes over RTMP",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "simulate": "tsx src/simulate.ts",
+    "flap-test": "tsx src/flapTest.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/ test/"
+  },
+  "dependencies": {
+    "@pesisselostaja/core": "*",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}

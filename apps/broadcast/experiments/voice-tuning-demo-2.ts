@@ -10,7 +10,7 @@ import { join } from "node:path";
  *      audible difference, or does the range need widening?
  *  Uses fictional names/teams (not the real match 143267 lines from the
  *  first demo) since this script is committed to a public repo.
- *  Run: npx tsx relay/experiments/voice-tuning-demo-2.ts */
+ *  Run: npx tsx apps/broadcast/experiments/voice-tuning-demo-2.ts */
 
 const VOICES_DIR = new URL("../voices/", import.meta.url).pathname;
 const MODEL_PATH = join(VOICES_DIR, "fi_FI-harri-medium.onnx");

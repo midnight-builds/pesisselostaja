@@ -7,6 +7,6 @@ debug.log
 .claude/
 .claude-remote-control.log
 .claude-remote-control.pid
-relay/run/
-relay/.env.relay
-relay/voices/
+apps/broadcast/run/
+apps/broadcast/.env.relay
+apps/broadcast/voices/

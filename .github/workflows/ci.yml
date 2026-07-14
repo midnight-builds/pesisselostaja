@@ -56,8 +56,8 @@ jobs:
       - name: Build
         run: npm run build -w @pesisselostaja/web
 
-  relay:
-    name: Relay (YouTube dubbing)
+  broadcast:
+    name: Broadcast (YouTube dubbing)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,7 +71,7 @@ jobs:
         run: npm ci
 
       - name: Lint
-        run: npm run relay:lint
+        run: npm run lint -w @pesisselostaja/broadcast
 
       - name: Typecheck
-        run: npm run relay:typecheck
+        run: npm run typecheck -w @pesisselostaja/broadcast

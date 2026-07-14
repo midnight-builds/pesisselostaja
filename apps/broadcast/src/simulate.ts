@@ -255,7 +255,7 @@ async function main(): Promise<void> {
   await mixAudio(videoPath, pcmPath, outPath, narrationGain);
 
   log(`Valmis: ${outPath}`);
-  log("Muista poistaa relay/run/simulate-*/ kun olet katsonut tuloksen — video+seos vievät tilaa.");
+  log("Muista poistaa apps/broadcast/run/simulate-*/ kun olet katsonut tuloksen — video+seos vievät tilaa.");
 }
 
 main().catch((err) => {

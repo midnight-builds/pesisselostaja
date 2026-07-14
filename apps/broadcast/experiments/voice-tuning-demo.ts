@@ -5,8 +5,8 @@ import { join } from "node:path";
 /** One-off listening demo for tuning Piper's noise_w/length_scale, built from
  *  real narration lines out of match 143267 (Ikaalisten Tarmo - IPV). Not
  *  wired into any npm script — run directly with:
- *    npx tsx relay/experiments/voice-tuning-demo.ts
- *  See relay/experiments/voice-tuning-demo.md for what to listen for. */
+ *    npx tsx apps/broadcast/experiments/voice-tuning-demo.ts
+ *  See apps/broadcast/experiments/voice-tuning-demo.md for what to listen for. */
 
 const VOICES_DIR = new URL("../voices/", import.meta.url).pathname;
 const MODEL_PATH = join(VOICES_DIR, "fi_FI-harri-medium.onnx");

@@ -89,9 +89,12 @@ export function parseRelayConfig(): RelayConfig {
   const runDir = new URL("../run/", import.meta.url).pathname;
   const stateFile = `${runDir}.state-${matchId}.json`;
   const controlFile = `${runDir}.control-${matchId}.json`;
-  // Same file the main app's web UI writes to, so pronunciation overrides
-  // configured there also apply to this relay's synthesized narration.
-  const pronunciationsFile = process.env.PRONUNCIATIONS_FILE ?? ".pronunciations.json";
+  // Repo-root file (historically written by the v1 server's web UI) so
+  // existing pronunciation overrides keep applying regardless of the cwd the
+  // broadcast is launched from (systemd uses repo root, npm workspace scripts
+  // use apps/broadcast/).
+  const pronunciationsFile =
+    process.env.PRONUNCIATIONS_FILE ?? new URL("../../../.pronunciations.json", import.meta.url).pathname;
 
   return {
     matchId,

@@ -39,7 +39,7 @@ kiintiöt) eikä tarpeen, kun lähetyksiä luodaan yksi per ottelu käsin.
 
 ### Oma hakemisto + oma palvelu samassa repossa
 
-`relay/` on oma ylätason hakemisto (kuten `v2/`), **ei** `src/`:n alla:
+`apps/broadcast/` on oma ylätason hakemisto (kuten `v2/`), **ei** `src/`:n alla:
 
 - `src/`-muutokset laukaisevat auto-build+commit-hookin — relay pysyy sen
   ulkopuolella tarkoituksella.
@@ -48,18 +48,18 @@ kiintiöt) eikä tarpeen, kun lähetyksiä luodaan yksi per ottelu käsin.
   kaatuminen ei koskaan vaikuta olemassa olevaan Pesisselostaja-palveluun.
 - Ei uusia npm-riippuvuuksia: kaikki ulkoinen (`ffmpeg`, `yt-dlp`, `piper`,
   `mkfifo`) on system-binäärejä child_processin kautta. Ajo `tsx`:llä suoraan
-  (ei build-askelta); `relay/tsconfig.json` on erillinen noEmit-projekti
+  (ei build-askelta); `apps/broadcast/tsconfig.json` on erillinen noEmit-projekti
   tyyppitarkistukseen, koska juuren tsc ei emitoi yli `rootDir: "src"` -rajan.
 
 ### Selostuslogiikan uudelleenkäyttö importilla, ei kopiolla
 
-`relay/src/commentaryLoop.ts` importtaa suoraan **v2:n** (kanoninen lähde;
-`src/` = v1 on kuollutta koodia) puhtaat funktiot: `subEventToSpeech`/
+`apps/broadcast/src/commentaryLoop.ts` importtaa jaetusta
+**@pesisselostaja/core**-paketista (kanoninen lähde) puhtaat funktiot: `subEventToSpeech`/
 `format*Speech` sekä palojen laskenta `recomputeCurrentOutsKeyed`/
-`outsThroughSubEvent` (`v2/src/speech.ts`), pisteet (`v2/src/state.ts`:n puhtaat
-helperit), API-haut (`v2/src/api.ts`). Persistointi on relay-lokaali, koska
-v2:n omat `loadState`/`saveState`/`loadPronunciations` ovat selaimen
-localStorage-pohjaisia: `relay/src/nodeState.ts` ja `nodePronunciation.ts`
+`outsThroughSubEvent` (`packages/core/src/speech.ts`), pisteet (`packages/core/src/state.ts`:n puhtaat
+helperit), API-haut (`packages/core/src/api.ts`). Persistointi on broadcast-lokaali, koska
+web-sovelluksen omat `loadState`/`saveState`/`loadPronunciations` ovat selaimen
+localStorage-pohjaisia: `apps/broadcast/src/nodeState.ts` ja `nodePronunciation.ts`
 uudelleenkäyttävät v2:n puhtaat helperit mutta lukevat/kirjoittavat tiedostoon
 (`.state-<id>.json`, `.pronunciations.json`).
 `WatcherController`ia (v2 `Watcher`) ei uudelleenkäytetä (se on sidottu

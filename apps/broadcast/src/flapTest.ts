@@ -10,7 +10,7 @@ const CHANNELS = 2;
 
 /** Reproduces ottelu 144203's observed cadence: the frozen source resolves
  *  fine and ffmpeg reads to a real EOF at ~33s every time (see
- *  relay/HANDOFF.md "Lähteen flappaus"). One session is deliberately longer
+ *  apps/broadcast/HANDOFF.md "Lähteen flappaus"). One session is deliberately longer
  *  (90s) so, if narration only ever recovers on it, that isolates hypothesis
  *  (c) — amix dropping the narration input on short sessions specifically —
  *  from (a)/(b), which predict failure regardless of session length. */
@@ -301,7 +301,7 @@ async function main(): Promise<void> {
   log(`Raportti: ${reportPath}`);
   log(`Nauhoitteet: ${sessions.map((s) => indexedRecordPath(recordFileBase, s.index)).join(", ")}`);
   log(verdict);
-  log("Muista poistaa relay/run/flap-test/ kun tulos on käsitelty — nauhoitteet vievät tilaa.");
+  log("Muista poistaa apps/broadcast/run/flap-test/ kun tulos on käsitelty — nauhoitteet vievät tilaa.");
 }
 
 main().catch((err) => {

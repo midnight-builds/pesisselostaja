@@ -15,7 +15,7 @@ HTTP/HLS-specific and meaningless against a file). It's a function rather
 than a static string so a harness can vary the source per respawn (e.g. one
 deliberately longer session, to separate "amix drops narration on short
 sessions" from "narration never reconnects at all" — see
-`relay/src/flapTest.ts`).
+`apps/broadcast/src/flapTest.ts`).
 
 **Trade-off accepted:** this permanently widens `FfmpegMixer`'s public
 surface with an option that must never be set in production. We considered

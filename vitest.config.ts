@@ -4,7 +4,6 @@ export default defineConfig({
   test: {
     include: [
       "test/**/*.test.ts",
-      "relay/test/**/*.test.ts",
       "packages/*/test/**/*.test.ts",
       "apps/*/test/**/*.test.ts",
     ],

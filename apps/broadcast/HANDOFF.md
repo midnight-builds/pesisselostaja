@@ -7,7 +7,7 @@
 >   commit `28c772c`. Relay lukee nyt `v2/src`:ää (kanoninen), ei kuollutta
 >   `src/` (v1) -koodia; v2:n koordinaattipohjainen `eventFingerprint` +
 >   `recomputeCurrentOutsKeyed`/`outsThroughSubEvent` hoitavat palot oikein.
-> - **2 (formatScore väärä järjestys)**: commit `7e9e039` (`v2/src/speech.ts`).
+> - **2 (formatScore väärä järjestys)**: commit `7e9e039` (`packages/core/src/speech.ts`).
 > - **3, 4, 5 (relay-ottelu-skill)**: `.claude/skills/relay-ottelu/SKILL.md`
 >   (gitignoressa, lokaali — muutokset työtiedostossa).
 > - **6 (ffmpeg HLS-keepalive-lokitulva)**: commit `a13687e`.
@@ -144,7 +144,7 @@ hostille → epäonnistuu, avaa uuden. Vaikutus: **ei toiminnallista haittaa**
 respawneja, selostus miksautui normaalisti). Ongelma on vain se että
 lokitulva hukuttaa alleen oikeat Selostus:/Palo:/Sydänääni-rivit ja
 vaikeuttaa seurantaa. Korjaus: lisää HLS-inputin optioihin
-`relay/src/ffmpegMixer.ts` `buildFfmpegArgs`:iin `"-http_persistent", "0"`
+`apps/broadcast/src/ffmpegMixer.ts` `buildFfmpegArgs`:iin `"-http_persistent", "0"`
 (harkitse myös `-reconnect 1 -reconnect_streamed 1
 -reconnect_delay_max 5` lähteen sitkeyteen). Aseta VAIN lähde-inputille
 (ennen ensimmäistä `-i sourceUrl`), ei FIFO-inputille. Testaa ettei
@@ -186,7 +186,7 @@ jälkikäteen. Yksityiskohdat commit-viestissä.
 1. **Palolaskuri saattoi nollautua kesken vuoron** (esim. `Palo: PomPy / OuHu
    1` → `2` → sitten taas `1` kolmannen palon sijaan, klo 12.04.07–12.04.45).
    Juurisyy: sekä `src/watcher.ts` (pääsovellus, ei vain relay!) että
-   `relay/src/commentaryLoop.ts` nollasivat `currentBatTeamId`/`currentOuts`
+   `apps/broadcast/src/commentaryLoop.ts` nollasivat `currentBatTeamId`/`currentOuts`
    ehdoitta jokaisella pollauksella koko tapahtumahistorian yli, koska
    `online/{id}/events` palauttaa aina kaiken historian eikä vain uudet
    tapahtumat. Yksittäinen jälkikäteen korjattu/eri järjestyksessä toistuva
@@ -393,10 +393,10 @@ toistaa selostuksen toivossa.
 
 ### TODO 2026-07-14: flappaavan lähteen integraatiotesti rakennettu ja ajettu — a/b/c EI reprodusoitunut
 
-Rakennettu `relay/src/flapTest.ts` (`npm run relay:flap-test`): synteettinen
+Rakennettu `apps/broadcast/src/flapTest.ts` (`npm run broadcast:flap-test`): synteettinen
 33 s -lähdefixture (värikartta + 220 Hz-siniääni), joka EOF:ää joka kerta
 oikeasti kuten 144203:n jäätynyt DVR-ikkuna — ei yt-dlp:tä eikä verkkoa,
-ks. `FfmpegMixer.resolveTestSource` (`relay/docs/adr/0001-ffmpeg-mixer-test-source-seam.md`).
+ks. `FfmpegMixer.resolveTestSource` (`apps/broadcast/docs/adr/0001-ffmpeg-mixer-test-source-seam.md`).
 Selostusklippi on 2 s / 1000 Hz-siniääni joka 8. sekunti, riippumatta
 sessiorajoista. `recordFile` indeksoidaan nyt sessioittain
 (`indexedRecordPath`, `foo.mp4` → `foo.session0.mp4`, …) — muuten jokainen
@@ -413,7 +413,7 @@ vaatisi KAIKKIEN sessioiden olevan <60 s peräkkäin):
 n. -22.3 dB:n tasolla (kynnysarvo -35 dB) — myös jokaisen respawnin jälkeen
 ja 90 s-sessiossa. **Tämä EI tue mitään hypoteeseista (a)/(b)/(c)**
 FfmpegMixerin/FIFOn/amixin tasolla paikallisella nauhoituksella. Raportti:
-`relay/run/flap-test-report.json` (gitignoroitu, `relay/run/`).
+`apps/broadcast/run/flap-test-report.json` (gitignoroitu, `apps/broadcast/run/`).
 
 **Tulkinta:** vika ei todennäköisesti ole paikallisessa
 mix-/FIFO-/amix-putkessa näillä ehdoilla. Todennäköisimmät seuraavat
@@ -462,13 +462,13 @@ toimitus), eivät domain-/selostuslogiikassa.
 ## Miten ajetaan — nopea muistilista
 
 - **Esitesti ilman RTMP:tä ensin**:
-  `npm run relay:dev -- --match-id <ID> --youtube-url <alkuperäisen lähetyksen URL> --dry-run`
-  (vain lokitus) tai `--record-file relay/run/<nimi>.mp4` (oikea synteesi +
+  `npm run broadcast:dev -- --match-id <ID> --youtube-url <alkuperäisen lähetyksen URL> --dry-run`
+  (vain lokitus) tai `--record-file apps/broadcast/run/<nimi>.mp4` (oikea synteesi +
   miksaus paikalliseen tiedostoon).
 - **Oikea RTMP-testi**: ks. [README.md](README.md) "Per-match workflow".
 - **Levytila**: `df -h /` ennen ja aikana pitkiä ajoja — globaali sääntö on
   pysäyttää kaikki kirjoittavat operaatiot jos vapaata alle 2 Gt.
-- **Roikkuvat prosessit**: `ps aux | grep -E "ffmpeg|relay/src/index"` ennen
+- **Roikkuvat prosessit**: `ps aux | grep -E "ffmpeg|apps/broadcast/src/index"` ennen
   uuden testin käynnistystä — varmista aina että edellinen ajo on oikeasti
   kuollut (`TaskStop`/`kill` + `ps`-tarkistus, ei pelkkä oletus).
 - **Bugien toisto ilman livepeliä**: palolaskuri-regressio on nyt
@@ -489,7 +489,7 @@ toimitus), eivät domain-/selostuslogiikassa.
 
 ## Rajaukset / muista
 
-- `relay/.env.relay` on gitignoroitu eikä säily committien välissä eikä
+- `apps/broadcast/.env.relay` on gitignoroitu eikä säily committien välissä eikä
   aiempien sessioiden välillä tällä koneella — se pitää luoda uudelleen.
 - Relay-palvelu **ei ole enabloitu boottiin** — käynnistä aina käsin per
   ottelu, sammuta ottelun jälkeen (`systemctl --user stop

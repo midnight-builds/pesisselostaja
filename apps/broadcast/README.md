@@ -19,11 +19,11 @@ decisions behind it. This file is the day-to-day operator runbook.
    sudo mkdir -p /opt/piper && sudo tar -xzf /tmp/piper.tar.gz -C /opt/piper --strip-components=1
    sudo ln -sf /opt/piper/piper /usr/local/bin/piper
 
-   mkdir -p relay/voices
-   curl -L -o relay/voices/fi_FI-harri-medium.onnx      https://huggingface.co/diffusionstudio/piper-voices/resolve/main/fi/fi_FI/harri/medium/fi_FI-harri-medium.onnx
-   curl -L -o relay/voices/fi_FI-harri-medium.onnx.json https://huggingface.co/diffusionstudio/piper-voices/resolve/main/fi/fi_FI/harri/medium/fi_FI-harri-medium.onnx.json
+   mkdir -p apps/broadcast/voices
+   curl -L -o apps/broadcast/voices/fi_FI-harri-medium.onnx      https://huggingface.co/diffusionstudio/piper-voices/resolve/main/fi/fi_FI/harri/medium/fi_FI-harri-medium.onnx
+   curl -L -o apps/broadcast/voices/fi_FI-harri-medium.onnx.json https://huggingface.co/diffusionstudio/piper-voices/resolve/main/fi/fi_FI/harri/medium/fi_FI-harri-medium.onnx.json
    ```
-2. `cp relay/.env.relay.example relay/.env.relay` and confirm `piper --help`
+2. `cp apps/broadcast/.env.relay.example apps/broadcast/.env.relay` and confirm `piper --help`
    and `yt-dlp --version` both work.
 
 ## Per-match workflow
@@ -38,7 +38,7 @@ decisions behind it. This file is the day-to-day operator runbook.
    to the API's `contentDetails.enableAutoStart`; it can't be toggled on once
    the broadcast has already reached the testing/live stage, so set it at
    creation time.)
-3. Edit `relay/.env.relay`:
+3. Edit `apps/broadcast/.env.relay`:
    - `RELAY_MATCH_ID` — same pesistulokset.fi match ID the main app uses.
    - `RELAY_YOUTUBE_URL` — the original broadcast's watch URL.
    - `RELAY_RTMP_URL` / `RELAY_STREAM_KEY` — the second broadcast's ingest info.
@@ -66,11 +66,11 @@ keep playing.
 
 - **At startup:** set `RELAY_ANNOUNCE_BATTER_CHANGES=false` in `.env.relay`, or
   pass `--no-batter-changes` to `relay:dev`.
-- **Live, without restarting:** the loop re-reads `relay/run/.control-<matchId>.json`
+- **Live, without restarting:** the loop re-reads `apps/broadcast/run/.control-<matchId>.json`
   every poll (~6 s). Flip it and the change takes effect within one poll:
   ```bash
-  echo '{"announceBatterChanges": false}' > relay/run/.control-143280.json   # off
-  echo '{"announceBatterChanges": true}'  > relay/run/.control-143280.json   # back on
+  echo '{"announceBatterChanges": false}' > apps/broadcast/run/.control-143280.json   # off
+  echo '{"announceBatterChanges": true}'  > apps/broadcast/run/.control-143280.json   # back on
   ```
   The relay logs a line when the effective value changes. The startup log
   prints the exact control-file path for the running match. (The file is
@@ -80,7 +80,7 @@ keep playing.
 ### Testing without touching YouTube (dry run)
 
 ```bash
-npm run relay:dev -- --match-id 123456 --youtube-url "https://..." --dry-run
+npm run broadcast:dev -- --match-id 123456 --youtube-url "https://..." --dry-run
 ```
 This runs the same commentary poll loop against real match data, logs what
 would be synthesized, and never starts ffmpeg or touches RTMP.
@@ -119,6 +119,6 @@ is not something to try to eliminate.
 Only `fi_FI-harri-medium` is wired up today (`RELAY_VOICE=harri-medium` is
 the default and the only model downloaded during setup). To add
 `harri-low`/`asmo-medium`, download their `.onnx`/`.onnx.json` pair into
-`relay/voices/` (same URLs as `v2/src/piper.ts` uses) — `piperTts.ts`'s
+`apps/broadcast/voices/` (same URLs as `apps/web/src/piper.ts` uses) — `piperTts.ts`'s
 `VOICE_FILES` map already has entries for all three, so this is config only,
 no code change.

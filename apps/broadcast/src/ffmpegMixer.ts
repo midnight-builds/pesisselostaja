@@ -30,7 +30,7 @@ export interface FfmpegMixerOptions {
    *  behaviour). The source is read with -re (native rate) rather than the
    *  production reconnect/http-persistent flags, since those are HTTP/HLS-
    *  specific and meaningless (at best) against a local file. Never set in
-   *  production — see relay/docs/adr/0001-ffmpeg-mixer-test-source-seam.md. */
+   *  production — see apps/broadcast/docs/adr/0001-ffmpeg-mixer-test-source-seam.md. */
   resolveTestSource?: () => Promise<string> | string;
   /** Test-only: fired with the wall-clock epoch once a session's FIFO
    *  handshake completes, so a harness can align its own timers to actual
@@ -272,7 +272,7 @@ export class FfmpegMixer {
     const waited = Date.now() - waitStart;
     const remaining = this.fifo.pendingClips;
     // Whether the queue actually drained is the evidence that the respawn
-    // didn't sever a clip mid-word (relay/HANDOFF.md fix #2): "tyhjeni" =
+    // didn't sever a clip mid-word (apps/broadcast/HANDOFF.md fix #2): "tyhjeni" =
     // clean gap, "EI tyhjentynyt" = the 10s bound cut it off anyway.
     const drainStatus =
       remaining === 0 ? "tyhjeni" : `EI tyhjentynyt (${remaining} klippiä jäljellä, 10s katkaisu)`;
