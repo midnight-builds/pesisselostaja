@@ -368,7 +368,13 @@ function formatKunnari(texts: EventTextElement[], _meta: MatchMetadata, lookup: 
   for (const el of texts) {
     if (typeof el === "object" && el.type === "player") {
       const name = resolvePlayerName(lookup, el);
-      if (name) return `${name} löi kunnarin!`;
+      if (name) {
+        return pickVariant([
+          `${name} löi kunnarin!`,
+          `Kunnari! Sen löi ${name}.`,
+          `${name} lyö kunnarin!`,
+        ]);
+      }
     }
   }
   return "Kunnari!";
