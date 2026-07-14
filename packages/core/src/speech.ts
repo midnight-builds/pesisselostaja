@@ -355,7 +355,12 @@ function formatRunScored(texts: EventTextElement[], _meta: MatchMetadata, lookup
   }
   const batter = players[0] ?? "?";
   const runner = players[1] ?? "?";
-  if (eventText.includes("tuojana")) return `${batter} löi juoksun, tuojana ${runner}.`;
+  if (eventText.includes("tuojana")) {
+    return pickVariant([
+      `${batter} löi juoksun, tuojana ${runner}.`,
+      `Juoksun löi ${batter}, tuojana ${runner}.`,
+    ]);
+  }
   return `${batter} ${eventText}.`;
 }
 
