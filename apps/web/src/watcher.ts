@@ -603,9 +603,14 @@ export class BrowserWatcher {
     if (!this._muted) this.speakRaw(summary);
   }
 
-  private say(speech: string, state: WatcherState): void {
-    if (speech === this._lastSpeech) return;
-    this._lastSpeech = speech;
+  /** dedupeKey identifies the announcement's content before variant
+   *  randomization. Consecutive scorer double-markings used to be dropped by
+   *  comparing the final strings, but pickVariant can now phrase the same
+   *  duplicate two different ways — so duplicates must be detected on the
+   *  pre-variant key, never on the rendered speech. */
+  private say(speech: string, state: WatcherState, dedupeKey: string = speech): void {
+    if (dedupeKey === this._lastSpeech) return;
+    this._lastSpeech = dedupeKey;
     this._lastSpeechAt = Date.now();
     this.log(`Puhe: ${speech}`);
     debugLog("say", { text: speech, muted: this._muted, queueLen: this._speechQueue.length });
