@@ -39,7 +39,8 @@ describe("formatScore ordering (via public callers) — HANDOFF task 2", () => {
 
   it("keeps home runs first on a tie", () => {
     const speech = formatBatTurnChangeSpeech(meta, 200, 100, 4, 4, 1, 1);
-    expect(speech).toContain("4, 4, tasatilanne");
+    // Tie phrasing has random variants; both keep home runs first.
+    expect(speech).toMatch(/4, 4, tasatilanne|[Tt]asan 4, 4/);
   });
 
   it("also orders home-first in the startup summary when away leads", () => {
