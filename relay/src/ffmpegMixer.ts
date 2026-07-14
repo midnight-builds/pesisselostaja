@@ -18,8 +18,36 @@ export interface FfmpegMixerOptions {
   maxFailureWindowMs?: number;
   /** Local-file test mode: write the mixed result to this path instead of
    *  pushing RTMP, so the mix can be reviewed before a second broadcast
-   *  exists. Takes precedence over rtmpUrl/streamKey when set. */
+   *  exists. Takes precedence over rtmpUrl/streamKey when set. Each spawn
+   *  gets its own session-indexed filename (foo.mp4 -> foo.session0.mp4,
+   *  foo.session1.mp4, …) since every respawn starts a fresh ffmpeg process
+   *  that would otherwise overwrite (-y) the previous session's recording. */
   recordFile?: string;
+  /** Test-only: when set, skips resolveSourceUrl/yt-dlp entirely and calls
+   *  this instead to get the -i source for each spawn attempt (a function,
+   *  not a static string, so a harness can vary the source per respawn —
+   *  e.g. a longer fixture on one respawn to test amix's short-session
+   *  behaviour). The source is read with -re (native rate) rather than the
+   *  production reconnect/http-persistent flags, since those are HTTP/HLS-
+   *  specific and meaningless (at best) against a local file. Never set in
+   *  production — see relay/docs/adr/0001-ffmpeg-mixer-test-source-seam.md. */
+  resolveTestSource?: () => Promise<string> | string;
+  /** Test-only: fired with the wall-clock epoch once a session's FIFO
+   *  handshake completes, so a harness can align its own timers to actual
+   *  session boundaries instead of parsing log text. */
+  onSessionStart?: (epochMs: number) => void;
+  /** Test-only: fired once a session's ffmpeg process has exited. */
+  onSessionEnd?: (epochMs: number, ranMs: number) => void;
+}
+
+/** foo.mp4 -> foo.session3.mp4, so successive respawns never overwrite each
+ *  other's recording. Exported so a test harness can compute the exact same
+ *  filename FfmpegMixer wrote, without duplicating the naming rule. */
+export function indexedRecordPath(recordFile: string, index: number): string {
+  const m = recordFile.match(/^(.*?)(\.[^./]+)?$/);
+  const base = m?.[1] ?? recordFile;
+  const ext = m?.[2] ?? "";
+  return `${base}.session${index}${ext}`;
 }
 
 /** Shared amix/limiter graph: original audio (input 0) + gained narration
@@ -33,12 +61,21 @@ export function buildMixFilterComplex(narrationGain: number): string {
   );
 }
 
-function buildFfmpegArgs(sourceUrl: string, opts: FfmpegMixerOptions): string[] {
-  const args = [
-    "-nostdin",
-    "-y",
-    "-loglevel", "warning",
-    "-thread_queue_size", "4096",
+function buildFfmpegArgs(
+  sourceUrl: string,
+  opts: FfmpegMixerOptions,
+  recordFilePath: string | undefined,
+  realtimeSource: boolean
+): string[] {
+  const args = ["-nostdin", "-y", "-loglevel", "warning", "-thread_queue_size", "4096"];
+  if (realtimeSource) {
+    // Test-only local-file source (see resolveTestSource): without -re
+    // ffmpeg reads the file as fast as disk/CPU allow instead of at its real
+    // playback rate, which would collapse the "frozen DVR window" cadence
+    // we're deliberately reproducing and desync it from the FIFO's
+    // real-time narration clock.
+    args.push("-re");
+  } else {
     // SOURCE input only (options apply to the -i that follows). The source is a
     // YouTube HLS pull, and YouTube rotates the CDN host inside the playlist;
     // ffmpeg's default -http_persistent 1 then tries to reuse a keepalive
@@ -47,8 +84,12 @@ function buildFfmpegArgs(sourceUrl: string, opts: FfmpegMixerOptions): string[] 
     // failed … retrying" every ~5s segment. Disabling persistent HTTP silences
     // that with no functional downside (source stayed real-time in testing);
     // the reconnect flags harden the pull against brief source blips.
-    "-http_persistent", "0",
-    "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+    args.push(
+      "-http_persistent", "0",
+      "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"
+    );
+  }
+  args.push(
     "-i", sourceUrl,
     "-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "4096",
     "-i", opts.fifoPath,
@@ -56,11 +97,11 @@ function buildFfmpegArgs(sourceUrl: string, opts: FfmpegMixerOptions): string[] 
     "-map", "0:v", "-map", "[aout]",
     "-c:v", "copy",
     "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
-  ];
-  if (opts.recordFile) {
+  );
+  if (recordFilePath) {
     // Fragmented mp4 stays playable even if the process is killed mid-write
     // (no trailing moov atom to lose), unlike a plain -f mp4 output.
-    args.push("-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", opts.recordFile);
+    args.push("-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", recordFilePath);
   } else {
     const rtmpDest = `${opts.rtmpUrl.replace(/\/$/, "")}/${opts.streamKey}`;
     args.push("-f", "flv", rtmpDest);
@@ -96,6 +137,8 @@ export class FfmpegMixer {
    *  the last attempt succeeded. Used to give up after maxFailureWindowMs. */
   private failingSince: number | null = null;
   private readonly maxFailureWindowMs: number;
+  /** Counts spawn attempts so recordFile can be indexed per session. */
+  private sessionIndex = 0;
 
   constructor(private opts: FfmpegMixerOptions) {
     this.fifo = new NarrationFifo(opts.fifoPath);
@@ -137,15 +180,22 @@ export class FfmpegMixer {
   }
 
   private async spawnOnce(): Promise<void> {
-    log("Haetaan lähdeosoite yt-dlp:llä…");
-    const sourceUrl = await resolveSourceUrl(this.opts.youtubeUrl);
+    const sourceUrl = this.opts.resolveTestSource
+      ? await this.opts.resolveTestSource()
+      : await (async () => {
+          log("Haetaan lähdeosoite yt-dlp:llä…");
+          return resolveSourceUrl(this.opts.youtubeUrl);
+        })();
 
     // Must exist before ffmpeg is spawned, and before fifo.open() (which
     // blocks until ffmpeg attaches as a reader) — see narrationFifo.ts.
     await this.fifo.prepare();
 
     log("Käynnistetään ffmpeg…");
-    const args = buildFfmpegArgs(sourceUrl, this.opts);
+    const recordFilePath = this.opts.recordFile
+      ? indexedRecordPath(this.opts.recordFile, this.sessionIndex++)
+      : undefined;
+    const args = buildFfmpegArgs(sourceUrl, this.opts, recordFilePath, !!this.opts.resolveTestSource);
     this.child = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
     this.child.stdout?.on("data", (d: Buffer) => process.stdout.write(d));
     this.child.stderr?.on("data", (d: Buffer) => process.stderr.write(d));
@@ -174,6 +224,8 @@ export class FfmpegMixer {
       throw new Error(`ffmpeg ei käynnistynyt: ${detail}`);
     }
 
+    this.opts.onSessionStart?.(Date.now());
+
     const refreshMs = this.opts.urlRefreshMs ?? 15 * 60 * 1000;
     const childForRefresh = this.child;
     this.refreshTimer = setTimeout(() => {
@@ -196,6 +248,7 @@ export class FfmpegMixer {
     if (ranMs > 60000) this.backoffMs = 1000; // reset backoff after a healthy run
     const detail = result.error ? result.error.message : `code=${result.code}, signal=${result.signal}`;
     log(`ffmpeg päättyi (${detail}), ajoaika ${Math.round(ranMs / 1000)}s`);
+    this.opts.onSessionEnd?.(Date.now(), ranMs);
   }
 
   /** Waits for a natural gap in the narration before killing ffmpeg for a

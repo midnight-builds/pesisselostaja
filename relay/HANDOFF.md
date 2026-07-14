@@ -391,6 +391,57 @@ selostuksen korjaajana — se on korkeintaan videon jatkuvuuden kannalta
 neutraali, ja katsojariskin (lähetys voi pudota) takia sitä ei kannata
 toistaa selostuksen toivossa.
 
+### TODO 2026-07-14: flappaavan lähteen integraatiotesti rakennettu ja ajettu — a/b/c EI reprodusoitunut
+
+Rakennettu `relay/src/flapTest.ts` (`npm run relay:flap-test`): synteettinen
+33 s -lähdefixture (värikartta + 220 Hz-siniääni), joka EOF:ää joka kerta
+oikeasti kuten 144203:n jäätynyt DVR-ikkuna — ei yt-dlp:tä eikä verkkoa,
+ks. `FfmpegMixer.resolveTestSource` (`relay/docs/adr/0001-ffmpeg-mixer-test-source-seam.md`).
+Selostusklippi on 2 s / 1000 Hz-siniääni joka 8. sekunti, riippumatta
+sessiorajoista. `recordFile` indeksoidaan nyt sessioittain
+(`indexedRecordPath`, `foo.mp4` → `foo.session0.mp4`, …) — muuten jokainen
+respawn olisi `-y`-ylikirjoittanut edellisen session nauhoituksen; tämä oli
+oma, aiemmin huomaamaton bugi minkä tahansa monirespawn-`--record-file`-ajon
+kannalta, ei vain testin.
+
+**Ajo 2026-07-14** (sessiot 33 s, 33 s, 90 s, 33 s, 33 s, respawn-välit
+1.1/2.1/1.1/2.1 s — 90 s-sessio nollasi backoffin `ranMs>60000`-ehdolla,
+joten kasvava-katto-kuvio [1→2→4→8→…→30 s] ei näy tässä ajossa koska se
+vaatisi KAIKKIEN sessioiden olevan <60 s peräkkäin):
+
+**Kaikki 29 selostusklippiä havaittiin kaikissa 5 sessiossa**, tasaisella
+n. -22.3 dB:n tasolla (kynnysarvo -35 dB) — myös jokaisen respawnin jälkeen
+ja 90 s-sessiossa. **Tämä EI tue mitään hypoteeseista (a)/(b)/(c)**
+FfmpegMixerin/FIFOn/amixin tasolla paikallisella nauhoituksella. Raportti:
+`relay/run/flap-test-report.json` (gitignoroitu, `relay/run/`).
+
+**Tulkinta:** vika ei todennäköisesti ole paikallisessa
+mix-/FIFO-/amix-putkessa näillä ehdoilla. Todennäköisimmät seuraavat
+epäilyt, tärkeysjärjestyksessä:
+1. **RTMP/YouTube-ingest-pää** — tätä testiä ei koskaan pushattu oikealle
+   YouTubelle asti, vain paikalliseen tiedostoon. DESIGN.md:n testaamaton
+   riski ("YouTuben ingest voi olla nirso keyframe-välistä `-c:v copy`:n
+   kanssa") on nyt todennäköisin epäilty — respawnien toistuva
+   video-discontinuiteetti voisi saada YouTuben ingestin pudottamaan/
+   desynkkaamaan äänen omalla puolellaan tavalla jota paikallinen
+   nauhoitus ei koskaan näe.
+2. **Kertymäefekti pidemmällä ajolla** — 144203:ssa flappaus kesti ~15 min
+   (kymmeniä respawneja); tämä testi ajoi vain 5 sykliä. Jokin
+   muistivuoto/tilan kertymä (FIFO-jono, file descriptorit) voisi vaatia
+   useampia toistoja manifestoituakseen.
+3. **CommentaryLoop/PiperTts-ketju** — testi kutsuu
+   `mixer.enqueueNarration()` suoraan valmiiksi syntetisoidulla PCM:llä,
+   ei mene oikean pollaus-/synteesiketjun kautta. Jos vika on siellä
+   (esim. piper-prosessi jää roikkumaan tai `sink`-kutsu epäonnistuu
+   hiljaa juuri respawnin aikana), tämä testi ei sitä löydä.
+
+**Seuraava askel:** ennen kuin epäillään enää FfmpegMixeria/FIFOa/amixia,
+kokeile samaa flappaavaa lähdettä oikealla RTMP-pushilla paikalliseen
+RTMP-vastaanottajaan (tai oikeaan YouTube-lähetykseen) sen sijaan että
+nauhoitetaan paikalliseen tiedostoon — jos selostus katoaa vasta siellä,
+epäily 1 vahvistuu. Toissijaisesti: aja `flapTest.ts` 15-20 syklillä
+kertymäefektin poissulkemiseksi.
+
 ### Sivuhavainto: auto-stopin viive (144203)
 
 Kun relay pysäytettiin ottelun päätyttyä, **kohdelähetys jäi Studiossa vielä
