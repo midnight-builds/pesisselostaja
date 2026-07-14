@@ -1,5 +1,141 @@
 # Relay — handoff seuraavaa live-testiä varten
 
+## TODO 2026-07-14: live-testin (ottelu 144197) löydökset — korjaa seuraavassa sessiossa
+
+Testi: lähde `youtube.com/watch?v=4X--QV-ZuyA`, selostettu kohde
+`youtube.com/watch?v=EHOVOWnmzK4` (stream key mxbf-…), ottelu-ID 144197
+(Pesä Ysit, Lappeenranta = koti vs Kauhajoen Karhu = vieras). Kuusi
+huomiota, kaikki tekstinä alla koska agentin sisäinen Task-lista ei säily
+istuntojen välillä.
+
+### 1. BUGI (kriittinen): eventFingerprint pudottaa paloja
+
+**Oire:** relay sanoi "ensimmäinen palo joukkueelle Ysit Kylmä" kun joukkue
+oli oikeasti saanut KOLMANNEN palon vuorossaan; myös KaKa:n paloja jäi
+sanomatta kokonaan.
+
+**Juurisyy (varmistettu API-datalla, match 144197):**
+`src/speech.ts:521`:
+```js
+export function eventFingerprint(event: LiveEvent, subIndex: number): string {
+  const sub = event.events[subIndex];
+  if (!sub) return `${event.id}:${subIndex}`;
+  return `${event.id}:${JSON.stringify(sub.texts)}`;
+}
+```
+Sormenjälki sisältää vain `event.id` + sub-eventin tekstin, EI
+vuorokoordinaatteja (team/batTurn/inning/period). `event.id` nollautuu joka
+lyöntivuorolla (API palauttaa aina koko historian, id-sarjat toistuvat
+vuoroittain), ja jokaisen Palo-tapahtuman teksti on identtinen:
+`[{type:"event",text:"Palo",base:null},{type:"stat",out:1}]` (`out` on aina
+1, ei kumulatiivinen). Eri vuorojen samalla `event.id`:llä oleva palo tuottaa
+siis saman sormenjäljen → `isEventFullyProcessed`/`alreadySeen` tulkitsee sen
+jo nähdyksi → sekä `currentOuts++` että itse selostus (`subEventToSpeech`)
+ohitetaan (`continue`).
+
+Simulaatio API-datasta (match 144197, tallennettu käsittelyn ajaksi
+`/tmp/ev144197.json`): vuoro Ysit palot id 2/10/14 → id 2 ja 10 pudotettiin,
+vain id 14 laskettiin "ensimmäiseksi". KaKa-vuorosta 2/3 paloa pudotettiin.
+
+Tämä on **regressio** muistiinpanossa `reference-event-id-resets-per-turn`
+kuvatusta bugista, jonka piti olla korjattu ("fingerprints MUST include turn
+coords except period 3"). Korjaus on ilmeisesti kadonnut/regressoinut.
+
+**Korjaus:** sisällytä vuorokoordinaatit sormenjälkeen, esim.
+`${event.period}:${event.team}:${event.batTurn}:${event.id}:${JSON.stringify(sub.texts)}`
+(varmista `LiveEvent`-tyypin kentät `src/types.ts`; huomioi period 3
+-erikoistapaus, ks. muisti). **HUOM:** `speech.ts` on jaettu pääsovelluksen
+(WatcherController) ja relayn kesken — sama bugi koskee molempia, korjaus
+hyödyttää molempia. Lisää regressiotesti joka toistaa cross-turn
+id-törmäyksen. Vahvista live-testin datalla fixtuuriksi **fiktiivisin
+nimin** (ks. `feedback-fixtures-fictional-names`-muisti).
+
+### 2. BUGI: formatScore sanoo pisteet väärässä järjestyksessä
+
+**Oire:** puhe sanoi "6, 3, KaKa johtaa" vaikka ottelu on "Pesä Ysit (koti) -
+KaKa (vieras)" — pitäisi olla "3, 6, KaKa johtaa" (kotijoukkueen pisteet
+aina ensin, ottelujärjestyksessä).
+
+**Juurisyy** (`src/speech.ts:68-72`):
+```js
+function formatScore(meta: MatchMetadata, homeRuns: number, awayRuns: number): string {
+  if (homeRuns > awayRuns) return `${homeRuns}, ${awayRuns}, ${meta.home.shorthand} johtaa`;  // koti ensin (OK)
+  if (awayRuns > homeRuns) return `${awayRuns}, ${homeRuns}, ${meta.away.shorthand} johtaa`;  // VIERAS ENSIN (väärä järjestys)
+  if (homeRuns === 0 && awayRuns === 0) return "nolla nolla";
+  return `${homeRuns}, ${awayRuns}, tasatilanne`;
+}
+```
+Kun vieras johtaa, luvut menevät väärässä järjestyksessä. Vain tämä haara on
+väärin; tasapeli- ja koti-johtaa-haarat tulostavat jo koti ensin.
+`formatSituationSummary` (speech.ts:240) tekee tämän jo oikein — käytä
+referenssinä.
+
+**Korjaus:** tulosta AINA `${homeRuns}, ${awayRuns}` (koti ensin)
+riippumatta kummalla on johto; vaihda vain "X johtaa"/"tasatilanne"-teksti
+tilanteen mukaan. Auditoi kaikki `formatScore`-kutsukohdat (rivit
+~198,219,301,306,311) + `formatPeriodsWon` (rivi 45-46, näyttää jo oikein
+tarkistuksen arvoinen). Lisää regressiotesti: vieras johtaa → koti ensin
+puheessa. Jaettu tiedosto, korjaus hyödyttää sekä relayta että pääsovellusta.
+
+### 3. Skill relay-ottelu: selkeämpi Auto-start-ohje
+
+Kohdassa 2 ("Luo toinen YouTube-lähetys") korosta vahvemmin, että Auto-start
+(ja Auto-stop) PITÄÄ laittaa päälle jo lähetystä LUODESSA — sitä ei voi
+kytkeä päälle enää jälkikäteen (`contentDetails.enableAutoStart`). Lisää
+oire jonka operaattori näkee jos unohtaa: selostettu lähetys jää "Waiting
+for <stream>" -tilaan vaikka relay pushaa dataa oikein (ffmpeg ESTAB, ei
+respawneja). Korjaus: jos Auto-start unohtui, paina Studiossa "Go live"
+käsin — feed on jo ingestissä, joten lähetys lähtee heti liveen. Testissä
+2026-07-14 juuri tämä (unohtunut Auto-start) jätti kohdelähetyksen
+odottamaan, ja käsin Go live korjasi sen.
+
+### 4. Skill relay-ottelu: varmista lähde vs. kohde -sekaannus
+
+Kohtaan 1 ("Kerää tarvittavat tiedot") lisää eksplisiittinen
+varmistusvaihe: LÄHDE (`RELAY_YOUTUBE_URL`) = puhelimen alkuperäinen live
+jota LUETAAN; KOHDE (videoId + stream key) = se toinen, selostettu lähetys,
+johon PUSHATAAN. Näitä ei saa sekoittaa. Erityissääntö: jos käyttäjä antaa
+vain YHDEN YouTube-linkin, älä oleta että se on lähde — kysy/varmista onko
+se lähde vai kohde. Vihje: kentät kuten stream key, "näkyvyys: unlisted" ja
+"thumbnail kopioitu" kuvaavat KOHDETTA, eivät lähdettä. Tausta: testissä
+kohde (videoId EHOVOWnmzK4 + stream key + thumbnail) meni vahingossa
+`RELAY_YOUTUBE_URL`:iin; oikea lähde oli eri video (4X--QV-ZuyA), joka
+jouduttiin pyytämään erikseen.
+
+### 5. Skill relay-ottelu: valmis YouTube Studio -linkki käyttäjälle
+
+Kun relay on käynnistetty ja kohteen videoId tiedetään, tulosta käyttäjälle
+valmis klikattava Studio-linkki muodossa
+`https://studio.youtube.com/video/<VIDEO_ID>/livestreaming` (esim.
+`https://studio.youtube.com/video/EHOVOWnmzK4/livestreaming`), jotta
+käyttäjä pääsee heti tarkistamaan lähetyksen tilan / painamaan Go live
+tarvittaessa. Lisää skillin kohtaan 5 ("Käynnistä ja varmista") ja/tai
+AJON AIKANA -osioon. Älä kääri URLia `**`-merkkeihin (terminaali näyttää
+kirjaimelliset asteriskit).
+
+### 6. Relay: hiljennä ffmpegin HLS-keepalive-lokitulva
+
+Loki tulvii ffmpegin varoituksia lähdepuolen (HLS-pull) keepalivesta:
+"Cannot reuse HTTP connection for different host: rr1---sn-XXXX !=
+rr1---sn-YYYY" + "keepalive request failed ... 'Invalid argument' ...
+retrying with new connection", toistuen joka ~5 s segmentillä. Syy: YouTube
+kiertää HLS-CDN-hostia playlistin sisällä, ja ffmpegin oletus
+`-http_persistent 1` yrittää uudelleenkäyttää pysyvää yhteyttä eri
+hostille → epäonnistuu, avaa uuden. Vaikutus: **ei toiminnallista haittaa**
+— lähde pysyi reaaliajassa (segmentit etenivät tahdissa, ffmpeg vakaa, ei
+respawneja, selostus miksautui normaalisti). Ongelma on vain se että
+lokitulva hukuttaa alleen oikeat Selostus:/Palo:/Sydänääni-rivit ja
+vaikeuttaa seurantaa. Korjaus: lisää HLS-inputin optioihin
+`relay/src/ffmpegMixer.ts` `buildFfmpegArgs`:iin `"-http_persistent", "0"`
+(harkitse myös `-reconnect 1 -reconnect_streamed 1
+-reconnect_delay_max 5` lähteen sitkeyteen). Aseta VAIN lähde-inputille
+(ennen ensimmäistä `-i sourceUrl`), ei FIFO-inputille. Testaa ettei
+keepalive-spam enää toistu ja että selostus yhä miksautuu. Src-muutos
+committaa itsensä hookilla + vaatii relayn uudelleenkäynnistyksen (katkaisee
+live-lähetyksen hetkeksi), joten tee ottelun ulkopuolella.
+
+---
+
 Kirjoitettu alun perin 2026-07-10 (PR #20), päivitetty samana päivänä toisen
 live-testin (klo 11.46–12.45, ottelu 143280, KeKi Blue–IPV oli väärä pari —
 oikea ottelu oli **PomPy / OuHu vastaan IPV**, video
