@@ -53,14 +53,20 @@ kiintiöt) eikä tarpeen, kun lähetyksiä luodaan yksi per ottelu käsin.
 
 ### Selostuslogiikan uudelleenkäyttö importilla, ei kopiolla
 
-`relay/src/commentaryLoop.ts` importtaa suoraan pääsovelluksen puhtaat
-funktiot: `subEventToSpeech`/`format*Speech` (`src/speech.ts`), pisteet ja
-palot (`src/state.ts`), API-haut (`src/api.ts`), ääntämissäännöt
-(`src/pronunciation.ts` — sama `.pronunciations.json` jota web-UI muokkaa).
-`WatcherController`ia ei uudelleenkäytetä (se on sidottu HA/selain-ulostuloon),
-mutta silmukan rakenne on tarkoituksella identtinen `src/watcher.ts`:n
-`runWatcher`/`processEvents`-logiikan kanssa — ainoa ero on "puhu HA:han" →
-"syntetisoi ja jonota FIFO:on". Sisältö ja ajoitus vastaavat siis HA-vahtijaa.
+`relay/src/commentaryLoop.ts` importtaa suoraan **v2:n** (kanoninen lähde;
+`src/` = v1 on kuollutta koodia) puhtaat funktiot: `subEventToSpeech`/
+`format*Speech` sekä palojen laskenta `recomputeCurrentOutsKeyed`/
+`outsThroughSubEvent` (`v2/src/speech.ts`), pisteet (`v2/src/state.ts`:n puhtaat
+helperit), API-haut (`v2/src/api.ts`). Persistointi on relay-lokaali, koska
+v2:n omat `loadState`/`saveState`/`loadPronunciations` ovat selaimen
+localStorage-pohjaisia: `relay/src/nodeState.ts` ja `nodePronunciation.ts`
+uudelleenkäyttävät v2:n puhtaat helperit mutta lukevat/kirjoittavat tiedostoon
+(`.state-<id>.json`, `.pronunciations.json`).
+`WatcherController`ia (v2 `Watcher`) ei uudelleenkäytetä (se on sidottu
+selain-/HA-ulostuloon), mutta silmukan rakenne on tarkoituksella identtinen
+v2:n `watcher.ts`:n `processEventsLive`/`processEventsSilent`-logiikan kanssa —
+ainoa ero on "puhu selaimeen/HA:han" → "syntetisoi ja jonota FIFO:on". Sisältö
+ja ajoitus vastaavat siis v2-vahtijaa.
 
 ### TTS: piper-CLI, ei wasm-putken toistoa
 

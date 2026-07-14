@@ -1,6 +1,24 @@
 # Relay — handoff seuraavaa live-testiä varten
 
-## TODO 2026-07-14: live-testin (ottelu 144197) löydökset — korjaa seuraavassa sessiossa
+## TODO 2026-07-14: live-testin (ottelu 144197) löydökset — ✅ KAIKKI KORJATTU
+
+> **Ratkaistu 2026-07-14 (samana päivänä).** Kaikki 6 huomiota alla on korjattu:
+> - **1 (fingerprint pudottaa paloja)** ja koko relayn v1→v2-migraatio:
+>   commit `28c772c`. Relay lukee nyt `v2/src`:ää (kanoninen), ei kuollutta
+>   `src/` (v1) -koodia; v2:n koordinaattipohjainen `eventFingerprint` +
+>   `recomputeCurrentOutsKeyed`/`outsThroughSubEvent` hoitavat palot oikein.
+> - **2 (formatScore väärä järjestys)**: commit `7e9e039` (`v2/src/speech.ts`).
+> - **3, 4, 5 (relay-ottelu-skill)**: `.claude/skills/relay-ottelu/SKILL.md`
+>   (gitignoressa, lokaali — muutokset työtiedostossa).
+> - **6 (ffmpeg HLS-keepalive-lokitulva)**: commit `a13687e`.
+>
+> Molemmat puhebugit todennettu oikealla ottelun 144197 datalla: palot
+> laskevat 1‑2‑3 vuoroittain ja vieraan johtaessa pisteet luetaan koti ensin
+> (`3, 6, KaKa johtaa`). Regressiotestit: `test/v2-speech.test.ts`.
+> **Ei vielä ajettu oikeassa live-relayssa migraation jälkeen** — seuraava
+> live-testi vahvistaa end-to-end.
+>
+> Alkuperäiset löydöskuvaukset (juurisyineen) säilytetty alla historiaksi.
 
 Testi: lähde `youtube.com/watch?v=4X--QV-ZuyA`, selostettu kohde
 `youtube.com/watch?v=EHOVOWnmzK4` (stream key mxbf-…), ottelu-ID 144197
