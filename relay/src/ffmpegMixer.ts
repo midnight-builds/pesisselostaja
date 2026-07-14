@@ -39,6 +39,16 @@ function buildFfmpegArgs(sourceUrl: string, opts: FfmpegMixerOptions): string[] 
     "-y",
     "-loglevel", "warning",
     "-thread_queue_size", "4096",
+    // SOURCE input only (options apply to the -i that follows). The source is a
+    // YouTube HLS pull, and YouTube rotates the CDN host inside the playlist;
+    // ffmpeg's default -http_persistent 1 then tries to reuse a keepalive
+    // connection against a different host, fails, and floods the log with
+    // "Cannot reuse HTTP connection for different host" + "keepalive request
+    // failed … retrying" every ~5s segment. Disabling persistent HTTP silences
+    // that with no functional downside (source stayed real-time in testing);
+    // the reconnect flags harden the pull against brief source blips.
+    "-http_persistent", "0",
+    "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
     "-i", sourceUrl,
     "-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "4096",
     "-i", opts.fifoPath,
