@@ -293,7 +293,10 @@ export function subEventToSpeech(
     // Full stops (not commas) between the parts so TTS reads it calmly with a
     // pause between each, instead of rattling "Palo KPL kolmas palo" off as one.
     if (ctx) {
-      return `Palo! ${teamName}. ${capitalize(ordinalPalo(ctx.currentOuts))}.`;
+      return pickVariant([
+        `Palo! ${teamName}. ${capitalize(ordinalPalo(ctx.currentOuts))}.`,
+        `Joukkueen ${teamName} ${ordinalPalo(ctx.currentOuts)}!`,
+      ]);
     }
     return `Palo! ${teamName}.`;
   }
