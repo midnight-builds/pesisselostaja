@@ -3,24 +3,29 @@
   "version": "1.0.0",
   "description": "Web app for following Finnish pesäpallo live events with spoken voice announcements",
   "license": "MIT",
+  "private": true,
   "type": "module",
-  "main": "dist/index.js",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "serve": "node dist/index.js",
-    "dev": "tsx src/index.ts",
-    "lint": "eslint src/ test/",
-    "typecheck": "tsc --noEmit",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
-    "relay:dev": "tsx relay/src/index.ts",
-    "relay:simulate": "tsx relay/src/simulate.ts",
-    "relay:typecheck": "tsc -p relay/tsconfig.json --noEmit",
-    "relay:lint": "eslint relay/src relay/test"
-  },
-  "dependencies": {
-    "dotenv": "^16.4.0"
+    "start": "node apps/server/dist/index.js",
+    "relay:dev": "npm run dev -w @pesisselostaja/broadcast --",
+    "relay:simulate": "npm run simulate -w @pesisselostaja/broadcast --",
+    "relay:flap-test": "npm run flap-test -w @pesisselostaja/broadcast --",
+    "relay:typecheck": "npm run typecheck -w @pesisselostaja/broadcast",
+    "relay:lint": "npm run lint -w @pesisselostaja/broadcast",
+    "broadcast:dev": "npm run dev -w @pesisselostaja/broadcast --",
+    "broadcast:simulate": "npm run simulate -w @pesisselostaja/broadcast --",
+    "broadcast:flap-test": "npm run flap-test -w @pesisselostaja/broadcast --",
+    "broadcast:typecheck": "npm run typecheck -w @pesisselostaja/broadcast",
+    "broadcast:lint": "npm run lint -w @pesisselostaja/broadcast"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

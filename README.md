@@ -34,7 +34,8 @@ Sovellus käyttää pesistulokset.fi-palvelun otteludataa. Tämä projekti on it
 
 Pesisselostaja turns live Finnish pesäpallo match updates into spoken Finnish announcements. The public web UI runs in the browser and can speak important match events with the Web Speech API. You can pick which voice to use in the settings, including an optional **advanced neural voice (Piper)** that produces a more natural Finnish voice entirely in the browser.
 
-The repository also contains an advanced Node.js watcher that can send announcements through Home Assistant TTS.
+The repository also contains a broadcast pipeline (`apps/broadcast`) that can
+republish a live YouTube stream with the same Finnish narration mixed on top.
 
 ## Screenshots
 
@@ -56,7 +57,7 @@ What works now:
 - Spoken Finnish announcements for important live events.
 - Selectable speech voice, including an optional advanced neural voice (Piper) that runs fully in the browser for more natural Finnish.
 - Favorites and local settings stored in the browser.
-- Advanced Node.js watcher for Home Assistant TTS output.
+- A YouTube broadcast pipeline that mixes synthesized narration over a live stream (`apps/broadcast`).
 
 Known limitations:
 
@@ -86,104 +87,52 @@ The web app can:
 
 No server account is required. The web app stores settings locally in the browser.
 
-## Advanced Usage: Home Assistant Voice Watcher
+## Repository Layout
 
-The root Node.js app can watch a match from the command line and speak events through Home Assistant TTS.
+An npm-workspaces monorepo: one platform-agnostic domain core, three thin apps.
 
-### Setup
-
-~~~bash
-npm install
-npm run build
-cp .env.example .env
-~~~
-
-Edit .env with your Home Assistant URL and long-lived access token.
-
-### Run
-
-Dry run:
-
-~~~bash
-npm run dev -- --match-id <match-id> --dry-run
-~~~
-
-With Home Assistant TTS:
-
-~~~bash
-npm start -- --match-id <match-id>
-~~~
-
-Custom poll interval:
-
-~~~bash
-npm run dev -- --match-id <match-id> --dry-run --poll-interval 10
-~~~
-
-### CLI Options
-
-| Option | Description |
+| Workspace | What it is |
 | --- | --- |
-| --match-url <url> | pesistulokset.fi match page URL |
-| --match-id <id> | Numeric match ID |
-| --dry-run | Log speech instead of calling Home Assistant TTS |
-| --poll-interval <s> | Poll interval in seconds. Default: 6 |
-| --state-file <path> | State file path. Default: .state-<matchId>.json |
-| --api-key <key> | Override the observed public API key |
+| `packages/core` | Pure domain logic: types, pesistulokset API client, speech text generation, scoring, pronunciation substitution. No localStorage, no fs, no DOM. |
+| `apps/web` | The mobile browser app (Vite). Browser adapters: localStorage persistence, Web Speech / Piper-WASM voices. Deployed to GitHub Pages. |
+| `apps/broadcast` | The YouTube broadcast pipeline: pulls a live stream with yt-dlp, mixes Piper-synthesized narration with ffmpeg, republishes over RTMP. Node adapters: file persistence, native Piper. See [`apps/broadcast/README.md`](apps/broadcast/README.md). |
+| `apps/server` | Minimal static file server hosting the built web app on :3000. |
 
-### Environment Variables
-
-| Variable | Description |
-| --- | --- |
-| HOMEASSISTANT_URL | Home Assistant base URL |
-| HOMEASSISTANT_TOKEN | Home Assistant long-lived access token |
-| HA_TTS_ENTITY | TTS entity. Default: tts.home_assistant_cloud |
-| HA_MEDIA_PLAYER_ENTITY | Media player entity |
-| PESISTULOKSET_API_KEY | Optional API key override |
-| PESISTULOKSET_API_BASE | Optional API base URL override |
+Persistence goes behind small ports defined in core (`WatcherStateStore`,
+`PronunciationStore`); each app supplies its own adapter.
 
 ## How It Works
 
-- The browser app and Node.js watcher fetch match metadata and live events from pesistulokset.fi endpoints.
-- Event data is converted into short Finnish announcement text.
-- The browser app speaks announcements with the Web Speech API.
-- The Node.js watcher can send the same style of announcements to Home Assistant TTS.
+- The apps fetch match metadata and live events from pesistulokset.fi endpoints (API client in `packages/core`).
+- Event data is converted into short Finnish announcement text (`packages/core/src/speech.ts`).
+- The browser app speaks announcements with the Web Speech API or the in-browser Piper voice; the broadcast app synthesizes them with native Piper and mixes them into a live stream.
 - Deduplication state prevents the same event from being announced repeatedly.
 
 ## Development
 
-Root watcher:
-
 ~~~bash
 npm ci
-npm run lint
-npm test
-npm run typecheck
-npm run build
+npm run lint       # all workspaces
+npm test           # root vitest, covers all workspace test dirs
+npm run typecheck  # all workspaces
+npm run build      # all workspaces
 ~~~
 
-Public web app:
+Single workspace: `npm run typecheck -w @pesisselostaja/web` etc.
+Workspace names: `@pesisselostaja/core`, `@pesisselostaja/web`,
+`@pesisselostaja/broadcast`, `@pesisselostaja/server`.
 
-~~~bash
-cd v2
-npm ci
-npm run typecheck
-npm run build
-~~~
+### Self-hosting on :3000
 
-### Debugging mobile issues (missed speech, audio going silent)
+`apps/server` is a minimal static file server that hosts the built web app on
+port 3000 (systemd unit `pesisselostaja.service` runs
+`node apps/server/dist/index.js` from the repo root). Old `/v2/` bookmarks
+redirect to `/`. It serves files only — no watcher and no API endpoints; the
+browser app talks to pesistulokset.fi directly.
 
-The root Node server also serves the public web app at `/v2/` from the same origin,
-so a phone on the same network (e.g. over Tailscale) can log debug events straight
-to a file on the server — useful for chasing bugs that only show up after the app
-has been backgrounded and resumed on a phone.
-
-Open the app with `?debug=1` (e.g. `http://<server>:3000/v2/?debug=1`) to enable it.
-The web app then posts structured events — API poll timing, what was spoken and
-when, `visibilitychange`/audio-unlock state — to `POST /api/debug-log`, which
-appends them as JSON lines to `debug.log` in the project root (gitignored). Watch
-it live with `tail -f debug.log`. Without `?debug=1`, or on the public GitHub Pages
-deployment (which has no such endpoint), nothing is sent.
+Note: the old v1 server's `POST /api/debug-log` endpoint (mobile `?debug=1`
+logging to `debug.log`) was dropped with v1 — `?debug=1` posts now fail
+silently, same as on the GitHub Pages deployment.
 
 ## Limitations
 
@@ -194,12 +143,10 @@ deployment (which has no such endpoint), nothing is sent.
 - Jakso- and palo-tracking is based on heuristics derived from the event stream and may still have edge cases — particularly in youth game variants where the rules differ from standard pesäpallo (e.g. more than three palot per turn).
 - Player name resolution depends on match metadata. If a player ID in an event does not match the roster, the app falls back to a less specific announcement.
 - Browser speech quality depends on the user's device, browser, and installed Finnish voices. For more consistent quality, enable the advanced neural voice (Piper) in settings; the voice model (roughly 20–60 MB) is downloaded once and cached in the browser.
-- Home Assistant usage requires a user-managed Home Assistant instance and a long-lived access token.
 
 ## Roadmap
 
-- Redesigned public v2 web UI.
-- Clearer separation between the public web app and the Home Assistant voice watcher if both continue to grow.
+- Redesigned web UI.
 - Stronger demo/test fixtures for public examples.
 
 ## Voices, Sources And Licenses
@@ -213,7 +160,7 @@ bundled in this repository:
 - Speech stack: Piper (MIT), `@diffusionstudio/piper-wasm` (embeds espeak-ng, GPL-3.0-or-later), onnxruntime-web (MIT).
 
 Full attribution, source links and license notes are in [CREDITS.md](CREDITS.md).
-The canonical machine-readable list lives in [`v2/src/piper.ts`](v2/src/piper.ts).
+The canonical machine-readable list lives in [`apps/web/src/piper.ts`](apps/web/src/piper.ts).
 
 ## License
 
