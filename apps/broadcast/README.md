@@ -114,7 +114,26 @@ is not something to try to eliminate.
   push side; each drop triggers a full respawn (with backoff). Persistent
   drops point to a network/ISP issue on this host, not a code bug.
 
-## Swapping voices later
+## ElevenLabs voice (primary engine)
+
+When `ELEVENLABS_API_KEY` is set in `.env.relay`, narration is synthesized with
+the ElevenLabs API (`elevenLabsTts.ts`) instead of Piper; Piper stays installed
+as the automatic per-utterance fallback (network error, credits exhausted, 429),
+so the stream never goes silent. Details:
+
+- **Voice/model:** `RELAY_ELEVENLABS_VOICE` (default Brian,
+  `nPczCjzI2devNBz1zQrb`, chosen by listening tests 2026-07-14) and
+  `RELAY_ELEVENLABS_MODEL` (default `eleven_multilingual_v2`, 1 credit/char).
+- **No pronunciation substitutions:** ElevenLabs reads abbreviations like `KPL`
+  correctly, so it gets the readable text as-is. The `.pronunciations.json`
+  substitutions still apply on the Piper fallback path.
+- **Cache:** synthesized audio is cached as PCM in `apps/broadcast/run/tts-cache/`
+  keyed by model+voice+text, so repeated phrases ("Palo! KPL.") cost credits only
+  once — also across matches. Safe to delete anytime.
+- **Cost visibility:** each synthesis logs its character count and a running
+  total; the total is logged again at shutdown (≈ credits on multilingual v2).
+
+## Swapping Piper voices later
 
 Only `fi_FI-harri-medium` is wired up today (`RELAY_VOICE=harri-medium` is
 the default and the only model downloaded during setup). To add

@@ -95,7 +95,7 @@ An npm-workspaces monorepo: one platform-agnostic domain core, three thin apps.
 | --- | --- |
 | `packages/core` | Pure domain logic: types, pesistulokset API client, speech text generation, scoring, pronunciation substitution. No localStorage, no fs, no DOM. |
 | `apps/web` | The mobile browser app (Vite). Browser adapters: localStorage persistence, Web Speech / Piper-WASM voices. Deployed to GitHub Pages. |
-| `apps/broadcast` | The YouTube broadcast pipeline: pulls a live stream with yt-dlp, mixes Piper-synthesized narration with ffmpeg, republishes over RTMP. Node adapters: file persistence, native Piper. See [`apps/broadcast/README.md`](apps/broadcast/README.md). |
+| `apps/broadcast` | The YouTube broadcast pipeline: pulls a live stream with yt-dlp, mixes synthesized narration (ElevenLabs API, native-Piper fallback) with ffmpeg, republishes over RTMP. Node adapters: file persistence, ElevenLabs/Piper TTS. See [`apps/broadcast/README.md`](apps/broadcast/README.md). |
 | `apps/server` | Minimal static file server hosting the built web app on :3000. |
 
 Persistence goes behind small ports defined in core (`WatcherStateStore`,
@@ -105,7 +105,7 @@ Persistence goes behind small ports defined in core (`WatcherStateStore`,
 
 - The apps fetch match metadata and live events from pesistulokset.fi endpoints (API client in `packages/core`).
 - Event data is converted into short Finnish announcement text (`packages/core/src/speech.ts`).
-- The browser app speaks announcements with the Web Speech API or the in-browser Piper voice; the broadcast app synthesizes them with native Piper and mixes them into a live stream.
+- The browser app speaks announcements with the Web Speech API or the in-browser Piper voice; the broadcast app synthesizes them with the ElevenLabs API (falling back to native Piper) and mixes them into a live stream.
 - Deduplication state prevents the same event from being announced repeatedly.
 
 ## Development
