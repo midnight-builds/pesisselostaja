@@ -21,6 +21,10 @@ export interface RelayConfig {
   /** JSON file the commentary loop re-reads each poll so an operator can flip
    *  announceBatterChanges mid-match without restarting — see commentaryLoop. */
   controlFile: string;
+  /** When set, ElevenLabs is the primary TTS engine and Piper the fallback. */
+  elevenLabsApiKey?: string;
+  elevenLabsVoiceId: string;
+  elevenLabsModelId: string;
 }
 
 function requireValue(name: string, cliValue: string | undefined, envName: string): string {
@@ -83,6 +87,10 @@ export function parseRelayConfig(): RelayConfig {
   // commentaryLoop) can still override this live once the loop is running.
   const announceBatterChanges =
     !(values["no-batter-changes"] ?? false) && process.env.RELAY_ANNOUNCE_BATTER_CHANGES !== "false";
+  const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY || undefined;
+  // Brian — valittu kuuntelemalla 2026-07-14 (ks. ~/projects/elevenlabs-aanitestit/)
+  const elevenLabsVoiceId = process.env.RELAY_ELEVENLABS_VOICE ?? "nPczCjzI2devNBz1zQrb";
+  const elevenLabsModelId = process.env.RELAY_ELEVENLABS_MODEL ?? "eleven_multilingual_v2";
   const apiKey = process.env.PESISTULOKSET_API_KEY ?? "wRX0tTke3DZ8RLKAMntjZ81LwgNQuSN9";
   const apiBase = process.env.PESISTULOKSET_API_BASE ?? "https://api.pesistulokset.fi/api/v1";
 
@@ -115,5 +123,8 @@ export function parseRelayConfig(): RelayConfig {
     runDir,
     pronunciationsFile,
     controlFile,
+    elevenLabsApiKey,
+    elevenLabsVoiceId,
+    elevenLabsModelId,
   };
 }
