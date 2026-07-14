@@ -960,13 +960,21 @@ function bindSettings(): void {
     render();
   };
 
-  const engineToggle = root.querySelector<HTMLElement>('[data-toggle="voiceEngine"]');
-  if (engineToggle) engineToggle.onclick = () => {
-    settings.voiceEngine = settings.voiceEngine === "piper" ? "browser" : "piper";
+  const engineSel = root.querySelector<HTMLSelectElement>("#voice-engine-select");
+  if (engineSel) engineSel.onchange = () => {
+    settings.voiceEngine = engineSel.value as Settings["voiceEngine"];
     saveSettings();
     applyVoiceEngine();
     render();
     if (settings.voiceEngine === "piper") void ensurePiperModel(settings.piperVoiceId);
+  };
+
+  const elKeyInput = root.querySelector<HTMLInputElement>("#elevenlabs-key");
+  if (elKeyInput) elKeyInput.onchange = () => {
+    settings.elevenLabsApiKey = elKeyInput.value.trim();
+    saveSettings();
+    watcher?.setElevenLabsApiKey(settings.elevenLabsApiKey);
+    toast(settings.elevenLabsApiKey ? "Avain tallennettu" : "Avain poistettu");
   };
 
   const boostToggle = root.querySelector<HTMLElement>('[data-toggle="volumeBoost"]');
