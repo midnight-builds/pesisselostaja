@@ -4,6 +4,7 @@ import { parseRelayConfig } from "./config.js";
 import { log } from "./log.js";
 import { CommentaryLoop } from "./commentaryLoop.js";
 import { PiperTts } from "./piperTts.js";
+import { ElevenLabsTts } from "./elevenLabsTts.js";
 import { FfmpegMixer, SourceExhaustedError } from "./ffmpegMixer.js";
 
 async function main(): Promise<void> {
