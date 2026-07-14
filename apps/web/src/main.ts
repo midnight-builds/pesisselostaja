@@ -733,26 +733,39 @@ function voiceSelectHtml(): string {
   </div>`;
 }
 
-// Voice-engine area: a toggle for the advanced Piper voice, and either the
-// browser-voice picker or the Piper model picker + download status.
+// Voice-engine area: an engine picker (browser / Piper / ElevenLabs) and the
+// selected engine's own fields below it.
 function voiceEngineHtml(): string {
-  const piper = settings.voiceEngine === "piper";
-  const row = `<div class="set-row">
-      <div class="ic">${icon("speaker", 18)}</div>
-      <div class="lab"><div class="a">Edistynyt ääni (Piper)</div><div class="b">Luonnollisempi suomenkielinen ääni, vaatii kertalatauksen</div></div>
-      <div class="switch${piper ? " on" : ""}" data-toggle="voiceEngine"><div class="knob"></div></div>
+  const engine = settings.voiceEngine;
+  const engineOpts = [
+    ["browser", "Selaimen ääni"],
+    ["piper", "Edistynyt ääni (Piper)"],
+    ["elevenlabs", "ElevenLabs (oma avain)"],
+  ].map(([v, label]) => `<option value="${v}"${engine === v ? " selected" : ""}>${label}</option>`).join("");
+  const row = `<div class="adv-field">
+      <div class="a">Puheääni</div>
+      <select id="voice-engine-select">${engineOpts}</select>
     </div>`;
-  if (!piper) return row + voiceSelectHtml();
-  const opts = PIPER_VOICES.map((v) =>
-    `<option value="${esc(v.id)}"${settings.piperVoiceId === v.id ? " selected" : ""}>${esc(v.label)}</option>`
-  ).join("");
-  // The boost runs through Web Audio, so it only exists on the Piper path —
-  // browser speechSynthesis caps at volume 1.0 and can't be amplified.
+  if (engine === "browser") return row + voiceSelectHtml();
+  // The boost runs through Web Audio, so it only exists on the Piper/ElevenLabs
+  // paths — browser speechSynthesis caps at volume 1.0 and can't be amplified.
   const boostRow = `<div class="set-row">
       <div class="ic">${icon("speaker", 18)}</div>
       <div class="lab"><div class="a">Kaiutintila</div><div class="b">Vahvistaa selostusta kovemmalle, esim. ulkona kännykän kaiuttimesta</div></div>
       <div class="switch${settings.volumeBoost ? " on" : ""}" data-toggle="volumeBoost"><div class="knob"></div></div>
     </div>`;
+  if (engine === "elevenlabs") {
+    return row + boostRow + `<div class="adv-field" style="border-top:1px solid var(--line)">
+      <div class="a">ElevenLabs API-avain</div>
+      <input id="elevenlabs-key" type="password" spellcheck="false" autocomplete="off"
+        placeholder="sk_…" value="${esc(settings.elevenLabsApiKey)}" />
+      <div class="b" style="margin-top:6px">Avain tallentuu vain tähän selaimeen. Synteesi kuluttaa
+        ElevenLabs-krediittejäsi; virhetilanteessa palataan selaimen ääneen.</div>
+    </div>`;
+  }
+  const opts = PIPER_VOICES.map((v) =>
+    `<option value="${esc(v.id)}"${settings.piperVoiceId === v.id ? " selected" : ""}>${esc(v.label)}</option>`
+  ).join("");
   return row + boostRow + `<div class="adv-field" style="border-top:1px solid var(--line)">
     <div class="a">Piper-ääni</div>
     <select id="piper-voice-select">${opts}</select>
