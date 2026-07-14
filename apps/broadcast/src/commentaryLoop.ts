@@ -12,6 +12,7 @@ import {
   formatStartupSpeech,
   formatBatTurnChangeSpeech,
   formatSituationSummary,
+  formatIdleSummary,
   periodName,
   type PlayerLookup,
   type SpeechContext,
