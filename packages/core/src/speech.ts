@@ -66,6 +66,9 @@ function formatScore(meta: MatchMetadata, homeRuns: number, awayRuns: number): s
   const verdict = homeRuns > awayRuns ? `${meta.home.shorthand} johtaa`
     : awayRuns > homeRuns ? `${meta.away.shorthand} johtaa`
     : "tasatilanne";
+  if (homeRuns === awayRuns) {
+    return pickVariant([`${homeRuns}, ${awayRuns}, tasatilanne`, `tasan ${homeRuns}, ${awayRuns}`]);
+  }
   return `${homeRuns}, ${awayRuns}, ${verdict}`;
 }
 
