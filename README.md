@@ -170,19 +170,17 @@ npm run typecheck -w @pesisselostaja/web
 npm run build -w @pesisselostaja/web
 ~~~
 
-### Debugging mobile issues (missed speech, audio going silent)
+### Self-hosting on :3000
 
-The root Node server also serves the public web app at `/v2/` from the same origin,
-so a phone on the same network (e.g. over Tailscale) can log debug events straight
-to a file on the server — useful for chasing bugs that only show up after the app
-has been backgrounded and resumed on a phone.
+`apps/server` is a minimal static file server that hosts the built web app on
+port 3000 (systemd unit `pesisselostaja.service` runs
+`node apps/server/dist/index.js` from the repo root). Old `/v2/` bookmarks
+redirect to `/`. It serves files only — no watcher and no API endpoints; the
+browser app talks to pesistulokset.fi directly.
 
-Open the app with `?debug=1` (e.g. `http://<server>:3000/v2/?debug=1`) to enable it.
-The web app then posts structured events — API poll timing, what was spoken and
-when, `visibilitychange`/audio-unlock state — to `POST /api/debug-log`, which
-appends them as JSON lines to `debug.log` in the project root (gitignored). Watch
-it live with `tail -f debug.log`. Without `?debug=1`, or on the public GitHub Pages
-deployment (which has no such endpoint), nothing is sent.
+Note: the old v1 server's `POST /api/debug-log` endpoint (mobile `?debug=1`
+logging to `debug.log`) was dropped with v1 — `?debug=1` posts now fail
+silently, same as on the GitHub Pages deployment.
 
 ## Limitations
 
