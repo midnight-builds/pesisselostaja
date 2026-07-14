@@ -1,4 +1,4 @@
-import { fetchMatchMetadata, fetchLiveEvents, type ApiOptions } from "./api.js";
+import { fetchMatchMetadata, fetchLiveEvents, type ApiOptions } from "@pesisselostaja/core";
 import {
   buildPlayerLookup,
   subEventToSpeech,
@@ -27,7 +27,7 @@ import {
   periodsPlayed,
   type WatcherState,
 } from "./state.js";
-import type { LiveEvent, MatchMetadata, SubEvent } from "./types.js";
+import type { LiveEvent, MatchMetadata, SubEvent } from "@pesisselostaja/core";
 
 const SUMMARY_INTERVAL_MS = 5 * 60 * 1000;
 const SUMMARY_EVERY_N = 10;

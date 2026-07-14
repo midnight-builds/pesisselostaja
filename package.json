@@ -7,7 +7,8 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/*",
+    "v2"
   ],
   "main": "dist/index.js",
   "scripts": {

@@ -1,4 +1,4 @@
-import { fetchMatchMetadata, fetchLiveEvents } from "../../v2/src/api.js";
+import { fetchMatchMetadata, fetchLiveEvents } from "@pesisselostaja/core";
 import {
   buildPlayerLookup,
   subEventToSpeech,
@@ -31,7 +31,7 @@ import {
   preventOrdinalReading,
   type PronunciationRule,
 } from "./nodePronunciation.js";
-import type { LiveEvent, MatchMetadata } from "../../v2/src/types.js";
+import type { LiveEvent, MatchMetadata } from "@pesisselostaja/core";
 import { readFileSync, writeFileSync } from "node:fs";
 import { log } from "./log.js";
 import type { RelayConfig } from "./config.js";

@@ -9,10 +9,10 @@ import {
   savePronunciations,
   type PronunciationRule,
 } from "./pronunciation.js";
-import { fetchTodayMatches } from "./api.js";
+import { fetchTodayMatches } from "@pesisselostaja/core";
 import { PIPER_VOICES, piperStored, piperDownload } from "./piper.js";
 import { debugLog } from "./debuglog.js";
-import type { LiveMatchSummary } from "./types.js";
+import type { LiveMatchSummary } from "@pesisselostaja/core";
 
 const DEFAULT_API_BASE = "https://api.pesistulokset.fi/api/v1";
 const DEFAULT_API_KEY = "wRX0tTke3DZ8RLKAMntjZ81LwgNQuSN9";
