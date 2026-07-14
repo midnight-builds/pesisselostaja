@@ -14,7 +14,7 @@ async function main(): Promise<void> {
   log("Pesisselostaja Relay");
   log(`Ottelu ID: ${config.matchId}`);
   log(`YouTube-lähde: ${config.youtubeUrl}`);
-  log(`Ääni: ${config.voice}`);
+  log(`Ääni: ${config.elevenLabsApiKey ? `ElevenLabs ${config.elevenLabsVoiceId} (${config.elevenLabsModelId}), fallback Piper ${config.voice}` : `Piper ${config.voice}`}`);
   log(`Dry run: ${config.dryRun}`);
   if (config.recordFile) log(`Tallennetaan paikalliseen tiedostoon: ${config.recordFile}`);
 
