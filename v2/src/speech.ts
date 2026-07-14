@@ -60,10 +60,13 @@ export function getTeamName(meta: MatchMetadata, teamId: number | null): string 
 }
 
 function formatScore(meta: MatchMetadata, homeRuns: number, awayRuns: number): string {
-  if (homeRuns > awayRuns) return `${homeRuns}, ${awayRuns}, ${meta.home.shorthand} johtaa`;
-  if (awayRuns > homeRuns) return `${awayRuns}, ${homeRuns}, ${meta.away.shorthand} johtaa`;
+  // Runs are always spoken home-first, in match order (koti ennen vierasta),
+  // regardless of who leads — only the trailing verdict changes.
   if (homeRuns === 0 && awayRuns === 0) return "nolla nolla";
-  return `${homeRuns}, ${awayRuns}, tasatilanne`;
+  const verdict = homeRuns > awayRuns ? `${meta.home.shorthand} johtaa`
+    : awayRuns > homeRuns ? `${meta.away.shorthand} johtaa`
+    : "tasatilanne";
+  return `${homeRuns}, ${awayRuns}, ${verdict}`;
 }
 
 function resolvePlayerName(lookup: PlayerLookup, el: EventTextElement): string | null {
