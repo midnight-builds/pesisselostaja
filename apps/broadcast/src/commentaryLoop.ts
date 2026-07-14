@@ -375,6 +375,7 @@ export class CommentaryLoop {
   private async speak(text: string, countAnnouncement = true): Promise<void> {
     if (text === this.lastSpeech) return;
     this.lastSpeech = text;
+    this.lastSpeechAt = Date.now();
     const spoken = preventOrdinalReading(applyPronunciations(text, this.pronunciations));
     log(`Selostus: ${text}`);
     try {
