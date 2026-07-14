@@ -128,7 +128,7 @@ function formatBatterChangeSubEvent(sub: SubEvent, lookup: PlayerLookup): string
   for (const el of sub.texts) {
     if (typeof el === "object" && el.type === "player") {
       const name = resolvePlayerName(lookup, el);
-      if (name) return `Vuorossa ${name}.`;
+      if (name) return pickVariant([`Vuorossa ${name}.`, `Nyt vuorossa ${name}.`, `Lyömässä ${name}.`]);
     }
   }
   return null;
