@@ -28,7 +28,7 @@ Notes:
   Asmo voice** or obtain separate permission from the author.
 
 The canonical list (id, author, license, source) lives in code in
-[`v2/src/piper.ts`](v2/src/piper.ts) so the UI, README and this file stay in sync.
+[`apps/web/src/piper.ts`](apps/web/src/piper.ts) so the UI, README and this file stay in sync.
 
 ## Speech / inference stack
 

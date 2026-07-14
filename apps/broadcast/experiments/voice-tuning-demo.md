@@ -27,7 +27,7 @@ sitten oikea selostusrivi säädetyillä arvoilla:
 
 `relay/experiments/voice-tuning-demo.ts` — ei npm-scriptiä (tarkoituksella
 throwaway, ei osa `relay/tsconfig.json`:n includea eli ei typecheck/lint-katettu).
-Aja uudelleen: `npx tsx relay/experiments/voice-tuning-demo.ts` (~30-60s, ei
+Aja uudelleen: `npx tsx apps/broadcast/experiments/voice-tuning-demo.ts` (~30-60s, ei
 lataa mitään, käyttää jo asennettua Piperiä).
 
 ## Palaute (2026-07-09)
@@ -45,8 +45,8 @@ mallilla. `noise_w`-variaatio (segmentit 3 ja 6) sen sijaan kelpaa jatkoon.
   tai muuta mekanismia (tauko, sanavalinta) kuin `length_scale`.
 - Kuulostaako korotettu `noise_w` (1.3) luonnollisemmalta, vai alkaako ääntämys rikkoutua?
 - Kuuluuko segmentti 6:n kevyt per-rivi `noise_w`-vaihtelu selvänä erona, vai pitääkö haarukkaa leventää?
-- Jos tulos kelpaa: viedäänkö parametrit tuotantoon (`relay/src/piperTts.ts` +
-  `v2/src/piper.ts`) kiinteinä uusina oletuksina, tapahtuvakohtaisina arvoina
+- Jos tulos kelpaa: viedäänkö parametrit tuotantoon (`apps/broadcast/src/piperTts.ts` +
+  `apps/web/src/piper.ts`) kiinteinä uusina oletuksina, tapahtuvakohtaisina arvoina
   (kunnari omat `noise_w`-arvot, lopetus jotain muuta kuin `length_scale`), vai
   satunnaistettuna joka synteesikutsulla väli sisällä?
 - Tekstipuolen vaihteluun (huutomerkit, lauserakenne — alkuperäisen listan
