@@ -343,6 +343,71 @@ enää etene, relay **ei sammu itsestään** — pysäytä käsin
 lähde voi flapata takaisin (näin kävi 144203:ssa) — tarkista kohdekuva
 Studiosta ennen lopullista tappoa.
 
+### ⚠️ VAKAVIN LÖYDÖS: selostus katosi kohteesta KOKONAAN flappauksen aikana (144203)
+
+**Operaattorin havainto (luotettava, katsoi kohdelähetystä):** ottelun
+**viimeiseen ~15 min flappausjaksoon ei tullut yhtään selostusta kohteen
+videoon** — täysi hiljaisuus, ei edes osittaisia klippejä. Kaksi täyttä
+service-restarttia **eivät auttaneet ääneen lainkaan** (auttoivat backoffiin
+= respawn-gäppiin, mutta ei kuuluvaan selostukseen). Video pyöri koko ajan
+katsojille (7 katsojaa), vain selostus puuttui.
+
+**Tämä on ISOMPI ongelma kuin ajon aikana pääteltiin.** Silloin arvioitiin
+että syy on backoff-gäpit + `amix=duration=first` katkaisee klipin lähteen
+EOF:ssä → *pätkivä/osittainen* ääni. **Se selitys on riittämätön:** se
+ennustaa osittaista ääntä, ei totaalista hiljaisuutta terveiden 33 s
+ikkunoiden aikanakaan. Restartin jälkeen gäpit olivat ~1–4 s ja ffmpeg
+pushasi 33 s kerrallaan — silti nolla selostusta. Vika on siis narraation
+**toimituksessa ulostuloon respawnien yli**, ei pelkkä ajoitus.
+
+**Hypoteeseja (EI vahvistettu — vaatii oman diagnoosin, ks. alla):**
+- **a)** FIFO-narraatioinput ei kytkeydy `amix`:iin oikein ensimmäisen
+  respawnin jälkeen → ffmpeg mixaa vain lähteen audiota, input 1 jää
+  käytännössä hiljaiseksi. (`spawnOnce` avaa FIFO:n `Promise.race`:ssa
+  lähteen avaamisen kanssa — epäillään kättely-/järjestysongelmaa kun input 0
+  on flaky.)
+- **b)** Narraatiojono soitetaan reaaliajassa (`narrationFifo.ts` tick 20 ms),
+  ja koko putken ~30–90 s latenssi vs. 33 s ikkunat tarkoittaa, että kun
+  klippi vihdoin on jonon kärjessä ja ffmpeg sattuu olemaan pystyssä, sessio
+  onkin jo katkennut EOF:iin ennen kuin klipin kuuluva osa ehtii soida —
+  systemaattisesti, joka syklissä.
+- **c)** `amix=inputs=2:duration=first:normalize=0` pudottaa lyhyillä
+  sessioilla narraatioinputin kokonaan (esim. input 1:n bufferointi ei ehdi
+  tuottaa dataa ennen input 0:n EOF:ää).
+
+**Seuraava askel (tärkein koko relayssa juuri nyt):** rakenna **flappaavan
+lähteen integraatiotesti** — HLS/tiedostolähde joka EOF:ää ~33 s välein
+toistuvasti — ja `--record-file`-ajolla **varmista päätyykö narraatioaudio
+oikeasti ulostuloon**. Tämä skenaario (HANDOFF-testilista kohta 3) ei ollut
+koskaan testattu, ja 144203 osoitti että se on rikki tavalla jota ei
+staattisesti pystytty varmuudella paikantamaan. Ilman toistettavaa testiä
+juurisyytä (a/b/c) ei kannata arvailla koodiin.
+
+**Muistiinpano restart-mitigaatiosta:** ajon aikana pääteltiin että
+service-restart nollaa backoffin ja palauttaa selostuksen. Backoffin se
+nollasi (respawn-gäppi 30 s → ~1 s), **mutta kuuluvaa selostusta se ei
+palauttanut** (operaattori vahvisti jälkikäteen). Älä siis luota restarttiin
+selostuksen korjaajana — se on korkeintaan videon jatkuvuuden kannalta
+neutraali, ja katsojariskin (lähetys voi pudota) takia sitä ei kannata
+toistaa selostuksen toivossa.
+
+### Sivuhavainto: auto-stopin viive (144203)
+
+Kun relay pysäytettiin ottelun päätyttyä, **kohdelähetys jäi Studiossa vielä
+pitkäksi aikaa "live"-tilaan** ja päättyi lopulta siististi itsestään
+(auto-stop). Eli auto-stop toimii, mutta **viiveellä** — älä hätäänny jos
+kohde näyttää jatkuvan minuutteja pushin loputtua. Jos haluat päättää heti,
+tee se käsin Studiosta.
+
+### Lopputulos 144203
+
+Ottelu selostettiin loppuun asti (loppulukemat kuuluivat lokissa klo 12:04:
+"Ottelu päättyi! Ysit Kylmä voitti 3–1"). Datapuoli (pesistulokset API →
+selostustekstit) toimi **moitteettomasti koko ajan** — palot, juoksut,
+vuoroparit, tilannekuva päivittyivät oikein myös flappauksen aikana. Kaikki
+illan ongelmat olivat **lähde-/mediaputkessa** (video-EOF + narraation
+toimitus), eivät domain-/selostuslogiikassa.
+
 ## Miten ajetaan — nopea muistilista
 
 - **Esitesti ilman RTMP:tä ensin**:
