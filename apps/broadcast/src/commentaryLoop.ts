@@ -287,7 +287,10 @@ export class CommentaryLoop {
 
         const speech = subEventToSpeech(event, sub, meta, lookup, this.announceBatterChanges, ctx);
         if (!speech) continue;
-        await this.speak(speech);
+        // Same texts in the same turn and situation = a scorer double-marking.
+        const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
+          `${JSON.stringify(sub.texts)}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
+        await this.speak(speech, true, dedupeKey);
       }
 
       if (event.timestamp !== null && event.timestamp > state.lastTimestamp) {
@@ -372,9 +375,14 @@ export class CommentaryLoop {
     };
   }
 
-  private async speak(text: string, countAnnouncement = true): Promise<void> {
-    if (text === this.lastSpeech) return;
-    this.lastSpeech = text;
+  /** dedupeKey identifies the announcement's content before variant
+   *  randomization. Consecutive scorer double-markings used to be dropped by
+   *  comparing the final strings, but pickVariant can now phrase the same
+   *  duplicate two different ways — so duplicates must be detected on the
+   *  pre-variant key, never on the rendered speech. */
+  private async speak(text: string, countAnnouncement = true, dedupeKey: string = text): Promise<void> {
+    if (dedupeKey === this.lastSpeech) return;
+    this.lastSpeech = dedupeKey;
     this.lastSpeechAt = Date.now();
     const spoken = preventOrdinalReading(applyPronunciations(text, this.pronunciations));
     log(`Selostus: ${text}`);
