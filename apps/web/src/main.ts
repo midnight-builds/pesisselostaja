@@ -831,9 +831,11 @@ function reflectPiperStatus(): void {
 function applyVoiceEngine(): void {
   watcher?.setVoiceEngine(settings.voiceEngine);
   watcher?.setVolumeBoost(settings.volumeBoost);
+  watcher?.setElevenLabsApiKey(settings.elevenLabsApiKey);
   if (settings.voiceEngine === "piper") {
     watcher?.setPiperVoice(settings.piperVoiceId);
   } else {
+    // Browser voice doubles as the fallback for the ElevenLabs engine.
     watcher?.setVoice(getVoiceByName(settings.voiceName));
   }
 }
