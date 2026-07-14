@@ -56,6 +56,27 @@ The service is intentionally **not enabled** at boot (`systemctl --user
 enable` is never run for it) — always started by hand per match, so a stale
 `.env.relay` from a finished match can't start replaying into a dead stream key.
 
+### Toggling batter-change announcements (incl. mid-match)
+
+By default the relay announces batter/lineup changes ("Vuorossa X"), the same
+as v2's `announceBatterChanges` toggle. If those come through at bad moments
+(e.g. the source feed logs substitutions out of order), turn them off — palot,
+scores, period events, and the periodic situation summary (score + palot) all
+keep playing.
+
+- **At startup:** set `RELAY_ANNOUNCE_BATTER_CHANGES=false` in `.env.relay`, or
+  pass `--no-batter-changes` to `relay:dev`.
+- **Live, without restarting:** the loop re-reads `relay/run/.control-<matchId>.json`
+  every poll (~6 s). Flip it and the change takes effect within one poll:
+  ```bash
+  echo '{"announceBatterChanges": false}' > relay/run/.control-143280.json   # off
+  echo '{"announceBatterChanges": true}'  > relay/run/.control-143280.json   # back on
+  ```
+  The relay logs a line when the effective value changes. The startup log
+  prints the exact control-file path for the running match. (The file is
+  written from the env/CLI value at startup, so the env/CLI setting is
+  authoritative on start and live edits take over after.)
+
 ### Testing without touching YouTube (dry run)
 
 ```bash

@@ -31,6 +31,7 @@ import {
   type PronunciationRule,
 } from "../../src/pronunciation.js";
 import type { LiveEvent, MatchMetadata } from "../../src/types.js";
+import { readFileSync, writeFileSync } from "node:fs";
 import { log } from "./log.js";
 import type { RelayConfig } from "./config.js";
 
@@ -50,15 +51,57 @@ export class CommentaryLoop {
   private pronunciations: PronunciationRule[];
   private lastSpeech: string | null = null;
   private abort: AbortController | null = null;
+  /** Current effective value of the batter-change setting. Seeded from config
+   *  at startup, then overridable mid-match via the control file. */
+  private announceBatterChanges: boolean;
 
   constructor(private config: RelayConfig, private sink: SpeechSink) {
     this.state = loadState(config.stateFile);
     this.pronunciations = loadPronunciations(config.pronunciationsFile);
+    this.announceBatterChanges = config.announceBatterChanges;
+  }
+
+  /** Writes the current setting to the control file so there is always a
+   *  discoverable, editable file. Called once at startup, so the config value
+   *  (env/CLI/default) is authoritative on start; runtime edits take over
+   *  after. */
+  private writeControlFile(): void {
+    try {
+      writeFileSync(
+        this.config.controlFile,
+        JSON.stringify({ announceBatterChanges: this.announceBatterChanges }, null, 2) + "\n"
+      );
+    } catch (err) {
+      log(`Control-tiedoston kirjoitus epäonnistui: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  /** Re-reads the control file each poll and applies a changed setting live.
+   *  A missing/invalid file is ignored (keep the current value) rather than
+   *  treated as an error, so a half-written edit can't crash the loop. */
+  private refreshRuntimeControls(): void {
+    let next: boolean | null = null;
+    try {
+      const parsed = JSON.parse(readFileSync(this.config.controlFile, "utf8"));
+      if (typeof parsed.announceBatterChanges === "boolean") next = parsed.announceBatterChanges;
+    } catch {
+      return;
+    }
+    if (next !== null && next !== this.announceBatterChanges) {
+      this.announceBatterChanges = next;
+      log(`Pelaajanvaihtojen selostus vaihdettu ajon aikana: ${next ? "PÄÄLLÄ" : "POIS"} (control-tiedostosta).`);
+    }
   }
 
   async run(): Promise<void> {
     this.abort = new AbortController();
     const signal = this.abort.signal;
+
+    this.writeControlFile();
+    log(
+      `Pelaajanvaihtojen selostus: ${this.announceBatterChanges ? "PÄÄLLÄ" : "POIS"} ` +
+        `(vaihda ajon aikana: ${this.config.controlFile})`
+    );
 
     log(`Haetaan ottelutietoja (ID: ${this.config.matchId})…`);
     const meta = await fetchMatchMetadata(this.config.matchId, {
@@ -94,6 +137,7 @@ export class CommentaryLoop {
     while (!signal.aborted) {
       await this.sleepAbortable(this.config.pollInterval, signal);
       if (signal.aborted) break;
+      this.refreshRuntimeControls();
       try {
         const data = await fetchLiveEvents(this.config.matchId, { apiBase: this.config.apiBase });
 
@@ -174,7 +218,7 @@ export class CommentaryLoop {
         }
 
         const ctx = this.buildContext();
-        const speech = subEventToSpeech(event, sub, meta, lookup, true, ctx);
+        const speech = subEventToSpeech(event, sub, meta, lookup, this.announceBatterChanges, ctx);
         if (!speech) continue;
 
         await this.speak(speech);

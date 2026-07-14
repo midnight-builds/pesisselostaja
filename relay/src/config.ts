@@ -10,6 +10,7 @@ export interface RelayConfig {
   pollInterval: number;
   narrationGain: number;
   urlRefreshMs: number;
+  announceBatterChanges: boolean;
   dryRun: boolean;
   recordFile?: string;
   apiKey: string;
@@ -17,6 +18,9 @@ export interface RelayConfig {
   stateFile: string;
   runDir: string;
   pronunciationsFile: string;
+  /** JSON file the commentary loop re-reads each poll so an operator can flip
+   *  announceBatterChanges mid-match without restarting — see commentaryLoop. */
+  controlFile: string;
 }
 
 function requireValue(name: string, cliValue: string | undefined, envName: string): string {
@@ -40,6 +44,7 @@ export function parseRelayConfig(): RelayConfig {
       "poll-interval": { type: "string" },
       "narration-gain": { type: "string" },
       "url-refresh-ms": { type: "string" },
+      "no-batter-changes": { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       "record-file": { type: "string" },
     },
@@ -74,11 +79,16 @@ export function parseRelayConfig(): RelayConfig {
   const pollInterval = parseInt(values["poll-interval"] ?? process.env.RELAY_POLL_INTERVAL ?? "6000", 10);
   const narrationGain = parseFloat(values["narration-gain"] ?? process.env.RELAY_NARRATION_GAIN ?? "1.3");
   const urlRefreshMs = parseInt(values["url-refresh-ms"] ?? process.env.RELAY_URL_REFRESH_MS ?? String(15 * 60 * 1000), 10);
+  // Off if either the CLI flag or the env var says so; the control file (see
+  // commentaryLoop) can still override this live once the loop is running.
+  const announceBatterChanges =
+    !(values["no-batter-changes"] ?? false) && process.env.RELAY_ANNOUNCE_BATTER_CHANGES !== "false";
   const apiKey = process.env.PESISTULOKSET_API_KEY ?? "wRX0tTke3DZ8RLKAMntjZ81LwgNQuSN9";
   const apiBase = process.env.PESISTULOKSET_API_BASE ?? "https://api.pesistulokset.fi/api/v1";
 
   const runDir = new URL("../run/", import.meta.url).pathname;
   const stateFile = `${runDir}.state-${matchId}.json`;
+  const controlFile = `${runDir}.control-${matchId}.json`;
   // Same file the main app's web UI writes to, so pronunciation overrides
   // configured there also apply to this relay's synthesized narration.
   const pronunciationsFile = process.env.PRONUNCIATIONS_FILE ?? ".pronunciations.json";
@@ -93,6 +103,7 @@ export function parseRelayConfig(): RelayConfig {
     pollInterval,
     narrationGain,
     urlRefreshMs,
+    announceBatterChanges,
     dryRun,
     recordFile,
     apiKey,
@@ -100,5 +111,6 @@ export function parseRelayConfig(): RelayConfig {
     stateFile,
     runDir,
     pronunciationsFile,
+    controlFile,
   };
 }
