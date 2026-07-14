@@ -37,8 +37,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { log } from "./log.js";
 import type { RelayConfig } from "./config.js";
 
-const SUMMARY_INTERVAL_MS = 5 * 60 * 1000;
 const SUMMARY_EVERY_N = 10;
+/** No speech for this long → break the silence with an idle filler. */
+const IDLE_FILLER_MS = 2 * 60 * 1000;
 
 export type SpeechSink = (spokenText: string, readableText: string) => Promise<void>;
 
@@ -52,6 +53,7 @@ export class CommentaryLoop {
   private state: WatcherState;
   private pronunciations: PronunciationRule[];
   private lastSpeech: string | null = null;
+  private lastSpeechAt = 0;                // wall clock of the last spoken announcement
   private lastSummaryCount = 0;
   private abort: AbortController | null = null;
   /** Current effective value of the batter-change setting. Seeded from config
@@ -335,17 +337,21 @@ export class CommentaryLoop {
     }
   }
 
-  /** Periodic situation recap, spoken (not counted as an announcement). */
+  /** Periodic situation recap or idle filler, spoken (not counted as an
+   *  announcement). Busy game: full recap every SUMMARY_EVERY_N announcements.
+   *  Quiet game: a "tilanne on edelleen…" filler once nothing has been said
+   *  for IDLE_FILLER_MS. */
   private async maybeAnnounceSummary(meta: MatchMetadata): Promise<void> {
     if (this.state.announcementCount === 0) return;
     const now = Date.now();
-    const due =
-      this.state.announcementCount - this.lastSummaryCount >= SUMMARY_EVERY_N ||
-      now - this.state.lastSummaryTime > SUMMARY_INTERVAL_MS;
-    if (!due) return;
+    const countDue = this.state.announcementCount - this.lastSummaryCount >= SUMMARY_EVERY_N;
+    const idleDue = now - this.lastSpeechAt > IDLE_FILLER_MS;
+    if (!countDue && !idleDue) return;
     this.lastSummaryCount = this.state.announcementCount;
     this.state.lastSummaryTime = now;
-    const summary = formatSituationSummary(meta, this.buildContext());
+    this.lastSpeechAt = now;
+    const ctx = this.buildContext();
+    const summary = countDue ? formatSituationSummary(meta, ctx) : formatIdleSummary(meta, ctx);
     await this.speak(summary, false);
   }
 
