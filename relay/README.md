@@ -31,17 +31,26 @@ decisions behind it. This file is the day-to-day operator runbook.
 1. Start the phone's YouTube livestream as usual — this is the original
    broadcast, and the relay never modifies it.
 2. In YouTube Studio, manually create a **second** live broadcast for the
-   commentated stream. Copy its RTMP ingest URL + stream key.
+   commentated stream. Copy its RTMP ingest URL + stream key. **Enable
+   "Auto-start" (and "Auto-stop")** on this broadcast — with auto-start on,
+   the broadcast transitions to live on its own the moment the relay's ffmpeg
+   starts pushing, so there's no manual "Go live" click in step 6. (This maps
+   to the API's `contentDetails.enableAutoStart`; it can't be toggled on once
+   the broadcast has already reached the testing/live stage, so set it at
+   creation time.)
 3. Edit `relay/.env.relay`:
    - `RELAY_MATCH_ID` — same pesistulokset.fi match ID the main app uses.
    - `RELAY_YOUTUBE_URL` — the original broadcast's watch URL.
    - `RELAY_RTMP_URL` / `RELAY_STREAM_KEY` — the second broadcast's ingest info.
 4. `systemctl --user start pesisselostaja-relay.service`
 5. Watch logs: `journalctl --user -u pesisselostaja-relay -f`
-6. Go live on the second broadcast in YouTube Studio once you see ffmpeg
-   pushing without errors.
-7. After the match: `systemctl --user stop pesisselostaja-relay.service`, and
-   end both broadcasts in YouTube Studio.
+6. With Auto-start enabled (step 2), the second broadcast goes live by itself
+   ~5–10 s after you see ffmpeg pushing without errors — no manual step. (If
+   Auto-start was *not* enabled, fall back to clicking "Go live" in Studio
+   once ffmpeg is pushing cleanly.)
+7. After the match: `systemctl --user stop pesisselostaja-relay.service`. With
+   Auto-stop enabled the second broadcast ends on its own when the push stops;
+   otherwise end both broadcasts manually in YouTube Studio.
 
 The service is intentionally **not enabled** at boot (`systemctl --user
 enable` is never run for it) — always started by hand per match, so a stale

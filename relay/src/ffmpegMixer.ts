@@ -62,6 +62,10 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** How often to emit a liveness line during an otherwise quiet healthy run,
+ *  so a long eventless stretch is distinguishable from a hang in the logs. */
+const HEARTBEAT_MS = 2 * 60 * 1000;
+
 /** Thrown once resolveSourceUrl/ffmpeg-start has failed continuously for too
  *  long — signals the original broadcast is gone for good (not a transient
  *  network blip), so the caller should stop retrying and shut the relay down
@@ -166,7 +170,16 @@ export class FfmpegMixer {
       void this.killForRefresh(childForRefresh);
     }, refreshMs);
 
+    // Liveness heartbeat: during a healthy run with no pesäpallo events for
+    // minutes there is otherwise nothing in the log, so "still alive" and
+    // "silently hung" look identical. Cleared on exit below.
+    const heartbeat = setInterval(() => {
+      const up = Math.round((Date.now() - startedAt) / 1000);
+      log(`Sydänääni: relay käynnissä ${up}s, selostusjonossa ${this.fifo.pendingClips} klippiä.`);
+    }, HEARTBEAT_MS);
+
     const result = await childDone;
+    clearInterval(heartbeat);
     this.fifo.closeIo();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     const ranMs = Date.now() - startedAt;
@@ -182,7 +195,9 @@ export class FfmpegMixer {
    *  can't be postponed forever by back-to-back announcements. */
   private async killForRefresh(childToKill: ChildProcess | null): Promise<void> {
     if (!childToKill || childToKill !== this.child) return;
-    const deadline = Date.now() + 10000;
+    const pendingAtStart = this.fifo.pendingClips;
+    const waitStart = Date.now();
+    const deadline = waitStart + 10000;
     while (this.fifo.pendingClips > 0 && Date.now() < deadline && !this.stopped && this.child === childToKill) {
       await delay(200);
     }
@@ -191,7 +206,17 @@ export class FfmpegMixer {
     // pipe buffer before we pull it out from under it.
     await delay(500);
     if (this.stopped || this.child !== childToKill) return;
-    log("Määräaikainen URL-päivitys — käynnistetään ffmpeg uudelleen.");
+    const waited = Date.now() - waitStart;
+    const remaining = this.fifo.pendingClips;
+    // Whether the queue actually drained is the evidence that the respawn
+    // didn't sever a clip mid-word (relay/HANDOFF.md fix #2): "tyhjeni" =
+    // clean gap, "EI tyhjentynyt" = the 10s bound cut it off anyway.
+    const drainStatus =
+      remaining === 0 ? "tyhjeni" : `EI tyhjentynyt (${remaining} klippiä jäljellä, 10s katkaisu)`;
+    log(
+      `Määräaikainen URL-päivitys — käynnistetään ffmpeg uudelleen. ` +
+        `Selostusjono ${drainStatus}; odotettiin ${waited}ms, jonossa ${pendingAtStart} klippiä respawnin alkaessa.`
+    );
     childToKill.kill("SIGTERM");
   }
 }
