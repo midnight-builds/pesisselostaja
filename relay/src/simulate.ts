@@ -2,7 +2,7 @@ import "dotenv/config";
 import { parseArgs } from "node:util";
 import { mkdirSync, existsSync, openSync, writeSync, ftruncateSync, closeSync, statSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
-import { fetchMatchMetadata, fetchLiveEvents } from "../../src/api.js";
+import { fetchMatchMetadata, fetchLiveEvents } from "../../v2/src/api.js";
 import {
   buildPlayerLookup,
   subEventToSpeech,
@@ -11,9 +11,9 @@ import {
   isMatchEndSubEvent,
   runValueOfSubEvent,
   type SpeechContext,
-} from "../../src/speech.js";
-import { loadState, addRun, getPeriodScore, periodsWon, periodsPlayed, type WatcherState } from "../../src/state.js";
-import { loadPronunciations, applyPronunciations, preventOrdinalReading } from "../../src/pronunciation.js";
+} from "../../v2/src/speech.js";
+import { loadState, addRun, getPeriodScore, periodsWon, periodsPlayed, type WatcherState } from "./nodeState.js";
+import { loadPronunciations, applyPronunciations, preventOrdinalReading } from "./nodePronunciation.js";
 import { PiperTts } from "./piperTts.js";
 import { buildMixFilterComplex } from "./ffmpegMixer.js";
 import { log } from "./log.js";
@@ -113,8 +113,15 @@ async function buildTimeline(
   let lastSpoken: string | null = null;
 
   for (const event of events) {
-    if (event.team != null && event.team !== state.currentBatTeamId) {
+    if (
+      event.team != null &&
+      (event.team !== state.currentBatTeamId ||
+        event.inning !== state.currentInning ||
+        event.batTurn !== state.currentBatTurn)
+    ) {
       state.currentBatTeamId = event.team;
+      state.currentInning = event.inning;
+      state.currentBatTurn = event.batTurn;
       state.currentOuts = 0;
     }
     if (event.period > 0) state.currentPeriod = event.period;
@@ -138,6 +145,8 @@ async function buildTimeline(
         currentOuts: state.currentOuts,
         currentPeriod: state.currentPeriod,
         currentBatTeamId: state.currentBatTeamId,
+        currentInning: state.currentInning,
+        currentBatTurn: state.currentBatTurn,
       };
       const readable = subEventToSpeech(event, sub, meta, lookup, true, ctx);
       if (!readable || readable === lastSpoken) continue;

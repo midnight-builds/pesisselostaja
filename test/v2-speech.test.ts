@@ -3,6 +3,8 @@ import {
   formatBatTurnChangeSpeech,
   formatStartupSpeech,
   eventFingerprint,
+  recomputeCurrentOutsKeyed,
+  outsThroughSubEvent,
   type SpeechContext,
 } from "../v2/src/speech.js";
 import type { MatchMetadata, LiveEvent, SubEvent, Team } from "../v2/src/types.js";
@@ -81,5 +83,31 @@ describe("eventFingerprint cross-turn palo collision — HANDOFF task 1", () => 
     const a = eventFingerprint(paloEvent(5, 3, 1, 0, 100), 0);
     const b = eventFingerprint(paloEvent(5, 3, 1, 1, 200), 0);
     expect(a).toBe(b);
+  });
+
+  it("counts all three palot 1-2-3 across a turn even when their ids collide with a prior turn (relay palolaskuri, match 144197)", () => {
+    // Reproduces the live bug: event.id resets each turn, so turn B's palot
+    // reuse ids 2 and 10 already seen in turn A. The old coordinate-free
+    // fingerprint dropped the colliding palot, so the relay under-counted (only
+    // the non-colliding id was announced, as "ensimmäinen palo"). The relay now
+    // counts palot from recomputeCurrentOutsKeyed on the full history, which
+    // scopes to the latest turn — so all three of turn B's palot survive.
+    const turnA = [paloEvent(2, 0, 1, 0, 100), paloEvent(10, 0, 1, 0, 100)];
+    const turnB = [paloEvent(2, 0, 1, 1, 200), paloEvent(10, 0, 1, 1, 200), paloEvent(14, 0, 1, 1, 200)];
+    const fullHistory = [...turnA, ...turnB];
+
+    // No two sub-events collapse to the same fingerprint → nothing is dropped.
+    const fps = fullHistory.map((e) => eventFingerprint(e, 0));
+    expect(new Set(fps).size).toBe(fullHistory.length);
+
+    const { outs, turnKey } = recomputeCurrentOutsKeyed(fullHistory);
+    expect(outs).toBe(3);
+    expect(turnKey).toBe("0:1:1:200");
+
+    // Each palo's spoken ordinal (1, 2, 3) as it happens.
+    const aIdx = turnA.length;
+    expect(outsThroughSubEvent(fullHistory, aIdx, 0)).toBe(1);
+    expect(outsThroughSubEvent(fullHistory, aIdx + 1, 0)).toBe(2);
+    expect(outsThroughSubEvent(fullHistory, aIdx + 2, 0)).toBe(3);
   });
 });

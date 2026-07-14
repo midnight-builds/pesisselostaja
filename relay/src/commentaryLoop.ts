@@ -1,4 +1,4 @@
-import { fetchMatchMetadata, fetchLiveEvents } from "../../src/api.js";
+import { fetchMatchMetadata, fetchLiveEvents } from "../../v2/src/api.js";
 import {
   buildPlayerLookup,
   subEventToSpeech,
@@ -7,14 +7,15 @@ import {
   isMatchEndSubEvent,
   runValueOfSubEvent,
   eventFingerprint,
-  isEventFullyProcessed,
+  recomputeCurrentOutsKeyed,
+  outsThroughSubEvent,
   formatStartupSpeech,
   formatBatTurnChangeSpeech,
   formatSituationSummary,
   periodName,
   type PlayerLookup,
   type SpeechContext,
-} from "../../src/speech.js";
+} from "../../v2/src/speech.js";
 import {
   loadState,
   saveState,
@@ -23,14 +24,14 @@ import {
   periodsWon,
   periodsPlayed,
   type WatcherState,
-} from "../../src/state.js";
+} from "./nodeState.js";
 import {
   loadPronunciations,
   applyPronunciations,
   preventOrdinalReading,
   type PronunciationRule,
-} from "../../src/pronunciation.js";
-import type { LiveEvent, MatchMetadata } from "../../src/types.js";
+} from "./nodePronunciation.js";
+import type { LiveEvent, MatchMetadata } from "../../v2/src/types.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import { log } from "./log.js";
 import type { RelayConfig } from "./config.js";
@@ -50,6 +51,7 @@ export class CommentaryLoop {
   private state: WatcherState;
   private pronunciations: PronunciationRule[];
   private lastSpeech: string | null = null;
+  private lastSummaryCount = 0;
   private abort: AbortController | null = null;
   /** Current effective value of the batter-change setting. Seeded from config
    *  at startup, then overridable mid-match via the control file. */
@@ -115,13 +117,25 @@ export class CommentaryLoop {
     const initial = await fetchLiveEvents(this.config.matchId, { apiBase: this.config.apiBase });
     this.state.periodRuns = {};
     this.state.currentOuts = 0;
+    this.state.paloTurnKey = null;
+    this.state.paloTurnMax = 0;
     this.state.currentPeriod = 0;
     this.state.currentBatTeamId = null;
     this.state.finished = false;
-    await this.processEvents(initial.events, meta, lookup, true);
+    this.processEventsSilent(initial.events, meta);
 
     if (initial.team != null) this.state.currentBatTeamId = initial.team;
-    if ((initial.period ?? 0) > 0) this.state.currentPeriod = initial.period!;
+    if ((initial.period ?? 0) > this.state.currentPeriod) this.state.currentPeriod = initial.period!;
+    {
+      const { outs, turnKey } = recomputeCurrentOutsKeyed(initial.events);
+      this.state.paloTurnKey = turnKey;
+      this.state.paloTurnMax = outs;
+      this.state.currentOuts = outs;
+    }
+    // The turn we're already in at start is covered by the startup speech —
+    // mark it announced so the live turn-change detector doesn't repeat it.
+    this.state.announcedTurnKey =
+      `${this.state.currentPeriod}:${this.state.currentInning}:${this.state.currentBatTurn}:${this.state.currentBatTeamId}`;
     saveState(this.config.stateFile, this.state);
     log(`Ohitettu ${initial.events.length} tapahtumaa`);
 
@@ -132,6 +146,10 @@ export class CommentaryLoop {
 
     const startupMsg = formatStartupSpeech(meta, this.buildContext());
     await this.speak(startupMsg);
+    // Startup already gives the full situation — don't fire the periodic
+    // summary immediately on top of it.
+    this.state.lastSummaryTime = Date.now();
+    this.lastSummaryCount = this.state.announcementCount;
 
     log("Selostussilmukka käynnissä…");
     while (!signal.aborted) {
@@ -141,27 +159,38 @@ export class CommentaryLoop {
       try {
         const data = await fetchLiveEvents(this.config.matchId, { apiBase: this.config.apiBase });
 
-        const newBatTeam = data.team ?? null;
-        if (
-          newBatTeam != null &&
-          this.state.currentBatTeamId != null &&
-          newBatTeam !== this.state.currentBatTeamId &&
-          data.events.length === 0
-        ) {
-          const cur = getPeriodScore(this.state, this.state.currentPeriod);
-          const msg = formatBatTurnChangeSpeech(meta, this.state.currentBatTeamId, newBatTeam, cur.home, cur.away);
-          await this.speak(msg);
-          this.state.currentBatTeamId = newBatTeam;
-          this.state.currentOuts = 0;
+        // Ordinary bat-turn changes have no dedicated API text marker; they are
+        // detected and announced inside processEventsLive, keyed off
+        // seenFingerprints/announcedTurnKey (see the comment there).
+        await this.processEventsLive(data.events, meta, lookup);
+
+        // Outs for the current turn, kept monotonic per turn key. The API briefly
+        // re-keys a turn-ending palo into the next sub-inning, which would make a
+        // raw recompute rewind mid-turn (e.g. 3 → 2) after the 3rd palo was
+        // already announced; keying the running max to the counted turn resets
+        // cleanly on a real turn change but never drops mid-turn.
+        if (data.events.length > 0) {
+          const { outs, turnKey } = recomputeCurrentOutsKeyed(data.events);
+          if (turnKey !== this.state.paloTurnKey) {
+            this.state.paloTurnKey = turnKey;
+            this.state.paloTurnMax = 0;
+          }
+          this.state.paloTurnMax = Math.max(this.state.paloTurnMax, outs);
+          this.state.currentOuts = this.state.paloTurnMax;
         }
 
-        await this.processEvents(data.events, meta, lookup, false);
-
+        // Reconcile with the API's authoritative fields. After a turn-ending out
+        // the API reports the new batting team / period before any explicit
+        // bat-change event arrives; period only ever advances.
+        if ((data.period ?? 0) > this.state.currentPeriod) this.state.currentPeriod = data.period!;
         if (data.team != null && data.team !== this.state.currentBatTeamId) {
           this.state.currentBatTeamId = data.team;
           this.state.currentOuts = 0;
+          this.state.paloTurnKey = null;
+          this.state.paloTurnMax = 0;
         }
-        if ((data.period ?? 0) > this.state.currentPeriod) this.state.currentPeriod = data.period!;
+
+        await this.maybeAnnounceSummary(meta);
 
         saveState(this.config.stateFile, this.state);
       } catch (err) {
@@ -174,77 +203,149 @@ export class CommentaryLoop {
     this.abort?.abort();
   }
 
-  private async processEvents(
+  /** Mirrors v2 watcher's processEventsLive: replays the full history each poll
+   *  (the endpoint is never windowed), announces genuinely new sub-events, and
+   *  infers mid-period bat-turn changes from the API's turn coordinates. */
+  private async processEventsLive(
     events: LiveEvent[],
     meta: MatchMetadata,
-    lookup: PlayerLookup,
-    silent: boolean
+    lookup: PlayerLookup
   ): Promise<void> {
-    for (const event of events) {
-      // Only act on team/outs bookkeeping for events new this poll — the
-      // endpoint always returns full history, so re-applying this to
-      // already-processed events on every poll lets a single
-      // reordered/corrected historical entry falsely reset currentOuts
-      // mid-turn (see relay/HANDOFF.md, "palolaskuri"-bugi).
-      if (!isEventFullyProcessed(this.state.seenFingerprints, event)) {
-        if (event.team != null && event.team !== this.state.currentBatTeamId) {
-          this.state.currentBatTeamId = event.team;
-          this.state.currentOuts = 0;
+    const state = this.state;
+    for (let ei = 0; ei < events.length; ei++) {
+      const event = events[ei];
+      const prevBatTeamId = state.currentBatTeamId;
+      const turnChanged =
+        event.team != null &&
+        (event.team !== state.currentBatTeamId ||
+          event.inning !== state.currentInning ||
+          event.batTurn !== state.currentBatTurn);
+      // The very first turn of a period is announced by the "X jakso alkoi" /
+      // "Ottelu alkoi" text in subEventToSpeech instead — skip it here.
+      const isFirstTurnOfPeriod = event.inning === 0 && event.batTurn === 0;
+
+      if (turnChanged) {
+        state.currentBatTeamId = event.team;
+        state.currentInning = event.inning;
+        state.currentBatTurn = event.batTurn;
+        state.currentOuts = 0;
+      }
+      if (event.period > 0) {
+        if (event.period !== state.currentPeriod) {
+          state.currentInning = event.inning;
+          state.currentBatTurn = event.batTurn;
+          state.currentOuts = 0;
         }
-        if (event.period > 0) this.state.currentPeriod = event.period;
+        state.currentPeriod = event.period;
+      }
+
+      // Mid-period bat-turn changes have no API text marker, so infer them —
+      // but only announce a genuinely new, not-yet-announced turn, or this
+      // would fire once per poll for every historical turn change.
+      const turnKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}`;
+      if (
+        turnChanged &&
+        !isFirstTurnOfPeriod &&
+        event.team != null &&
+        turnKey !== state.announcedTurnKey &&
+        event.events.some((_, i) => !state.seenFingerprints.has(eventFingerprint(event, i)))
+      ) {
+        const cur = getPeriodScore(state, state.currentPeriod);
+        const msg = formatBatTurnChangeSpeech(
+          meta, prevBatTeamId, event.team, cur.home, cur.away, state.currentInning, state.currentBatTurn
+        );
+        await this.speak(msg);
+        state.announcedTurnKey = turnKey;
       }
 
       for (let i = 0; i < event.events.length; i++) {
         const sub = event.events[i];
         const fp = eventFingerprint(event, i);
-        const alreadySeen = this.state.seenFingerprints.has(fp);
-        this.state.seenFingerprints.add(fp);
+        if (state.seenFingerprints.has(fp)) continue;
+        state.seenFingerprints.add(fp);
 
-        if (isMatchEndSubEvent(sub)) this.state.finished = true;
+        if (isMatchEndSubEvent(sub)) state.finished = true;
 
-        if (silent) {
-          if (isRunScoringSubEvent(sub)) this.updateScore(event, meta, runValueOfSubEvent(sub));
-          if (isOutSubEvent(sub)) this.state.currentOuts++;
-          continue;
+        if (isRunScoringSubEvent(sub) && event.team !== null) {
+          addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
+          const s = getPeriodScore(state, event.period);
+          log(`Pisteet (${periodName(event.period)}): ${meta.home.shorthand} ${s.home}-${s.away} ${meta.away.shorthand}`);
         }
 
-        if (alreadySeen) continue;
-
-        if (isRunScoringSubEvent(sub)) this.updateScore(event, meta, runValueOfSubEvent(sub));
-        if (isOutSubEvent(sub)) {
-          this.state.currentOuts++;
-          const team = event.team === meta.home.id ? meta.home.shorthand : meta.away.shorthand;
-          log(`Palo: ${team} ${this.state.currentOuts}`);
-        }
-
+        // For an out, the spoken ordinal must come from the turn-key recompute
+        // (same source as the scoreboard), not the running currentOuts which
+        // can drift across polls.
         const ctx = this.buildContext();
+        if (isOutSubEvent(sub) && event.team !== null) {
+          ctx.currentOuts = outsThroughSubEvent(events, ei, i);
+          const team = event.team === meta.home.id ? meta.home.shorthand : meta.away.shorthand;
+          log(`Palo: ${team} ${ctx.currentOuts}`);
+        }
+
         const speech = subEventToSpeech(event, sub, meta, lookup, this.announceBatterChanges, ctx);
         if (!speech) continue;
-
         await this.speak(speech);
-
-        const now = Date.now();
-        const needsSummary =
-          this.state.announcementCount % SUMMARY_EVERY_N === 0 ||
-          now - this.state.lastSummaryTime > SUMMARY_INTERVAL_MS;
-        if (needsSummary && this.state.announcementCount > 0) {
-          this.state.lastSummaryTime = now;
-          const summary = formatSituationSummary(meta, this.buildContext());
-          await this.speak(summary, false);
-        }
       }
 
-      if (event.timestamp !== null && event.timestamp > this.state.lastTimestamp) {
-        this.state.lastTimestamp = event.timestamp;
+      if (event.timestamp !== null && event.timestamp > state.lastTimestamp) {
+        state.lastTimestamp = event.timestamp;
       }
     }
   }
 
-  private updateScore(event: LiveEvent, meta: MatchMetadata, value: number): void {
-    if (event.team === null || value <= 0) return;
-    addRun(this.state, event.period, event.team === meta.home.id, value);
-    const s = getPeriodScore(this.state, event.period);
-    log(`Pisteet (${periodName(event.period)}): ${meta.home.shorthand} ${s.home}-${s.away} ${meta.away.shorthand}`);
+  /** Mirrors v2 watcher's processEventsSilent: fast-forwards state through the
+   *  historical backlog at startup without emitting any speech. */
+  private processEventsSilent(events: LiveEvent[], meta: MatchMetadata): void {
+    const state = this.state;
+    for (const event of events) {
+      if (
+        event.team != null &&
+        (event.team !== state.currentBatTeamId ||
+          event.inning !== state.currentInning ||
+          event.batTurn !== state.currentBatTurn)
+      ) {
+        state.currentBatTeamId = event.team;
+        state.currentInning = event.inning;
+        state.currentBatTurn = event.batTurn;
+        state.currentOuts = 0;
+      }
+      if (event.period > 0) {
+        if (event.period !== state.currentPeriod) {
+          state.currentInning = event.inning;
+          state.currentBatTurn = event.batTurn;
+          state.currentOuts = 0;
+        }
+        state.currentPeriod = event.period;
+      }
+
+      for (let i = 0; i < event.events.length; i++) {
+        const sub = event.events[i];
+        state.seenFingerprints.add(eventFingerprint(event, i));
+        if (isMatchEndSubEvent(sub)) state.finished = true;
+        if (isRunScoringSubEvent(sub) && event.team !== null) {
+          addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
+        }
+        if (isOutSubEvent(sub) && event.team !== null) state.currentOuts++;
+      }
+
+      if (event.timestamp !== null && event.timestamp > state.lastTimestamp) {
+        state.lastTimestamp = event.timestamp;
+      }
+    }
+  }
+
+  /** Periodic situation recap, spoken (not counted as an announcement). */
+  private async maybeAnnounceSummary(meta: MatchMetadata): Promise<void> {
+    if (this.state.announcementCount === 0) return;
+    const now = Date.now();
+    const due =
+      this.state.announcementCount - this.lastSummaryCount >= SUMMARY_EVERY_N ||
+      now - this.state.lastSummaryTime > SUMMARY_INTERVAL_MS;
+    if (!due) return;
+    this.lastSummaryCount = this.state.announcementCount;
+    this.state.lastSummaryTime = now;
+    const summary = formatSituationSummary(meta, this.buildContext());
+    await this.speak(summary, false);
   }
 
   private buildContext(): SpeechContext {
@@ -259,6 +360,8 @@ export class CommentaryLoop {
       currentOuts: this.state.currentOuts,
       currentPeriod: this.state.currentPeriod,
       currentBatTeamId: this.state.currentBatTeamId,
+      currentInning: this.state.currentInning,
+      currentBatTurn: this.state.currentBatTurn,
     };
   }
 
