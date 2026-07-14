@@ -104,6 +104,11 @@ function vuoropariLabel(inning: number, batTurn: number): string {
   return `${capitalize(ord)} vuoropari, ${role}.`;
 }
 
+/** Random pick among equivalent phrasings, to keep the narration varied. */
+function pickVariant(variants: string[]): string {
+  return variants[Math.floor(Math.random() * variants.length)];
+}
+
 function ttsClean(text: string): string {
   return text
     .replace(/\s*[–—]\s*/g, ", ")
