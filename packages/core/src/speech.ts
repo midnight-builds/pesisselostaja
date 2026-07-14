@@ -399,7 +399,8 @@ function formatRunBrought(texts: EventTextElement[], _meta: MatchMetadata, looku
     }
   }
   const who = players[0] ?? "";
-  return who ? `${who} ${eventText}.` : `${eventText}.`;
+  if (!who) return `${eventText}.`;
+  return pickVariant([`${who} ${eventText}.`, `Juoksu! Tuojana ${who}.`]);
 }
 
 function formatDrawOfChoice(texts: EventTextElement[], meta: MatchMetadata, lookup: PlayerLookup): string {
