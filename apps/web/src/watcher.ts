@@ -606,6 +606,7 @@ export class BrowserWatcher {
   private say(speech: string, state: WatcherState): void {
     if (speech === this._lastSpeech) return;
     this._lastSpeech = speech;
+    this._lastSpeechAt = Date.now();
     this.log(`Puhe: ${speech}`);
     debugLog("say", { text: speech, muted: this._muted, queueLen: this._speechQueue.length });
     this.speakRaw(speech);
