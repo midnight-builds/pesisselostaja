@@ -66,6 +66,9 @@ function formatScore(meta: MatchMetadata, homeRuns: number, awayRuns: number): s
   const verdict = homeRuns > awayRuns ? `${meta.home.shorthand} johtaa`
     : awayRuns > homeRuns ? `${meta.away.shorthand} johtaa`
     : "tasatilanne";
+  if (homeRuns === awayRuns) {
+    return pickVariant("tie-score", [`${homeRuns}, ${awayRuns}, tasatilanne`, `tasan ${homeRuns}, ${awayRuns}`]);
+  }
   return `${homeRuns}, ${awayRuns}, ${verdict}`;
 }
 
@@ -104,6 +107,21 @@ function vuoropariLabel(inning: number, batTurn: number): string {
   return `${capitalize(ord)} vuoropari, ${role}.`;
 }
 
+/** Random pick among equivalent phrasings, to keep the narration varied.
+ *  Never repeats the previous pick of the same group back to back, so the
+ *  variation is actually audible (with 2 variants a plain draw repeats half
+ *  the time). Group is a stable id per phrase family — the rendered strings
+ *  can't key this, they change with names and scores. */
+const lastVariantPick = new Map<string, number>();
+function pickVariant(group: string, variants: string[]): string {
+  if (variants.length === 1) return variants[0];
+  const prev = lastVariantPick.get(group);
+  let idx = Math.floor(Math.random() * variants.length);
+  if (idx === prev) idx = (idx + 1) % variants.length;
+  lastVariantPick.set(group, idx);
+  return variants[idx];
+}
+
 function ttsClean(text: string): string {
   return text
     .replace(/\s*[–—]\s*/g, ", ")
@@ -123,7 +141,7 @@ function formatBatterChangeSubEvent(sub: SubEvent, lookup: PlayerLookup): string
   for (const el of sub.texts) {
     if (typeof el === "object" && el.type === "player") {
       const name = resolvePlayerName(lookup, el);
-      if (name) return `Vuorossa ${name}.`;
+      if (name) return pickVariant("batter", [`Vuorossa ${name}.`, `Nyt vuorossa ${name}.`, `Lyömässä ${name}.`]);
     }
   }
   return null;
@@ -201,7 +219,12 @@ export function formatBatTurnChangeSpeech(
   const score = formatScore(meta, periodHomeRuns, periodAwayRuns);
   const scoreStr = `${capitalize(score)}.`;
   if (prev && next) {
-    return `${label} ${prev}:n vuoro päättyi. ${scoreStr} Nyt sisävuoroon ${next}.`;
+    const toBat = pickVariant("to-bat", [
+      `Nyt sisävuoroon ${next}.`,
+      `${next} siirtyy sisävuoroon.`,
+      `Seuraavaksi lyömään ${next}.`,
+    ]);
+    return `${label} ${prev}:n vuoro päättyi. ${scoreStr} ${toBat}`;
   }
   if (next) {
     return `${label} ${scoreStr} Sisävuoroon ${next}.`;
@@ -228,6 +251,29 @@ export function formatSituationSummary(meta: MatchMetadata, ctx: SpeechContext):
     ? ` Sisävuorossa ${getTeamName(meta, ctx.currentBatTeamId)}, ${ctx.currentOuts} ${ctx.currentOuts === 1 ? "palo" : "paloa"}.`
     : "";
   return result + batting;
+}
+
+/**
+ * Silence filler: spoken when nothing has happened for a while, so the
+ * narration doesn't go dead. Phrased as "still the same situation" rather
+ * than a fresh recap ({@link formatSituationSummary}).
+ */
+export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): string {
+  const h = ctx.periodHomeRuns;
+  const a = ctx.periodAwayRuns;
+  if (h === a) {
+    return pickVariant("idle-tie", [
+      `Tilanne on edelleen tasan ${h}, ${a}.`,
+      `Ottelu jatkuu tasatilanteessa, ${h}, ${a}.`,
+    ]);
+  }
+  const leader = h > a ? meta.home.shorthand : meta.away.shorthand;
+  const adv = Math.abs(h - a) <= 2 ? "niukasti" : "reilusti";
+  return pickVariant("idle", [
+    `Tilanne on edelleen ${h}, ${a}, kun ${leader} johtaa peliä ${adv}.`,
+    `Tilanne edelleen ${h}, ${a}, ${leader} johdossa ${adv}.`,
+    `Ottelu jatkuu, ${leader} johtaa ${adv}, tilanne ${h}, ${a}.`,
+  ]);
 }
 
 export function subEventToSpeech(
@@ -288,7 +334,10 @@ export function subEventToSpeech(
     // Full stops (not commas) between the parts so TTS reads it calmly with a
     // pause between each, instead of rattling "Palo KPL kolmas palo" off as one.
     if (ctx) {
-      return `Palo! ${teamName}. ${capitalize(ordinalPalo(ctx.currentOuts))}.`;
+      return pickVariant("palo", [
+        `Palo! ${teamName}. ${capitalize(ordinalPalo(ctx.currentOuts))}.`,
+        `Joukkueen ${teamName} ${ordinalPalo(ctx.currentOuts)}!`,
+      ]);
     }
     return `Palo! ${teamName}.`;
   }
@@ -347,7 +396,12 @@ function formatRunScored(texts: EventTextElement[], _meta: MatchMetadata, lookup
   }
   const batter = players[0] ?? "?";
   const runner = players[1] ?? "?";
-  if (eventText.includes("tuojana")) return `${batter} löi juoksun, tuojana ${runner}.`;
+  if (eventText.includes("tuojana")) {
+    return pickVariant("run-scored", [
+      `${batter} löi juoksun, tuojana ${runner}.`,
+      `Juoksun löi ${batter}, tuojana ${runner}.`,
+    ]);
+  }
   return `${batter} ${eventText}.`;
 }
 
@@ -355,7 +409,13 @@ function formatKunnari(texts: EventTextElement[], _meta: MatchMetadata, lookup: 
   for (const el of texts) {
     if (typeof el === "object" && el.type === "player") {
       const name = resolvePlayerName(lookup, el);
-      if (name) return `${name} löi kunnarin!`;
+      if (name) {
+        return pickVariant("kunnari", [
+          `${name} löi kunnarin!`,
+          `Kunnari! Sen löi ${name}.`,
+          `${name} lyö kunnarin!`,
+        ]);
+      }
     }
   }
   return "Kunnari!";
@@ -372,7 +432,8 @@ function formatRunBrought(texts: EventTextElement[], _meta: MatchMetadata, looku
     }
   }
   const who = players[0] ?? "";
-  return who ? `${who} ${eventText}.` : `${eventText}.`;
+  if (!who) return `${eventText}.`;
+  return pickVariant("run-brought", [`${who} ${eventText}.`, `Juoksu! Tuojana ${who}.`]);
 }
 
 function formatDrawOfChoice(texts: EventTextElement[], meta: MatchMetadata, lookup: PlayerLookup): string {

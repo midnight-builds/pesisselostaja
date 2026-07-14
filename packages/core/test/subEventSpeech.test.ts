@@ -69,7 +69,11 @@ describe("subEventToSpeech: batter change", () => {
   };
 
   it("announces the batter as number + initial + last name", () => {
-    expect(subEventToSpeech(liveEvent(), sub, meta, lookup)).toBe("Vuorossa 5 M Mäyrä.");
+    expect([
+      "Vuorossa 5 M Mäyrä.",
+      "Nyt vuorossa 5 M Mäyrä.",
+      "Lyömässä 5 M Mäyrä.",
+    ]).toContain(subEventToSpeech(liveEvent(), sub, meta, lookup));
   });
 
   it("stays silent when batter-change announcements are off", () => {
@@ -87,9 +91,10 @@ describe("subEventToSpeech: scoring events", () => {
       ],
     };
     const ctx = ctxWith({ periodHomeRuns: 1, periodAwayRuns: 0 });
-    expect(subEventToSpeech(liveEvent(), sub, meta, lookup, true, ctx)).toBe(
-      "5 M Mäyrä löi juoksun, tuojana 8 A Ilves. 1, 0, Ketut johtaa."
-    );
+    expect([
+      "5 M Mäyrä löi juoksun, tuojana 8 A Ilves. 1, 0, Ketut johtaa.",
+      "Juoksun löi 5 M Mäyrä, tuojana 8 A Ilves. 1, 0, Ketut johtaa.",
+    ]).toContain(subEventToSpeech(liveEvent(), sub, meta, lookup, true, ctx));
   });
 
   it("speaks a kunnari with the batter's name", () => {
@@ -97,9 +102,11 @@ describe("subEventToSpeech: scoring events", () => {
       texts: [{ type: "player", id: 21 }, { type: "event", text: "löi kunnarin", base: null }],
     };
     const ctx = ctxWith({ periodHomeRuns: 0, periodAwayRuns: 3, currentBatTeamId: 200 });
-    expect(subEventToSpeech(liveEvent({ team: 200 }), sub, meta, lookup, true, ctx)).toBe(
-      "3 V Susi löi kunnarin! 0, 3, Sudet johtaa."
-    );
+    expect([
+      "3 V Susi löi kunnarin! 0, 3, Sudet johtaa.",
+      "Kunnari! Sen löi 3 V Susi. 0, 3, Sudet johtaa.",
+      "3 V Susi lyö kunnarin! 0, 3, Sudet johtaa.",
+    ]).toContain(subEventToSpeech(liveEvent({ team: 200 }), sub, meta, lookup, true, ctx));
   });
 });
 
@@ -110,9 +117,10 @@ describe("subEventToSpeech: palo", () => {
 
   it("speaks the batting team and the palo's Finnish ordinal", () => {
     const ctx = ctxWith({ currentOuts: 3, currentBatTeamId: 200 });
-    expect(subEventToSpeech(liveEvent({ team: 200 }), paloSub, meta, lookup, true, ctx)).toBe(
-      "Palo! Sudet. Kolmas palo."
-    );
+    expect([
+      "Palo! Sudet. Kolmas palo.",
+      "Joukkueen Sudet kolmas palo!",
+    ]).toContain(subEventToSpeech(liveEvent({ team: 200 }), paloSub, meta, lookup, true, ctx));
   });
 
   it("omits the ordinal without context", () => {

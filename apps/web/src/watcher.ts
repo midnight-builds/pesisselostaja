@@ -12,6 +12,7 @@ import {
   formatStartupSpeech,
   formatBatTurnChangeSpeech,
   formatSituationSummary,
+  formatIdleSummary,
   periodName,
   type SpeechContext,
 } from "@pesisselostaja/core";
@@ -30,8 +31,9 @@ import {
 } from "./state.js";
 import type { LiveEvent, MatchMetadata, SubEvent } from "@pesisselostaja/core";
 
-const SUMMARY_INTERVAL_MS = 5 * 60 * 1000;
 const SUMMARY_EVERY_N = 10;
+/** No speech for this long → break the silence with an idle filler. */
+const IDLE_FILLER_MS = 2 * 60 * 1000;
 
 // Speaker mode: loudness-maximize a decoded buffer in place with a tanh soft
 // clip. A plain GainNode+DynamicsCompressor chain barely changes perceived
@@ -112,6 +114,7 @@ export class BrowserWatcher {
   private _audioCtx: AudioContext | null = null;
   private _drainToken = 0;                 // generation counter; bump to abort in-flight work
   private _lastSummaryCount = 0;           // announcementCount at the last periodic summary
+  private _lastSpeechAt = 0;               // wall clock of the last spoken announcement
   private _matchEndSeen = false;           // true after first poll that contains "Ottelu päättyi"
 
   constructor(
@@ -514,7 +517,10 @@ export class BrowserWatcher {
         );
         if (!speech) continue;
 
-        this.say(speech, state);
+        // Same texts in the same turn and situation = a scorer double-marking.
+        const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
+          `${JSON.stringify(sub.texts)}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
+        this.say(speech, state, dedupeKey);
         this.emitFeed(this.classifyFeed(sub, speech), speech);
       }
 
@@ -581,24 +587,34 @@ export class BrowserWatcher {
     };
   }
 
-  /** Speak/feed the periodic situation summary when one is due. */
+  /** Speak/feed the periodic situation summary or idle filler when one is due.
+   *  Busy game: full recap every SUMMARY_EVERY_N announcements. Quiet game:
+   *  a "tilanne on edelleen…" filler once nothing has been said for
+   *  IDLE_FILLER_MS. */
   private maybeAnnounceSummary(state: WatcherState, meta: MatchMetadata): void {
     if (state.announcementCount === 0) return;
     const now = Date.now();
-    const due =
-      state.announcementCount - this._lastSummaryCount >= SUMMARY_EVERY_N ||
-      now - state.lastSummaryTime > SUMMARY_INTERVAL_MS;
-    if (!due) return;
+    const countDue = state.announcementCount - this._lastSummaryCount >= SUMMARY_EVERY_N;
+    const idleDue = now - this._lastSpeechAt > IDLE_FILLER_MS;
+    if (!countDue && !idleDue) return;
     this._lastSummaryCount = state.announcementCount;
     state.lastSummaryTime = now;
-    const summary = formatSituationSummary(meta, this.buildContext(state));
+    this._lastSpeechAt = now;
+    const ctx = this.buildContext(state);
+    const summary = countDue ? formatSituationSummary(meta, ctx) : formatIdleSummary(meta, ctx);
     this.emitFeed("summary", summary);
     if (!this._muted) this.speakRaw(summary);
   }
 
-  private say(speech: string, state: WatcherState): void {
-    if (speech === this._lastSpeech) return;
-    this._lastSpeech = speech;
+  /** dedupeKey identifies the announcement's content before variant
+   *  randomization. Consecutive scorer double-markings used to be dropped by
+   *  comparing the final strings, but pickVariant can now phrase the same
+   *  duplicate two different ways — so duplicates must be detected on the
+   *  pre-variant key, never on the rendered speech. */
+  private say(speech: string, state: WatcherState, dedupeKey: string = speech): void {
+    if (dedupeKey === this._lastSpeech) return;
+    this._lastSpeech = dedupeKey;
+    this._lastSpeechAt = Date.now();
     this.log(`Puhe: ${speech}`);
     debugLog("say", { text: speech, muted: this._muted, queueLen: this._speechQueue.length });
     this.speakRaw(speech);

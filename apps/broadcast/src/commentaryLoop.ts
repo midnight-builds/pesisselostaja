@@ -12,6 +12,7 @@ import {
   formatStartupSpeech,
   formatBatTurnChangeSpeech,
   formatSituationSummary,
+  formatIdleSummary,
   periodName,
   type PlayerLookup,
   type SpeechContext,
@@ -36,8 +37,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { log } from "./log.js";
 import type { RelayConfig } from "./config.js";
 
-const SUMMARY_INTERVAL_MS = 5 * 60 * 1000;
 const SUMMARY_EVERY_N = 10;
+/** No speech for this long → break the silence with an idle filler. */
+const IDLE_FILLER_MS = 2 * 60 * 1000;
 
 export type SpeechSink = (spokenText: string, readableText: string) => Promise<void>;
 
@@ -51,6 +53,7 @@ export class CommentaryLoop {
   private state: WatcherState;
   private pronunciations: PronunciationRule[];
   private lastSpeech: string | null = null;
+  private lastSpeechAt = 0;                // wall clock of the last spoken announcement
   private lastSummaryCount = 0;
   private abort: AbortController | null = null;
   /** Current effective value of the batter-change setting. Seeded from config
@@ -284,7 +287,10 @@ export class CommentaryLoop {
 
         const speech = subEventToSpeech(event, sub, meta, lookup, this.announceBatterChanges, ctx);
         if (!speech) continue;
-        await this.speak(speech);
+        // Same texts in the same turn and situation = a scorer double-marking.
+        const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
+          `${JSON.stringify(sub.texts)}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
+        await this.speak(speech, true, dedupeKey);
       }
 
       if (event.timestamp !== null && event.timestamp > state.lastTimestamp) {
@@ -334,17 +340,21 @@ export class CommentaryLoop {
     }
   }
 
-  /** Periodic situation recap, spoken (not counted as an announcement). */
+  /** Periodic situation recap or idle filler, spoken (not counted as an
+   *  announcement). Busy game: full recap every SUMMARY_EVERY_N announcements.
+   *  Quiet game: a "tilanne on edelleen…" filler once nothing has been said
+   *  for IDLE_FILLER_MS. */
   private async maybeAnnounceSummary(meta: MatchMetadata): Promise<void> {
     if (this.state.announcementCount === 0) return;
     const now = Date.now();
-    const due =
-      this.state.announcementCount - this.lastSummaryCount >= SUMMARY_EVERY_N ||
-      now - this.state.lastSummaryTime > SUMMARY_INTERVAL_MS;
-    if (!due) return;
+    const countDue = this.state.announcementCount - this.lastSummaryCount >= SUMMARY_EVERY_N;
+    const idleDue = now - this.lastSpeechAt > IDLE_FILLER_MS;
+    if (!countDue && !idleDue) return;
     this.lastSummaryCount = this.state.announcementCount;
     this.state.lastSummaryTime = now;
-    const summary = formatSituationSummary(meta, this.buildContext());
+    this.lastSpeechAt = now;
+    const ctx = this.buildContext();
+    const summary = countDue ? formatSituationSummary(meta, ctx) : formatIdleSummary(meta, ctx);
     await this.speak(summary, false);
   }
 
@@ -365,9 +375,15 @@ export class CommentaryLoop {
     };
   }
 
-  private async speak(text: string, countAnnouncement = true): Promise<void> {
-    if (text === this.lastSpeech) return;
-    this.lastSpeech = text;
+  /** dedupeKey identifies the announcement's content before variant
+   *  randomization. Consecutive scorer double-markings used to be dropped by
+   *  comparing the final strings, but pickVariant can now phrase the same
+   *  duplicate two different ways — so duplicates must be detected on the
+   *  pre-variant key, never on the rendered speech. */
+  private async speak(text: string, countAnnouncement = true, dedupeKey: string = text): Promise<void> {
+    if (dedupeKey === this.lastSpeech) return;
+    this.lastSpeech = dedupeKey;
+    this.lastSpeechAt = Date.now();
     const spoken = preventOrdinalReading(applyPronunciations(text, this.pronunciations));
     log(`Selostus: ${text}`);
     try {
