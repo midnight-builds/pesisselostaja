@@ -517,7 +517,10 @@ export class BrowserWatcher {
         );
         if (!speech) continue;
 
-        this.say(speech, state);
+        // Same texts in the same turn and situation = a scorer double-marking.
+        const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
+          `${JSON.stringify(sub.texts)}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
+        this.say(speech, state, dedupeKey);
         this.emitFeed(this.classifyFeed(sub, speech), speech);
       }
 
