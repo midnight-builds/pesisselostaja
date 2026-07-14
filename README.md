@@ -26,7 +26,7 @@ Käyttö:
 
 **Jaa ottelu:** Jokaisella ottelulla on oma osoite (`#ottelu/<id>`), joka näkyy selaimen osoiterivillä ottelua seuratessa. Ottelunäkymän **Jaa**-napista voit lähettää linkin eteenpäin (tai kopioida sen leikepöydälle) — linkistä ottelu avautuu suoraan. Ottelunäkymästä pääsee myös katsomaan ottelun tarkemmat tilastot pesistulokset.fi-palvelussa (aukeaa uuteen välilehteen).
 
-**Vinkki – parempi ääni:** Asetuksista voit valita käytettävän puheäänen. Oletuksena käytetään selaimen omaa puhesyntetisaattoria, mutta ottamalla käyttöön **Edistynyt ääni (Piper)** saat luonnollisemman suomenkielisen neuroverkkoäänen, joka toimii kokonaan selaimessa. Valittavana on Harri-ääni (CC0, lähde rhasspy/Piper) sekä yhteisömalli Asmo (CC BY-NC 4.0, tekijä AsmoKoskinen, epäkaupalliseen käyttöön). Ääni ladataan kerran ja tallennetaan selaimeen, joten se on heti käytössä seuraavilla kerroilla. Jos lataus ei onnistu, sovellus palaa selaimen omaan ääneen. Piper-äänelle voi lisäksi kytkeä päälle **Kaiutintilan**, joka vahvistaa selostuksen normaalia kovemmalle esimerkiksi ulkokäyttöön kännykän kaiuttimesta. Äänten lähteet ja lisenssit: [CREDITS.md](CREDITS.md).
+**Vinkki – parempi ääni:** Asetuksista voit valita käytettävän puheäänen. Oletuksena käytetään selaimen omaa puhesyntetisaattoria, mutta ottamalla käyttöön **Edistynyt ääni (Piper)** saat luonnollisemman suomenkielisen neuroverkkoäänen, joka toimii kokonaan selaimessa. Valittavana on Harri-ääni (CC0, lähde rhasspy/Piper) sekä yhteisömalli Asmo (CC BY-NC 4.0, tekijä AsmoKoskinen, epäkaupalliseen käyttöön). Ääni ladataan kerran ja tallennetaan selaimeen, joten se on heti käytössä seuraavilla kerroilla. Jos lataus ei onnistu, sovellus palaa selaimen omaan ääneen. Piper- ja ElevenLabs-äänille voi lisäksi kytkeä päälle **Kaiutintilan**, joka vahvistaa selostuksen normaalia kovemmalle esimerkiksi ulkokäyttöön kännykän kaiuttimesta. Kolmas vaihtoehto on **ElevenLabs (oma avain)**: laadukkain ääni, joka syntetisoidaan ElevenLabsin pilvipalvelussa omalla API-avaimellasi. Avain tallentuu vain omaan selaimeesi ja synteesi kuluttaa omia ElevenLabs-krediittejäsi; virhetilanteessa (esim. krediitit loppu) sovellus palaa selaimen ääneen. Äänten lähteet ja lisenssit: [CREDITS.md](CREDITS.md).
 
 Sovellus käyttää pesistulokset.fi-palvelun otteludataa. Tämä projekti on itsenäinen, eikä se ole pesistulokset.fi:n tekemä, hyväksymä tai sponsoroima.
 
@@ -55,7 +55,7 @@ What works now:
 
 - Browser-based live match following from pesistulokset.fi data.
 - Spoken Finnish announcements for important live events.
-- Selectable speech voice, including an optional advanced neural voice (Piper) that runs fully in the browser for more natural Finnish.
+- Selectable speech voice: the browser's own voices, an advanced neural voice (Piper) that runs fully in the browser, or ElevenLabs cloud TTS with the user's own API key.
 - Favorites and local settings stored in the browser.
 - A YouTube broadcast pipeline that mixes synthesized narration over a live stream (`apps/broadcast`).
 
