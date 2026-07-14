@@ -102,9 +102,11 @@ describe("subEventToSpeech: scoring events", () => {
       texts: [{ type: "player", id: 21 }, { type: "event", text: "löi kunnarin", base: null }],
     };
     const ctx = ctxWith({ periodHomeRuns: 0, periodAwayRuns: 3, currentBatTeamId: 200 });
-    expect(subEventToSpeech(liveEvent({ team: 200 }), sub, meta, lookup, true, ctx)).toBe(
-      "3 V Susi löi kunnarin! 0, 3, Sudet johtaa."
-    );
+    expect([
+      "3 V Susi löi kunnarin! 0, 3, Sudet johtaa.",
+      "Kunnari! Sen löi 3 V Susi. 0, 3, Sudet johtaa.",
+      "3 V Susi lyö kunnarin! 0, 3, Sudet johtaa.",
+    ]).toContain(subEventToSpeech(liveEvent({ team: 200 }), sub, meta, lookup, true, ctx));
   });
 });
 

@@ -23,6 +23,8 @@ Käyttö:
 2. Valitse käynnissä oleva ottelu tai syötä ottelun tunnus.
 3. Käynnistä seuranta ja salli selaimen puhetoiminto, jos selain pyytää lupaa.
 4. Sovellus ilmoittaa ääneen esimerkiksi juoksut, palot, vuoronvaihdot ja jakson tilanteen.
+   Kuulutuksissa on satunnaista vaihtelua (samalle tapahtumalle useita sanamuotoja), ja jos
+   mitään ei tapahdu pariin minuuttiin, selostus kertaa tilanteen ("Tilanne on edelleen…").
 
 **Jaa ottelu:** Jokaisella ottelulla on oma osoite (`#ottelu/<id>`), joka näkyy selaimen osoiterivillä ottelua seuratessa. Ottelunäkymän **Jaa**-napista voit lähettää linkin eteenpäin (tai kopioida sen leikepöydälle) — linkistä ottelu avautuu suoraan. Ottelunäkymästä pääsee myös katsomaan ottelun tarkemmat tilastot pesistulokset.fi-palvelussa (aukeaa uuteen välilehteen).
 
