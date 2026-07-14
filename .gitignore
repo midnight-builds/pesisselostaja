@@ -10,3 +10,7 @@ debug.log
 apps/broadcast/run/
 apps/broadcast/.env.relay
 apps/broadcast/voices/
+
+# TTS API keys must never enter the public repo
+*.key
+.elevenlabs*

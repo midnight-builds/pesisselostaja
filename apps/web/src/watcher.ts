@@ -17,6 +17,7 @@ import {
 } from "@pesisselostaja/core";
 import { applyPronunciations, preventOrdinalReading, type PronunciationRule } from "./pronunciation.js";
 import { piperSynthesize } from "./piper.js";
+import { elevenLabsSynthesize } from "./elevenlabs.js";
 import { debugLog } from "./debuglog.js";
 import {
   loadState,
@@ -100,10 +101,12 @@ export class BrowserWatcher {
   private _speechQueue: string[] = [];
   private _speechBusy = false;
   private _selectedVoice: SpeechSynthesisVoice | null = null;
-  private _voiceEngine: "browser" | "piper" = "browser";
+  private _voiceEngine: "browser" | "piper" | "elevenlabs" = "browser";
   private _piperVoiceId = "fi_FI-harri-medium";
   private _volumeBoost = false;
   private _piperFailed = false;            // sticky fallback to browser this session
+  private _elevenLabsApiKey = "";
+  private _elevenLabsFailed = false;       // sticky fallback to browser this session
   private _currentAudio: HTMLAudioElement | null = null;
   private _currentSource: AudioBufferSourceNode | null = null;
   private _audioCtx: AudioContext | null = null;
@@ -132,13 +135,18 @@ export class BrowserWatcher {
     this._selectedVoice = voice;
   }
 
-  setVoiceEngine(engine: "browser" | "piper"): void {
+  setVoiceEngine(engine: "browser" | "piper" | "elevenlabs"): void {
     this._voiceEngine = engine;
   }
 
   setPiperVoice(voiceId: string): void {
     if (voiceId !== this._piperVoiceId) this._piperFailed = false;
     this._piperVoiceId = voiceId;
+  }
+
+  setElevenLabsApiKey(apiKey: string): void {
+    if (apiKey !== this._elevenLabsApiKey) this._elevenLabsFailed = false;
+    this._elevenLabsApiKey = apiKey;
   }
 
   /** Speaker mode: boost Piper playback above unity gain (with a limiter). */
@@ -155,7 +163,7 @@ export class BrowserWatcher {
   announceSituation(): void {
     if (this._muted || !this._meta || !this._state) return;
     const summary = formatSituationSummary(this._meta, this.buildContext(this._state));
-    this.speakRaw(applyPronunciations(summary, this._pronunciations));
+    this.speakRaw(summary);
   }
 
   markAudioUnlocked(): void {
@@ -585,7 +593,7 @@ export class BrowserWatcher {
     state.lastSummaryTime = now;
     const summary = formatSituationSummary(meta, this.buildContext(state));
     this.emitFeed("summary", summary);
-    if (!this._muted) this.speakRaw(applyPronunciations(summary, this._pronunciations));
+    if (!this._muted) this.speakRaw(summary);
   }
 
   private say(speech: string, state: WatcherState): void {
@@ -593,14 +601,22 @@ export class BrowserWatcher {
     this._lastSpeech = speech;
     this.log(`Puhe: ${speech}`);
     debugLog("say", { text: speech, muted: this._muted, queueLen: this._speechQueue.length });
-    this.speakRaw(applyPronunciations(speech, this._pronunciations));
+    this.speakRaw(speech);
     state.announcementCount++;
   }
 
+  /** Queues the readable text as-is; engine-specific transforms (pronunciation
+   *  substitutions, ordinal guard) happen at drain time, because ElevenLabs
+   *  reads abbreviations like KPL correctly and must get the raw text. */
   private speakRaw(text: string): void {
     if (this._muted) return;
-    this._speechQueue.push(preventOrdinalReading(text));
+    this._speechQueue.push(text);
     if (!this._speechBusy) void this._drainQueue();
+  }
+
+  /** Pronunciation-substituted form for the Piper/browser engines. */
+  private _substituted(text: string): string {
+    return preventOrdinalReading(applyPronunciations(text, this._pronunciations));
   }
 
   /** Serial async loop: synthesize + play each item to completion before the next. */
@@ -609,22 +625,33 @@ export class BrowserWatcher {
     const token = ++this._drainToken;
     while (this._speechQueue.length > 0) {
       if (this._muted || token !== this._drainToken) break;   // cancelled
-      const text = this._speechQueue.shift()!;
+      const raw = this._speechQueue.shift()!;
+      const useElevenLabs =
+        this._voiceEngine === "elevenlabs" && !this._elevenLabsFailed && this._elevenLabsApiKey !== "";
+      const usePiper = this._voiceEngine === "piper" && !this._piperFailed;
       try {
-        if (this._voiceEngine === "piper" && !this._piperFailed) {
+        if (useElevenLabs) {
+          await this._withWatchdog(raw, () => this._speakElevenLabs(raw, token));
+        } else if (usePiper) {
+          const text = this._substituted(raw);
           await this._withWatchdog(text, () => this._speakPiper(text, token));
         } else {
+          const text = this._substituted(raw);
           await this._withWatchdog(text, () => this._speakBrowser(text));
         }
       } catch {
-        // Piper threw: switch to the browser voice for the rest of the session
-        // and re-speak this item so nothing is lost.
-        if (this._voiceEngine === "piper" && !this._piperFailed) {
+        // Synthesis threw: switch to the browser voice for the rest of the
+        // session and re-speak this item so nothing is lost.
+        if (useElevenLabs) {
+          this._elevenLabsFailed = true;
+          this.log("ElevenLabs epäonnistui, vaihdetaan selaimen ääneen.");
+        } else if (usePiper) {
           this._piperFailed = true;
           this.log("Edistynyt ääni epäonnistui, vaihdetaan selaimen ääneen.");
-          if (token === this._drainToken && !this._muted) {
-            try { await this._withWatchdog(text, () => this._speakBrowser(text)); } catch { /* give up on this item */ }
-          }
+        }
+        if ((useElevenLabs || usePiper) && token === this._drainToken && !this._muted) {
+          const text = this._substituted(raw);
+          try { await this._withWatchdog(text, () => this._speakBrowser(text)); } catch { /* give up on this item */ }
         }
       }
     }
@@ -668,6 +695,15 @@ export class BrowserWatcher {
       utt.onerror = (e) => { debugLog("speak-browser-error", { text, error: e.error }); resolve(); };   // resolve (don't trip the piper fallback)
       window.speechSynthesis.speak(utt);
     });
+  }
+
+  private async _speakElevenLabs(text: string, token: number): Promise<void> {
+    const startedAt = Date.now();
+    debugLog("speak-elevenlabs-start", { text, chars: text.length });
+    const blob = await elevenLabsSynthesize(text, this._elevenLabsApiKey);
+    if (this._muted || token !== this._drainToken) return;   // cancelled during synth
+    await this._playBlob(blob);
+    debugLog("speak-elevenlabs-end", { text, ms: Date.now() - startedAt });
   }
 
   private async _speakPiper(text: string, token: number): Promise<void> {

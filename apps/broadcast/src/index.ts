@@ -4,6 +4,7 @@ import { parseRelayConfig } from "./config.js";
 import { log } from "./log.js";
 import { CommentaryLoop } from "./commentaryLoop.js";
 import { PiperTts } from "./piperTts.js";
+import { ElevenLabsTts } from "./elevenLabsTts.js";
 import { FfmpegMixer, SourceExhaustedError } from "./ffmpegMixer.js";
 
 async function main(): Promise<void> {
@@ -13,12 +14,20 @@ async function main(): Promise<void> {
   log("Pesisselostaja Relay");
   log(`Ottelu ID: ${config.matchId}`);
   log(`YouTube-lähde: ${config.youtubeUrl}`);
-  log(`Ääni: ${config.voice}`);
+  log(`Ääni: ${config.elevenLabsApiKey ? `ElevenLabs ${config.elevenLabsVoiceId} (${config.elevenLabsModelId}), fallback Piper ${config.voice}` : `Piper ${config.voice}`}`);
   log(`Dry run: ${config.dryRun}`);
   if (config.recordFile) log(`Tallennetaan paikalliseen tiedostoon: ${config.recordFile}`);
 
   const voicesDir = new URL("../voices/", import.meta.url).pathname;
   const piper = new PiperTts({ piperBin: config.piperBin, voice: config.voice, voicesDir });
+  const elevenLabs = config.elevenLabsApiKey
+    ? new ElevenLabsTts({
+        apiKey: config.elevenLabsApiKey,
+        voiceId: config.elevenLabsVoiceId,
+        modelId: config.elevenLabsModelId,
+        cacheDir: `${config.runDir}tts-cache/`,
+      })
+    : null;
 
   let mixer: FfmpegMixer | null = null;
 
@@ -27,7 +36,18 @@ async function main(): Promise<void> {
       log(`[DRY-RUN synteesi] ${readable}`);
       return;
     }
-    const pcm = await piper.synthesize(spoken);
+    let pcm: Buffer;
+    if (elevenLabs) {
+      try {
+        // ElevenLabs reads abbreviations correctly → readable text, no substitutions.
+        pcm = await elevenLabs.synthesize(readable);
+      } catch (err) {
+        log(`ElevenLabs epäonnistui (${err instanceof Error ? err.message : err}) — Piper-fallback`);
+        pcm = await piper.synthesize(spoken);
+      }
+    } else {
+      pcm = await piper.synthesize(spoken);
+    }
     mixer.enqueueNarration(pcm);
   });
 
@@ -36,6 +56,7 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     log("Sammutetaan…");
+    if (elevenLabs) log(`ElevenLabs-merkkejä käytetty tässä ajossa: ${elevenLabs.totalCharsUsed}`);
     loop.stop();
     mixer?.stop();
     setTimeout(() => process.exit(0), 500);
