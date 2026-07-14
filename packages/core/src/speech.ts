@@ -206,7 +206,12 @@ export function formatBatTurnChangeSpeech(
   const score = formatScore(meta, periodHomeRuns, periodAwayRuns);
   const scoreStr = `${capitalize(score)}.`;
   if (prev && next) {
-    return `${label} ${prev}:n vuoro päättyi. ${scoreStr} Nyt sisävuoroon ${next}.`;
+    const toBat = pickVariant([
+      `Nyt sisävuoroon ${next}.`,
+      `${next} siirtyy sisävuoroon.`,
+      `Seuraavaksi lyömään ${next}.`,
+    ]);
+    return `${label} ${prev}:n vuoro päättyi. ${scoreStr} ${toBat}`;
   }
   if (next) {
     return `${label} ${scoreStr} Sisävuoroon ${next}.`;
