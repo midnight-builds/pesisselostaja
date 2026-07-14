@@ -67,7 +67,7 @@ function formatScore(meta: MatchMetadata, homeRuns: number, awayRuns: number): s
     : awayRuns > homeRuns ? `${meta.away.shorthand} johtaa`
     : "tasatilanne";
   if (homeRuns === awayRuns) {
-    return pickVariant([`${homeRuns}, ${awayRuns}, tasatilanne`, `tasan ${homeRuns}, ${awayRuns}`]);
+    return pickVariant("tie-score", [`${homeRuns}, ${awayRuns}, tasatilanne`, `tasan ${homeRuns}, ${awayRuns}`]);
   }
   return `${homeRuns}, ${awayRuns}, ${verdict}`;
 }
@@ -107,9 +107,19 @@ function vuoropariLabel(inning: number, batTurn: number): string {
   return `${capitalize(ord)} vuoropari, ${role}.`;
 }
 
-/** Random pick among equivalent phrasings, to keep the narration varied. */
-function pickVariant(variants: string[]): string {
-  return variants[Math.floor(Math.random() * variants.length)];
+/** Random pick among equivalent phrasings, to keep the narration varied.
+ *  Never repeats the previous pick of the same group back to back, so the
+ *  variation is actually audible (with 2 variants a plain draw repeats half
+ *  the time). Group is a stable id per phrase family — the rendered strings
+ *  can't key this, they change with names and scores. */
+const lastVariantPick = new Map<string, number>();
+function pickVariant(group: string, variants: string[]): string {
+  if (variants.length === 1) return variants[0];
+  const prev = lastVariantPick.get(group);
+  let idx = Math.floor(Math.random() * variants.length);
+  if (idx === prev) idx = (idx + 1) % variants.length;
+  lastVariantPick.set(group, idx);
+  return variants[idx];
 }
 
 function ttsClean(text: string): string {
@@ -131,7 +141,7 @@ function formatBatterChangeSubEvent(sub: SubEvent, lookup: PlayerLookup): string
   for (const el of sub.texts) {
     if (typeof el === "object" && el.type === "player") {
       const name = resolvePlayerName(lookup, el);
-      if (name) return pickVariant([`Vuorossa ${name}.`, `Nyt vuorossa ${name}.`, `Lyömässä ${name}.`]);
+      if (name) return pickVariant("batter", [`Vuorossa ${name}.`, `Nyt vuorossa ${name}.`, `Lyömässä ${name}.`]);
     }
   }
   return null;
@@ -209,7 +219,7 @@ export function formatBatTurnChangeSpeech(
   const score = formatScore(meta, periodHomeRuns, periodAwayRuns);
   const scoreStr = `${capitalize(score)}.`;
   if (prev && next) {
-    const toBat = pickVariant([
+    const toBat = pickVariant("to-bat", [
       `Nyt sisävuoroon ${next}.`,
       `${next} siirtyy sisävuoroon.`,
       `Seuraavaksi lyömään ${next}.`,
@@ -252,14 +262,14 @@ export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): stri
   const h = ctx.periodHomeRuns;
   const a = ctx.periodAwayRuns;
   if (h === a) {
-    return pickVariant([
+    return pickVariant("idle-tie", [
       `Tilanne on edelleen tasan ${h}, ${a}.`,
       `Ottelu jatkuu tasatilanteessa, ${h}, ${a}.`,
     ]);
   }
   const leader = h > a ? meta.home.shorthand : meta.away.shorthand;
   const adv = Math.abs(h - a) <= 2 ? "niukasti" : "reilusti";
-  return pickVariant([
+  return pickVariant("idle", [
     `Tilanne on edelleen ${h}, ${a}, kun ${leader} johtaa peliä ${adv}.`,
     `Tilanne edelleen ${h}, ${a}, ${leader} johdossa ${adv}.`,
     `Ottelu jatkuu, ${leader} johtaa ${adv}, tilanne ${h}, ${a}.`,
@@ -324,7 +334,7 @@ export function subEventToSpeech(
     // Full stops (not commas) between the parts so TTS reads it calmly with a
     // pause between each, instead of rattling "Palo KPL kolmas palo" off as one.
     if (ctx) {
-      return pickVariant([
+      return pickVariant("palo", [
         `Palo! ${teamName}. ${capitalize(ordinalPalo(ctx.currentOuts))}.`,
         `Joukkueen ${teamName} ${ordinalPalo(ctx.currentOuts)}!`,
       ]);
@@ -387,7 +397,7 @@ function formatRunScored(texts: EventTextElement[], _meta: MatchMetadata, lookup
   const batter = players[0] ?? "?";
   const runner = players[1] ?? "?";
   if (eventText.includes("tuojana")) {
-    return pickVariant([
+    return pickVariant("run-scored", [
       `${batter} löi juoksun, tuojana ${runner}.`,
       `Juoksun löi ${batter}, tuojana ${runner}.`,
     ]);
@@ -400,7 +410,7 @@ function formatKunnari(texts: EventTextElement[], _meta: MatchMetadata, lookup: 
     if (typeof el === "object" && el.type === "player") {
       const name = resolvePlayerName(lookup, el);
       if (name) {
-        return pickVariant([
+        return pickVariant("kunnari", [
           `${name} löi kunnarin!`,
           `Kunnari! Sen löi ${name}.`,
           `${name} lyö kunnarin!`,
@@ -423,7 +433,7 @@ function formatRunBrought(texts: EventTextElement[], _meta: MatchMetadata, looku
   }
   const who = players[0] ?? "";
   if (!who) return `${eventText}.`;
-  return pickVariant([`${who} ${eventText}.`, `Juoksu! Tuojana ${who}.`]);
+  return pickVariant("run-brought", [`${who} ${eventText}.`, `Juoksu! Tuojana ${who}.`]);
 }
 
 function formatDrawOfChoice(texts: EventTextElement[], meta: MatchMetadata, lookup: PlayerLookup): string {
