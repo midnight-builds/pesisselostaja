@@ -165,10 +165,9 @@ npm run build
 Public web app:
 
 ~~~bash
-cd v2
 npm ci
-npm run typecheck
-npm run build
+npm run typecheck -w @pesisselostaja/web
+npm run build -w @pesisselostaja/web
 ~~~
 
 ### Debugging mobile issues (missed speech, audio going silent)
@@ -213,7 +212,7 @@ bundled in this repository:
 - Speech stack: Piper (MIT), `@diffusionstudio/piper-wasm` (embeds espeak-ng, GPL-3.0-or-later), onnxruntime-web (MIT).
 
 Full attribution, source links and license notes are in [CREDITS.md](CREDITS.md).
-The canonical machine-readable list lives in [`v2/src/piper.ts`](v2/src/piper.ts).
+The canonical machine-readable list lives in [`apps/web/src/piper.ts`](apps/web/src/piper.ts).
 
 ## License
 

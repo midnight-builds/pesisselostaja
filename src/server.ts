@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { fetchLiveMatches } from "./api.js";
 import type { WatcherController } from "./watcher.js";
 
-const V2_DIST = fileURLToPath(new URL("../v2/dist", import.meta.url));
+const V2_DIST = fileURLToPath(new URL("../apps/web/dist", import.meta.url));
 const DEBUG_LOG_FILE = fileURLToPath(new URL("../debug.log", import.meta.url));
 const DEBUG_LOG_MAX_BODY = 8 * 1024;
 
@@ -48,7 +48,7 @@ async function serveV2(url: string, res: ServerResponse): Promise<void> {
       res.end(buf);
     } catch {
       res.writeHead(404, { "Content-Type": "text/plain" });
-      res.end("v2 build not found — run `npm run build` in v2/");
+      res.end("v2 build not found — run `npm run build -w @pesisselostaja/web`");
     }
   }
 }

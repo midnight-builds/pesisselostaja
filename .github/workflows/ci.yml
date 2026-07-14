@@ -51,10 +51,10 @@ jobs:
         run: npm ci
 
       - name: Typecheck
-        run: npm run typecheck -w pesisselostaja-v2
+        run: npm run typecheck -w @pesisselostaja/web
 
       - name: Build
-        run: npm run build -w pesisselostaja-v2
+        run: npm run build -w @pesisselostaja/web
 
   relay:
     name: Relay (YouTube dubbing)

@@ -1,5 +1,5 @@
 {
-  "name": "pesisselostaja-v2",
+  "name": "@pesisselostaja/web",
   "version": "2.0.0",
   "description": "Browser app for Finnish pesäpallo live events with spoken voice announcements",
   "license": "MIT",
