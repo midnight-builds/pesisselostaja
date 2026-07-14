@@ -15,7 +15,7 @@ import {
   periodName,
   type PlayerLookup,
   type SpeechContext,
-} from "../../v2/src/speech.js";
+} from "@pesisselostaja/core";
 import {
   loadState,
   saveState,

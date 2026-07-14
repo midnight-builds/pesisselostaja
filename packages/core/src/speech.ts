@@ -1,4 +1,4 @@
-import type { LiveEvent, SubEvent, EventTextElement, MatchMetadata, Player } from "@pesisselostaja/core";
+import type { LiveEvent, SubEvent, EventTextElement, MatchMetadata, Player } from "./types.js";
 
 export interface PlayerLookup {
   byId: Map<number, Player>;

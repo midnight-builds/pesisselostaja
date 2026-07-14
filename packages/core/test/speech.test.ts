@@ -6,8 +6,8 @@ import {
   recomputeCurrentOutsKeyed,
   outsThroughSubEvent,
   type SpeechContext,
-} from "../v2/src/speech.js";
-import type { MatchMetadata, LiveEvent, SubEvent, Team } from "../v2/src/types.js";
+} from "../src/speech.js";
+import type { MatchMetadata, LiveEvent, SubEvent, Team } from "../src/types.js";
 
 // Fictional teams only (public repo, matches can involve minors — see
 // feedback-fixtures-fictional-names). Home = Ketut, Away = Sudet.
@@ -47,6 +47,7 @@ describe("formatScore ordering (via public callers) — HANDOFF task 2", () => {
       periodHomeRuns: 1, periodAwayRuns: 5,
       homePeriodsWon: 0, awayPeriodsWon: 0, periodsPlayed: 1,
       currentOuts: 0, currentPeriod: 0, currentBatTeamId: null,
+      currentInning: 0, currentBatTurn: 0,
     };
     const speech = formatStartupSpeech(meta, ctx);
     expect(speech).toContain("1, 5, Sudet johtaa");

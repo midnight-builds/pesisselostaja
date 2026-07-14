@@ -14,7 +14,7 @@ import {
   formatSituationSummary,
   periodName,
   type SpeechContext,
-} from "./speech.js";
+} from "@pesisselostaja/core";
 import { applyPronunciations, preventOrdinalReading, type PronunciationRule } from "./pronunciation.js";
 import { piperSynthesize } from "./piper.js";
 import { debugLog } from "./debuglog.js";

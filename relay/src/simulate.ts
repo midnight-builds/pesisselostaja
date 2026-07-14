@@ -11,7 +11,7 @@ import {
   isMatchEndSubEvent,
   runValueOfSubEvent,
   type SpeechContext,
-} from "../../v2/src/speech.js";
+} from "@pesisselostaja/core";
 import { loadState, addRun, getPeriodScore, periodsWon, periodsPlayed, type WatcherState } from "./nodeState.js";
 import { loadPronunciations, applyPronunciations, preventOrdinalReading } from "./nodePronunciation.js";
 import { PiperTts } from "./piperTts.js";
