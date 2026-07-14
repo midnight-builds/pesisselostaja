@@ -56,6 +56,7 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     log("Sammutetaan…");
+    if (elevenLabs) log(`ElevenLabs-merkkejä käytetty tässä ajossa: ${elevenLabs.totalCharsUsed}`);
     loop.stop();
     mixer?.stop();
     setTimeout(() => process.exit(0), 500);
