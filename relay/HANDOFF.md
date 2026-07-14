@@ -252,9 +252,96 @@ rotaatiota ei tarvitse testata joka kerta), aseta se `.env.relay`:iin.
    tilanne kuin testattu "striimi loppui pysyvästi": tässä yt-dlp saattaa
    yhä resolvata URLin, mutta itse HLS-luku katkeilee. Tarkista ettei tämä
    laukaise turhaan `SourceExhaustedError`-luovutusta liian herkästi.
+   **⚠️ NYT NÄHTY LIVENÄ 2026-07-14 (ottelu 144203)** — ks. alla
+   "Lähteen flappaus / respawn-loop-luovutus". Ongelma on päinvastainen kuin
+   pelättiin: luovutus ei laukea *ollenkaan*, ei liian herkästi.
 4. Jos aikaa jää: pidempi (>1h) ajo useilla respawneilla peräkkäin,
    varmistaaksesi ettei mikään vuoda/kasva ajan myötä (muistinkäyttö,
    `seenFingerprints`-koko jne).
+
+## Avoimet kysymykset / jatkokehitys
+
+### Poll-välin ajonaikainen säätö (esiin 2026-07-14, ottelu 144203)
+
+Käyttäjä pyysi kesken live-ajon vaihtamaan API-pollausvälin 6 s → 3 s
+lennossa. **Ei onnistu nykyarkkitehtuurilla ilman uudelleenkäynnistystä:**
+
+- `pollInterval` luetaan kertaalleen käynnistyksessä
+  (`RELAY_POLL_INTERVAL`-env / `--poll-interval`-flag, oletus 6000 ms,
+  `config.ts`). Poll-silmukka lukee `this.config.pollInterval` joka kierroksella
+  (`commentaryLoop.ts` ~156), mutta arvo on kiinteä config-objektissa.
+- Ajonaikainen control-tiedosto (`.control-<ID>.json`,
+  `refreshRuntimeControls`) kantaa **vain** `announceBatterChanges`-boolean.
+  Poll-väliä se ei lue.
+- Src-koodin muokkauskaan ei auta jo *käynnissä* olevaa prosessia ilman
+  restartia (uusi koodi ei lataudu ajossa olevaan Node-prosessiin).
+
+Vaihtoehdot jatkoa varten — **mietittävä ennen seuraavaa ottelua**:
+
+1. **Laajenna control-tiedosto kattamaan myös `pollInterval`** (kuten
+   `announceBatterChanges` nyt): lisää kenttä `refreshRuntimeControls`:iin,
+   validoi järkevä alaraja (esim. ≥2000 ms ettei API:a hakata). Tämä antaisi
+   aidon lennossa-säädön ilman katkoa. Suositeltu ratkaisu jos tarve toistuu.
+2. **Hyväksy restart:** `RELAY_POLL_INTERVAL=3000` `.env.relay`:iin +
+   `systemctl --user restart`. Katkaisee selostetun lähetyksen ~2–5 s
+   (ffmpeg respawnaa); YouTube-lähetys selviää auto-stopin armonajassa.
+
+Punnittavaa ennen kuin lasketaan väliä: hyöty on **pieni** (6→3 s pudottaa
+tapahtuma→selostus-viiveestä ≤3 s, kun kokonaisviive on arkkitehtuurisesti
+~30–90 s), ja live-events-endpoint palauttaa **aina koko historian** joka
+pollilla (ks. muisti "live-events full history"), joten 3 s tuplaa
+API-kuorman ja rate-limit-riskin. Päätös 2026-07-14: **jätettiin 6 s:iin**,
+ratkaisutapa mietitään myöhemmin.
+
+### Lähteen flappaus / respawn-loop ei laukaise luovutusta (VAHVISTETTU 2026-07-14, ottelu 144203)
+
+**Oire livenä:** kesken ottelun ffmpeg alkoi päättyä **code=0, ajoaika
+~33–34 s kellontarkasti**, respawnaten heti uudelleen — ja jatkoi tätä
+kymmeniä minuutteja. Selostettuun lähetykseen tuli katko joka respawnissa.
+Samaan aikaan pesistulokset.fi:n **tapahtumadata jatkui täysin normaalisti**
+(palot, juoksut, tilanne päivittyi) — video ja data ovat eri kanavat.
+
+**Juurisyy (varmistettu koodista):** `FfmpegMixer.start()` kutsuu
+`spawnOnce()` ja **nollaa `failingSince = null` aina kun `spawnOnce` palaa
+ilman poikkeusta** (`ffmpegMixer.ts:114`). `SourceExhaustedError`
+(5 min luovutusikkuna) laukeaa **vain** jos `spawnOnce` *heittää*, mikä
+tapahtuu ainoastaan kun:
+  - yt-dlp ei resolvaa URLia, TAI
+  - ffmpeg kuolee ennen FIFO-kättelyä (`raceResult === "died"`, ~rivi 168).
+
+Kun lähde kuolee/jäätyy mutta YouTube tarjoaa yhä DVR-hännän, yt-dlp
+resolvaa URLin, ffmpeg käynnistyy, lukee kiinteän DVR-ikkunan (~33 s),
+osuu sen loppuun ja poistuu **code=0** → `spawnOnce` palaa normaalisti →
+`failingSince` nollautuu → **respawn ikuisesti, luovutus ei laukea koskaan.**
+Kellontarkka ~33 s cadence = sama DVR-ikkuna luetaan yhä uudelleen (video
+käytännössä jäätynyt/loopaa), ei uutta segmenttiä.
+
+**Miksei korjaus ole triviaali "lisää auto-kill":** samassa sessiossa lähde
+myös **flappasi ja palautui** — se ei aina tarkoita pysyvää kuolemaa. Liian
+aggressiivinen automaattitappo katkaisisi lähetyksen turhaan tilapäisen
+katkon takia. Korjauksen pitää erottaa *flappaa-mutta-palautuu* tilanteesta
+*kuollut/jäätynyt pysyvästi*.
+
+**Korjausideoita (mietittävä ennen seuraavaa ottelua):**
+1. **Erillinen "stalled source" -luovutusehto:** laske peräkkäiset lyhyet
+   (<~60 s) code=0-exitit; jos niitä tulee N kpl / kestää yli M min ilman
+   yhtään tervettä pitkää ajoa → luovuta (tai ainakin ilmoita operaattorille
+   näkyvästi). Erillään resolve-failure-ikkunasta, joka ei tätä kata.
+2. **Älä nollaa `failingSince` pelkästä `spawnOnce`-paluusta** vaan vasta
+   *terveestä* ajosta (esim. `ranMs > 60000`, sama kynnys jolla backoff jo
+   nollataan rivillä 196). Lyhyt code=0-loop kerryttäisi silloin
+   luovutusikkunaa normaalisti.
+3. **Operaattorin päätös vs. automaatti:** koska data jatkuu vaikka video
+   jäätyy, "pitääkö lähetyksen kuolla" on osin toimituksellinen valinta.
+   Harkitse selkeää **hälytystä** (näkyvä loki / push) automaattitapon sijaan
+   tai lisäksi, ja jätä lopullinen kill operaattorille.
+
+**Operaattorin väliaikaisohje** (kunnes korjattu): jos näet tämän kuvion
+(kellontarkat ~33 s code=0-respawnit) ja varmistat lähteestä että video ei
+enää etene, relay **ei sammu itsestään** — pysäytä käsin
+(`systemctl --user stop pesisselostaja-relay.service`). Varo silti että
+lähde voi flapata takaisin (näin kävi 144203:ssa) — tarkista kohdekuva
+Studiosta ennen lopullista tappoa.
 
 ## Miten ajetaan — nopea muistilista
 
