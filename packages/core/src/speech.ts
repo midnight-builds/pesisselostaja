@@ -243,6 +243,29 @@ export function formatSituationSummary(meta: MatchMetadata, ctx: SpeechContext):
   return result + batting;
 }
 
+/**
+ * Silence filler: spoken when nothing has happened for a while, so the
+ * narration doesn't go dead. Phrased as "still the same situation" rather
+ * than a fresh recap ({@link formatSituationSummary}).
+ */
+export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): string {
+  const h = ctx.periodHomeRuns;
+  const a = ctx.periodAwayRuns;
+  if (h === a) {
+    return pickVariant([
+      `Tilanne on edelleen tasan ${h}, ${a}.`,
+      `Ottelu jatkuu tasatilanteessa, ${h}, ${a}.`,
+    ]);
+  }
+  const leader = h > a ? meta.home.shorthand : meta.away.shorthand;
+  const adv = Math.abs(h - a) <= 2 ? "niukasti" : "reilusti";
+  return pickVariant([
+    `Tilanne on edelleen ${h}, ${a}, kun ${leader} johtaa peliä ${adv}.`,
+    `Tilanne edelleen ${h}, ${a}, ${leader} johdossa ${adv}.`,
+    `Ottelu jatkuu, ${leader} johtaa ${adv}, tilanne ${h}, ${a}.`,
+  ]);
+}
+
 export function subEventToSpeech(
   event: LiveEvent,
   sub: SubEvent,
