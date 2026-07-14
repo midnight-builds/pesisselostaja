@@ -30,15 +30,25 @@ throwaway, ei osa `relay/tsconfig.json`:n includea eli ei typecheck/lint-katettu
 Aja uudelleen: `npx tsx relay/experiments/voice-tuning-demo.ts` (~30-60s, ei
 lataa mitään, käyttää jo asennettua Piperiä).
 
+## Palaute (2026-07-09)
+
+Kuunneltu `fi_FI-harri-medium`illa. Yleisarvio: variaatio (`noise_w`) tuntui
+suht luonnolliselta, mutta **hidastus (`length_scale=1.15`, segmentti 5,
+ottelun lopetus) ei toiminut hyvin tässä äänessä** — hylätään ainakin tällä
+mallilla. `noise_w`-variaatio (segmentit 3 ja 6) sen sijaan kelpaa jatkoon.
+
 ## Päätettävää seuraavassa sessiossa
 
+- ~~Onko `length_scale`-kontrasti sopiva?~~ Ei — 1.15-hidastus kuulosti
+  huonolta `harri-medium`illa, pudotetaan pois tästä äänestä. Jos hidastusta
+  halutaan lopetukselle jatkossa, kokeiltava pienempää arvoa (esim. 1.05–1.08)
+  tai muuta mekanismia (tauko, sanavalinta) kuin `length_scale`.
 - Kuulostaako korotettu `noise_w` (1.3) luonnollisemmalta, vai alkaako ääntämys rikkoutua?
-- Onko `length_scale`-kontrasti (0.85 kunnarille / 1.15 lopetukselle) sopiva vai liioiteltu?
 - Kuuluuko segmentti 6:n kevyt per-rivi `noise_w`-vaihtelu selvänä erona, vai pitääkö haarukkaa leventää?
 - Jos tulos kelpaa: viedäänkö parametrit tuotantoon (`relay/src/piperTts.ts` +
   `v2/src/piper.ts`) kiinteinä uusina oletuksina, tapahtuvakohtaisina arvoina
-  (kunnari/lopetus omat `length_scale`-arvot), vai satunnaistettuna joka
-  synteesikutsulla väli sisällä?
+  (kunnari omat `noise_w`-arvot, lopetus jotain muuta kuin `length_scale`), vai
+  satunnaistettuna joka synteesikutsulla väli sisällä?
 - Tekstipuolen vaihteluun (huutomerkit, lauserakenne — alkuperäisen listan
   kohta 3) ei koskettu vielä; seuraava askel jos pelkkä parametrisäätö ei riitä.
 
