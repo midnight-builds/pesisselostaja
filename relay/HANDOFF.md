@@ -209,10 +209,6 @@ rotaatiota ei tarvitse testata joka kerta), aseta se `.env.relay`:iin.
 - **Auto-start/auto-stop**: relay käynnistettiin ja sammutettiin käsin
   `systemctl --user start/stop pesisselostaja-relay.service` juuri ennen/
   jälkeen ottelun, kuten suunniteltu — toimi odotetusti, ei automaatiota.
-- **RELAY_URL_REFRESH_MS**: asetettiin `.env.relay`:iin live-testissä mutta
-  ei tehnyt mitään (ks. yllä) — nyt korjattu, muista asettaa se uudelleen
-  jos halutaan poiketa 15 min oletuksesta (`.env.relay` ei säily istuntojen
-  välillä, ks. Rajaukset).
 - **Viiveodotukset**: respawn (yt-dlp-resoluutio + ffmpeg-kylmäkäynnistys +
   FIFO-kättely) kestää useita sekunteja — tämä on odotettua, ei bugi
   sinänsä. Erota se korjatusta selostuskatko-bugista (yllä, kohta 2): lyhyt
@@ -221,10 +217,15 @@ rotaatiota ei tarvitse testata joka kerta), aseta se `.env.relay`:iin.
 
 ## Mitä pitää testata seuraavaksi (tärkeysjärjestyksessä)
 
-1. **Vahvista korjaukset oikealla live-lähetyksellä.** Erityisesti: onko
-   respawn nyt siisti kuunneltuna (ei enää sanan kesken -katkoja), ja jos
-   alkuperäinen striimi joskus päättyy kesken testin, sammuuko relay
-   siististi 5 min sisään sen sijaan että jäisi silmukoimaan.
+1. **Vahvista korjaukset oikealla live-lähetyksellä — OSITTAIN TEHTY
+   2026-07-14** (ottelu 144197): RTMP-push oikeaan toiseen lähetykseen
+   toimi päästä päähän ~30 min ajan, ei respawneja (URL_REFRESH_MS=4h),
+   ei kaatumisia. **Ei vielä nähty**: respawn-käyttäytymistä yhtään
+   kertaa tässä testissä (väli oli liian pitkä), joten sanan kesken
+   -katko-korjaus on yhä vahvistamatta oikealla ajolla. Jos alkuperäinen
+   striimi joskus päättyy kesken testin, sammuuko relay siististi 5 min
+   sisään sen sijaan että jäisi silmukoimaan — ei myöskään testattu (lähde
+   ei loppunut kesken tämän testin).
 2. **RTMP-push-katko / verkkotökkiminen** (M6, ei vielä koskaan testattu) —
    simuloi esim. sammuttamalla verkko hetkeksi kesken ajon, tarkista että
    respawn-backoff toimii eikä narration-jono kasva rajattomasti sinä
