@@ -133,6 +133,7 @@ export class CommentaryLoop {
     this.state.currentBatTeamId = null;
     this.state.finished = false;
     this.processEventsSilent(initial.events, meta);
+    this.matchStarted = initial.events.length > 0;
 
     if (initial.team != null) this.state.currentBatTeamId = initial.team;
     if ((initial.period ?? 0) > this.state.currentPeriod) this.state.currentPeriod = initial.period!;
