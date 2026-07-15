@@ -170,7 +170,7 @@ export class CommentaryLoop {
     // mark it announced so the live turn-change detector doesn't repeat it.
     this.state.announcedTurnKey =
       `${this.state.currentPeriod}:${this.state.currentInning}:${this.state.currentBatTurn}:${this.state.currentBatTeamId}`;
-    saveState(this.config.stateFile, this.state);
+    await saveState(this.config.stateFile, this.state);
     log(`Ohitettu ${initial.events.length} tapahtumaa`);
 
     if (!meta.live && meta.started) {
