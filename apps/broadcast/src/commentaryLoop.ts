@@ -62,6 +62,10 @@ export class CommentaryLoop {
   /** Current effective value of the batter-change setting. Seeded from config
    *  at startup, then overridable mid-match via the control file. */
   private announceBatterChanges: boolean;
+  /** False until the match has produced any event — the endpoint always
+   *  returns the full history, so an empty history means the game genuinely
+   *  hasn't started and the loop speaks welcome fillers instead of recaps. */
+  private matchStarted = false;
 
   constructor(private config: RelayConfig, private sink: SpeechSink) {
     this.state = loadState(config.stateFile);
