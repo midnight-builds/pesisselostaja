@@ -37,9 +37,14 @@ the readable original.
 ## Build / commit hook
 Editing a file under any workspace `src/` (`packages/core/src`, `apps/*/src`) auto-runs
 that workspace's typecheck+build + `git add <workspace>` + commit
-(`.claude/settings.json`). So: workspace `src/` changes commit themselves; a multi-file
-refactor shows build failures on intermediate edits (expected until all files are
-consistent); other changes (tests, configs, docs) need a manual commit.
+(`.claude/settings.json`, local-only — see `.gitignore`). So: workspace `src/` changes
+commit themselves; a multi-file refactor shows build failures on intermediate edits
+(expected until all files are consistent); other changes (tests, configs, docs) need a
+manual commit. The hook never commits directly onto `main`/`master`: if it's about to
+commit while on one of those, it first creates and switches to `auto/<timestamp>`, and
+later auto-commits in the same session stay on that branch. Work meant to land via PR
+should still check out a real feature branch *before* editing — the auto-branch is a
+safety net, not a substitute for a properly named branch.
 
 ## Running
 `apps/server` runs as a systemd **user** unit. Restart with
