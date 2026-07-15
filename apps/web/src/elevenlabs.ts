@@ -3,7 +3,7 @@
 // no proxy, so the public GitHub Pages deploy works identically. Same voice
 // and model the broadcast pipeline uses.
 
-export const ELEVENLABS_VOICE_ID = "nPczCjzI2devNBz1zQrb"; // Brian — valittu kuuntelemalla 2026-07-14
+export const ELEVENLABS_VOICE_ID = "onwK4e9ZLuTAKqWW03F9"; // Daniel — valittu kuuntelemalla 2026-07-15
 export const ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 
 export async function elevenLabsSynthesize(text: string, apiKey: string): Promise<Blob> {
