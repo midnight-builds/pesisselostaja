@@ -514,9 +514,10 @@ function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
       : [ctx.homePeriodsWon, ctx.awayPeriodsWon];
     const winner = homeVal > awayVal ? meta.home.shorthand : awayVal > homeVal ? meta.away.shorthand : null;
     const result = `${meta.home.shorthand} ${homeVal}, ${meta.away.shorthand} ${awayVal}`;
-    return winner
+    const headline = winner
       ? `Ottelu päättyi! ${winner} voitti, ${result}.`
       : `Ottelu päättyi! Tasatilanne, ${result}.`;
+    return `${headline} ${formatMatchEndRecap(ctx)}`;
   }
   const result = meta.result;
   if (result) {
@@ -524,6 +525,23 @@ function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
     return `Ottelu päättyi! ${meta.home.shorthand} ${d.periods_home}, ${meta.away.shorthand} ${d.periods_away}.`;
   }
   return `Ottelu päättyi! ${meta.home.shorthand} vastaan ${meta.away.shorthand}.`;
+}
+
+/** One-off closing recap appended to the match-end announcement — after it the
+ *  loops go silent (only a reopened, changed score wakes them again). Match
+ *  formats vary: camp games are often a single jakso, so report vuoroparit
+ *  there and jaksot/decider elsewhere. */
+function formatMatchEndRecap(ctx: SpeechContext): string {
+  if (ctx.currentPeriod === 3) return "Ratkaisu syntyi kotiutuslyöntikilpailussa.";
+  if (ctx.currentPeriod === 2) return "Ratkaisu syntyi supervuorossa.";
+  if (ctx.periodsPlayed > 1) {
+    const word = FI_CARDINAL[ctx.periodsPlayed] ?? String(ctx.periodsPlayed);
+    return `Ottelussa pelattiin ${word} jaksoa.`;
+  }
+  const pairs = ctx.currentInning + 1;
+  if (pairs === 1) return "Ottelussa pelattiin yksi vuoropari.";
+  const word = FI_CARDINAL[pairs] ?? String(pairs);
+  return `Ottelussa pelattiin ${word} vuoroparia.`;
 }
 
 export function eventFingerprint(event: LiveEvent, subIndex: number): string {
