@@ -368,8 +368,18 @@ export class CommentaryLoop {
    *  Quiet game: a "tilanne on edelleen…" filler once nothing has been said
    *  for IDLE_FILLER_MS. */
   private async maybeAnnounceSummary(meta: MatchMetadata): Promise<void> {
-    if (this.state.announcementCount === 0) return;
+    // After the closing announcement the narration goes fully silent — no
+    // recaps, fillers, or batter calls — until a post-end score change wakes
+    // it (see processEventsLive). The relay/ffmpeg keep running regardless.
+    if (this.state.finished) return;
     const now = Date.now();
+    // Pre-game there is no situation to recap; keep the wait warm instead.
+    if (!this.matchStarted) {
+      if (now - this.lastSpeechAt < WELCOME_FILLER_MS) return;
+      await this.speak(formatWelcomeFiller(meta), false);
+      return;
+    }
+    if (this.state.announcementCount === 0) return;
     const countDue = this.state.announcementCount - this.lastSummaryCount >= SUMMARY_EVERY_N;
     const idleDue = now - this.lastSpeechAt > IDLE_FILLER_MS;
     if (!countDue && !idleDue) return;
