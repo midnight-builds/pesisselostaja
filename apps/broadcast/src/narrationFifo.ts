@@ -81,7 +81,7 @@ export class NarrationQueue {
  *  filter graph instead. */
 export class NarrationFifo {
   private stream: WriteStream | null = null;
-  private queue = new NarrationQueue(FRAME_BYTES);
+  private queue = new NarrationQueue(FRAME_BYTES, CLIP_GAP_FRAMES);
   private timer: NodeJS.Timeout | null = null;
   private tickCount = 0;
   private startTime = 0;
