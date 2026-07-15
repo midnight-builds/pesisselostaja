@@ -289,13 +289,14 @@ export class CommentaryLoop {
       // but only announce a genuinely new, not-yet-announced turn, or this
       // would fire once per poll for every historical turn change.
       const turnKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}`;
+      const hasNewSubEvent = event.events.some((_, i) => !state.seenFingerprints.has(eventFingerprint(event, i)));
       if (
         turnChanged &&
         !isFirstTurnOfPeriod &&
         !state.finished &&
         event.team != null &&
         turnKey !== state.announcedTurnKey &&
-        event.events.some((_, i) => !state.seenFingerprints.has(eventFingerprint(event, i)))
+        hasNewSubEvent
       ) {
         const cur = getPeriodScore(state, state.currentPeriod);
         const msg = formatBatTurnChangeSpeech(
@@ -303,6 +304,18 @@ export class CommentaryLoop {
         );
         this.speak(msg);
         state.announcedTurnKey = turnKey;
+      }
+
+      // First-seen delay log (HANDOFF.md 6c): one line per event with at
+      // least one genuinely new sub-event (not per sub-event), so a later
+      // pass can split total delay into API-side publish delay (this delta)
+      // vs. our own portion (speak-time minus this log's timestamp).
+      if (hasNewSubEvent && event.timestamp !== null) {
+        const candidateEpochMs = Date.now() - event.timestamp * 1000;
+        this.matchEpochMs =
+          this.matchEpochMs === null ? candidateEpochMs : Math.min(this.matchEpochMs, candidateEpochMs);
+        const deltaS = Math.round((Date.now() - (this.matchEpochMs + event.timestamp * 1000)) / 1000);
+        log(`first-seen: id=${event.id} ts=${event.timestamp} delta=${deltaS}s`);
       }
 
       for (let i = 0; i < event.events.length; i++) {
