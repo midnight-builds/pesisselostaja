@@ -155,7 +155,9 @@ export class CommentaryLoop {
       return;
     }
 
-    const startupMsg = formatStartupSpeech(meta, this.buildContext());
+    const startupMsg = this.matchStarted
+      ? formatStartupSpeech(meta, this.buildContext())
+      : formatWelcomeFiller(meta);
     await this.speak(startupMsg);
     // Startup already gives the full situation — don't fire the periodic
     // summary immediately on top of it.
