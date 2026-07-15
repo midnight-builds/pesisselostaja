@@ -449,6 +449,7 @@ function formatRunScored(texts: EventTextElement[], _meta: MatchMetadata, lookup
     return pickVariant("run-scored", [
       `${batter} löi juoksun, tuojana ${runner}.`,
       `Juoksun löi ${batter}, tuojana ${runner}.`,
+      `Tulospalveluun on kirjattu juoksu: sen löi ${batter}, tuojana ${runner}.`,
     ]);
   }
   return `${batter} ${eventText}.`;
