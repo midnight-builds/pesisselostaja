@@ -1,6 +1,54 @@
 # Relay — handoff seuraavaa live-testiä varten
 
-## TODO 2026-07-15: live-ajon (ottelu 144193) löydökset ja jatkokehitys — AVOINNA
+## TODO 2026-07-15: live-ajon (ottelu 144193) löydökset ja jatkokehitys
+
+> **Kohdat 1, 2, 3, 4 sekä pollausvälin pudotus korjattu 2026-07-15**
+> (samana päivänä, ilman live-testiä — vahvistus seuraavassa ottelussa).
+> Kohdat 5–7 (C: RTMP-flap-testi, isommat selvitykset/management-view)
+> jätettiin tietoisesti tekemättä, edellinen striimi toimi eikä niitä
+> pidetty kiireellisinä.
+>
+> - **1 (selostus jatkui ottelun päätyttyä)**: `commentaryLoop.ts` ja
+>   `apps/web/src/watcher.ts` vaikenevat nyt kokonaan `state.finished`-tilassa
+>   (ei tilannekuvia, täytefraaseja eikä vaihtokuulutuksia) — video/relay
+>   jatkuu koskemattomana. Herääminen: jos pistetilanne muuttuu päättymisen
+>   jälkeen, `finished` nollautuu ja selostus jatkuu normaalisti. Loppuun
+>   lisättiin yksi kertaluonteinen laajempi yhteenveto (`formatMatchEndRecap`
+>   `speech.ts`:ssä): vuoroparien/jaksojen määrä tai ratkaisu supervuorossa/
+>   kotiutuslyöntikilpailussa, riippuen ottelun päättymistavasta.
+> - **2 (pelaajanimi "3 S Sukunimi")**: valittu vaihtoehto — puhutaan pelkkä
+>   sukunimi ("Lyömässä Korhonen."); jos kokoonpanossa kaksi samaa sukunimeä,
+>   lisätään koko etunimi ("Lyömässä Anna Korhonen."). API antaa koko
+>   etunimen, ei vain alkukirjainta, joten törmäystapaus on yksiselitteinen.
+>   Toteutus `resolvePlayerName`/`buildPlayerLookup` (`packages/core/src/speech.ts`).
+>   Feed näyttää edelleen raakamuodon (tarkoituksellinen asymmetria).
+> - **3 (tauko selostusten väliin)**: n. 700 ms hiljaisuus lisätty sekä
+>   relayn `NarrationQueue`:hen (`narrationFifo.ts`, klippien väliin, ei
+>   viimeisen klipin jälkeen) että web-appin `_drainQueue`-jonon purkuun.
+> - **4 (lähdemaininta)**: "Tulospalvelun mukaan…" / "Tulospalveluun on
+>   kirjattu…" lisätty pickVariant-varianteiksi tilannekuviin (idle- ja
+>   summary-fraasit) ja pistetapahtumiin (juoksu, tuotu juoksu) — vain osaan
+>   variantteja, ei jokaiseen.
+> - **5:n loppuosa (esipelitäyte)**: `formatWelcomeFiller` puhuu
+>   tervetuloa-/odotusfraaseja ~90 s välein ennen ottelun alkua (tunnistetaan
+>   tyhjästä `online/{id}/events`-historiasta). Kenttänimi mukana
+>   sellaisenaan `|`-merkkiin asti siivottuna (`stadiumSpeechName`) — käyttäjän
+>   päätös leiripelien koodimaisille kenttänimille ("12 Tupos B | LEIRITUOTANTO"
+>   → "12 Tupos B").
+> - **Pollausväli**: `RELAY_POLL_INTERVAL`-oletus 6000 → 4000 ms
+>   (`config.ts`). Ei runtime-säädettävä (control-tiedosto-laajennus jätetty
+>   tekemättä) — jos tarve tihentää/harventaa lennossa toistuu, se on yhä
+>   avoin jatkokehityskohta.
+> - **Ei tehty**: kohta 5:n API-kenttätarkistus jäi epäolennaiseksi (kenttä
+>   löytyy aina `stadium.name`:sta); kohta 6 (striimaava/osittainen API) ja
+>   kohta 7 (management web view) ovat yhä avoimia selvityksiä; C-kokonaisuus
+>   (RTMP-flap-testi, `SourceExhaustedError`-luovutusehdon korjaus) rajattiin
+>   pois tästä sessiosta käyttäjän päätöksellä.
+>
+> Testit: `packages/core/test/subEventSpeech.test.ts` (sukunimipuhe,
+> loppuyhteenveto, lähdemaininta, tervetuloafraasi), `apps/broadcast/test/narrationFifo.test.ts`
+> (klippien välinen tauko). Koko suite: `npx vitest run` (61/61 vihreä).
+> **Ei vielä vahvistettu oikealla live-ottelulla.**
 
 Ensimmäinen tuotantoajo ElevenLabsilla onnistui: ~42 min, 86 selostusta,
 3048 EL-merkkiä, 2 ohimenevää API-timeouttia, ei respawneja. Alla löydökset
