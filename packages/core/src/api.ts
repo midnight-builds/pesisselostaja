@@ -6,6 +6,10 @@ const DEFAULT_API_KEY = "wRX0tTke3DZ8RLKAMntjZ81LwgNQuSN9";
 export interface ApiOptions {
   apiBase?: string;
   apiKey?: string;
+  /** Overrides the default 8s fetch timeout. Callers polling on a tighter
+   *  cadence than the server's response-cache window can lower this, since
+   *  waiting past the cache TTL for a hung request buys nothing. */
+  timeoutMs?: number;
 }
 
 async function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response> {
