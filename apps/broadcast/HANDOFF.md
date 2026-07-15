@@ -258,6 +258,37 @@ puhutaan (tekee jonon ja viiveen näkyväksi). Lisäideoita: vaihtoselostuksen
 on/off-kytkin UI:hin (nyt control-tiedosto), EL-merkkilaskuri, sydänäänen
 ikä, respawn-historia. Suunnittele ja ehdota ennen toteutusta.
 
+### 8. Synkroniset fs-kutsut poll-silmukassa jitteröivät narraation 20 ms -tickiä
+
+**Löydös (koodikatselmus 2026-07-15, ei lokitodennettu):** Node on
+yksisäikeinen, ja sama event loop ajaa sekä `NarrationFifo`n 20 ms
+-framekirjoittimen (`narrationFifo.ts`, ffmpegin `amix` ei siedä nälkää)
+että `CommentaryLoop`in poll-silmukan. Poll-silmukka teki joka kierroksella
+(oletus 4 s) kaksi **synkronista** fs-kutsua, jotka blokkaavat koko event
+loopin — myös FIFO-tickin — syscallin ajaksi:
+
+1. `refreshRuntimeControls()`: `readFileSync(controlFile)` joka pollilla
+   (`commentaryLoop.ts`).
+2. `saveState()`: `writeFileSync(stateFile, JSON.stringify(...))` joka
+   pollin lopussa (`nodeState.ts`). Serialisoitava `seenFingerprints`-Set
+   kasvaa koko ottelun ajan, joten kirjoitus hidastuu pelin edetessä.
+
+Jos levy-I/O tökkii edes kymmeniä millisekunteja (VM:n levy on rajallinen),
+FIFO-tick myöhästyy saman verran → ffmpeg saa narraatioframen myöhässä →
+mahdollinen kuultava jitter/katko mixissä, toistuvasti joka poll-sykli.
+Kertaluonteiset käynnistyspolun sync-kutsut (`loadState`,
+`loadPronunciations`, `writeControlFile`) ajavat ennen kuin FIFO tickaa,
+ne eivät ole ongelma.
+
+> **Korjattu 2026-07-15** (ilman live-testiä): per-poll-kutsut vaihdettu
+> `fs/promises`-vastineisiin — `saveState` on nyt async (`writeFile`) ja
+> `refreshRuntimeControls` lukee control-tiedoston `readFile`:lla; poll-
+> silmukka awaitaa molemmat, jolloin FIFO-tick ajaa I/O:n aikana vapaasti.
+> Käynnistyspolun sync-kutsut jätetty ennalleen (eivät kilpaile tickin
+> kanssa). Vaikutusarvio maltillinen: ei selitä 6b:n 0–60 s jitteriä
+> (se on API-julkaisuviivettä), vaan poistaa mahdollisen ms-luokan
+> äänijitterin lähteen mixistä.
+
 ### Sivuhuomiot ajosta
 
 - Kaksi "Hakuvirhe: This operation was aborted" -riviä (API-timeout) —
