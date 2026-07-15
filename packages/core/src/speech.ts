@@ -112,6 +112,12 @@ const FI_ORDINAL: Record<number, string> = {
   11: "yhdestoista", 12: "kahdestoista",
 };
 
+const FI_CARDINAL: Record<number, string> = {
+  1: "yksi", 2: "kaksi", 3: "kolme", 4: "neljä", 5: "viisi",
+  6: "kuusi", 7: "seitsemän", 8: "kahdeksan", 9: "yhdeksän", 10: "kymmenen",
+  11: "yksitoista", 12: "kaksitoista",
+};
+
 function ordinalPalo(n: number): string {
   const ord = FI_ORDINAL[n];
   return ord ? `${ord} palo` : `${n}. palo`;
