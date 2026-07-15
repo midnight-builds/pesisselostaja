@@ -123,12 +123,16 @@ export class CommentaryLoop {
     const meta = await fetchMatchMetadata(this.config.matchId, {
       apiBase: this.config.apiBase,
       apiKey: this.config.apiKey,
+      timeoutMs: API_TIMEOUT_MS,
     });
     const lookup = buildPlayerLookup(meta);
     log(`${meta.home.name} vs ${meta.away.name}`);
 
     log("Ohitetaan historialliset tapahtumat…");
-    const initial = await fetchLiveEvents(this.config.matchId, { apiBase: this.config.apiBase });
+    const initial = await fetchLiveEvents(this.config.matchId, {
+      apiBase: this.config.apiBase,
+      timeoutMs: API_TIMEOUT_MS,
+    });
     this.state.periodRuns = {};
     this.state.currentOuts = 0;
     this.state.paloTurnKey = null;
