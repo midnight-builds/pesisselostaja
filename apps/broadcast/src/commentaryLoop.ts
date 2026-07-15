@@ -260,6 +260,7 @@ export class CommentaryLoop {
       if (
         turnChanged &&
         !isFirstTurnOfPeriod &&
+        !state.finished &&
         event.team != null &&
         turnKey !== state.announcedTurnKey &&
         event.events.some((_, i) => !state.seenFingerprints.has(eventFingerprint(event, i)))
