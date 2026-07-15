@@ -200,7 +200,7 @@ export class CommentaryLoop {
       if (waitMs > 0) await this.sleepAbortable(waitMs, signal);
       if (signal.aborted) break;
       nextPollAt = Math.max(nextPollAt + this.config.pollInterval, Date.now());
-      this.refreshRuntimeControls();
+      await this.refreshRuntimeControls();
       try {
         const data = await fetchLiveEvents(this.config.matchId, {
           apiBase: this.config.apiBase,
