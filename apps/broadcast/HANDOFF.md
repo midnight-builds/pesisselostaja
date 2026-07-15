@@ -162,6 +162,36 @@ Alkuperäinen kysymys: nykyinen polli tuottaa katkonaisen rytmin ryppäissä.
 Huom: kokonaisviiveestä valtaosa tulee video-pipelinesta — tämä parantaa
 rytmiä, ei kokonaisviivettä.
 
+#### 6b. Viiveanalyysi ottelusta 144202 (15.7.2026)
+
+Vertailtiin API:n tapahtuma-aikaleimoja (`timestamp` = sekunteja ottelun
+epochista) relayn lokin havaitsemishetkiin, 17 paloa + 11 juoksua:
+
+- **Viiveen pohja ~130 s, hajonta 129–190 s.** Eli jokainen tapahtuma näkyy
+  julkisessa API:ssa vasta ~2 min tapahtumahetken jälkeen, ja päälle tulee
+  0–60 s jitteriä. Pollauksen osuus (≤ ~10 s) on tästä murto-osa.
+- Pohjaviive sopii täsmälleen `skip-delay`-löydökseen: **API viivästänee
+  julkista feediä ~2 min oletuksena.** Jos `skip-delay=true` toimii julkisella
+  avaimella, se on ylivoimaisesti suurin yksittäinen parannus.
+- 0–60 s jitter selittää käyttäjän havainnon "pitkä tauko, sitten 3–4
+  selostusta putkeen": viiveikkunan ylittäneet tapahtumat vapautuvat
+  ryppäänä samaan polliin (esim. ts 2085 ja 2086 molemmat selostettu
+  14:07:04). Osa jitteristä lienee kirjurin syöttöviivettä (timestamp on
+  pelitapahtuman hetki, kirjaus tulee myöhemmin) — sitä ei voi poistaa.
+
+Koodipuolen pienemmät parannukset (toissijaisia yllä olevaan nähden):
+
+1. **Synteesi blokkaa pollin:** silmukka `await`aa jokaisen selostuksen
+   ElevenLabs-synteesin (~1 s/klippi) ennen seuraavaa askelta, ja 4 s uni
+   alkaa vasta käsittelyn jälkeen. Rypäs (4 klippiä) lykkää seuraavaa pollia
+   ~4–8 s. Korjaus: irrota synteesi polliketjusta omaan järjestyksen
+   säilyttävään promise-jonoon, ja pollaa kiinteällä tahdilla
+   (no-overlap-vahti) unen sijaan.
+2. **Fetch-timeout 8 s on tarpeettoman pitkä** suhteessa 4 s polliin ja 5 s
+   palvelinvälimuistiin — pudota ~4 s:iin, niin jumiutunut haku maksaa
+   vähemmän (timeoutteja oli 2 kpl / ajo, ei iso ongelma).
+3. ETag-ehdollinen haku (304) tekee tiheämmästäkin pollista halvan.
+
 ### 7. Management web view (isompi kokonaisuus, ideointi kesken)
 
 Valvontanäkymä relaylle, saatavilla vain Tailscalen kautta (ei julkiseen
