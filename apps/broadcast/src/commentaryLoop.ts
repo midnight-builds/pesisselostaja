@@ -424,18 +424,23 @@ export class CommentaryLoop {
    *  comparing the final strings, but pickVariant can now phrase the same
    *  duplicate two different ways — so duplicates must be detected on the
    *  pre-variant key, never on the rendered speech. */
-  private async speak(text: string, countAnnouncement = true, dedupeKey: string = text): Promise<void> {
+  /** Decision-time bookkeeping (dedupe, lastSpeechAt, announcementCount)
+   *  happens synchronously; the actual sink call (TTS synthesis + mix) is
+   *  handed to synthQueue instead of awaited inline. Previously the poll loop
+   *  awaited each clip's synthesis (~1s/clip) before moving on, so a cluster
+   *  of several announcements in one poll delayed the next poll by several
+   *  seconds (see HANDOFF.md 6b). synthQueue keeps clips in order while
+   *  letting the poll loop run on its own fixed cadence. */
+  private speak(text: string, countAnnouncement = true, dedupeKey: string = text): void {
     if (dedupeKey === this.lastSpeech) return;
     this.lastSpeech = dedupeKey;
     this.lastSpeechAt = Date.now();
+    if (countAnnouncement) this.state.announcementCount++;
     const spoken = preventOrdinalReading(applyPronunciations(text, this.pronunciations));
     log(`Selostus: ${text}`);
-    try {
-      await this.sink(spoken, text);
-    } catch (err) {
+    this.synthQueue = this.synthQueue.then(() => this.sink(spoken, text)).catch((err) => {
       log(`Selostusvirhe: ${err instanceof Error ? err.message : err}`);
-    }
-    if (countAnnouncement) this.state.announcementCount++;
+    });
   }
 
   private sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
