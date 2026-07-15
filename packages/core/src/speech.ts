@@ -291,6 +291,7 @@ export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): stri
     return pickVariant("idle-tie", [
       `Tilanne on edelleen tasan ${h}, ${a}.`,
       `Ottelu jatkuu tasatilanteessa, ${h}, ${a}.`,
+      `Tulospalvelun mukaan tilanne on yhä tasan ${h}, ${a}.`,
     ]);
   }
   const leader = h > a ? meta.home.shorthand : meta.away.shorthand;
@@ -299,6 +300,28 @@ export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): stri
     `Tilanne on edelleen ${h}, ${a}, kun ${leader} johtaa peliä ${adv}.`,
     `Tilanne edelleen ${h}, ${a}, ${leader} johdossa ${adv}.`,
     `Ottelu jatkuu, ${leader} johtaa ${adv}, tilanne ${h}, ${a}.`,
+    `Tulospalvelun mukaan tilanne on edelleen ${h}, ${a}, ${leader} johdossa.`,
+  ]);
+}
+
+/** Kenttänimi puhuttavaksi: camp fields come through as codes with a pipe
+ *  qualifier ("12 Tupos B | LEIRITUOTANTO") — speak only the part before it. */
+export function stadiumSpeechName(rawName: string): string {
+  return rawName.split("|")[0].trim();
+}
+
+/**
+ * Pre-game filler: spoken periodically while waiting for the match's first
+ * event, so a broadcast that starts well before the game isn't dead air.
+ */
+export function formatWelcomeFiller(meta: MatchMetadata): string {
+  const pair = `${meta.home.name} vastaan ${meta.away.name}`;
+  const stadium = stadiumSpeechName(meta.stadium.name);
+  const at = stadium ? `, pelikenttänä ${stadium}` : "";
+  return pickVariant("welcome", [
+    `Tervetuloa seuraamaan ottelua ${pair}${at}.`,
+    `Odottelemme pelin alkua. Vastakkain ${pair}.`,
+    `Ottelu ei ole vielä alkanut. ${pair}${at}.`,
   ]);
 }
 
