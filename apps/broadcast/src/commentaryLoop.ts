@@ -225,6 +225,7 @@ export class CommentaryLoop {
     lookup: PlayerLookup
   ): Promise<void> {
     const state = this.state;
+    if (events.length > 0) this.matchStarted = true;
     for (let ei = 0; ei < events.length; ei++) {
       const event = events[ei];
       const prevBatTeamId = state.currentBatTeamId;
