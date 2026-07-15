@@ -186,7 +186,22 @@ epochista) relayn lokin havaitsemishetkiin, 17 paloa + 11 juoksua:
   havaitsemisviive (näkyy feedissä → speak). Erottelu vaatii first-seen-
   lokituksen (alla).
 
-#### 6c. TODO: first-seen-lokitus viiveen erotteluun
+#### 6c. first-seen-lokitus viiveen erotteluun
+
+> **Toteutettu 2026-07-15** (`commentaryLoop.ts`, ilman live-testiä).
+> Ottelun epoch ei tule API:sta/metadatasta (`MatchMetadata.date` on vain
+> päivämäärä ilman kellonaikaa) — se päätellään ajon aikana: koska
+> julkaisuviive on aina ≥0, `havaitsemishetki − ts` on epochin yläraja
+> jokaiselle first-seen-tapahtumalle, ja juokseva minimi (`matchEpochMs`)
+> lähestyy todellista epochia ajon edetessä. Jää pysyvästi vinoutuneeksi
+> alaspäin ensimmäisen havainnon todellisen viiveen verran (ei siis
+> absoluuttinen kello), mutta hajonta/trendi saman ajon sisällä on
+> luotettava. Loki kirjoitetaan `processEventsLive`:ssä ennen
+> sub-event-silmukkaa, yksi rivi per tapahtuma jolla on aidosti uusi
+> sormenjälki (`hasNewSubEvent`, jaettu muuttuja vaihtokuulutus-gatelle).
+> Tyypit + `npx vitest run` (61/61) vihreitä. **Ei vielä vahvistettu
+> live-ottelulla** — seuraava ajo näyttää toimiiko epoch-arvio käytännössä
+> ja voiko datasta erotella API- vs. oman osuuden.
 
 Pieni lisäys `commentaryLoop.ts`:n pollikäsittelyyn: kun tapahtuma-id
 nähdään pollivastauksessa ensimmäistä kertaa, lokitetaan yksi rivi:
