@@ -130,13 +130,37 @@ hiljaisuussääntö.
 
 ### 6. Selvitys: striimaava/osittainen API
 
-Nykyinen ~6 s polli tuottaa katkonaisen rytmin ryppäissä: rypäs selostetaan
-putkeen, sitten tauko seuraavaan polliin. Selvitä: (a) onko pesistulokset.fi:llä
-WebSocket/SSE/long-poll-päätepistettä (selaimen devtools live-näkymässä),
-(b) onko `online/{id}/events`-päätepisteessä since-/delta-parametria
-(nykyisin palauttaa aina koko historian), (c) jos ei kumpaakaan, voiko
-pollia tihentää turvallisesti tai adaptiivisesti. Huom: kokonaisviiveestä
-valtaosa tulee video-pipelinesta — tämä parantaa rytmiä, ei kokonaisviivettä.
+> **Selvitetty 15.7.2026** (frontendin main.js-analyysi + API-kokeet päättyneellä
+> ottelulla 144202). Löydökset:
+>
+> - **Ei WebSocketia/SSE:tä.** Sivusto itse pollaa samaa
+>   `online/{id}/events`-päätepistettä `setTimeout(…, 6e3)`-silmukalla (6 s).
+>   ("SignalR"-osumat JS:ssä olivat Angularin `consumerOnSignalRead`-symboleja.)
+> - **Delta-parametri on olemassa: `after=YYYY-MM-DD HH:mm:ss`** —
+>   Europe/Helsinki-aikaa, välilyönnillä (frontend: `latestTimestamp
+>   .tz("Europe/Helsinki").format("YYYY-MM-DD HH:mm:ss")`). Väärä muoto →
+>   400 `{"error":"Virheellinen aikaleima"}`. Frontend käsittelee vastauksen
+>   `reset`-lipun (palvelin voi palauttaa koko setin + reset). HUOM:
+>   päättyneellä ottelulla `after` palautti aina koko historian — **vaikutus
+>   pitää verifioida live-ottelua vasten** ennen käyttöönottoa.
+> - **`skip-delay=true`-parametri on olemassa** (frontend lähettää jos
+>   `window.skipDelay` asetettu) → API ilmeisesti viivästää tapahtumia
+>   oletuksena. Jos toimii julkisella avaimella, tämä voi leikata
+>   feed-viivettä — testaa live-ottelussa.
+> - **Palvelinpuolen välimuisti ~5 s** (`cache-control: max-age=5`,
+>   `x-pesis-cache`-header, Cloudflare edessä) → alle ~5 s polli ei tuo
+>   uudempaa dataa. Nykyinen 4 s `RELAY_POLL_INTERVAL` osuu jo tähän rajaan.
+> - **ETag/If-None-Match toimii** (304, 0 tavua) → halpa tapa pollata
+>   tiheämminkin ilman 28 kt:n runkoja.
+> - Rate-limitistä ei merkkejä (ei 429:iä lokeissa eikä kokeissa).
+>
+> Seuraava askel: live-ottelun aikana kokeile `after`- ja `skip-delay`-
+> parametreja curlilla rinnan täyden haun kanssa; jos delta toimii, lisää
+> ETag-ehdollinen haku + `after` commentaryLoopiin ja tihennä polli ~3 s:iin.
+
+Alkuperäinen kysymys: nykyinen polli tuottaa katkonaisen rytmin ryppäissä.
+Huom: kokonaisviiveestä valtaosa tulee video-pipelinesta — tämä parantaa
+rytmiä, ei kokonaisviivettä.
 
 ### 7. Management web view (isompi kokonaisuus, ideointi kesken)
 
