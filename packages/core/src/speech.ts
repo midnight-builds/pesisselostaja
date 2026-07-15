@@ -255,7 +255,11 @@ export function formatBatTurnChangeSpeech(
 }
 
 export function formatSituationSummary(meta: MatchMetadata, ctx: SpeechContext): string {
-  const parts: string[] = [`Menossa ${periodName(ctx.currentPeriod)}`];
+  // Source attribution ("Tulospalvelun mukaan…") tells viewers where the data
+  // comes from and why it trails the video; the duplicated plain variant keeps
+  // it an occasional aside instead of a constant refrain.
+  const lead = pickVariant("summary-attribution", ["Menossa", "Menossa", "Tulospalvelun mukaan menossa"]);
+  const parts: string[] = [`${lead} ${periodName(ctx.currentPeriod)}`];
 
   if (ctx.periodHomeRuns > ctx.periodAwayRuns) {
     parts.push(`tilanne ${ctx.periodHomeRuns}, ${ctx.periodAwayRuns}, ${meta.home.shorthand} johtaa`);
