@@ -307,6 +307,9 @@ export class CommentaryLoop {
 
         const speech = subEventToSpeech(event, sub, meta, lookup, this.announceBatterChanges, ctx);
         if (!speech) continue;
+        // After the closing announcement everything else stays silent (the
+        // match-end sub-event itself is what speaks that closing line).
+        if (state.finished && !isMatchEndSubEvent(sub)) continue;
         // Same texts in the same turn and situation = a scorer double-marking.
         const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
           `${JSON.stringify(sub.texts)}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
