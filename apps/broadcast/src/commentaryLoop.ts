@@ -13,6 +13,7 @@ import {
   formatBatTurnChangeSpeech,
   formatSituationSummary,
   formatIdleSummary,
+  formatWelcomeFiller,
   periodName,
   type PlayerLookup,
   type SpeechContext,
