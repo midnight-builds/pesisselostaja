@@ -73,6 +73,15 @@ export class CommentaryLoop {
    *  returns the full history, so an empty history means the game genuinely
    *  hasn't started and the loop speaks welcome fillers instead of recaps. */
   private matchStarted = false;
+  /** Estimated wall-clock instant (ms) corresponding to event.timestamp=0,
+   *  for the first-seen delay log (HANDOFF.md 6c). The API gives no epoch
+   *  field, so this is inferred from observed events: since publish delay is
+   *  always ≥0, (first-seen walltime − timestamp) is an upper bound on the
+   *  true epoch, and the running minimum over all first-seen events
+   *  converges toward it. Carries a constant bias equal to the lowest true
+   *  delay seen so far — good enough to compare jitter/trends within a run,
+   *  not an authoritative clock. */
+  private matchEpochMs: number | null = null;
 
   constructor(private config: RelayConfig, private sink: SpeechSink) {
     this.state = loadState(config.stateFile);
