@@ -169,19 +169,31 @@ export class CommentaryLoop {
     const startupMsg = this.matchStarted
       ? formatStartupSpeech(meta, this.buildContext())
       : formatWelcomeFiller(meta);
-    await this.speak(startupMsg);
+    this.speak(startupMsg);
     // Startup already gives the full situation — don't fire the periodic
     // summary immediately on top of it.
     this.state.lastSummaryTime = Date.now();
     this.lastSummaryCount = this.state.announcementCount;
 
     log("Selostussilmukka käynnissä…");
+    // Fixed poll cadence, independent of how long a cycle's fetch/processing
+    // takes — synthesis no longer blocks this loop (see speak()/synthQueue),
+    // so cycles should normally be fast, but a slow fetch must not add to the
+    // next wait on top of its own delay. If a cycle overruns the interval,
+    // resume the cadence from now instead of firing a burst of catch-up ticks
+    // (no-overlap guard).
+    let nextPollAt = Date.now() + this.config.pollInterval;
     while (!signal.aborted) {
-      await this.sleepAbortable(this.config.pollInterval, signal);
+      const waitMs = nextPollAt - Date.now();
+      if (waitMs > 0) await this.sleepAbortable(waitMs, signal);
       if (signal.aborted) break;
+      nextPollAt = Math.max(nextPollAt + this.config.pollInterval, Date.now());
       this.refreshRuntimeControls();
       try {
-        const data = await fetchLiveEvents(this.config.matchId, { apiBase: this.config.apiBase });
+        const data = await fetchLiveEvents(this.config.matchId, {
+          apiBase: this.config.apiBase,
+          timeoutMs: API_TIMEOUT_MS,
+        });
 
         // Ordinary bat-turn changes have no dedicated API text marker; they are
         // detected and announced inside processEventsLive, keyed off
@@ -280,7 +292,7 @@ export class CommentaryLoop {
         const msg = formatBatTurnChangeSpeech(
           meta, prevBatTeamId, event.team, cur.home, cur.away, state.currentInning, state.currentBatTurn
         );
-        await this.speak(msg);
+        this.speak(msg);
         state.announcedTurnKey = turnKey;
       }
 
@@ -324,7 +336,7 @@ export class CommentaryLoop {
         // Same texts in the same turn and situation = a scorer double-marking.
         const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
           `${JSON.stringify(sub.texts)}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
-        await this.speak(speech, true, dedupeKey);
+        this.speak(speech, true, dedupeKey);
       }
 
       if (event.timestamp !== null && event.timestamp > state.lastTimestamp) {
@@ -387,7 +399,7 @@ export class CommentaryLoop {
     // Pre-game there is no situation to recap; keep the wait warm instead.
     if (!this.matchStarted) {
       if (now - this.lastSpeechAt < WELCOME_FILLER_MS) return;
-      await this.speak(formatWelcomeFiller(meta), false);
+      this.speak(formatWelcomeFiller(meta), false);
       return;
     }
     if (this.state.announcementCount === 0) return;
@@ -399,7 +411,7 @@ export class CommentaryLoop {
     this.lastSpeechAt = now;
     const ctx = this.buildContext();
     const summary = countDue ? formatSituationSummary(meta, ctx) : formatIdleSummary(meta, ctx);
-    await this.speak(summary, false);
+    this.speak(summary, false);
   }
 
   private buildContext(): SpeechContext {
