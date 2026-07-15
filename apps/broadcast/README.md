@@ -67,7 +67,7 @@ keep playing.
 - **At startup:** set `RELAY_ANNOUNCE_BATTER_CHANGES=false` in `.env.relay`, or
   pass `--no-batter-changes` to `relay:dev`.
 - **Live, without restarting:** the loop re-reads `apps/broadcast/run/.control-<matchId>.json`
-  every poll (~6 s). Flip it and the change takes effect within one poll:
+  every poll (~4 s). Flip it and the change takes effect within one poll:
   ```bash
   echo '{"announceBatterChanges": false}' > apps/broadcast/run/.control-143280.json   # off
   echo '{"announceBatterChanges": true}'  > apps/broadcast/run/.control-143280.json   # back on

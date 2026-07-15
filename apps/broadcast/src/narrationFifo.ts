@@ -8,6 +8,9 @@ const CHANNELS = 2;
 const BYTES_PER_SAMPLE = 2;
 const FRAME_MS = 20;
 const FRAME_BYTES = (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE * FRAME_MS) / 1000; // 3840
+/** ~700 ms of silence between consecutive clips, so narration bursts (several
+ *  events announced in one poll) don't run together into one long sentence. */
+const CLIP_GAP_FRAMES = 700 / FRAME_MS;
 
 function mkfifo(path: string): Promise<void> {
   return new Promise((resolve, reject) => {
