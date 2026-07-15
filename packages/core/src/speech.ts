@@ -3,6 +3,9 @@ import type { LiveEvent, SubEvent, EventTextElement, MatchMetadata, Player } fro
 export interface PlayerLookup {
   byId: Map<number, Player>;
   byTeamNumber: Map<string, Player>;
+  /** Surnames shared by more than one player in the match (both rosters,
+   *  case-insensitive) — these need the first name to stay unambiguous. */
+  ambiguousSurnames: Set<string>;
 }
 
 export interface SpeechContext {
@@ -43,13 +46,20 @@ function formatPeriodsWon(meta: MatchMetadata, home: number, away: number): stri
 export function buildPlayerLookup(meta: MatchMetadata): PlayerLookup {
   const byId = new Map<number, Player>();
   const byTeamNumber = new Map<string, Player>();
+  const surnameCounts = new Map<string, number>();
   for (const team of [meta.home, meta.away]) {
     for (const p of team.players) {
       byId.set(p.id, p);
       byTeamNumber.set(`${team.id}:${p.number}`, p);
+      const key = p.last_name.toLowerCase();
+      surnameCounts.set(key, (surnameCounts.get(key) ?? 0) + 1);
     }
   }
-  return { byId, byTeamNumber };
+  const ambiguousSurnames = new Set<string>();
+  for (const [surname, count] of surnameCounts) {
+    if (count > 1) ambiguousSurnames.add(surname);
+  }
+  return { byId, byTeamNumber, ambiguousSurnames };
 }
 
 export function getTeamName(meta: MatchMetadata, teamId: number | null): string {
