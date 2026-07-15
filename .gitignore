@@ -4,7 +4,11 @@ dist/
 .state-*.json
 .pronunciations.json
 debug.log
-.claude/
+# .claude/ on muuten paikallinen, mutta skillit versioidaan.
+# Huom: emohakemisto pitää ignorata muodossa .claude/* (ei .claude/),
+# muuten git ei laskeudu hakemistoon eikä !-poikkeus toimi.
+.claude/*
+!.claude/skills/
 .claude-remote-control.log
 .claude-remote-control.pid
 apps/broadcast/run/
