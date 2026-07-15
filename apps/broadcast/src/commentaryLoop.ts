@@ -43,6 +43,10 @@ const SUMMARY_EVERY_N = 10;
 const IDLE_FILLER_MS = 2 * 60 * 1000;
 /** Pre-game: welcome-filler cadence while waiting for the match to start. */
 const WELCOME_FILLER_MS = 90 * 1000;
+/** API fetch timeout. The server response cache is ~5s (see HANDOFF.md 6b),
+ *  so waiting longer than the poll interval for a hung request buys nothing —
+ *  keep it short so a stuck fetch doesn't stall the fixed poll cadence. */
+const API_TIMEOUT_MS = 4000;
 
 export type SpeechSink = (spokenText: string, readableText: string) => Promise<void>;
 
