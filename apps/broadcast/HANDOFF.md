@@ -176,8 +176,40 @@ epochista) relayn lokin havaitsemishetkiin, 17 paloa + 11 juoksua:
 - 0–60 s jitter selittää käyttäjän havainnon "pitkä tauko, sitten 3–4
   selostusta putkeen": viiveikkunan ylittäneet tapahtumat vapautuvat
   ryppäänä samaan polliin (esim. ts 2085 ja 2086 molemmat selostettu
-  14:07:04). Osa jitteristä lienee kirjurin syöttöviivettä (timestamp on
-  pelitapahtuman hetki, kirjaus tulee myöhemmin) — sitä ei voi poistaa.
+  14:07:04).
+- HUOM mittauksen luonteesta: vertailu on kahden lähteen välinen — API:n
+  `timestamp`-kenttä (kirjurin kirjaama) vs. relayn lokin speak-hetki.
+  **Kirjurin oma viive ei ole havaittavissa eikä kuulu tähän lukuun:
+  kirjurin aikaleima on meidän ground zero, muuta totuutta ei ole.**
+  Jitter jakautuu siis vain kahteen mitattavissa olevaan osaan:
+  API-puolen julkaisuviive (timestamp → näkyy feedissä) ja meidän
+  havaitsemisviive (näkyy feedissä → speak). Erottelu vaatii first-seen-
+  lokituksen (alla).
+
+#### 6c. TODO: first-seen-lokitus viiveen erotteluun
+
+Pieni lisäys `commentaryLoop.ts`:n pollikäsittelyyn: kun tapahtuma-id
+nähdään pollivastauksessa ensimmäistä kertaa, lokitetaan yksi rivi:
+
+```
+first-seen: id=38713041 ts=2376 delta=142s
+```
+
+missä `ts` on API:n timestamp (sekunteja ottelun epochista) ja `delta` =
+first-seen-kellonaika miinus (ottelun epoch + ts). Tällä seuraavan
+live-ajon lokista voi laskea suoraan:
+
+- **API-julkaisuviive** = delta (timestamp → ensinäkymä feedissä), ja
+- **meidän osuus** = speak-hetki miinus first-seen-hetki (pollirytmi +
+  käsittely + synteesijono).
+
+Toteutushuomiot: id-joukko on jo käytännössä olemassa
+(`seenFingerprints`) — lokita vain kun fingerprint on aidosti uusi, yksi
+rivi per tapahtuma (ei per sub-event), ei puhetta, pelkkä loki. Ottelun
+epoch saadaan `match-started`-statista (ensimmäinen tapahtuma) tai
+metadatasta. Rinnalle sama mittaus `skip-delay=true`-parametrilla
+(erillinen curl-näytteistäjä riittää) kertoo suoraan paljonko skip-delay
+leikkaa API-julkaisuviivettä.
 
 Koodipuolen pienemmät parannukset (toissijaisia yllä olevaan nähden):
 
