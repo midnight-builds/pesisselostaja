@@ -41,6 +41,8 @@ import type { RelayConfig } from "./config.js";
 const SUMMARY_EVERY_N = 10;
 /** No speech for this long → break the silence with an idle filler. */
 const IDLE_FILLER_MS = 2 * 60 * 1000;
+/** Pre-game: welcome-filler cadence while waiting for the match to start. */
+const WELCOME_FILLER_MS = 90 * 1000;
 
 export type SpeechSink = (spokenText: string, readableText: string) => Promise<void>;
 
