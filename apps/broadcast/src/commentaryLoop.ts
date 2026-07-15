@@ -62,6 +62,9 @@ export class CommentaryLoop {
   private lastSpeech: string | null = null;
   private lastSpeechAt = 0;                // wall clock of the last spoken announcement
   private lastSummaryCount = 0;
+  /** Order-preserving queue for sink calls (TTS synthesis + mix), decoupled
+   *  from the poll loop — see speak(). */
+  private synthQueue: Promise<void> = Promise.resolve();
   private abort: AbortController | null = null;
   /** Current effective value of the batter-change setting. Seeded from config
    *  at startup, then overridable mid-match via the control file. */
