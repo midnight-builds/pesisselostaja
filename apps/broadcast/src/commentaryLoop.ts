@@ -279,6 +279,14 @@ export class CommentaryLoop {
         if (state.seenFingerprints.has(fp)) continue;
         state.seenFingerprints.add(fp);
 
+        // A score change after "Ottelu päättyi" means the scorer ended the
+        // game too early and reopened it — the finished gate is not one-way,
+        // narration wakes back up here.
+        if (state.finished && isRunScoringSubEvent(sub)) {
+          state.finished = false;
+          log("Pistetilanne muuttui ottelun päättymisen jälkeen — selostus jatkuu.");
+        }
+
         if (isMatchEndSubEvent(sub)) state.finished = true;
 
         if (isRunScoringSubEvent(sub) && event.team !== null) {
