@@ -1,5 +1,115 @@
 # Relay — handoff seuraavaa live-testiä varten
 
+## TODO 2026-07-15: live-ajon (ottelu 144193) löydökset ja jatkokehitys — AVOINNA
+
+Ensimmäinen tuotantoajo ElevenLabsilla onnistui: ~42 min, 86 selostusta,
+3048 EL-merkkiä, 2 ohimenevää API-timeouttia, ei respawneja. Alla löydökset
+ja käyttäjän toiveet, prioriteettijärjestyksessä. Vastaavat merkinnät ovat
+myös agentin muistissa (memory/), mutta tämä tiedosto on kanoninen työlista.
+
+> Huom. julkinen repo: älä lisää tähän tiedostoon oikeita pelaajanimiä
+> (otteluissa alaikäisiä) — esimerkit alla ovat keksittyjä.
+
+### 1. BUGI: selostus jatkuu ottelun päättymisen jälkeen
+
+**Oire (todennettu lokista):** klo 11.09.40 relay selosti "Ottelu päättyi!
+Ysit Kylmä voitti…", mutta klo 11.11.45 tuli vielä periodinen tilannekuva
+"Tilanne on edelleen 4, 3, kun Ysit Kylmä johtaa peliä niukasti" — väärä
+sekä ajoitukseltaan että sanamuodoltaan (peli ei ollut käynnissä).
+
+**Haluttu käyttäytyminen (käyttäjä määritteli):**
+1. Loppuselostuksen jälkeen ei enää mitään selostusta — ei tilannekuvia,
+   täytefraaseja eikä vaihtokuulutuksia.
+2. Poikkeus: jos pistetilanne muuttuu päättymisen jälkeen (kirjuri lopetti
+   pelin liian ajoissa ja avaa sen uudelleen — harvinaista mutta
+   mahdollista), selostus herää taas. Päättynyt-tila ei siis ole
+   peruuttamaton portti.
+3. Video jatkuu normaalisti kunnes lähde loppuu — vain selostus hiljenee,
+   relay/ffmpeg ei sammu päättymistapahtumaan.
+4. Ennen hiljaisuutta saa tulla yksi laajempi loppuyhteenveto (kohta 5).
+
+**Toteutuskohta:** sama paikka joka tuottaa "Ottelu päättyi" -selostuksen;
+koskee todennäköisesti sekä broadcast- että web-polkua (`packages/core` /
+selostussilmukka) — tarkista molemmat.
+
+### 2. Pelaajanimi puhutaan raakana ("Lyömässä 3 S Sukunimi")
+
+**Oire:** API antaa pelaajan muodossa pelinumero + etunimen alkukirjain +
+sukunimi, ja se menee TTS:lle sellaisenaan — EL lukee "3 S" epäselvästi
+nielaisten. Koskee kaikkia fraaseja joissa pelaajanimi esiintyy: vaihto-
+kuulutukset JA juoksuselostukset ("Juoksun löi 6 E Sukunimi, tuojana…"),
+eli korjaa yksi yhteinen nimenmuotoilufunktio, ei fraaseja erikseen.
+
+**Kaksi vaihtoehtoa (käyttäjä ei ole vielä valinnut — ehdota molemmat):**
+1. Foneettinen auki kirjoitus: "Lyömässä kolme äs Sukunimi" (numero sanaksi,
+   kirjain foneettisesti kuten KPL → Koo Pee Äl -korvaukset).
+2. Vain sukunimi; etunimi kokonaan vain jos kokoonpanossa kaksi samaa
+   sukunimeä. HUOM: API näyttää antavan vain alkukirjaimen — tarkista onko
+   koko etunimi ylipäätään saatavilla ennen tämän valintaa.
+
+**Toteutuskohta:** `packages/core/src/speech.ts`, feedi näyttää edelleen
+raakamuodon (feed peilaa lähdettä — tarkoituksellinen asymmetria).
+
+### 3. Pieni tauko peräkkäisten selostusten väliin
+
+~0,5–1 s tauko selostusjonon purkuun, jotta rypäänä tulevat puheet (useita
+tapahtumia samassa pollissa) erottuvat toisistaan. Yleensä erottuvuus on
+hyvä — kyse on nimenomaan rypästilanteista. Toteutus jonon purkuun
+(`apps/broadcast` commentaryLoop), EI puhetekstiin (SSML ei ole luotettava
+EL/Piper-poluilla). Tarkista koskeeko sama web-appin puhejonoa.
+
+### 4. Lähdemaininta osaan selostuksista
+
+Osaan fraaseista "Tulospalvelun mukaan…" / "Tulospalveluun on kirjattu…",
+jotta katsojille on selvää mistä tiedot tulevat ja miksi ne tulevat kuvaan
+nähden myöhässä (~30–90 s). Vain osaan — jatkuva toisto puuduttaisi.
+Luonteva toteutus: pickVariant-varianttijoukkoihin osaksi fraaseja
+(tilannekuvat, pistetapahtumat). Ehdota muotoilut käyttäjälle ennen
+toteutusta.
+
+### 5. Esipelitäyte ja laajempi loppuyhteenveto
+
+**Ennen peliä:** jos lähetys alkaa reilusti ennen ottelua, tervetuloa-
+fraaseja ~1,5 min välein: "Tervetuloa katsomaan ottelua X vastaan Y,
+pelikenttänä Z", "Odottelemme pelin alkua" jne. Kenttä-/paikkatieto: tarkista
+saadaanko API:sta; jos ei, jätä kenttäfraasit pois — älä keksi paikkaa.
+
+**Pelin jälkeen:** kertaluonteinen kokoava yhteenveto: "Peli loppui X:n
+voittoon luvuin 4, 3. Pelissä pelattiin tänään 3 vuoroparia" tms.
+Vuoroparien/jaksojen määrä päätellään tapahtumista — formaatit vaihtelevat
+(leiripeleissä usein 1 jakso), älä oleta 2 jaksoa. Tämän jälkeen kohdan 1
+hiljaisuussääntö.
+
+### 6. Selvitys: striimaava/osittainen API
+
+Nykyinen ~6 s polli tuottaa katkonaisen rytmin ryppäissä: rypäs selostetaan
+putkeen, sitten tauko seuraavaan polliin. Selvitä: (a) onko pesistulokset.fi:llä
+WebSocket/SSE/long-poll-päätepistettä (selaimen devtools live-näkymässä),
+(b) onko `online/{id}/events`-päätepisteessä since-/delta-parametria
+(nykyisin palauttaa aina koko historian), (c) jos ei kumpaakaan, voiko
+pollia tihentää turvallisesti tai adaptiivisesti. Huom: kokonaisviiveestä
+valtaosa tulee video-pipelinesta — tämä parantaa rytmiä, ei kokonaisviivettä.
+
+### 7. Management web view (isompi kokonaisuus, ideointi kesken)
+
+Valvontanäkymä relaylle, saatavilla vain Tailscalen kautta (ei julkiseen
+nettiin, ei Pages-deployhin): striimin tila (relay/ffmpeg/lähde), palvelimen
+RAM/CPU/levytila (2 Gt raja kriittinen), lokivirheet esiin nostettuna, ja
+täydellinen selostuslista kaksivaiheisella tilalla — teksti ilmestyy heti
+kun tapahtuma tunnistetaan lähteestä ja rivi korostuu kun se oikeasti
+puhutaan (tekee jonon ja viiveen näkyväksi). Lisäideoita: vaihtoselostuksen
+on/off-kytkin UI:hin (nyt control-tiedosto), EL-merkkilaskuri, sydänäänen
+ikä, respawn-historia. Suunnittele ja ehdota ennen toteutusta.
+
+### Sivuhuomiot ajosta
+
+- Kaksi "Hakuvirhe: This operation was aborted" -riviä (API-timeout) —
+  relay toipui itsestään seuraavassa pollissa, ei toimenpiteitä.
+- `npm run broadcast:dev` ei lataa `.env.relay`-tiedostoa (vain systemd-unit
+  lataa EnvironmentFile-rivillä) — dry-run näyttää siksi Piper-äänen vaikka
+  oikea ajo käyttää ElevenLabsia. Ei bugi, mutta hämäävä; dokumentoinnin
+  arvoinen jos toistuu kysymyksenä.
+
 ## TODO 2026-07-14: live-testin (ottelu 144197) löydökset — ✅ KAIKKI KORJATTU
 
 > **Ratkaistu 2026-07-14 (samana päivänä).** Kaikki 6 huomiota alla on korjattu:
