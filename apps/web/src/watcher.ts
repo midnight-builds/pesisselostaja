@@ -13,6 +13,7 @@ import {
   formatBatTurnChangeSpeech,
   formatSituationSummary,
   formatIdleSummary,
+  formatWelcomeFiller,
   periodName,
   type SpeechContext,
 } from "@pesisselostaja/core";
@@ -34,6 +35,11 @@ import type { LiveEvent, MatchMetadata, SubEvent } from "@pesisselostaja/core";
 const SUMMARY_EVERY_N = 10;
 /** No speech for this long → break the silence with an idle filler. */
 const IDLE_FILLER_MS = 2 * 60 * 1000;
+/** Pre-game: welcome-filler cadence while waiting for the match to start. */
+const WELCOME_FILLER_MS = 90 * 1000;
+/** Pause between consecutive queued announcements, so bursts (several events
+ *  in one poll) don't run together into one long sentence. */
+const NARRATION_GAP_MS = 700;
 
 // Speaker mode: loudness-maximize a decoded buffer in place with a tanh soft
 // clip. A plain GainNode+DynamicsCompressor chain barely changes perceived
@@ -116,6 +122,10 @@ export class BrowserWatcher {
   private _lastSummaryCount = 0;           // announcementCount at the last periodic summary
   private _lastSpeechAt = 0;               // wall clock of the last spoken announcement
   private _matchEndSeen = false;           // true after first poll that contains "Ottelu päättyi"
+  /** False until the match has produced any event — the endpoint always
+   *  returns the full history, so an empty history means the game genuinely
+   *  hasn't started and the watcher speaks welcome fillers instead of recaps. */
+  private _matchStarted = false;
 
   constructor(
     private config: WatcherConfig,
@@ -265,6 +275,7 @@ export class BrowserWatcher {
     state.currentBatTeamId = null;
     state.finished = false;
     this.processEventsSilent(initial.events, state, meta);
+    this._matchStarted = initial.events.length > 0;
 
     if (initial.team != null) state.currentBatTeamId = initial.team;
     if ((initial.period ?? 0) > state.currentPeriod) state.currentPeriod = initial.period!;
@@ -300,7 +311,9 @@ export class BrowserWatcher {
       if (signal.aborted) { this._running = false; return; }
     }
 
-    const startupMsg = formatStartupSpeech(meta, this.buildContext(state));
+    const startupMsg = this._matchStarted
+      ? formatStartupSpeech(meta, this.buildContext(state))
+      : formatWelcomeFiller(meta);
     this.say(startupMsg, state);
     this.emitFeed("info", startupMsg);
     // The startup message already gives the full situation — don't let the
@@ -437,6 +450,7 @@ export class BrowserWatcher {
     meta: MatchMetadata,
     lookup: ReturnType<typeof buildPlayerLookup>
   ): void {
+    if (events.length > 0) this._matchStarted = true;
     for (let ei = 0; ei < events.length; ei++) {
       const event = events[ei];
       const prevBatTeamId = state.currentBatTeamId;
@@ -473,6 +487,7 @@ export class BrowserWatcher {
       if (
         turnChanged &&
         !isFirstTurnOfPeriod &&
+        !state.finished &&
         event.team != null &&
         turnKey !== state.announcedTurnKey &&
         event.events.some((_, i) => !state.seenFingerprints.has(eventFingerprint(event, i)))
@@ -491,6 +506,15 @@ export class BrowserWatcher {
         const fp = eventFingerprint(event, i);
         if (state.seenFingerprints.has(fp)) continue;
         state.seenFingerprints.add(fp);
+
+        // A score change after "Ottelu päättyi" means the scorer ended the
+        // game too early and reopened it — the finished gate is not one-way,
+        // narration wakes back up here.
+        if (state.finished && isRunScoringSubEvent(sub)) {
+          state.finished = false;
+          this._matchEndSeen = false;
+          this.log("Pistetilanne muuttui ottelun päättymisen jälkeen — selostus jatkuu.");
+        }
 
         if (isMatchEndSubEvent(sub)) state.finished = true;
 
@@ -516,6 +540,14 @@ export class BrowserWatcher {
           event, sub, meta, lookup, this.config.announceBatterChanges, ctx
         );
         if (!speech) continue;
+
+        // After the closing announcement everything else stays silent (the
+        // match-end sub-event itself speaks that closing line). The feed still
+        // shows the event — it mirrors the source, only the speech is gated.
+        if (state.finished && !isMatchEndSubEvent(sub)) {
+          this.emitFeed(this.classifyFeed(sub, speech), speech);
+          continue;
+        }
 
         // Same texts in the same turn and situation = a scorer double-marking.
         const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
@@ -592,8 +624,21 @@ export class BrowserWatcher {
    *  a "tilanne on edelleen…" filler once nothing has been said for
    *  IDLE_FILLER_MS. */
   private maybeAnnounceSummary(state: WatcherState, meta: MatchMetadata): void {
-    if (state.announcementCount === 0) return;
+    // After the closing announcement the narration goes fully silent — no
+    // recaps or fillers — until a post-end score change wakes it
+    // (see processEventsLive).
+    if (state.finished) return;
     const now = Date.now();
+    // Pre-game there is no situation to recap; keep the wait warm instead.
+    if (!this._matchStarted) {
+      if (now - this._lastSpeechAt < WELCOME_FILLER_MS) return;
+      this._lastSpeechAt = now;
+      const welcome = formatWelcomeFiller(meta);
+      this.emitFeed("info", welcome);
+      if (!this._muted) this.speakRaw(welcome);
+      return;
+    }
+    if (state.announcementCount === 0) return;
     const countDue = state.announcementCount - this._lastSummaryCount >= SUMMARY_EVERY_N;
     const idleDue = now - this._lastSpeechAt > IDLE_FILLER_MS;
     if (!countDue && !idleDue) return;
@@ -669,6 +714,11 @@ export class BrowserWatcher {
           const text = this._substituted(raw);
           try { await this._withWatchdog(text, () => this._speakBrowser(text)); } catch { /* give up on this item */ }
         }
+      }
+      // Breathe between consecutive announcements so a burst from one poll
+      // doesn't run together into one long sentence.
+      if (this._speechQueue.length > 0 && token === this._drainToken && !this._muted) {
+        await new Promise<void>((resolve) => setTimeout(resolve, NARRATION_GAP_MS));
       }
     }
     if (token === this._drainToken) this._speechBusy = false;
