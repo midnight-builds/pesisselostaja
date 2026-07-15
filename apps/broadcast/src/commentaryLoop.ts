@@ -240,7 +240,7 @@ export class CommentaryLoop {
 
         await this.maybeAnnounceSummary(meta);
 
-        saveState(this.config.stateFile, this.state);
+        await saveState(this.config.stateFile, this.state);
       } catch (err) {
         log(`Hakuvirhe: ${err instanceof Error ? err.message : err}`);
       }
