@@ -31,12 +31,37 @@ describe("NarrationQueue", () => {
     expect(q.nextFrame()).toEqual(Buffer.alloc(FRAME_BYTES));
   });
 
-  it("plays queued clips back-to-back in enqueue order", () => {
+  it("plays queued clips back-to-back in enqueue order when no gap is configured", () => {
     const q = new NarrationQueue(FRAME_BYTES);
     q.enqueue(Buffer.from([1, 1, 1, 1, 1, 1, 1, 1]));
     q.enqueue(Buffer.from([2, 2, 2, 2, 2, 2, 2, 2]));
     expect(q.nextFrame()[0]).toBe(1);
     expect(q.nextFrame()[0]).toBe(2);
+  });
+
+  it("inserts the configured silence gap between consecutive clips, but not after the last one", () => {
+    const q = new NarrationQueue(FRAME_BYTES, 2);
+    q.enqueue(Buffer.from([1, 1, 1, 1, 1, 1, 1, 1]));
+    q.enqueue(Buffer.from([2, 2, 2])); // partial final frame
+    q.enqueue(Buffer.from([3, 3, 3, 3, 3, 3, 3, 3]));
+    expect(q.nextFrame()[0]).toBe(1);
+    expect(q.nextFrame()).toEqual(Buffer.alloc(FRAME_BYTES));
+    expect(q.nextFrame()).toEqual(Buffer.alloc(FRAME_BYTES));
+    expect(q.nextFrame()[0]).toBe(2);
+    expect(q.nextFrame()).toEqual(Buffer.alloc(FRAME_BYTES));
+    expect(q.nextFrame()).toEqual(Buffer.alloc(FRAME_BYTES));
+    expect(q.nextFrame()[0]).toBe(3);
+    // Last clip done: plain perpetual silence, no extra armed gap state left.
+    expect(q.nextFrame()).toEqual(Buffer.alloc(FRAME_BYTES));
+  });
+
+  it("does not arm a gap when the next clip arrives only after the previous one drained", () => {
+    const q = new NarrationQueue(FRAME_BYTES, 3);
+    q.enqueue(Buffer.from([1, 1, 1, 1, 1, 1, 1, 1]));
+    expect(q.nextFrame()[0]).toBe(1);
+    expect(q.nextFrame()).toEqual(Buffer.alloc(FRAME_BYTES)); // queue idle
+    q.enqueue(Buffer.from([2, 2, 2, 2, 2, 2, 2, 2]));
+    expect(q.nextFrame()[0]).toBe(2); // starts immediately, silence already elapsed
   });
 });
 

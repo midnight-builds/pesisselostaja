@@ -8,6 +8,9 @@ const CHANNELS = 2;
 const BYTES_PER_SAMPLE = 2;
 const FRAME_MS = 20;
 const FRAME_BYTES = (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE * FRAME_MS) / 1000; // 3840
+/** ~700 ms of silence between consecutive clips, so narration bursts (several
+ *  events announced in one poll) don't run together into one long sentence. */
+const CLIP_GAP_FRAMES = 700 / FRAME_MS;
 
 function mkfifo(path: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -18,12 +21,14 @@ function mkfifo(path: string): Promise<void> {
 /** Pure frame-slicing logic, split out from NarrationFifo's I/O so it can be
  *  unit-tested without a real pipe/ffmpeg. Clips never bleed into each
  *  other: a clip's final partial frame is padded with silence rather than
- *  reading into the next queued clip. */
+ *  reading into the next queued clip, and `gapFrames` of silence separate
+ *  consecutive clips so back-to-back announcements stay distinguishable. */
 export class NarrationQueue {
   private queue: Buffer[] = [];
   private offset = 0;
+  private gapRemaining = 0;
 
-  constructor(private frameBytes: number) {}
+  constructor(private frameBytes: number, private gapFrames = 0) {}
 
   enqueue(pcm: Buffer): void {
     this.queue.push(pcm);
@@ -34,12 +39,16 @@ export class NarrationQueue {
   }
 
   nextFrame(): Buffer {
-    while (this.queue.length > 0) {
+    for (;;) {
+      if (this.gapRemaining > 0) {
+        this.gapRemaining--;
+        return Buffer.alloc(this.frameBytes);
+      }
       const head = this.queue[0];
+      if (!head) return Buffer.alloc(this.frameBytes);
       const remaining = head.length - this.offset;
       if (remaining <= 0) {
-        this.queue.shift();
-        this.offset = 0;
+        this.finishClip();
         continue;
       }
       if (remaining >= this.frameBytes) {
@@ -49,11 +58,18 @@ export class NarrationQueue {
       }
       const frame = Buffer.alloc(this.frameBytes);
       head.copy(frame, 0, this.offset);
-      this.queue.shift();
-      this.offset = 0;
+      this.finishClip();
       return frame;
     }
-    return Buffer.alloc(this.frameBytes);
+  }
+
+  /** The gap applies only between clips: it is armed when a finished clip
+   *  already has a successor queued, never after the last clip (where the
+   *  perpetual silence is the gap). */
+  private finishClip(): void {
+    this.queue.shift();
+    this.offset = 0;
+    if (this.queue.length > 0) this.gapRemaining = this.gapFrames;
   }
 }
 
@@ -65,7 +81,7 @@ export class NarrationQueue {
  *  filter graph instead. */
 export class NarrationFifo {
   private stream: WriteStream | null = null;
-  private queue = new NarrationQueue(FRAME_BYTES);
+  private queue = new NarrationQueue(FRAME_BYTES, CLIP_GAP_FRAMES);
   private timer: NodeJS.Timeout | null = null;
   private tickCount = 0;
   private startTime = 0;

@@ -80,7 +80,7 @@ export function parseRelayConfig(): RelayConfig {
 
   const voice = values.voice ?? process.env.RELAY_VOICE ?? "harri-medium";
   const piperBin = values["piper-bin"] ?? process.env.RELAY_PIPER_BIN ?? "piper";
-  const pollInterval = parseInt(values["poll-interval"] ?? process.env.RELAY_POLL_INTERVAL ?? "6000", 10);
+  const pollInterval = parseInt(values["poll-interval"] ?? process.env.RELAY_POLL_INTERVAL ?? "4000", 10);
   const narrationGain = parseFloat(values["narration-gain"] ?? process.env.RELAY_NARRATION_GAIN ?? "1.3");
   const urlRefreshMs = parseInt(values["url-refresh-ms"] ?? process.env.RELAY_URL_REFRESH_MS ?? String(15 * 60 * 1000), 10);
   // Off if either the CLI flag or the env var says so; the control file (see

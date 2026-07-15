@@ -3,6 +3,9 @@ import type { LiveEvent, SubEvent, EventTextElement, MatchMetadata, Player } fro
 export interface PlayerLookup {
   byId: Map<number, Player>;
   byTeamNumber: Map<string, Player>;
+  /** Surnames shared by more than one player in the match (both rosters,
+   *  case-insensitive) — these need the first name to stay unambiguous. */
+  ambiguousSurnames: Set<string>;
 }
 
 export interface SpeechContext {
@@ -43,13 +46,20 @@ function formatPeriodsWon(meta: MatchMetadata, home: number, away: number): stri
 export function buildPlayerLookup(meta: MatchMetadata): PlayerLookup {
   const byId = new Map<number, Player>();
   const byTeamNumber = new Map<string, Player>();
+  const surnameCounts = new Map<string, number>();
   for (const team of [meta.home, meta.away]) {
     for (const p of team.players) {
       byId.set(p.id, p);
       byTeamNumber.set(`${team.id}:${p.number}`, p);
+      const key = p.last_name.toLowerCase();
+      surnameCounts.set(key, (surnameCounts.get(key) ?? 0) + 1);
     }
   }
-  return { byId, byTeamNumber };
+  const ambiguousSurnames = new Set<string>();
+  for (const [surname, count] of surnameCounts) {
+    if (count > 1) ambiguousSurnames.add(surname);
+  }
+  return { byId, byTeamNumber, ambiguousSurnames };
 }
 
 export function getTeamName(meta: MatchMetadata, teamId: number | null): string {
@@ -80,8 +90,14 @@ function resolvePlayerName(lookup: PlayerLookup, el: EventTextElement): string |
     player = lookup.byTeamNumber.get(`${el.team}:${el.number}`);
   if (!player && "number" in el && el.number !== undefined) player = lookup.byId.get(el.number);
   if (!player) return null;
-  const initial = player.first_name ? `${player.first_name.charAt(0)} ` : "";
-  return `${player.number} ${initial}${player.last_name}`;
+  // TTS swallows the raw "5 M Mäyrä" form — speak the surname alone, and
+  // qualify with the first name only when the match has two players sharing
+  // the surname (the API's first_name is the full name, not just an initial).
+  if (lookup.ambiguousSurnames.has(player.last_name.toLowerCase())) {
+    const qualifier = player.first_name || String(player.number);
+    return `${qualifier} ${player.last_name}`;
+  }
+  return player.last_name;
 }
 
 function getEventText(el: EventTextElement): string | null {
@@ -94,6 +110,12 @@ const FI_ORDINAL: Record<number, string> = {
   1: "ensimmäinen", 2: "toinen", 3: "kolmas", 4: "neljäs", 5: "viides",
   6: "kuudes", 7: "seitsemäs", 8: "kahdeksas", 9: "yhdeksäs", 10: "kymmenes",
   11: "yhdestoista", 12: "kahdestoista",
+};
+
+const FI_CARDINAL: Record<number, string> = {
+  1: "yksi", 2: "kaksi", 3: "kolme", 4: "neljä", 5: "viisi",
+  6: "kuusi", 7: "seitsemän", 8: "kahdeksan", 9: "yhdeksän", 10: "kymmenen",
+  11: "yksitoista", 12: "kaksitoista",
 };
 
 function ordinalPalo(n: number): string {
@@ -233,7 +255,11 @@ export function formatBatTurnChangeSpeech(
 }
 
 export function formatSituationSummary(meta: MatchMetadata, ctx: SpeechContext): string {
-  const parts: string[] = [`Menossa ${periodName(ctx.currentPeriod)}`];
+  // Source attribution ("Tulospalvelun mukaan…") tells viewers where the data
+  // comes from and why it trails the video; the duplicated plain variant keeps
+  // it an occasional aside instead of a constant refrain.
+  const lead = pickVariant("summary-attribution", ["Menossa", "Menossa", "Tulospalvelun mukaan menossa"]);
+  const parts: string[] = [`${lead} ${periodName(ctx.currentPeriod)}`];
 
   if (ctx.periodHomeRuns > ctx.periodAwayRuns) {
     parts.push(`tilanne ${ctx.periodHomeRuns}, ${ctx.periodAwayRuns}, ${meta.home.shorthand} johtaa`);
@@ -265,6 +291,7 @@ export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): stri
     return pickVariant("idle-tie", [
       `Tilanne on edelleen tasan ${h}, ${a}.`,
       `Ottelu jatkuu tasatilanteessa, ${h}, ${a}.`,
+      `Tulospalvelun mukaan tilanne on yhä tasan ${h}, ${a}.`,
     ]);
   }
   const leader = h > a ? meta.home.shorthand : meta.away.shorthand;
@@ -273,6 +300,28 @@ export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): stri
     `Tilanne on edelleen ${h}, ${a}, kun ${leader} johtaa peliä ${adv}.`,
     `Tilanne edelleen ${h}, ${a}, ${leader} johdossa ${adv}.`,
     `Ottelu jatkuu, ${leader} johtaa ${adv}, tilanne ${h}, ${a}.`,
+    `Tulospalvelun mukaan tilanne on edelleen ${h}, ${a}, ${leader} johdossa.`,
+  ]);
+}
+
+/** Kenttänimi puhuttavaksi: camp fields come through as codes with a pipe
+ *  qualifier ("12 Tupos B | LEIRITUOTANTO") — speak only the part before it. */
+export function stadiumSpeechName(rawName: string): string {
+  return rawName.split("|")[0].trim();
+}
+
+/**
+ * Pre-game filler: spoken periodically while waiting for the match's first
+ * event, so a broadcast that starts well before the game isn't dead air.
+ */
+export function formatWelcomeFiller(meta: MatchMetadata): string {
+  const pair = `${meta.home.name} vastaan ${meta.away.name}`;
+  const stadium = stadiumSpeechName(meta.stadium.name);
+  const at = stadium ? `, pelikenttänä ${stadium}` : "";
+  return pickVariant("welcome", [
+    `Tervetuloa seuraamaan ottelua ${pair}${at}.`,
+    `Odottelemme pelin alkua. Vastakkain ${pair}.`,
+    `Ottelu ei ole vielä alkanut. ${pair}${at}.`,
   ]);
 }
 
@@ -400,6 +449,7 @@ function formatRunScored(texts: EventTextElement[], _meta: MatchMetadata, lookup
     return pickVariant("run-scored", [
       `${batter} löi juoksun, tuojana ${runner}.`,
       `Juoksun löi ${batter}, tuojana ${runner}.`,
+      `Tulospalveluun on kirjattu juoksu: sen löi ${batter}, tuojana ${runner}.`,
     ]);
   }
   return `${batter} ${eventText}.`;
@@ -433,7 +483,11 @@ function formatRunBrought(texts: EventTextElement[], _meta: MatchMetadata, looku
   }
   const who = players[0] ?? "";
   if (!who) return `${eventText}.`;
-  return pickVariant("run-brought", [`${who} ${eventText}.`, `Juoksu! Tuojana ${who}.`]);
+  return pickVariant("run-brought", [
+    `${who} ${eventText}.`,
+    `Juoksu! Tuojana ${who}.`,
+    `Tulospalveluun on kirjattu juoksu, tuojana ${who}.`,
+  ]);
 }
 
 function formatDrawOfChoice(texts: EventTextElement[], meta: MatchMetadata, lookup: PlayerLookup): string {
@@ -460,9 +514,10 @@ function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
       : [ctx.homePeriodsWon, ctx.awayPeriodsWon];
     const winner = homeVal > awayVal ? meta.home.shorthand : awayVal > homeVal ? meta.away.shorthand : null;
     const result = `${meta.home.shorthand} ${homeVal}, ${meta.away.shorthand} ${awayVal}`;
-    return winner
+    const headline = winner
       ? `Ottelu päättyi! ${winner} voitti, ${result}.`
       : `Ottelu päättyi! Tasatilanne, ${result}.`;
+    return `${headline} ${formatMatchEndRecap(ctx)}`;
   }
   const result = meta.result;
   if (result) {
@@ -470,6 +525,23 @@ function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
     return `Ottelu päättyi! ${meta.home.shorthand} ${d.periods_home}, ${meta.away.shorthand} ${d.periods_away}.`;
   }
   return `Ottelu päättyi! ${meta.home.shorthand} vastaan ${meta.away.shorthand}.`;
+}
+
+/** One-off closing recap appended to the match-end announcement — after it the
+ *  loops go silent (only a reopened, changed score wakes them again). Match
+ *  formats vary: camp games are often a single jakso, so report vuoroparit
+ *  there and jaksot/decider elsewhere. */
+function formatMatchEndRecap(ctx: SpeechContext): string {
+  if (ctx.currentPeriod === 3) return "Ratkaisu syntyi kotiutuslyöntikilpailussa.";
+  if (ctx.currentPeriod === 2) return "Ratkaisu syntyi supervuorossa.";
+  if (ctx.periodsPlayed > 1) {
+    const word = FI_CARDINAL[ctx.periodsPlayed] ?? String(ctx.periodsPlayed);
+    return `Ottelussa pelattiin ${word} jaksoa.`;
+  }
+  const pairs = ctx.currentInning + 1;
+  if (pairs === 1) return "Ottelussa pelattiin yksi vuoropari.";
+  const word = FI_CARDINAL[pairs] ?? String(pairs);
+  return `Ottelussa pelattiin ${word} vuoroparia.`;
 }
 
 export function eventFingerprint(event: LiveEvent, subIndex: number): string {

@@ -13,6 +13,7 @@ import {
   formatBatTurnChangeSpeech,
   formatSituationSummary,
   formatIdleSummary,
+  formatWelcomeFiller,
   periodName,
   type PlayerLookup,
   type SpeechContext,
@@ -40,6 +41,8 @@ import type { RelayConfig } from "./config.js";
 const SUMMARY_EVERY_N = 10;
 /** No speech for this long → break the silence with an idle filler. */
 const IDLE_FILLER_MS = 2 * 60 * 1000;
+/** Pre-game: welcome-filler cadence while waiting for the match to start. */
+const WELCOME_FILLER_MS = 90 * 1000;
 
 export type SpeechSink = (spokenText: string, readableText: string) => Promise<void>;
 
@@ -59,6 +62,10 @@ export class CommentaryLoop {
   /** Current effective value of the batter-change setting. Seeded from config
    *  at startup, then overridable mid-match via the control file. */
   private announceBatterChanges: boolean;
+  /** False until the match has produced any event — the endpoint always
+   *  returns the full history, so an empty history means the game genuinely
+   *  hasn't started and the loop speaks welcome fillers instead of recaps. */
+  private matchStarted = false;
 
   constructor(private config: RelayConfig, private sink: SpeechSink) {
     this.state = loadState(config.stateFile);
@@ -126,6 +133,7 @@ export class CommentaryLoop {
     this.state.currentBatTeamId = null;
     this.state.finished = false;
     this.processEventsSilent(initial.events, meta);
+    this.matchStarted = initial.events.length > 0;
 
     if (initial.team != null) this.state.currentBatTeamId = initial.team;
     if ((initial.period ?? 0) > this.state.currentPeriod) this.state.currentPeriod = initial.period!;
@@ -147,7 +155,9 @@ export class CommentaryLoop {
       return;
     }
 
-    const startupMsg = formatStartupSpeech(meta, this.buildContext());
+    const startupMsg = this.matchStarted
+      ? formatStartupSpeech(meta, this.buildContext())
+      : formatWelcomeFiller(meta);
     await this.speak(startupMsg);
     // Startup already gives the full situation — don't fire the periodic
     // summary immediately on top of it.
@@ -215,6 +225,7 @@ export class CommentaryLoop {
     lookup: PlayerLookup
   ): Promise<void> {
     const state = this.state;
+    if (events.length > 0) this.matchStarted = true;
     for (let ei = 0; ei < events.length; ei++) {
       const event = events[ei];
       const prevBatTeamId = state.currentBatTeamId;
@@ -249,6 +260,7 @@ export class CommentaryLoop {
       if (
         turnChanged &&
         !isFirstTurnOfPeriod &&
+        !state.finished &&
         event.team != null &&
         turnKey !== state.announcedTurnKey &&
         event.events.some((_, i) => !state.seenFingerprints.has(eventFingerprint(event, i)))
@@ -266,6 +278,14 @@ export class CommentaryLoop {
         const fp = eventFingerprint(event, i);
         if (state.seenFingerprints.has(fp)) continue;
         state.seenFingerprints.add(fp);
+
+        // A score change after "Ottelu päättyi" means the scorer ended the
+        // game too early and reopened it — the finished gate is not one-way,
+        // narration wakes back up here.
+        if (state.finished && isRunScoringSubEvent(sub)) {
+          state.finished = false;
+          log("Pistetilanne muuttui ottelun päättymisen jälkeen — selostus jatkuu.");
+        }
 
         if (isMatchEndSubEvent(sub)) state.finished = true;
 
@@ -287,6 +307,9 @@ export class CommentaryLoop {
 
         const speech = subEventToSpeech(event, sub, meta, lookup, this.announceBatterChanges, ctx);
         if (!speech) continue;
+        // After the closing announcement everything else stays silent (the
+        // match-end sub-event itself is what speaks that closing line).
+        if (state.finished && !isMatchEndSubEvent(sub)) continue;
         // Same texts in the same turn and situation = a scorer double-marking.
         const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
           `${JSON.stringify(sub.texts)}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
@@ -345,8 +368,18 @@ export class CommentaryLoop {
    *  Quiet game: a "tilanne on edelleen…" filler once nothing has been said
    *  for IDLE_FILLER_MS. */
   private async maybeAnnounceSummary(meta: MatchMetadata): Promise<void> {
-    if (this.state.announcementCount === 0) return;
+    // After the closing announcement the narration goes fully silent — no
+    // recaps, fillers, or batter calls — until a post-end score change wakes
+    // it (see processEventsLive). The relay/ffmpeg keep running regardless.
+    if (this.state.finished) return;
     const now = Date.now();
+    // Pre-game there is no situation to recap; keep the wait warm instead.
+    if (!this.matchStarted) {
+      if (now - this.lastSpeechAt < WELCOME_FILLER_MS) return;
+      await this.speak(formatWelcomeFiller(meta), false);
+      return;
+    }
+    if (this.state.announcementCount === 0) return;
     const countDue = this.state.announcementCount - this.lastSummaryCount >= SUMMARY_EVERY_N;
     const idleDue = now - this.lastSpeechAt > IDLE_FILLER_MS;
     if (!countDue && !idleDue) return;
