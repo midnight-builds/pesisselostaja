@@ -90,8 +90,14 @@ function resolvePlayerName(lookup: PlayerLookup, el: EventTextElement): string |
     player = lookup.byTeamNumber.get(`${el.team}:${el.number}`);
   if (!player && "number" in el && el.number !== undefined) player = lookup.byId.get(el.number);
   if (!player) return null;
-  const initial = player.first_name ? `${player.first_name.charAt(0)} ` : "";
-  return `${player.number} ${initial}${player.last_name}`;
+  // TTS swallows the raw "5 M Mäyrä" form — speak the surname alone, and
+  // qualify with the first name only when the match has two players sharing
+  // the surname (the API's first_name is the full name, not just an initial).
+  if (lookup.ambiguousSurnames.has(player.last_name.toLowerCase())) {
+    const qualifier = player.first_name || String(player.number);
+    return `${qualifier} ${player.last_name}`;
+  }
+  return player.last_name;
 }
 
 function getEventText(el: EventTextElement): string | null {
