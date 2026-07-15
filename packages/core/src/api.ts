@@ -6,6 +6,10 @@ const DEFAULT_API_KEY = "wRX0tTke3DZ8RLKAMntjZ81LwgNQuSN9";
 export interface ApiOptions {
   apiBase?: string;
   apiKey?: string;
+  /** Overrides the default 8s fetch timeout. Callers polling on a tighter
+   *  cadence than the server's response-cache window can lower this, since
+   *  waiting past the cache TTL for a hung request buys nothing. */
+  timeoutMs?: number;
 }
 
 async function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response> {
@@ -25,7 +29,7 @@ export async function fetchMatchMetadata(
   const base = opts.apiBase ?? DEFAULT_API_BASE;
   const key = opts.apiKey ?? DEFAULT_API_KEY;
   const url = `${base}/public/match?id=${matchId}&apikey=${key}`;
-  const res = await fetchWithTimeout(url);
+  const res = await fetchWithTimeout(url, opts.timeoutMs);
   if (!res.ok) throw new Error(`Match metadata fetch failed: ${res.status}`);
   return res.json() as Promise<MatchMetadata>;
 }
@@ -110,7 +114,7 @@ export async function fetchLiveEvents(
   if (opts.after !== undefined) params.set("after", String(opts.after));
   const qs = params.toString();
   if (qs) url += `?${qs}`;
-  const res = await fetchWithTimeout(url);
+  const res = await fetchWithTimeout(url, opts.timeoutMs);
   if (!res.ok) throw new Error(`Live events fetch failed: ${res.status}`);
   return res.json() as Promise<LiveEventsResponse>;
 }

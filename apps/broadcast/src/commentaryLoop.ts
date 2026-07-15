@@ -43,6 +43,10 @@ const SUMMARY_EVERY_N = 10;
 const IDLE_FILLER_MS = 2 * 60 * 1000;
 /** Pre-game: welcome-filler cadence while waiting for the match to start. */
 const WELCOME_FILLER_MS = 90 * 1000;
+/** API fetch timeout. The server response cache is ~5s (see HANDOFF.md 6b),
+ *  so waiting longer than the poll interval for a hung request buys nothing —
+ *  keep it short so a stuck fetch doesn't stall the fixed poll cadence. */
+const API_TIMEOUT_MS = 4000;
 
 export type SpeechSink = (spokenText: string, readableText: string) => Promise<void>;
 
@@ -58,6 +62,9 @@ export class CommentaryLoop {
   private lastSpeech: string | null = null;
   private lastSpeechAt = 0;                // wall clock of the last spoken announcement
   private lastSummaryCount = 0;
+  /** Order-preserving queue for sink calls (TTS synthesis + mix), decoupled
+   *  from the poll loop — see speak(). */
+  private synthQueue: Promise<void> = Promise.resolve();
   private abort: AbortController | null = null;
   /** Current effective value of the batter-change setting. Seeded from config
    *  at startup, then overridable mid-match via the control file. */
@@ -66,6 +73,15 @@ export class CommentaryLoop {
    *  returns the full history, so an empty history means the game genuinely
    *  hasn't started and the loop speaks welcome fillers instead of recaps. */
   private matchStarted = false;
+  /** Estimated wall-clock instant (ms) corresponding to event.timestamp=0,
+   *  for the first-seen delay log (HANDOFF.md 6c). The API gives no epoch
+   *  field, so this is inferred from observed events: since publish delay is
+   *  always ≥0, (first-seen walltime − timestamp) is an upper bound on the
+   *  true epoch, and the running minimum over all first-seen events
+   *  converges toward it. Carries a constant bias equal to the lowest true
+   *  delay seen so far — good enough to compare jitter/trends within a run,
+   *  not an authoritative clock. */
+  private matchEpochMs: number | null = null;
 
   constructor(private config: RelayConfig, private sink: SpeechSink) {
     this.state = loadState(config.stateFile);
@@ -119,12 +135,16 @@ export class CommentaryLoop {
     const meta = await fetchMatchMetadata(this.config.matchId, {
       apiBase: this.config.apiBase,
       apiKey: this.config.apiKey,
+      timeoutMs: API_TIMEOUT_MS,
     });
     const lookup = buildPlayerLookup(meta);
     log(`${meta.home.name} vs ${meta.away.name}`);
 
     log("Ohitetaan historialliset tapahtumat…");
-    const initial = await fetchLiveEvents(this.config.matchId, { apiBase: this.config.apiBase });
+    const initial = await fetchLiveEvents(this.config.matchId, {
+      apiBase: this.config.apiBase,
+      timeoutMs: API_TIMEOUT_MS,
+    });
     this.state.periodRuns = {};
     this.state.currentOuts = 0;
     this.state.paloTurnKey = null;
@@ -158,19 +178,31 @@ export class CommentaryLoop {
     const startupMsg = this.matchStarted
       ? formatStartupSpeech(meta, this.buildContext())
       : formatWelcomeFiller(meta);
-    await this.speak(startupMsg);
+    this.speak(startupMsg);
     // Startup already gives the full situation — don't fire the periodic
     // summary immediately on top of it.
     this.state.lastSummaryTime = Date.now();
     this.lastSummaryCount = this.state.announcementCount;
 
     log("Selostussilmukka käynnissä…");
+    // Fixed poll cadence, independent of how long a cycle's fetch/processing
+    // takes — synthesis no longer blocks this loop (see speak()/synthQueue),
+    // so cycles should normally be fast, but a slow fetch must not add to the
+    // next wait on top of its own delay. If a cycle overruns the interval,
+    // resume the cadence from now instead of firing a burst of catch-up ticks
+    // (no-overlap guard).
+    let nextPollAt = Date.now() + this.config.pollInterval;
     while (!signal.aborted) {
-      await this.sleepAbortable(this.config.pollInterval, signal);
+      const waitMs = nextPollAt - Date.now();
+      if (waitMs > 0) await this.sleepAbortable(waitMs, signal);
       if (signal.aborted) break;
+      nextPollAt = Math.max(nextPollAt + this.config.pollInterval, Date.now());
       this.refreshRuntimeControls();
       try {
-        const data = await fetchLiveEvents(this.config.matchId, { apiBase: this.config.apiBase });
+        const data = await fetchLiveEvents(this.config.matchId, {
+          apiBase: this.config.apiBase,
+          timeoutMs: API_TIMEOUT_MS,
+        });
 
         // Ordinary bat-turn changes have no dedicated API text marker; they are
         // detected and announced inside processEventsLive, keyed off
@@ -257,20 +289,33 @@ export class CommentaryLoop {
       // but only announce a genuinely new, not-yet-announced turn, or this
       // would fire once per poll for every historical turn change.
       const turnKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}`;
+      const hasNewSubEvent = event.events.some((_, i) => !state.seenFingerprints.has(eventFingerprint(event, i)));
       if (
         turnChanged &&
         !isFirstTurnOfPeriod &&
         !state.finished &&
         event.team != null &&
         turnKey !== state.announcedTurnKey &&
-        event.events.some((_, i) => !state.seenFingerprints.has(eventFingerprint(event, i)))
+        hasNewSubEvent
       ) {
         const cur = getPeriodScore(state, state.currentPeriod);
         const msg = formatBatTurnChangeSpeech(
           meta, prevBatTeamId, event.team, cur.home, cur.away, state.currentInning, state.currentBatTurn
         );
-        await this.speak(msg);
+        this.speak(msg);
         state.announcedTurnKey = turnKey;
+      }
+
+      // First-seen delay log (HANDOFF.md 6c): one line per event with at
+      // least one genuinely new sub-event (not per sub-event), so a later
+      // pass can split total delay into API-side publish delay (this delta)
+      // vs. our own portion (speak-time minus this log's timestamp).
+      if (hasNewSubEvent && event.timestamp !== null) {
+        const candidateEpochMs = Date.now() - event.timestamp * 1000;
+        this.matchEpochMs =
+          this.matchEpochMs === null ? candidateEpochMs : Math.min(this.matchEpochMs, candidateEpochMs);
+        const deltaS = Math.round((Date.now() - (this.matchEpochMs + event.timestamp * 1000)) / 1000);
+        log(`first-seen: id=${event.id} ts=${event.timestamp} delta=${deltaS}s`);
       }
 
       for (let i = 0; i < event.events.length; i++) {
@@ -313,7 +358,7 @@ export class CommentaryLoop {
         // Same texts in the same turn and situation = a scorer double-marking.
         const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
           `${JSON.stringify(sub.texts)}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
-        await this.speak(speech, true, dedupeKey);
+        this.speak(speech, true, dedupeKey);
       }
 
       if (event.timestamp !== null && event.timestamp > state.lastTimestamp) {
@@ -376,7 +421,7 @@ export class CommentaryLoop {
     // Pre-game there is no situation to recap; keep the wait warm instead.
     if (!this.matchStarted) {
       if (now - this.lastSpeechAt < WELCOME_FILLER_MS) return;
-      await this.speak(formatWelcomeFiller(meta), false);
+      this.speak(formatWelcomeFiller(meta), false);
       return;
     }
     if (this.state.announcementCount === 0) return;
@@ -388,7 +433,7 @@ export class CommentaryLoop {
     this.lastSpeechAt = now;
     const ctx = this.buildContext();
     const summary = countDue ? formatSituationSummary(meta, ctx) : formatIdleSummary(meta, ctx);
-    await this.speak(summary, false);
+    this.speak(summary, false);
   }
 
   private buildContext(): SpeechContext {
@@ -413,18 +458,23 @@ export class CommentaryLoop {
    *  comparing the final strings, but pickVariant can now phrase the same
    *  duplicate two different ways — so duplicates must be detected on the
    *  pre-variant key, never on the rendered speech. */
-  private async speak(text: string, countAnnouncement = true, dedupeKey: string = text): Promise<void> {
+  /** Decision-time bookkeeping (dedupe, lastSpeechAt, announcementCount)
+   *  happens synchronously; the actual sink call (TTS synthesis + mix) is
+   *  handed to synthQueue instead of awaited inline. Previously the poll loop
+   *  awaited each clip's synthesis (~1s/clip) before moving on, so a cluster
+   *  of several announcements in one poll delayed the next poll by several
+   *  seconds (see HANDOFF.md 6b). synthQueue keeps clips in order while
+   *  letting the poll loop run on its own fixed cadence. */
+  private speak(text: string, countAnnouncement = true, dedupeKey: string = text): void {
     if (dedupeKey === this.lastSpeech) return;
     this.lastSpeech = dedupeKey;
     this.lastSpeechAt = Date.now();
+    if (countAnnouncement) this.state.announcementCount++;
     const spoken = preventOrdinalReading(applyPronunciations(text, this.pronunciations));
     log(`Selostus: ${text}`);
-    try {
-      await this.sink(spoken, text);
-    } catch (err) {
+    this.synthQueue = this.synthQueue.then(() => this.sink(spoken, text)).catch((err) => {
       log(`Selostusvirhe: ${err instanceof Error ? err.message : err}`);
-    }
-    if (countAnnouncement) this.state.announcementCount++;
+    });
   }
 
   private sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {

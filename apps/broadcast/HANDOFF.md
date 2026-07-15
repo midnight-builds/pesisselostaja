@@ -130,13 +130,122 @@ hiljaisuussääntö.
 
 ### 6. Selvitys: striimaava/osittainen API
 
-Nykyinen ~6 s polli tuottaa katkonaisen rytmin ryppäissä: rypäs selostetaan
-putkeen, sitten tauko seuraavaan polliin. Selvitä: (a) onko pesistulokset.fi:llä
-WebSocket/SSE/long-poll-päätepistettä (selaimen devtools live-näkymässä),
-(b) onko `online/{id}/events`-päätepisteessä since-/delta-parametria
-(nykyisin palauttaa aina koko historian), (c) jos ei kumpaakaan, voiko
-pollia tihentää turvallisesti tai adaptiivisesti. Huom: kokonaisviiveestä
-valtaosa tulee video-pipelinesta — tämä parantaa rytmiä, ei kokonaisviivettä.
+> **Selvitetty 15.7.2026** (frontendin main.js-analyysi + API-kokeet päättyneellä
+> ottelulla 144202). Löydökset:
+>
+> - **Ei WebSocketia/SSE:tä.** Sivusto itse pollaa samaa
+>   `online/{id}/events`-päätepistettä `setTimeout(…, 6e3)`-silmukalla (6 s).
+>   ("SignalR"-osumat JS:ssä olivat Angularin `consumerOnSignalRead`-symboleja.)
+> - **Delta-parametri on olemassa: `after=YYYY-MM-DD HH:mm:ss`** —
+>   Europe/Helsinki-aikaa, välilyönnillä (frontend: `latestTimestamp
+>   .tz("Europe/Helsinki").format("YYYY-MM-DD HH:mm:ss")`). Väärä muoto →
+>   400 `{"error":"Virheellinen aikaleima"}`. Frontend käsittelee vastauksen
+>   `reset`-lipun (palvelin voi palauttaa koko setin + reset). HUOM:
+>   päättyneellä ottelulla `after` palautti aina koko historian — **vaikutus
+>   pitää verifioida live-ottelua vasten** ennen käyttöönottoa.
+> - **`skip-delay=true`-parametri on olemassa** (frontend lähettää jos
+>   `window.skipDelay` asetettu) → API ilmeisesti viivästää tapahtumia
+>   oletuksena. Jos toimii julkisella avaimella, tämä voi leikata
+>   feed-viivettä — testaa live-ottelussa.
+> - **Palvelinpuolen välimuisti ~5 s** (`cache-control: max-age=5`,
+>   `x-pesis-cache`-header, Cloudflare edessä) → alle ~5 s polli ei tuo
+>   uudempaa dataa. Nykyinen 4 s `RELAY_POLL_INTERVAL` osuu jo tähän rajaan.
+> - **ETag/If-None-Match toimii** (304, 0 tavua) → halpa tapa pollata
+>   tiheämminkin ilman 28 kt:n runkoja.
+> - Rate-limitistä ei merkkejä (ei 429:iä lokeissa eikä kokeissa).
+>
+> Seuraava askel: live-ottelun aikana kokeile `after`- ja `skip-delay`-
+> parametreja curlilla rinnan täyden haun kanssa; jos delta toimii, lisää
+> ETag-ehdollinen haku + `after` commentaryLoopiin ja tihennä polli ~3 s:iin.
+
+Alkuperäinen kysymys: nykyinen polli tuottaa katkonaisen rytmin ryppäissä.
+Huom: kokonaisviiveestä valtaosa tulee video-pipelinesta — tämä parantaa
+rytmiä, ei kokonaisviivettä.
+
+#### 6b. Viiveanalyysi ottelusta 144202 (15.7.2026)
+
+Vertailtiin API:n tapahtuma-aikaleimoja (`timestamp` = sekunteja ottelun
+epochista) relayn lokin havaitsemishetkiin, 17 paloa + 11 juoksua:
+
+- **Viiveen pohja ~130 s, hajonta 129–190 s.** Eli jokainen tapahtuma näkyy
+  julkisessa API:ssa vasta ~2 min tapahtumahetken jälkeen, ja päälle tulee
+  0–60 s jitteriä. Pollauksen osuus (≤ ~10 s) on tästä murto-osa.
+- Pohjaviive sopii täsmälleen `skip-delay`-löydökseen: **API viivästänee
+  julkista feediä ~2 min oletuksena.** Jos `skip-delay=true` toimii julkisella
+  avaimella, se on ylivoimaisesti suurin yksittäinen parannus.
+- 0–60 s jitter selittää käyttäjän havainnon "pitkä tauko, sitten 3–4
+  selostusta putkeen": viiveikkunan ylittäneet tapahtumat vapautuvat
+  ryppäänä samaan polliin (esim. ts 2085 ja 2086 molemmat selostettu
+  14:07:04).
+- HUOM mittauksen luonteesta: vertailu on kahden lähteen välinen — API:n
+  `timestamp`-kenttä (kirjurin kirjaama) vs. relayn lokin speak-hetki.
+  **Kirjurin oma viive ei ole havaittavissa eikä kuulu tähän lukuun:
+  kirjurin aikaleima on meidän ground zero, muuta totuutta ei ole.**
+  Jitter jakautuu siis vain kahteen mitattavissa olevaan osaan:
+  API-puolen julkaisuviive (timestamp → näkyy feedissä) ja meidän
+  havaitsemisviive (näkyy feedissä → speak). Erottelu vaatii first-seen-
+  lokituksen (alla).
+
+#### 6c. first-seen-lokitus viiveen erotteluun
+
+> **Toteutettu 2026-07-15** (`commentaryLoop.ts`, ilman live-testiä).
+> Ottelun epoch ei tule API:sta/metadatasta (`MatchMetadata.date` on vain
+> päivämäärä ilman kellonaikaa) — se päätellään ajon aikana: koska
+> julkaisuviive on aina ≥0, `havaitsemishetki − ts` on epochin yläraja
+> jokaiselle first-seen-tapahtumalle, ja juokseva minimi (`matchEpochMs`)
+> lähestyy todellista epochia ajon edetessä. Jää pysyvästi vinoutuneeksi
+> alaspäin ensimmäisen havainnon todellisen viiveen verran (ei siis
+> absoluuttinen kello), mutta hajonta/trendi saman ajon sisällä on
+> luotettava. Loki kirjoitetaan `processEventsLive`:ssä ennen
+> sub-event-silmukkaa, yksi rivi per tapahtuma jolla on aidosti uusi
+> sormenjälki (`hasNewSubEvent`, jaettu muuttuja vaihtokuulutus-gatelle).
+> Tyypit + `npx vitest run` (61/61) vihreitä. **Ei vielä vahvistettu
+> live-ottelulla** — seuraava ajo näyttää toimiiko epoch-arvio käytännössä
+> ja voiko datasta erotella API- vs. oman osuuden.
+
+Pieni lisäys `commentaryLoop.ts`:n pollikäsittelyyn: kun tapahtuma-id
+nähdään pollivastauksessa ensimmäistä kertaa, lokitetaan yksi rivi:
+
+```
+first-seen: id=38713041 ts=2376 delta=142s
+```
+
+missä `ts` on API:n timestamp (sekunteja ottelun epochista) ja `delta` =
+first-seen-kellonaika miinus (ottelun epoch + ts). Tällä seuraavan
+live-ajon lokista voi laskea suoraan:
+
+- **API-julkaisuviive** = delta (timestamp → ensinäkymä feedissä), ja
+- **meidän osuus** = speak-hetki miinus first-seen-hetki (pollirytmi +
+  käsittely + synteesijono).
+
+Toteutushuomiot: id-joukko on jo käytännössä olemassa
+(`seenFingerprints`) — lokita vain kun fingerprint on aidosti uusi, yksi
+rivi per tapahtuma (ei per sub-event), ei puhetta, pelkkä loki. Ottelun
+epoch saadaan `match-started`-statista (ensimmäinen tapahtuma) tai
+metadatasta. Rinnalle sama mittaus `skip-delay=true`-parametrilla
+(erillinen curl-näytteistäjä riittää) kertoo suoraan paljonko skip-delay
+leikkaa API-julkaisuviivettä.
+
+Koodipuolen pienemmät parannukset (toissijaisia yllä olevaan nähden):
+
+> **1 ja 2 korjattu 2026-07-15** (`commentaryLoop.ts`, ilman live-testiä).
+> `speak()` ei enää `await`aa sinkkiä (TTS-synteesi + miksaus) inline, vaan
+> luovuttaa sen omaan järjestyksen säilyttävään `synthQueue`-promise-jonoon;
+> bokkipiito (dedupe, lastSpeechAt, announcementCount) tehdään yhä
+> synkronisesti päätöshetkellä. Poll-silmukka pollaa nyt kiinteällä tahdilla
+> (`nextPollAt`-ajastus unen sijaan) — jos yksi kierros ylittää pollausvälin,
+> seuraava ajastetaan nykyhetkestä eikä ryppäänä. `API_TIMEOUT_MS` pudotettu
+> 8000 → 4000 ms sekä käynnistys- että pollihakuihin (uusi `timeoutMs`-optio
+> `packages/core/src/api.ts`:n `ApiOptions`:iin, oletus pysyy 8000:ssa muille
+> kutsujille kuten web-appille). Tyypit + `npx vitest run` (61/61) vihreitä.
+> **Ei vielä vahvistettu live-ottelussa** — vahvista seuraavassa ajossa ettei
+> ryppäitä enää synny yhtä voimakkaasti.
+>
+> 3 on avoin.
+
+1. ~~**Synteesi blokkaa pollin:**~~ ks. yllä.
+2. ~~**Fetch-timeout 8 s on tarpeettoman pitkä**~~ ks. yllä.
+3. ETag-ehdollinen haku (304) tekee tiheämmästäkin pollista halvan.
 
 ### 7. Management web view (isompi kokonaisuus, ideointi kesken)
 
