@@ -34,7 +34,8 @@ import {
   type PronunciationRule,
 } from "./nodePronunciation.js";
 import type { LiveEvent, MatchMetadata } from "@pesisselostaja/core";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { log } from "./log.js";
 import type { RelayConfig } from "./config.js";
 
@@ -106,11 +107,13 @@ export class CommentaryLoop {
 
   /** Re-reads the control file each poll and applies a changed setting live.
    *  A missing/invalid file is ignored (keep the current value) rather than
-   *  treated as an error, so a half-written edit can't crash the loop. */
-  private refreshRuntimeControls(): void {
+   *  treated as an error, so a half-written edit can't crash the loop.
+   *  Async read: a sync one would block NarrationFifo's 20ms tick every
+   *  poll (HANDOFF.md 8). */
+  private async refreshRuntimeControls(): Promise<void> {
     let next: boolean | null = null;
     try {
-      const parsed = JSON.parse(readFileSync(this.config.controlFile, "utf8"));
+      const parsed = JSON.parse(await readFile(this.config.controlFile, "utf8"));
       if (typeof parsed.announceBatterChanges === "boolean") next = parsed.announceBatterChanges;
     } catch {
       return;
@@ -167,7 +170,7 @@ export class CommentaryLoop {
     // mark it announced so the live turn-change detector doesn't repeat it.
     this.state.announcedTurnKey =
       `${this.state.currentPeriod}:${this.state.currentInning}:${this.state.currentBatTurn}:${this.state.currentBatTeamId}`;
-    saveState(this.config.stateFile, this.state);
+    await saveState(this.config.stateFile, this.state);
     log(`Ohitettu ${initial.events.length} tapahtumaa`);
 
     if (!meta.live && meta.started) {
@@ -197,7 +200,7 @@ export class CommentaryLoop {
       if (waitMs > 0) await this.sleepAbortable(waitMs, signal);
       if (signal.aborted) break;
       nextPollAt = Math.max(nextPollAt + this.config.pollInterval, Date.now());
-      this.refreshRuntimeControls();
+      await this.refreshRuntimeControls();
       try {
         const data = await fetchLiveEvents(this.config.matchId, {
           apiBase: this.config.apiBase,
@@ -237,7 +240,7 @@ export class CommentaryLoop {
 
         await this.maybeAnnounceSummary(meta);
 
-        saveState(this.config.stateFile, this.state);
+        await saveState(this.config.stateFile, this.state);
       } catch (err) {
         log(`Hakuvirhe: ${err instanceof Error ? err.message : err}`);
       }
