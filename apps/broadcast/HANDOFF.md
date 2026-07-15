@@ -181,15 +181,23 @@ epochista) relayn lokin havaitsemishetkiin, 17 paloa + 11 juoksua:
 
 Koodipuolen pienemmät parannukset (toissijaisia yllä olevaan nähden):
 
-1. **Synteesi blokkaa pollin:** silmukka `await`aa jokaisen selostuksen
-   ElevenLabs-synteesin (~1 s/klippi) ennen seuraavaa askelta, ja 4 s uni
-   alkaa vasta käsittelyn jälkeen. Rypäs (4 klippiä) lykkää seuraavaa pollia
-   ~4–8 s. Korjaus: irrota synteesi polliketjusta omaan järjestyksen
-   säilyttävään promise-jonoon, ja pollaa kiinteällä tahdilla
-   (no-overlap-vahti) unen sijaan.
-2. **Fetch-timeout 8 s on tarpeettoman pitkä** suhteessa 4 s polliin ja 5 s
-   palvelinvälimuistiin — pudota ~4 s:iin, niin jumiutunut haku maksaa
-   vähemmän (timeoutteja oli 2 kpl / ajo, ei iso ongelma).
+> **1 ja 2 korjattu 2026-07-15** (`commentaryLoop.ts`, ilman live-testiä).
+> `speak()` ei enää `await`aa sinkkiä (TTS-synteesi + miksaus) inline, vaan
+> luovuttaa sen omaan järjestyksen säilyttävään `synthQueue`-promise-jonoon;
+> bokkipiito (dedupe, lastSpeechAt, announcementCount) tehdään yhä
+> synkronisesti päätöshetkellä. Poll-silmukka pollaa nyt kiinteällä tahdilla
+> (`nextPollAt`-ajastus unen sijaan) — jos yksi kierros ylittää pollausvälin,
+> seuraava ajastetaan nykyhetkestä eikä ryppäänä. `API_TIMEOUT_MS` pudotettu
+> 8000 → 4000 ms sekä käynnistys- että pollihakuihin (uusi `timeoutMs`-optio
+> `packages/core/src/api.ts`:n `ApiOptions`:iin, oletus pysyy 8000:ssa muille
+> kutsujille kuten web-appille). Tyypit + `npx vitest run` (61/61) vihreitä.
+> **Ei vielä vahvistettu live-ottelussa** — vahvista seuraavassa ajossa ettei
+> ryppäitä enää synny yhtä voimakkaasti.
+>
+> 3 on avoin.
+
+1. ~~**Synteesi blokkaa pollin:**~~ ks. yllä.
+2. ~~**Fetch-timeout 8 s on tarpeettoman pitkä**~~ ks. yllä.
 3. ETag-ehdollinen haku (304) tekee tiheämmästäkin pollista halvan.
 
 ### 7. Management web view (isompi kokonaisuus, ideointi kesken)
