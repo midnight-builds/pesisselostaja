@@ -88,8 +88,8 @@ export function parseRelayConfig(): RelayConfig {
   const announceBatterChanges =
     !(values["no-batter-changes"] ?? false) && process.env.RELAY_ANNOUNCE_BATTER_CHANGES !== "false";
   const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY || undefined;
-  // Brian — valittu kuuntelemalla 2026-07-14 (ks. ~/projects/elevenlabs-aanitestit/)
-  const elevenLabsVoiceId = process.env.RELAY_ELEVENLABS_VOICE ?? "nPczCjzI2devNBz1zQrb";
+  // Daniel — valittu kuuntelemalla 2026-07-15 (ks. ~/projects/elevenlabs-aanitestit/)
+  const elevenLabsVoiceId = process.env.RELAY_ELEVENLABS_VOICE ?? "onwK4e9ZLuTAKqWW03F9";
   const elevenLabsModelId = process.env.RELAY_ELEVENLABS_MODEL ?? "eleven_multilingual_v2";
   const apiKey = process.env.PESISTULOKSET_API_KEY ?? "wRX0tTke3DZ8RLKAMntjZ81LwgNQuSN9";
   const apiBase = process.env.PESISTULOKSET_API_BASE ?? "https://api.pesistulokset.fi/api/v1";
