@@ -1,5 +1,47 @@
 # Relay — handoff seuraavaa live-testiä varten
 
+## TODO 2026-07-16: live-ajon (ottelu 144733) löydökset
+
+> Kerätty ajon aikana, **ei toteutettu** — käyttäjän pyynnöstä vain kirjattu
+> ylös seuraavaa kehityssessiota varten.
+
+### 1. Aloitusselostus tulee aivan videon alkuun — harva katsoja ehtinyt paikalle
+
+**Havainto (käyttäjä):** ensimmäinen selostus alkaa heti kun relay/ottelu
+käynnistyy, mutta siinä vaiheessa harva on vielä ehtinyt avata videota.
+Ehdotus: viivytä ensimmäistä selostusta esim. **20 s** relayn/videon
+käynnistyksestä, jotta katsojat ehtivät kytkeytyä ennen kuin mitään sanotaan.
+
+**Ei toteutettu.** Harkittava toteutuskohta: `commentaryLoop.ts`/`index.ts`
+käynnistyspolku — esim. kertaluonteinen viive ennen ensimmäistä `speak()`-
+kutsua. Huomioi suhde esipelitäytteeseen (HANDOFF 07-15 kohta 5,
+"Tervetuloa"-fraasit ~90 s välein) — 20 s viive koskisi todennäköisesti vain
+ihan ensimmäistä repliikkiä, ei koko täytemekanismia.
+
+### 2. YouTube-virhe: "Please use a keyframe frequency of four seconds or less"
+
+**Havainto (YouTube Studio -virheilmoitus livenä):** "Please use a keyframe
+frequency of four seconds or less. Currently, keyframes are not being sent
+often enough, which can cause buffering. The current keyframe frequency is
+5.0 seconds. Note that ingestion errors can cause incorrect GOP (group of
+pictures) sizes."
+
+**Todennäköinen syy:** relay käyttää `-c:v copy` (`ffmpegMixer.ts:98`) —
+video läpäisee koskemattomana lähteestä, joten keyframe-/GOP-väli tulee
+suoraan puhelimen striimauskoodekilta; relay ei enkoodaa videota eikä siksi
+päätä keyframe-taajuudesta pushivaiheessa. **Emme luultavasti voi korjata
+tätä relay-puolella** ilman videon uudelleenkoodausta
+(`-c:v libx264 -g <fps*4> -keyint_min <fps*4> ...`), mikä toisi CPU-kuormaa ja
+enkoodausviivettä rajalliselle VM:lle — tietoinen tehokkuus/laatu-kompromissi,
+ei ilmainen korjaus. Vaihtoehto: puhelimen striimaussovelluksen omista
+asetuksista tiivistää GOP/keyframe-väli ≤4 s:iin (lähdepään korjaus, ei
+relayn).
+
+**Ei toteutettu / avoin selvitys.** Ennen toteutusta selvitettävä: kannattaako
+re-encode ollenkaan (CPU-hinta vs. hyöty — YouTuben ilmoitus voi olla vain
+varoitus eikä aina näy katsojalle bufferointina), vai onko helpompi ohjata
+käyttäjää säätämään puhelimen striimaussovelluksen GOP-asetusta.
+
 ## TODO 2026-07-15: live-ajon (ottelu 144193) löydökset ja jatkokehitys
 
 > **Kohdat 1, 2, 3, 4 sekä pollausvälin pudotus korjattu 2026-07-15**
@@ -157,6 +199,40 @@ hiljaisuussääntö.
 > Seuraava askel: live-ottelun aikana kokeile `after`- ja `skip-delay`-
 > parametreja curlilla rinnan täyden haun kanssa; jos delta toimii, lisää
 > ETag-ehdollinen haku + `after` commentaryLoopiin ja tihennä polli ~3 s:iin.
+
+> **Live-vahvistus 16.7.2026 (ottelu 144733), curlilla rinnan käynnissä
+> olevan relayn kanssa — relayä ei kosketettu, pelkkiä GET-pyyntöjä.**
+> Kaikki kolme aiempaa oletusta vahvistuivat, yksi niistä päinvastaiseksi
+> kuin päättyneellä ottelulla nähty:
+>
+> - **`after=` TOIMII OIKEANA DELTANA LIVE-OTTELUSSA** (toisin kuin
+>   päättyneellä ottelulla, joka aina palautti koko historian). Pyyntö
+>   `after=2026-07-16%2009%3A35%3A00` palautti 14 tapahtuman koko listan
+>   sijaan vain 4 tuoretta tapahtumaa (id 1–4, klo 09:35:16 alkaen) — täysin
+>   pudottaen edellisen vuoron 11 tapahtumaa. `reset` pysyi `null`:na koko
+>   testin ajan. **Tämä oli aiemmin suurin avoin epävarmuus — nyt poistettu.**
+> - **`skip-delay=true` leikkaa julkaisuviivettä mitattavasti.**
+>   Samanaikainen rinnakkaisvertailu (kaksi curlia samassa hetkessä, eri
+>   prosessit): ilman parametria tuorein tapahtuma oli 108 s vanha, parametrin
+>   kanssa 83 s — n. 25 s (~25 %) vähemmän julkaisuviivettä yhdessä
+>   mittauksessa, toisessa mittauksessa 123 s → 68 s (~45 %). Toimii julkisella
+>   API-avaimella. Yhdistettävissä `after`-parametrin kanssa samassa
+>   pyynnössä (testattu, molemmat voimassa yhtä aikaa).
+> - **ETag/If-None-Match vahvistettu käytännössä**: peräkkäinen pyyntö 1 s
+>   välein samalla `If-None-Match`-headerilla palautti `304` kun dataan ei
+>   ollut tullut muutosta; toinen pyyntö uusien tapahtumien saavuttua
+>   palautti `200` odotetusti.
+>
+> **Ei vielä toteutettu koodiin** — pelkkä curl-vahvistus, käyttäjän
+> pyynnöstä ei koskettu käynnissä olevaan relayyn (src-muutos vaatisi
+> restartin, joka katkaisisi live-lähetyksen hetkeksi). Seuraava askel on
+> yhä 6:n alkuperäinen ehdotus: lisää `after`+`skip-delay`+ETag-ehdollinen
+> haku `commentaryLoop.ts`:ään ottelun ulkopuolella, sitten vahvista
+> uudella live-ajolla. Odotettu hyöty: tapahtuma→feed-julkaisuviive
+> (pohjaosa ~123 s tässä ottelussa, ks. myös 6b) pienenee ehkä ~30–45 %;
+> kokonaisviiveestä (~30–90 s puheeseen saakka) suurin osa on silti
+> video-pipelinessä, joten tämä ei poista kokonaisviivettä, vain lyhentää
+> API-osuutta siitä.
 
 Alkuperäinen kysymys: nykyinen polli tuottaa katkonaisen rytmin ryppäissä.
 Huom: kokonaisviiveestä valtaosa tulee video-pipelinesta — tämä parantaa
