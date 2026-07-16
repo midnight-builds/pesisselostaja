@@ -87,6 +87,28 @@ ottelun kerrotaan päättyneen (loppuyhteenveto / `formatMatchEndRecap`,
 "Kiitos katsojille." Ei toteutettu — pieni lisäys, sopii tehtäväksi samalla
 kun loppuyhteenvetoa seuraavan kerran muokataan.
 
+### 6. Ottelun 144737 valvomaton ajo (iltapäivä 16.7.) — onnistui päästä päähän
+
+Ensimmäinen kokonaan valvomaton lähetys (operaattori poissa, agentin
+15 min watchdog-ketju): käynnistys 6 min etuajassa, ottelu selostettiin
+kokonaan (Pesä Ysit 7–7 KaKa, yksi jakso, tasapeli), loppuyhteenveto ehti
+ulos ~85 s ennen lähteen loppua, relay sammutti itsensä siististi
+12 min ikkunan umpeuduttua ja watchdog ajoi lopetussiivouksen. 3850
+EL-merkkiä. Kaksi havaintoa:
+
+1. **Nimikolliisiologiikka sai kunnon live-testin ja toimi**: kokoonpanossa
+   sekä Amal että Amira Gazdali ja Hulda että Hilda Kivilahti — kaikki
+   luettiin koko etunimellä oikein, myös saman fraasin sisällä ("sen löi
+   Amira Gazdali, tuojana Amal Gazdali").
+2. **Pieni parannusidea:** kun ottelu on jo päättynyt (`state.finished`) ja
+   lähde EOF:ää, relay jää silti yrittämään lähdettä koko
+   `RELAY_MAX_FAILURE_WINDOW_MS`-ikkunan (nyt 12 min) ennen itsesammutusta.
+   Päättyneen ottelun jälkeen odotus on turha — voisi luovuttaa heti tai
+   esim. 1–2 min kuluttua, kun `finished` on tosi. Harmiton mutta hidastaa
+   siivousta ja pitää prosessia turhaan pystyssä. Kosmeettinen sivuhuomio
+   samasta ajosta: pistefraasi alkoi pienellä kirjaimella ("… tuojana Amal
+   Gazdali. tasan 7, 7.") — ei kuulu puheessa, mutta lokissa näkyy.
+
 ## TODO 2026-07-15: live-ajon (ottelu 144193) löydökset ja jatkokehitys
 
 > **Kohdat 1, 2, 3, 4 sekä pollausvälin pudotus korjattu 2026-07-15**
