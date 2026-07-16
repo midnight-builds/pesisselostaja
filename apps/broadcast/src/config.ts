@@ -9,6 +9,12 @@ export interface RelayConfig {
   piperBin: string;
   pollInterval: number;
   narrationGain: number;
+  /** Artificial delay (ms) inserted between detecting an event and handing its
+   *  narration to synthesis, so speech lands after the corresponding video
+   *  instead of ahead of it once the API skip-delay shortened the feed lag
+   *  (HANDOFF.md 8). Default 0 (no delay). Runtime-overridable via the control
+   *  file — see commentaryLoop. */
+  narrationDelayMs: number;
   urlRefreshMs: number;
   maxFailureWindowMs: number;
   announceBatterChanges: boolean;
@@ -48,6 +54,7 @@ export function parseRelayConfig(): RelayConfig {
       "piper-bin": { type: "string" },
       "poll-interval": { type: "string" },
       "narration-gain": { type: "string" },
+      "narration-delay-ms": { type: "string" },
       "url-refresh-ms": { type: "string" },
       "max-failure-window-ms": { type: "string" },
       "no-batter-changes": { type: "boolean", default: false },
@@ -84,6 +91,11 @@ export function parseRelayConfig(): RelayConfig {
   const piperBin = values["piper-bin"] ?? process.env.RELAY_PIPER_BIN ?? "piper";
   const pollInterval = parseInt(values["poll-interval"] ?? process.env.RELAY_POLL_INTERVAL ?? "4000", 10);
   const narrationGain = parseFloat(values["narration-gain"] ?? process.env.RELAY_NARRATION_GAIN ?? "1.3");
+  // Artificial narration delay (HANDOFF.md 8). Default 0 = current behavior;
+  // the real value is calibrated live. A bad value falls back to 0 rather than
+  // NaN (which would make every wait computation NaN). Negative is clamped to 0.
+  const narrationDelayRaw = parseInt(values["narration-delay-ms"] ?? process.env.RELAY_NARRATION_DELAY_MS ?? "0", 10);
+  const narrationDelayMs = Number.isNaN(narrationDelayRaw) ? 0 : Math.max(0, narrationDelayRaw);
   const urlRefreshMs = parseInt(values["url-refresh-ms"] ?? process.env.RELAY_URL_REFRESH_MS ?? String(15 * 60 * 1000), 10);
   // How long resolveSourceUrl/ffmpeg-start may fail continuously before the
   // relay gives up and shuts down (see SourceExhaustedError). Kept generous
@@ -123,6 +135,7 @@ export function parseRelayConfig(): RelayConfig {
     piperBin,
     pollInterval,
     narrationGain,
+    narrationDelayMs,
     urlRefreshMs,
     maxFailureWindowMs,
     announceBatterChanges,
