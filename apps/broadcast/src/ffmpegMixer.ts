@@ -139,6 +139,9 @@ export class FfmpegMixer {
   private readonly maxFailureWindowMs: number;
   /** Counts spawn attempts so recordFile can be indexed per session. */
   private sessionIndex = 0;
+  /** True only while an ffmpeg session is attached as a FIFO reader (between a
+   *  completed handshake and the process exiting). */
+  private sessionActive = false;
 
   constructor(private opts: FfmpegMixerOptions) {
     this.fifo = new NarrationFifo(opts.fifoPath);
@@ -147,6 +150,21 @@ export class FfmpegMixer {
 
   enqueueNarration(pcm: Buffer): void {
     this.fifo.enqueue(pcm);
+  }
+
+  /** True while ffmpeg is attached and reading the FIFO, i.e. queued narration
+   *  actually drains in real time. The commentary loop reads this to avoid
+   *  synthesizing pre-game filler nobody would hear yet — otherwise those
+   *  welcome clips pile up in the FIFO before ffmpeg attaches and all play
+   *  back-to-back on connect (HANDOFF.md 7). */
+  get isReaderAttached(): boolean {
+    return this.sessionActive;
+  }
+
+  /** Narration clips still waiting in the FIFO queue (not yet handed to the
+   *  write stream). */
+  get pendingClips(): number {
+    return this.fifo.pendingClips;
   }
 
   async start(): Promise<void> {
