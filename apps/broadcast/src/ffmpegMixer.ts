@@ -242,6 +242,7 @@ export class FfmpegMixer {
       throw new Error(`ffmpeg ei käynnistynyt: ${detail}`);
     }
 
+    this.sessionActive = true;
     this.opts.onSessionStart?.(Date.now());
 
     const refreshMs = this.opts.urlRefreshMs ?? 15 * 60 * 1000;
