@@ -72,6 +72,7 @@ async function main(): Promise<void> {
       streamKey: config.streamKey,
       narrationGain: config.narrationGain,
       urlRefreshMs: config.urlRefreshMs,
+      maxFailureWindowMs: config.maxFailureWindowMs,
       fifoPath,
       recordFile: config.recordFile,
     });
