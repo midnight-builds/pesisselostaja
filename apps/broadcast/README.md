@@ -77,6 +77,26 @@ keep playing.
   written from the env/CLI value at startup, so the env/CLI setting is
   authoritative on start and live edits take over after.)
 
+### Narration delay (aligning speech with the video)
+
+If narration lands slightly *before* the matching situation appears on the
+video (the API skip-delay can make the commentary pipeline briefly faster than
+the video path), add an artificial delay. It affects **only playback** — dedupe
+and scoring bookkeeping still run synchronously at detection time — and never
+stalls the poll loop or reorders clips.
+
+- **At startup:** `RELAY_NARRATION_DELAY_MS=4000` in `.env.relay`, or
+  `--narration-delay-ms 4000`. Default `0` (no delay, unchanged behavior).
+- **Live, without restarting:** the same control file, `narrationDelayMs` key:
+  ```bash
+  echo '{"narrationDelayMs": 4000}' > apps/broadcast/run/.control-143280.json   # add 4s
+  echo '{"narrationDelayMs": 0}'    > apps/broadcast/run/.control-143280.json   # off
+  ```
+  The control-file value wins over the env/CLI seed. You can set both keys in
+  one file (`{"announceBatterChanges": false, "narrationDelayMs": 4000}`);
+  writing only one key leaves the other setting unchanged. The right value is
+  calibrated live — the video path's latency varies between broadcasts.
+
 ### Testing without touching YouTube (dry run)
 
 ```bash
