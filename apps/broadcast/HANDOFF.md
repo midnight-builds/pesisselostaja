@@ -112,18 +112,54 @@ EL-merkkiä. Kaksi havaintoa:
 ### 7. BUGI: esipelifraasit kasautuvat FIFO-jonoon ennen ffmpegin kytkeytymistä ja soivat putkeen — ✅ KORJATTU (PR #34)
 
 > **Korjattu 2026-07-16 (PR #34), toteutettu korjausvaihtoehto 3 (kattaa myös
-> vaihtoehdon 1).** Esipelitäyte (`formatWelcomeFiller`) syntetisoidaan nyt vain
-> kun selostusjono on tyhjä JA ffmpeg on kytkeytynyt lukijaksi; muuten kierros
-> ohitetaan (~90 s kadenssi yrittää uudelleen seuraavalla pollilla). `FfmpegMixer`
-> paljastaa kytkeytymistilan kahdella getterillä (`isReaderAttached` = sessio
-> handshaken ja exitin välissä, `pendingClips` = FIFO-jonon syvyys); nämä
-> välitetään `CommentaryLoopille` kapeana `NarrationStatus`-porttina
-> (`index.ts`), ei suorana mixer-viittauksena. Gate koskee VAIN esipelitäytettä
-> (`run()`:n käynnistysfraasi ja `maybeAnnounceSummary`:n pre-game-haara) —
-> tapahtumaselostukset jonottuvat yhä normaalisti vaikka ffmpeg ei olisi
-> kytkeytynyt. Dry-runissa portti raportoi "valmis", joten täyte lokitetaan
-> kuten ennenkin. Testit: `apps/broadcast/test/commentaryLoop.test.ts`
-> ("pre-game filler gating"). **Ei vielä vahvistettu live-ottelulla.**
+> vaihtoehdon 1) + kaksi laajennusta samassa PR:ssä.** Esipelitäyte
+> (`formatWelcomeFiller`) syntetisoidaan nyt vain kun selostusjono on tyhjä JA
+> ffmpeg on kytkeytynyt lukijaksi; muuten kierros ohitetaan (~90 s kadenssi
+> yrittää uudelleen seuraavalla pollilla). `FfmpegMixer` paljastaa
+> kytkeytymistilan kahdella getterillä (`isReaderAttached` = sessio handshaken
+> ja exitin välissä, `pendingClips` = FIFO-jonon syvyys); nämä välitetään
+> `CommentaryLoopille` kapeana `NarrationStatus`-porttina (`index.ts`), ei
+> suorana mixer-viittauksena. Dry-runissa portti raportoi "valmis", joten
+> täyte lokitetaan kuten ennenkin.
+>
+> **Laajennus 1 — pelinaikaiset täytteet saman portin taakse:**
+> `maybeAnnounceSummary`:n matchStarted-haara (recap/idle-täyte) tarkistaa nyt
+> saman `narrationReadyForFiller`-portin ja ohittaa kierroksen PÄIVITTÄMÄTTÄ
+> `lastSummaryCount`/`lastSpeechAt`/`lastSummaryTime`-kirjanpitoa — täyte
+> puhutaan tuoreena heti ensimmäisellä valmiilla pollilla sen sijaan että
+> pitkän ffmpeg-katkon aikana jonoon kertyisi ~2 min välein vanhentuvia
+> "tilanne on edelleen…" -klippejä. Tapahtumaselostuksiin ei vaikutusta.
+>
+> **Laajennus 2 — tapahtumaselostusten vaimennus ennen ENSIMMÄISTÄ
+> kytkeytymistä + tuore recap kytkeytymishetkellä (tapaus B: kirjuri kirjaa
+> tapahtumia, video ei vielä livenä):** `narrationEverReady`-latch lukittuu
+> pysyvästi todeksi kun `isReaderAttached` havaitaan ensi kerran (tarkistus
+> poll-silmukassa ja `run()`:n käynnistyspolussa; ilman porttia latch on heti
+> tosi = vanha käytös dry-runissa/testeissä). Ennen latchia `speak()` ajaa
+> kirjanpidon (dedupe, lastSpeech, announcementCount, lokirivi "Selostus
+> (vaimennettu — ffmpeg ei vielä kytkeytynyt): …") normaalisti mutta OHITTAA
+> sink-luovutuksen — ei synteesiä, ei FIFO-jonotusta; koskee myös `run()`:n
+> aloitusrecapia. Latch-hetkellä, jos puhetta vaimennettiin ja ottelu on
+> käynnissä, puhutaan YKSI tuore recap sen hetkisestä tilasta
+> (`formatSituationSummary`; tai `formatMatchEnd`-loppuyhteenveto, jos ottelu
+> ehti päättyä vaimennuksen aikana — funktio exportattu corestä tätä varten).
+> Recap kulkee normaalin speak-polun läpi (selostusviive + synthQueue,
+> countAnnouncement=false, oma dedupe-avain koska teksti voi olla identtinen
+> juuri vaimennetun kanssa). Latchin JÄLKEEN käytös ei muutu — ks. avoin
+> kohta alla.
+>
+> Testit: `apps/broadcast/test/commentaryLoop.test.ts` ("pre-game filler
+> gating", "in-game filler gating", "pre-first-attach suppression + connect
+> recap"). **Ei vielä vahvistettu live-ottelulla.**
+>
+> **AVOIN JATKOKYSYMYS — flappikatkojen jonotuskäytös (tapaus E,
+> 144203+144740):** latchin jälkeen tapahtumaselostukset jonottuvat
+> pelinaikaisen ffmpeg-katkon yli kuten ennenkin — tietoinen rajaus tässä
+> PR:ssä. Lyhyessä katkossa jonotus suojaa selostuksen katoamiselta (144203:n
+> "selostus katosi kokonaan" -löydös), mutta pitkässä flapissa se tuottaa
+> vanhentuneen purskeen jäätyneen kuvan päälle (144740). Yksi idea: ikäraja
+> klipeille (pudota jonosta klipit jotka odottivat yli N s ennen toistoa).
+> Päätös jätetty myöhemmäksi.
 
 **Oire (käyttäjä kuuli, todennettu lokista 144737):** videon alussa
 selostettiin lähes samaa tervetuloa-tekstiä useaan kertaan peräkkäin ilman
