@@ -147,6 +147,7 @@ export class CommentaryLoop {
     const initial = await fetchLiveEvents(this.config.matchId, {
       apiBase: this.config.apiBase,
       timeoutMs: API_TIMEOUT_MS,
+      skipDelay: true,
     });
     this.state.periodRuns = {};
     this.state.currentOuts = 0;
@@ -205,6 +206,7 @@ export class CommentaryLoop {
         const data = await fetchLiveEvents(this.config.matchId, {
           apiBase: this.config.apiBase,
           timeoutMs: API_TIMEOUT_MS,
+          skipDelay: true,
         });
 
         // Ordinary bat-turn changes have no dedicated API text marker; they are

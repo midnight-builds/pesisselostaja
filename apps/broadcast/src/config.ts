@@ -10,6 +10,7 @@ export interface RelayConfig {
   pollInterval: number;
   narrationGain: number;
   urlRefreshMs: number;
+  maxFailureWindowMs: number;
   announceBatterChanges: boolean;
   dryRun: boolean;
   recordFile?: string;
@@ -48,6 +49,7 @@ export function parseRelayConfig(): RelayConfig {
       "poll-interval": { type: "string" },
       "narration-gain": { type: "string" },
       "url-refresh-ms": { type: "string" },
+      "max-failure-window-ms": { type: "string" },
       "no-batter-changes": { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       "record-file": { type: "string" },
@@ -83,6 +85,14 @@ export function parseRelayConfig(): RelayConfig {
   const pollInterval = parseInt(values["poll-interval"] ?? process.env.RELAY_POLL_INTERVAL ?? "4000", 10);
   const narrationGain = parseFloat(values["narration-gain"] ?? process.env.RELAY_NARRATION_GAIN ?? "1.3");
   const urlRefreshMs = parseInt(values["url-refresh-ms"] ?? process.env.RELAY_URL_REFRESH_MS ?? String(15 * 60 * 1000), 10);
+  // How long resolveSourceUrl/ffmpeg-start may fail continuously before the
+  // relay gives up and shuts down (see SourceExhaustedError). Kept generous
+  // by default so a relay started a few minutes ahead of the phone's
+  // announced go-live time doesn't give up before the source ever appears.
+  const maxFailureWindowMs = parseInt(
+    values["max-failure-window-ms"] ?? process.env.RELAY_MAX_FAILURE_WINDOW_MS ?? String(12 * 60 * 1000),
+    10
+  );
   // Off if either the CLI flag or the env var says so; the control file (see
   // commentaryLoop) can still override this live once the loop is running.
   const announceBatterChanges =
@@ -114,6 +124,7 @@ export function parseRelayConfig(): RelayConfig {
     pollInterval,
     narrationGain,
     urlRefreshMs,
+    maxFailureWindowMs,
     announceBatterChanges,
     dryRun,
     recordFile,

@@ -16,6 +16,7 @@ async function main(): Promise<void> {
   log(`YouTube-lähde: ${config.youtubeUrl}`);
   log(`Ääni: ${config.elevenLabsApiKey ? `ElevenLabs ${config.elevenLabsVoiceId} (${config.elevenLabsModelId}), fallback Piper ${config.voice}` : `Piper ${config.voice}`}`);
   log(`Dry run: ${config.dryRun}`);
+  if (!config.dryRun) log(`Lähteen antelias aikaikkuna ennen luovutusta: ${Math.round(config.maxFailureWindowMs / 60000)} min`);
   if (config.recordFile) log(`Tallennetaan paikalliseen tiedostoon: ${config.recordFile}`);
 
   const voicesDir = new URL("../voices/", import.meta.url).pathname;
@@ -72,6 +73,7 @@ async function main(): Promise<void> {
       streamKey: config.streamKey,
       narrationGain: config.narrationGain,
       urlRefreshMs: config.urlRefreshMs,
+      maxFailureWindowMs: config.maxFailureWindowMs,
       fifoPath,
       recordFile: config.recordFile,
     });

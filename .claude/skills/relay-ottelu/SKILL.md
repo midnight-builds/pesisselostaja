@@ -154,6 +154,18 @@ Katkaise (Ctrl-C / prosessin tappo) kun näet oikean ottelun tapahtumia.
 
 ## 5. Käynnistä ja varmista
 
+**Ajoitus: käynnistä ~6 min ennen alkuperäisen lähetyksen ilmoitettua
+alkuaikaa.** Jos puhelimen lähetys ei ole vielä livenä kun relay yrittää lukea
+sitä, relay yrittää yt-dlp:llä yhä tiheämmin ja **luovuttaa (sammuu
+kokonaan) jos lähde ei vastaa `RELAY_MAX_FAILURE_WINDOW_MS` (oletus 12 min)
+kuluessa** — ks. `ffmpegMixer.ts`. 6 min etuajassa käynnistäminen jättää
+12 min ikkunasta ~6 min marginaalia molempiin suuntiin: lähde voi olla vähän
+etuajassa tai valahtaa vähän ilmoitettua myöhemmäksi ilman että relay luovuttaa
+turhaan. Jos yt-dlp ilmoittaa esim. "This live event will begin in 26
+minutes", **älä käynnistä palvelua vielä** — odota kunnes ilmoitettuun
+alkuun on ~6 min, tai käytä `ScheduleWakeup`-tyyppistä ajastusta tarkistamaan
+tilanne lähempänä.
+
 ```bash
 systemctl --user start pesisselostaja-relay.service
 journalctl --user -u pesisselostaja-relay -f
