@@ -230,11 +230,17 @@ export class CommentaryLoop {
       return;
     }
 
-    // The real startup recap (match already running) is always spoken; the
-    // pre-game welcome filler is only worth queuing once ffmpeg is attached
-    // and the queue empty, or it piles up unheard and bursts on connect
-    // (HANDOFF.md 7). Skipping it here just defers it to maybeAnnounceSummary,
-    // which re-checks readiness each poll.
+    // If ffmpeg is already attached by the time we get here, latch now so the
+    // startup speech below goes straight through instead of being suppressed
+    // and replaced by a catch-up recap one poll later.
+    this.maybeLatchNarrationReady(meta);
+
+    // The startup recap goes through speak(), which suppresses it pre-latch
+    // (it would only pile up stale in the FIFO); the latch moment then speaks
+    // a fresh recap instead. The pre-game welcome filler is additionally only
+    // worth queuing once ffmpeg is attached and the queue empty, or it bursts
+    // on connect (HANDOFF.md 7) — skipping it here just defers it to
+    // maybeAnnounceSummary, which re-checks readiness each poll.
     if (this.matchStarted) {
       this.speak(formatStartupSpeech(meta, this.buildContext()));
     } else if (this.narrationReadyForFiller()) {
@@ -259,6 +265,10 @@ export class CommentaryLoop {
       if (signal.aborted) break;
       nextPollAt = Math.max(nextPollAt + this.config.pollInterval, Date.now());
       await this.refreshRuntimeControls();
+      // Checked before processing so a latch-moment catch-up recap enters the
+      // synth queue ahead of any events found in this same poll — the recap
+      // covers the suppressed past, the events then narrate the present.
+      this.maybeLatchNarrationReady(meta);
       try {
         const data = await fetchLiveEvents(this.config.matchId, {
           apiBase: this.config.apiBase,
@@ -495,6 +505,12 @@ export class CommentaryLoop {
     const countDue = this.state.announcementCount - this.lastSummaryCount >= SUMMARY_EVERY_N;
     const idleDue = now - this.lastSpeechAt > IDLE_FILLER_MS;
     if (!countDue && !idleDue) return;
+    // Same readiness gate as the pre-game branch: an in-game recap/idle filler
+    // is worthless unless it is heard in real time. Skip WITHOUT advancing the
+    // bookkeeping below, so the first ready poll speaks a fresh one instead of
+    // queueing stale "tilanne on edelleen…" clips every ~2 min through a long
+    // ffmpeg outage (HANDOFF.md 7, extension). Event narration is unaffected.
+    if (!this.narrationReadyForFiller()) return;
     this.lastSummaryCount = this.state.announcementCount;
     this.state.lastSummaryTime = now;
     this.lastSpeechAt = now;
@@ -538,6 +554,17 @@ export class CommentaryLoop {
     this.lastSpeechAt = Date.now();
     if (countAnnouncement) this.state.announcementCount++;
     const spoken = preventOrdinalReading(applyPronunciations(text, this.pronunciations));
+    // Pre-first-attach suppression (HANDOFF.md 7, case B): all decision-time
+    // bookkeeping above ran normally — so dedupe/scoring/turn state stay
+    // exactly as if the clip had played — but the sink handoff is skipped:
+    // synthesizing now would only stack stale clips in the FIFO to burst out
+    // on connect. The latch moment speaks one fresh recap instead (see
+    // maybeLatchNarrationReady). Never reverts after the first attach.
+    if (!this.narrationEverReady) {
+      this.suppressedBeforeAttach = true;
+      log(`Selostus (vaimennettu — ffmpeg ei vielä kytkeytynyt): ${text}`);
+      return;
+    }
     log(`Selostus: ${text}`);
     // Artificial playback delay (RELAY_NARRATION_DELAY_MS / control file,
     // HANDOFF.md 8): captured at decision time and applied ONLY to the sink
@@ -559,6 +586,29 @@ export class CommentaryLoop {
       .catch((err) => {
         log(`Selostusvirhe: ${err instanceof Error ? err.message : err}`);
       });
+  }
+
+  /** One-way latch: flips narrationEverReady true the first time the ffmpeg
+   *  reader is seen attached. If speech was suppressed while waiting (case B:
+   *  scorer already logging events but the source video not yet live), speaks
+   *  ONE fresh catch-up recap built from the CURRENT state — a situation
+   *  summary mid-game, or the closing line (formatMatchEnd) if the match
+   *  already ended during suppression. Nothing suppressed → no extra recap;
+   *  match not started → the welcome-filler logic covers it. The recap goes
+   *  through the normal speak() path (narration delay + synthQueue) with a
+   *  dedicated dedupe key, since its rendered text can legitimately equal the
+   *  just-suppressed closing line. Deliberately NOT re-armed on later ffmpeg
+   *  drops — see narrationEverReady. */
+  private maybeLatchNarrationReady(meta: MatchMetadata): void {
+    if (this.narrationEverReady) return;
+    if (!this.narrationStatus?.isReaderAttached()) return;
+    this.narrationEverReady = true;
+    if (!this.suppressedBeforeAttach || !this.matchStarted) return;
+    this.suppressedBeforeAttach = false;
+    const ctx = this.buildContext();
+    const recap = this.state.finished ? formatMatchEnd(meta, ctx) : formatSituationSummary(meta, ctx);
+    log("ffmpeg kytkeytyi — puhutaan tuore tilannekooste vaimennettujen selostusten sijaan.");
+    this.speak(recap, false, `latch-recap:${recap}`);
   }
 
   /** True when a pre-game/idle filler is worth synthesizing right now: ffmpeg
