@@ -191,6 +191,14 @@ laukeamaan). Huomioitava jos "stalled source" -luovutusehtoa (kohta yllä)
 joskus toteutetaan: pitkittynyt flappi ei ole vain kosmeettinen, se myös
 lykkää kohteen auto-stopia.
 
+**Ajon lopputulos:** puhelin ei palannut; kirjuri vei ottelun loppuun
+tulospalvelussa ja datapuoli selosti pelin loppuun asti flappauksen läpi
+(Virkiä voitti 7–2, loppuyhteenveto jonossa 14:01:16). Relay pysäytettiin
+watchdogilla heti perään, 2863 EL-merkkiä. Selostukset ajautuivat
+flappijaksossa ulos ~34 s pusku-purskeissa jäätyneen kuvan päälle — ei
+voitu etänä varmistaa kuuluivatko kaikki kohteessa (vrt. 144203:n
+"selostus katosi kokonaan" -löydös; jos käyttäjä kuunteli, kysy).
+
 ## TODO 2026-07-15: live-ajon (ottelu 144193) löydökset ja jatkokehitys
 
 > **Kohdat 1, 2, 3, 4 sekä pollausvälin pudotus korjattu 2026-07-15**
