@@ -109,7 +109,21 @@ EL-merkkiä. Kaksi havaintoa:
    samasta ajosta: pistefraasi alkoi pienellä kirjaimella ("… tuojana Amal
    Gazdali. tasan 7, 7.") — ei kuulu puheessa, mutta lokissa näkyy.
 
-### 7. BUGI: esipelifraasit kasautuvat FIFO-jonoon ennen ffmpegin kytkeytymistä ja soivat putkeen
+### 7. BUGI: esipelifraasit kasautuvat FIFO-jonoon ennen ffmpegin kytkeytymistä ja soivat putkeen — ✅ KORJATTU (PR #34)
+
+> **Korjattu 2026-07-16 (PR #34), toteutettu korjausvaihtoehto 3 (kattaa myös
+> vaihtoehdon 1).** Esipelitäyte (`formatWelcomeFiller`) syntetisoidaan nyt vain
+> kun selostusjono on tyhjä JA ffmpeg on kytkeytynyt lukijaksi; muuten kierros
+> ohitetaan (~90 s kadenssi yrittää uudelleen seuraavalla pollilla). `FfmpegMixer`
+> paljastaa kytkeytymistilan kahdella getterillä (`isReaderAttached` = sessio
+> handshaken ja exitin välissä, `pendingClips` = FIFO-jonon syvyys); nämä
+> välitetään `CommentaryLoopille` kapeana `NarrationStatus`-porttina
+> (`index.ts`), ei suorana mixer-viittauksena. Gate koskee VAIN esipelitäytettä
+> (`run()`:n käynnistysfraasi ja `maybeAnnounceSummary`:n pre-game-haara) —
+> tapahtumaselostukset jonottuvat yhä normaalisti vaikka ffmpeg ei olisi
+> kytkeytynyt. Dry-runissa portti raportoi "valmis", joten täyte lokitetaan
+> kuten ennenkin. Testit: `apps/broadcast/test/commentaryLoop.test.ts`
+> ("pre-game filler gating"). **Ei vielä vahvistettu live-ottelulla.**
 
 **Oire (käyttäjä kuuli, todennettu lokista 144737):** videon alussa
 selostettiin lähes samaa tervetuloa-tekstiä useaan kertaan peräkkäin ilman
@@ -141,7 +155,23 @@ jälkeen.
 3. Yksinkertaisin: syntetisoi esipelitäyte vain jos selostusjono on tyhjä
    JA ffmpeg on kytkeytynyt; muuten ohita kierros.
 
-### 8. skip-delayn jälkeen osa kuulutuksista tulee ENNEN videokuvaa (~2–3 s) — harkitse keinotekoista viivettä
+### 8. skip-delayn jälkeen osa kuulutuksista tulee ENNEN videokuvaa (~2–3 s) — harkitse keinotekoista viivettä — ✅ KORJATTU (PR #34)
+
+> **Korjattu 2026-07-16 (PR #34): keinotekoinen, konfiguroitava selostusviive.**
+> `RELAY_NARRATION_DELAY_MS` (`config.ts`, oletus 0 = nykykäytös) ja lennossa
+> säädettävä samasta control-tiedostosta kuin `announceBatterChanges`
+> (`{"narrationDelayMs": 4000}`); control-tiedoston arvo voittaa envin. Viive
+> koskee VAIN toistoa: `speak()` kaappaa viiveen ja päätöshetken synkronisesti
+> (dedupe/tila/announcementCount ajetaan ennallaan), ja viivästää vain
+> synthQueue-luovutusta sinkille. Viive mitataan päätöshetkestä (lattia, ei
+> per-klippi-kumulatiivinen), joten aiemman klipin synteesin valmistuttua
+> lattia on yleensä jo kulunut → ei ajautumista, ja klipit purkautuvat
+> päätösjärjestyksessä samasta järjestystä säilyttävästä synthQueue-ketjusta.
+> Poll-silmukka ei awaita synthQueueta, joten viive ei pysäytä pollausta.
+> Koskee myös täytteitä/recappeja (sama speak-polku), järjestys säilyy.
+> Testit: `apps/broadcast/test/commentaryLoop.test.ts` ("narration delay").
+> Operaattoriohje lisätty relay-ottelu-skilliin. **Oletus 0 — oikea arvo
+> kalibroidaan livenä (video-pipelinen viive vaihtelee lähetyksittäin).**
 
 **Havainto (käyttäjä livenä, ottelu 144740, 16.7. ilta):** osa selostuksista
 kuuluu nyt ~2–3 s ENNEN kuin vastaava tilanne näkyy videolla. Tämä on

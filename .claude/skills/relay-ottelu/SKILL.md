@@ -206,6 +206,25 @@ echo '{"announceBatterChanges": true}'  > apps/broadcast/run/.control-<ID>.json
 (Käytä käynnistyslokin näyttämää tarkkaa polkua. Voit pyytää minua tekemään
 tämän puolestasi kesken ajon — hoidan sen yhdellä komennolla.)
 
+**Selostusviive (jos selostus tulee ennen kuvaa) lennossa.** Jos kuulet
+selostuksen ~2–3 s ENNEN kuin tilanne näkyy videolla, lisää keinotekoista
+viivettä selostuksen ja kuvan kohdistamiseksi. Oletus on 0 ms (ei viivettä);
+oikea arvo kalibroidaan livenä (video-pipelinen viive vaihtelee lähetyksittäin,
+suuruusluokka ~3000–5000 ms). Voi asettaa jo käynnistyksessä
+(`RELAY_NARRATION_DELAY_MS`) tai vaihtaa kesken ajon samaan control-tiedostoon —
+viive koskee vain toistoa (kuvaan kohdistusta), ei muuta selostuslogiikkaa:
+
+```bash
+# lisää 4 s selostusviive:
+echo '{"narrationDelayMs": 4000}' > apps/broadcast/run/.control-<ID>.json
+# pois (takaisin ilman viivettä):
+echo '{"narrationDelayMs": 0}'    > apps/broadcast/run/.control-<ID>.json
+```
+
+Control-tiedostoon voi kirjoittaa molemmat avaimet yhtä aikaa
+(`{"announceBatterChanges": false, "narrationDelayMs": 4000}`); jos kirjoitat
+vain toisen avaimen, toinen asetus säilyy ennallaan.
+
 **Seuranta.** `journalctl --user -u pesisselostaja-relay -f`:
 - "Sydänääni: relay käynnissä … " ~2 min välein = elää (hiljainen jakso ≠ jumi).
 - "Palo: … ", "Pisteet: … ", "Selostus: … " = normaali toiminta.
