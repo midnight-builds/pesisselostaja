@@ -213,10 +213,16 @@ export class CommentaryLoop {
       return;
     }
 
-    const startupMsg = this.matchStarted
-      ? formatStartupSpeech(meta, this.buildContext())
-      : formatWelcomeFiller(meta);
-    this.speak(startupMsg);
+    // The real startup recap (match already running) is always spoken; the
+    // pre-game welcome filler is only worth queuing once ffmpeg is attached
+    // and the queue empty, or it piles up unheard and bursts on connect
+    // (HANDOFF.md 7). Skipping it here just defers it to maybeAnnounceSummary,
+    // which re-checks readiness each poll.
+    if (this.matchStarted) {
+      this.speak(formatStartupSpeech(meta, this.buildContext()));
+    } else if (this.narrationReadyForFiller()) {
+      this.speak(formatWelcomeFiller(meta));
+    }
     // Startup already gives the full situation — don't fire the periodic
     // summary immediately on top of it.
     this.state.lastSummaryTime = Date.now();
@@ -460,6 +466,11 @@ export class CommentaryLoop {
     // Pre-game there is no situation to recap; keep the wait warm instead.
     if (!this.matchStarted) {
       if (now - this.lastSpeechAt < WELCOME_FILLER_MS) return;
+      // Only synthesize the welcome filler when it will actually be heard in
+      // real time (ffmpeg attached, queue empty). Otherwise skip this round —
+      // the ~90s cadence assumes real-time playback, and queuing fillers
+      // before ffmpeg attaches makes them all burst on connect (HANDOFF.md 7).
+      if (!this.narrationReadyForFiller()) return;
       this.speak(formatWelcomeFiller(meta), false);
       return;
     }
@@ -511,9 +522,40 @@ export class CommentaryLoop {
     if (countAnnouncement) this.state.announcementCount++;
     const spoken = preventOrdinalReading(applyPronunciations(text, this.pronunciations));
     log(`Selostus: ${text}`);
-    this.synthQueue = this.synthQueue.then(() => this.sink(spoken, text)).catch((err) => {
-      log(`Selostusvirhe: ${err instanceof Error ? err.message : err}`);
-    });
+    // Artificial playback delay (RELAY_NARRATION_DELAY_MS / control file,
+    // HANDOFF.md 8): captured at decision time and applied ONLY to the sink
+    // handoff below — all dedupe/state bookkeeping above already ran
+    // synchronously, so the delay never affects what gets announced, only
+    // when it plays. The wait is measured from the decision instant, not
+    // added per clip: chained onto the single ordered synthQueue, so by the
+    // time an earlier clip's synthesis finishes this floor is usually already
+    // elapsed (no cumulative drift), and clips still drain in decision order.
+    // The poll loop never awaits synthQueue, so the delay can't stall polling.
+    const decidedAt = Date.now();
+    const delayMs = this.narrationDelayMs;
+    this.synthQueue = this.synthQueue
+      .then(async () => {
+        const wait = decidedAt + delayMs - Date.now();
+        if (wait > 0) await this.sleep(wait);
+        await this.sink(spoken, text);
+      })
+      .catch((err) => {
+        log(`Selostusvirhe: ${err instanceof Error ? err.message : err}`);
+      });
+  }
+
+  /** True when a pre-game/idle filler is worth synthesizing right now: ffmpeg
+   *  attached AND the narration queue empty, so the clip is heard in real time
+   *  instead of piling up (HANDOFF.md 7). With no status port (dry-run/tests)
+   *  narration is treated as always ready, preserving prior behavior. Event
+   *  narration never goes through this gate — only fillers. */
+  private narrationReadyForFiller(): boolean {
+    if (!this.narrationStatus) return true;
+    return this.narrationStatus.isReaderAttached() && this.narrationStatus.pendingClips() === 0;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
