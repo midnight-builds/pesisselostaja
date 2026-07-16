@@ -119,7 +119,11 @@ export class CommentaryLoop {
     try {
       writeFileSync(
         this.config.controlFile,
-        JSON.stringify({ announceBatterChanges: this.announceBatterChanges }, null, 2) + "\n"
+        JSON.stringify(
+          { announceBatterChanges: this.announceBatterChanges, narrationDelayMs: this.narrationDelayMs },
+          null,
+          2
+        ) + "\n"
       );
     } catch (err) {
       log(`Control-tiedoston kirjoitus epäonnistui: ${err instanceof Error ? err.message : err}`);
