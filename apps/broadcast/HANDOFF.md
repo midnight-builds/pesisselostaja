@@ -42,6 +42,51 @@ re-encode ollenkaan (CPU-hinta vs. hyöty — YouTuben ilmoitus voi olla vain
 varoitus eikä aina näy katsojalle bufferointina), vai onko helpompi ohjata
 käyttäjää säätämään puhelimen striimaussovelluksen GOP-asetusta.
 
+### 3. ElevenLabs lausui ylimääräisen siansaksasanan lyhyen fraasin alkuun
+
+**Havainto (käyttäjä kuuli livenä, klo 6:46:29 UTC):** kohteessa kuului
+"reewer lyömässä lappalainen" — mutta lokissa selostusteksti oli täysin
+normaali `Selostus: Lyömässä Lappalainen.` (16–20 merkin klippi). Ylimääräinen
+"reewer"-alku ei siis tullut meidän tekstistä vaan **ElevenLabs-synteesistä**.
+
+**Todennäköinen selitys:** ElevenLabsin tunnettu taipumus hallusinoida
+ylimääräisiä äänteitä/sanoja hyvin lyhyiden syötteiden alkuun tai loppuun
+(erityisesti multilingual-malleilla). Meidän lyhyimmät fraasit ("Lyömässä X.",
+"Vuorossa X.") ovat juuri tässä riskiluokassa.
+
+**Ei toteutettu — korjausideoita seuraavaan sessioon:**
+1. Pidennä lyhyimpiä fraaseja luonnollisella tavalla (esim. "Ja lyömässä nyt
+   Lappalainen.") — pidempi konteksti vähentää hallusinointia.
+2. Kokeile `previous_text`-parametria EL-pyyntöön (antaa mallille kontekstin
+   ilman että sitä puhutaan ääneen) — voisi vakauttaa lyhyet klipit.
+3. Seuraa toistuuko: yksittäistapaus voi olla satunnainen; jos toistuu
+   nimenomaan lyhyillä fraaseilla, priorisoi 1/2.
+
+### 4. ~2 min hiljainen jakso kesken pelin tuntui katsojasta selostuksen loppumiselta
+
+**Havainto (käyttäjä livenä, klo ~6:49–6:52 UTC):** pelissä oli luonnollinen
+tapahtumaköyhä rako 6:49:37 → 6:51:28 (~2 min ilman paloja/pisteitä/vaihtoja),
+ja putken ~30–90 s viive päälle — katsojalle tauko venyi niin pitkäksi, että
+se tuntui selostuksen loppumiselta ("nyt loppui selostukset"). Relay oli koko
+ajan terve: sama ffmpeg-sessio, ei respawneja, synteesi jatkui heti kun
+tapahtumia tuli.
+
+**Idea (ei toteutettu):** harkitse periodisen tilannekuvan/täytefraasin
+laukaisua jo ~2 min hiljaisuuden jälkeen kesken pelin — nykyinen periodinen
+tilannekuva ei ehdi laueta näin lyhyeen rakoon. Sukua idle filler
+-ajatukselle (ennen peliä -täyte on jo olemassa, `formatWelcomeFiller`);
+tämä laajentaisi saman periaatteen käynnissä olevaan peliin. Punnittava
+puuduttavuutta vastaan: liian tiheä tilannekuva toistaa itseään — ehkä
+lyhyt kevytfraasi ("Tilanne edelleen 5, 0") tai vaihteleva varianttijoukko.
+
+### 5. Loppuselostukseen "Kiitos katsojille"
+
+**Käyttäjän toive (ottelun 144733 päätyttyä):** samaan selostukseen jossa
+ottelun kerrotaan päättyneen (loppuyhteenveto / `formatMatchEndRecap`,
+`packages/core/src/speech.ts`) voisi lisätä kiitoksen katsojille, esim.
+"Kiitos katsojille." Ei toteutettu — pieni lisäys, sopii tehtäväksi samalla
+kun loppuyhteenvetoa seuraavan kerran muokataan.
+
 ## TODO 2026-07-15: live-ajon (ottelu 144193) löydökset ja jatkokehitys
 
 > **Kohdat 1, 2, 3, 4 sekä pollausvälin pudotus korjattu 2026-07-15**
