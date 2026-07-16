@@ -51,6 +51,18 @@ const API_TIMEOUT_MS = 4000;
 
 export type SpeechSink = (spokenText: string, readableText: string) => Promise<void>;
 
+/** Lets the loop see the narration output stage so it can decide whether a
+ *  pre-game filler is worth synthesizing right now (HANDOFF.md 7). Kept as a
+ *  narrow port rather than a direct FfmpegMixer reference so the loop stays
+ *  testable and decoupled from ffmpeg. When absent (dry-run/tests) the loop
+ *  treats narration as always ready, preserving the old behavior. */
+export interface NarrationStatus {
+  /** True while ffmpeg is attached and draining the FIFO in real time. */
+  isReaderAttached(): boolean;
+  /** Clips still queued for playback but not yet drained. */
+  pendingClips(): number;
+}
+
 /** Standalone ~6s poll loop that reproduces WatcherController's announcement
  *  content/timing (src/watcher.ts) using the same pure speech/state helpers,
  *  but hands each announcement to a SpeechSink (narration synthesis) instead
