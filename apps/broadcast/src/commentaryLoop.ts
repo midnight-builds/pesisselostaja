@@ -82,6 +82,10 @@ export class CommentaryLoop {
   /** Current effective value of the batter-change setting. Seeded from config
    *  at startup, then overridable mid-match via the control file. */
   private announceBatterChanges: boolean;
+  /** Current effective narration delay (ms). Seeded from config, overridable
+   *  mid-match via the control file. See speak() for how it's applied without
+   *  touching dedupe/state bookkeeping. */
+  private narrationDelayMs: number;
   /** False until the match has produced any event — the endpoint always
    *  returns the full history, so an empty history means the game genuinely
    *  hasn't started and the loop speaks welcome fillers instead of recaps. */
@@ -96,10 +100,15 @@ export class CommentaryLoop {
    *  not an authoritative clock. */
   private matchEpochMs: number | null = null;
 
-  constructor(private config: RelayConfig, private sink: SpeechSink) {
+  constructor(
+    private config: RelayConfig,
+    private sink: SpeechSink,
+    private narrationStatus?: NarrationStatus
+  ) {
     this.state = loadState(config.stateFile);
     this.pronunciations = loadPronunciations(config.pronunciationsFile);
     this.announceBatterChanges = config.announceBatterChanges;
+    this.narrationDelayMs = config.narrationDelayMs;
   }
 
   /** Writes the current setting to the control file so there is always a
