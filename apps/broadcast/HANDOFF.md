@@ -141,6 +141,27 @@ jälkeen.
 3. Yksinkertaisin: syntetisoi esipelitäyte vain jos selostusjono on tyhjä
    JA ffmpeg on kytkeytynyt; muuten ohita kierros.
 
+### 8. skip-delayn jälkeen osa kuulutuksista tulee ENNEN videokuvaa (~2–3 s) — harkitse keinotekoista viivettä
+
+**Havainto (käyttäjä livenä, ottelu 144740, 16.7. ilta):** osa selostuksista
+kuuluu nyt ~2–3 s ENNEN kuin vastaava tilanne näkyy videolla. Tämä on
+skip-delay-muutoksen (PR #33) kääntöpuoli: API-julkaisuviive putosi niin
+paljon, että selostusputki (poll → synteesi → FIFO → mix) on nyt joskus
+NOPEAMPI kuin videopolku (puhelin → YouTube-ingest → HLS-pull → remux).
+Aiemmin API:n ~2 min viive takasi että selostus tuli aina kuvan jäljessä;
+nyt marginaali on kaventunut nollan molemmin puolin.
+
+**Idea (ei toteutettu): keinotekoinen pieni viive selostuksiin.** Esim.
+kiinteä konfiguroitava viive (RELAY_NARRATION_DELAY_MS, suuruusluokka
+~3–5 s?) tapahtuman havaitsemisen ja puheen jonotuksen väliin, jotta
+selostus osuu aina kuvan jälkeen mutta pysyy tuoreena. Toteutuskohtia:
+commentaryLoopin speak-jono (viivästä synthQueue-luovutusta) tai FIFO-
+kirjoitus. Huomioitava: viive ei saa sekoittaa dedupe-/tilalogiikkaa
+(bokkipito tehdään jo synkronisesti päätöshetkellä, joten pelkkä
+toiston viivästys lienee turvallinen). Oikea arvo kannattaa kalibroida
+livenä — videopolun viive vaihtelee lähetyksestä toiseen, joten arvon on
+hyvä olla env-säädettävä ja/tai control-tiedostosta lennossa muutettava.
+
 ## TODO 2026-07-15: live-ajon (ottelu 144193) löydökset ja jatkokehitys
 
 > **Kohdat 1, 2, 3, 4 sekä pollausvälin pudotus korjattu 2026-07-15**
