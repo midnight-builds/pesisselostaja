@@ -136,16 +136,25 @@ export class CommentaryLoop {
    *  Async read: a sync one would block NarrationFifo's 20ms tick every
    *  poll (HANDOFF.md 8). */
   private async refreshRuntimeControls(): Promise<void> {
-    let next: boolean | null = null;
+    let parsed: Record<string, unknown>;
     try {
-      const parsed = JSON.parse(await readFile(this.config.controlFile, "utf8"));
-      if (typeof parsed.announceBatterChanges === "boolean") next = parsed.announceBatterChanges;
+      parsed = JSON.parse(await readFile(this.config.controlFile, "utf8"));
     } catch {
       return;
     }
-    if (next !== null && next !== this.announceBatterChanges) {
-      this.announceBatterChanges = next;
-      log(`Pelaajanvaihtojen selostus vaihdettu ajon aikana: ${next ? "PÄÄLLÄ" : "POIS"} (control-tiedostosta).`);
+    if (typeof parsed.announceBatterChanges === "boolean" && parsed.announceBatterChanges !== this.announceBatterChanges) {
+      this.announceBatterChanges = parsed.announceBatterChanges;
+      log(`Pelaajanvaihtojen selostus vaihdettu ajon aikana: ${this.announceBatterChanges ? "PÄÄLLÄ" : "POIS"} (control-tiedostosta).`);
+    }
+    // Runtime narration-delay override: the control-file value wins over the
+    // env/CLI seed once set. Ignore invalid/negative values so a half-written
+    // edit can't turn every wait computation into NaN (see speak()).
+    if (typeof parsed.narrationDelayMs === "number" && Number.isFinite(parsed.narrationDelayMs)) {
+      const next = Math.max(0, Math.round(parsed.narrationDelayMs));
+      if (next !== this.narrationDelayMs) {
+        this.narrationDelayMs = next;
+        log(`Selostusviive vaihdettu ajon aikana: ${next} ms (control-tiedostosta).`);
+      }
     }
   }
 
