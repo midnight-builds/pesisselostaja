@@ -503,7 +503,11 @@ function formatDrawOfChoice(texts: EventTextElement[], meta: MatchMetadata, look
   return ttsClean(parts.join(" ")) + ".";
 }
 
-function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
+/** Also exported for the broadcast relay's first-attach recap: if the match
+ *  ended while narration was still suppressed (ffmpeg never attached in time),
+ *  the connect-moment recap must speak this same closing line instead of a
+ *  mid-game situation summary. */
+export function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
   if (ctx) {
     // A single-jakso match (camps/tournaments) never reaches a second period,
     // so periodsWon is always 0-1 or 1-0 regardless of margin — report the
