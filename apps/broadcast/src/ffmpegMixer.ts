@@ -192,6 +192,7 @@ export class FfmpegMixer {
 
   stop(): void {
     this.stopped = true;
+    this.sessionActive = false;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.fifo.stop();
     this.child?.kill("SIGTERM");
