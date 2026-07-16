@@ -87,6 +87,20 @@ export class CommentaryLoop {
    *  mid-match via the control file. See speak() for how it's applied without
    *  touching dedupe/state bookkeeping. */
   private narrationDelayMs: number;
+  /** Latched permanently true the first time the ffmpeg reader is seen
+   *  attached (or immediately when there is no status port — dry-run/tests).
+   *  Before the latch, speak() runs its bookkeeping but skips the sink handoff
+   *  entirely: clips synthesized before the FIRST attach would pile up in the
+   *  FIFO and play out minutes stale in one burst on connect (HANDOFF.md 7,
+   *  case B). AFTER the latch the behavior deliberately never reverts —
+   *  mid-game ffmpeg drops (flapping source) keep queueing event narration
+   *  exactly as before, since a short outage losing all narration is the
+   *  worse failure mode there (144203); revisiting that is a separate open
+   *  HANDOFF question. */
+  private narrationEverReady: boolean;
+  /** True if any speech was suppressed pre-latch, so the latch moment knows
+   *  to speak one fresh catch-up recap instead of the stale suppressed clips. */
+  private suppressedBeforeAttach = false;
   /** False until the match has produced any event — the endpoint always
    *  returns the full history, so an empty history means the game genuinely
    *  hasn't started and the loop speaks welcome fillers instead of recaps. */
@@ -110,6 +124,8 @@ export class CommentaryLoop {
     this.pronunciations = loadPronunciations(config.pronunciationsFile);
     this.announceBatterChanges = config.announceBatterChanges;
     this.narrationDelayMs = config.narrationDelayMs;
+    // No status port = nothing to wait for: latch immediately (old behavior).
+    this.narrationEverReady = !narrationStatus;
   }
 
   /** Writes the current setting to the control file so there is always a
