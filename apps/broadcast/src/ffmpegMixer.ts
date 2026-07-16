@@ -260,6 +260,7 @@ export class FfmpegMixer {
     }, HEARTBEAT_MS);
 
     const result = await childDone;
+    this.sessionActive = false;
     clearInterval(heartbeat);
     this.fifo.closeIo();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
