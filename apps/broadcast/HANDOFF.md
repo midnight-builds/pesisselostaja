@@ -109,6 +109,38 @@ EL-merkkiä. Kaksi havaintoa:
    samasta ajosta: pistefraasi alkoi pienellä kirjaimella ("… tuojana Amal
    Gazdali. tasan 7, 7.") — ei kuulu puheessa, mutta lokissa näkyy.
 
+### 7. BUGI: esipelifraasit kasautuvat FIFO-jonoon ennen ffmpegin kytkeytymistä ja soivat putkeen
+
+**Oire (käyttäjä kuuli, todennettu lokista 144737):** videon alussa
+selostettiin lähes samaa tervetuloa-tekstiä useaan kertaan peräkkäin ilman
+merkittäviä taukoja.
+
+**Juurisyy (lokianalyysi):** relay käynnistettiin 10:25:23, mutta lähde ei
+ollut vielä livenä — ffmpeg kytkeytyi vasta 10:30:26. Sillä välin
+esipelitäyte (`formatWelcomeFiller`, ~90 s välein) syntetisoi ja jonotti
+NELJÄ klippiä (10:25:23 Tervetuloa…, 10:26:56 Ottelu ei ole vielä alkanut…,
+10:28:27 Tervetuloa…, 10:29:59 Odottelemme…). NarrationFifo ei purkaudu
+ennen kuin ffmpeg on lukijana, joten kaikki neljä soivat putkeen (vain
+700 ms väli) heti kun ffmpeg kytkeytyi — katsojalle ~4 lähes identtistä
+avausfraasia peräkkäin videon alussa. 90 s täytekadenssi olettaa
+reaaliaikaisen toiston; ennen kytkeytymistä oletus ei päde.
+
+**Muualta ei löytynyt vastaavaa:** koko loppuajon jonosyvyys kävi
+korkeimmillaan 3:ssa (normaali tapahtumaryöppy 11:04, purkautui heti);
+lokissa toistuvat tekstit ("Palo! … Ensimmäinen palo" 3×) ovat aitoja eri
+vuorojen tapahtumia ~13 min välein, eivät virhetoistoja. Aamun ajossa
+(144733) jono pysyi ≤1:ssä koska lähde tuli liveksi nopeasti käynnistyksen
+jälkeen.
+
+**Korjausideoita (ei toteutettu):**
+1. Älä jonota esipelitäytettä kun ffmpeg ei ole kytkeytynyt (mixer tietää
+   tilansa) — täyte on arvotonta jos kukaan ei kuule sitä reaaliajassa.
+2. TAI: kun ffmpeg kytkeytyy, pudota jonosta vanhentuneet täyteklipit ja
+   jätä vain uusin (vaatii klippien luokittelun: tapahtumaselostuksia ei
+   saa pudottaa).
+3. Yksinkertaisin: syntetisoi esipelitäyte vain jos selostusjono on tyhjä
+   JA ffmpeg on kytkeytynyt; muuten ohita kierros.
+
 ## TODO 2026-07-15: live-ajon (ottelu 144193) löydökset ja jatkokehitys
 
 > **Kohdat 1, 2, 3, 4 sekä pollausvälin pudotus korjattu 2026-07-15**
