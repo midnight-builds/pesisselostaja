@@ -162,6 +162,22 @@ toiston viivästys lienee turvallinen). Oikea arvo kannattaa kalibroida
 livenä — videopolun viive vaihtelee lähetyksestä toiseen, joten arvon on
 hyvä olla env-säädettävä ja/tai control-tiedostosta lennossa muutettava.
 
+### 9. Flappaava lähde toistui (144740) — juurisyy nyt tiedossa: lähettävän puhelimen akku loppui
+
+**Havainto (kesken ajon 16.7. ilta, klo 13:39 UTC alkaen):** sama
+kellontarkka ~33–34 s code=0-respawn-kuvio kuin 144203:ssa (938 s terve ajo
+→ sitten 16+ respawnia ~66 s sykleissä). Käyttäjä vahvisti juurisyyn:
+**lähettävän kännykän akku loppui** — ensimmäinen kerta kun kuviolle on
+varmistettu tosielämän syy. YouTube tarjoili jäätynyttä DVR-häntää, yt-dlp
+resolvasi joka kerta, ffmpeg luki ~34 s ja EOF:äsi. Datapuoli
+(pesistulokset-feed → selostus) jatkui koko ajan normaalisti.
+
+Käyttäjän päätös: relay jätettiin ajoon siltä varalta että puhelin palaa —
+kuvio ei laukaise itsesammutusta (code=0-exitit eivät kerrytä
+luovutusikkunaa), mikä tässä tapauksessa oli haluttu käytös. Vahvistaa
+HANDOFFin aiemman "stalled source" -analyysin: automaattitappo olisi ollut
+väärä ratkaisu, operaattorin/agentin päätös oikea taso.
+
 ## TODO 2026-07-15: live-ajon (ottelu 144193) löydökset ja jatkokehitys
 
 > **Kohdat 1, 2, 3, 4 sekä pollausvälin pudotus korjattu 2026-07-15**
