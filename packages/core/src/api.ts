@@ -106,12 +106,16 @@ export async function fetchTodayMatches(opts: ApiOptions = {}): Promise<LiveMatc
 
 export async function fetchLiveEvents(
   matchId: number,
-  opts: ApiOptions & { after?: number } = {}
+  opts: ApiOptions & { after?: number; skipDelay?: boolean } = {}
 ): Promise<LiveEventsResponse> {
   const base = opts.apiBase ?? DEFAULT_API_BASE;
   let url = `${base}/online/${matchId}/events`;
   const params = new URLSearchParams();
   if (opts.after !== undefined) params.set("after", String(opts.after));
+  // The API delays the public feed ~2 min by default; skip-delay=true (same
+  // parameter the pesistulokset.fi frontend sends) serves events sooner.
+  // Verified live 2026-07-16: cut publication delay ~25-45%.
+  if (opts.skipDelay) params.set("skip-delay", "true");
   const qs = params.toString();
   if (qs) url += `?${qs}`;
   const res = await fetchWithTimeout(url, opts.timeoutMs);
