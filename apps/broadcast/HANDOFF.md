@@ -178,6 +178,19 @@ luovutusikkunaa), mikä tässä tapauksessa oli haluttu käytös. Vahvistaa
 HANDOFFin aiemman "stalled source" -analyysin: automaattitappo olisi ollut
 väärä ratkaisu, operaattorin/agentin päätös oikea taso.
 
+**Sivumekanismi (käyttäjän havainto samasta ajosta):** kumpikaan striimi ei
+päättynyt katsojille, vaikka puhelin oli selvästi kuollut. Kaksi eri syytä:
+(1) lähde: YouTube pitää lähetystä "live"-tilassa useita minuutteja ingestin
+loppumisen jälkeen (sama armonaika kuin auto-stopin viive, ks. 144203:n
+sivuhavainto). (2) kohde: **flappaava relay itse pitää kohdelähetyksen
+hengissä loputtomiin** — joka ~66 s syklissä se työntää ~34 s jäätynyttä
+DVR-häntää kohteen ingestiin, joten kohteen auto-stop ei laukea koskaan
+flapin jatkuessa. Seuraus: jos lähde ei palaa, kohde päättyy vasta kun relay
+pysäytetään käsin/watchdogilla ("Ottelu päättyi" → stop → auto-stop pääsee
+laukeamaan). Huomioitava jos "stalled source" -luovutusehtoa (kohta yllä)
+joskus toteutetaan: pitkittynyt flappi ei ole vain kosmeettinen, se myös
+lykkää kohteen auto-stopia.
+
 ## TODO 2026-07-15: live-ajon (ottelu 144193) löydökset ja jatkokehitys
 
 > **Kohdat 1, 2, 3, 4 sekä pollausvälin pudotus korjattu 2026-07-15**
