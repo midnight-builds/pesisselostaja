@@ -195,10 +195,18 @@ export class FfmpegMixer {
       } catch (err) {
         log(`ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
         if (this.failingSince === null) this.failingSince = Date.now();
-        if (Date.now() - this.failingSince > this.maxFailureWindowMs) {
+        // A finished match's source won't come back — use the much shorter
+        // window then (HANDOFF.md 16.7. kohta 6.2). Only this start-up-failure
+        // accounting is affected; clean exits (flapping source) still reset
+        // failingSince above and never accrue toward giving up.
+        const windowMs = this.opts.isMatchFinished?.()
+          ? (this.opts.finishedFailureWindowMs ?? 2 * 60 * 1000)
+          : this.maxFailureWindowMs;
+        if (Date.now() - this.failingSince > windowMs) {
           this.stopped = true;
           throw new SourceExhaustedError(
-            `Lähde ei ole vastannut ${Math.round(this.maxFailureWindowMs / 60000)} minuuttiin — luovutetaan.`
+            `Lähde ei ole vastannut ${Math.round(windowMs / 60000)} minuuttiin` +
+              `${this.opts.isMatchFinished?.() ? " ja ottelu on päättynyt" : ""} — luovutetaan.`
           );
         }
       }
