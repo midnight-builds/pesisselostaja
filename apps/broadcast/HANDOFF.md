@@ -5,18 +5,23 @@
 > Kerätty ajon aikana, **ei toteutettu** — käyttäjän pyynnöstä vain kirjattu
 > ylös seuraavaa kehityssessiota varten.
 
-### 1. Aloitusselostus tulee aivan videon alkuun — harva katsoja ehtinyt paikalle
+### 1. Aloitusselostus tulee aivan videon alkuun — harva katsoja ehtinyt paikalle — ✅ KORJATTU (PR #34, 2026-07-17)
+
+> **Korjattu laajentamalla latch-mekanismia (kohta 7):** narration lasketaan
+> "valmiiksi" vasta kun ffmpeg on ollut kytkeytyneenä
+> `RELAY_FIRST_SPEECH_DELAY_MS` (oletus 20 000 ms; 0 = pois). Viive mitataan
+> ENSIMMÄISESTÄ kytkeytymisestä (`FfmpegMixer.firstAttachedAt`, ei relayn
+> startista — lähde voi tulla liveksi minuutteja myöhemmin) ja koskee vain
+> ajon alkua: latch, esipelitäyte ja kytkeytymisrecap odottavat sen yli,
+> latchin jälkeen respawnit eivät tuo uutta viivettä. Erillinen mekanismi
+> kuin `RELAY_NARRATION_DELAY_MS` (kohta 8, per-klippi-toistoviive).
+> Testit: `commentaryLoop.test.ts` ("first-speech grace").
+> **Ei vielä vahvistettu live-ottelulla.**
 
 **Havainto (käyttäjä):** ensimmäinen selostus alkaa heti kun relay/ottelu
 käynnistyy, mutta siinä vaiheessa harva on vielä ehtinyt avata videota.
 Ehdotus: viivytä ensimmäistä selostusta esim. **20 s** relayn/videon
 käynnistyksestä, jotta katsojat ehtivät kytkeytyä ennen kuin mitään sanotaan.
-
-**Ei toteutettu.** Harkittava toteutuskohta: `commentaryLoop.ts`/`index.ts`
-käynnistyspolku — esim. kertaluonteinen viive ennen ensimmäistä `speak()`-
-kutsua. Huomioi suhde esipelitäytteeseen (HANDOFF 07-15 kohta 5,
-"Tervetuloa"-fraasit ~90 s välein) — 20 s viive koskisi todennäköisesti vain
-ihan ensimmäistä repliikkiä, ei koko täytemekanismia.
 
 ### 2. YouTube-virhe: "Please use a keyframe frequency of four seconds or less"
 
@@ -42,7 +47,21 @@ re-encode ollenkaan (CPU-hinta vs. hyöty — YouTuben ilmoitus voi olla vain
 varoitus eikä aina näy katsojalle bufferointina), vai onko helpompi ohjata
 käyttäjää säätämään puhelimen striimaussovelluksen GOP-asetusta.
 
-### 3. ElevenLabs lausui ylimääräisen siansaksasanan lyhyen fraasin alkuun
+### 3. ElevenLabs lausui ylimääräisen siansaksasanan lyhyen fraasin alkuun — ✅ KORJATTU (PR #34, 2026-07-17)
+
+> **Molemmat korjausideat toteutettu (käyttäjän valinta):**
+> 1. `previous_text`-parametri EL-pyyntöön (`elevenLabsTts.ts`): edellisen
+>    syntetisoidun selostuksen teksti lähetetään kontekstiksi (ei puhuta
+>    ääneen) — päivittyy myös cache-osumilla; cache-avain ennallaan (sama
+>    teksti = sama klippi).
+> 2. Lyhyimmät fraasit pidennetty pickVariant-varianteilla: batter-pooliin
+>    lisätty "Nyt vuorossa on X." / "Ja lyömässä nyt X." / "Seuraavaksi
+>    vuorossa X." / "Seuraavaksi lyömässä X." — lyhyet muodot jäivät pooliin
+>    vähemmistöksi (2/6).
+>
+> Testit: `elevenLabsTts.test.ts` ("previous_text context"),
+> `subEventSpeech.test.ts` (varianttijoukot). Seuraa livenä toistuuko
+> hallusinointi — jos toistuu, harkitse lyhyiden muotojen poistoa kokonaan.
 
 **Havainto (käyttäjä kuuli livenä, klo 6:46:29 UTC):** kohteessa kuului
 "reewer lyömässä lappalainen" — mutta lokissa selostusteksti oli täysin
@@ -62,7 +81,15 @@ ylimääräisiä äänteitä/sanoja hyvin lyhyiden syötteiden alkuun tai loppuu
 3. Seuraa toistuuko: yksittäistapaus voi olla satunnainen; jos toistuu
    nimenomaan lyhyillä fraaseilla, priorisoi 1/2.
 
-### 4. ~2 min hiljainen jakso kesken pelin tuntui katsojasta selostuksen loppumiselta
+### 4. ~2 min hiljainen jakso kesken pelin tuntui katsojasta selostuksen loppumiselta — ✅ KORJATTU (PR #34, 2026-07-17)
+
+> **Korjattu:** `IDLE_FILLER_MS` 2 min → 90 s (`commentaryLoop.ts`), ja
+> `formatIdleSummary`-varianttipooliin lisätty käyttäjän toivoma kevyt
+> tilastotyyli sisävuorojoukkueen kanssa: "Tilasto kertoo tilanteeksi 2, 4,
+> Ysit johtaa, ja sisävuorossa on KaKa." (tasatilannepoolissa vastaava).
+> Pisteet aina koti ensin; sisävuorolause jää siististi pois jos
+> `currentBatTeamId` ei ole tiedossa. Testit: `subEventSpeech.test.ts`
+> ("light stat-style variant"). **Ei vielä vahvistettu live-ottelulla.**
 
 **Havainto (käyttäjä livenä, klo ~6:49–6:52 UTC):** pelissä oli luonnollinen
 tapahtumaköyhä rako 6:49:37 → 6:51:28 (~2 min ilman paloja/pisteitä/vaihtoja),
@@ -79,13 +106,18 @@ tämä laajentaisi saman periaatteen käynnissä olevaan peliin. Punnittava
 puuduttavuutta vastaan: liian tiheä tilannekuva toistaa itseään — ehkä
 lyhyt kevytfraasi ("Tilanne edelleen 5, 0") tai vaihteleva varianttijoukko.
 
-### 5. Loppuselostukseen "Kiitos katsojille"
+### 5. Loppuselostukseen "Kiitos katsojille" — ✅ KORJATTU (PR #34, 2026-07-17)
+
+> **Korjattu:** `formatMatchEnd` (`packages/core/src/speech.ts`) päättää
+> loppuselostuksen kiitokseen, pickVariant-variantit: "Kiitos katsojille." /
+> "Kiitokset kaikille katsojille." / "Kiitos, että olitte mukana." Kaikissa
+> haaroissa (ctx-loppuyhteenveto, result-fallback). Testit hyväksyvät
+> varianttijoukon (`subEventSpeech.test.ts`, match end).
 
 **Käyttäjän toive (ottelun 144733 päätyttyä):** samaan selostukseen jossa
 ottelun kerrotaan päättyneen (loppuyhteenveto / `formatMatchEndRecap`,
 `packages/core/src/speech.ts`) voisi lisätä kiitoksen katsojille, esim.
-"Kiitos katsojille." Ei toteutettu — pieni lisäys, sopii tehtäväksi samalla
-kun loppuyhteenvetoa seuraavan kerran muokataan.
+"Kiitos katsojille."
 
 ### 6. Ottelun 144737 valvomaton ajo (iltapäivä 16.7.) — onnistui päästä päähän
 
@@ -100,14 +132,21 @@ EL-merkkiä. Kaksi havaintoa:
    sekä Amal että Amira Gazdali ja Hulda että Hilda Kivilahti — kaikki
    luettiin koko etunimellä oikein, myös saman fraasin sisällä ("sen löi
    Amira Gazdali, tuojana Amal Gazdali").
-2. **Pieni parannusidea:** kun ottelu on jo päättynyt (`state.finished`) ja
-   lähde EOF:ää, relay jää silti yrittämään lähdettä koko
-   `RELAY_MAX_FAILURE_WINDOW_MS`-ikkunan (nyt 12 min) ennen itsesammutusta.
-   Päättyneen ottelun jälkeen odotus on turha — voisi luovuttaa heti tai
-   esim. 1–2 min kuluttua, kun `finished` on tosi. Harmiton mutta hidastaa
-   siivousta ja pitää prosessia turhaan pystyssä. Kosmeettinen sivuhuomio
-   samasta ajosta: pistefraasi alkoi pienellä kirjaimella ("… tuojana Amal
-   Gazdali. tasan 7, 7.") — ei kuulu puheessa, mutta lokissa näkyy.
+2. **Pieni parannusidea — ✅ KORJATTU (PR #34, 2026-07-17):** kun ottelu on
+   jo päättynyt (`state.finished`) ja lähde EOF:ää, relay jäi yrittämään
+   lähdettä koko `RELAY_MAX_FAILURE_WINDOW_MS`-ikkunan (12 min) ennen
+   itsesammutusta.
+   > **Korjaus:** `FfmpegMixer` saa `isMatchFinished`-providerin
+   > (`index.ts` → loopin `matchFinished`-getteri) ja käyttää finished-
+   > tilassa lyhyempää luovutusikkunaa `RELAY_FINISHED_FAILURE_WINDOW_MS`
+   > (oletus 2 min). Koskee VAIN käynnistys-/resolvausvirheiden ikkunaa
+   > kuten ennenkin — flappikuvio (code=0-exitit) ei edelleenkään kerrytä
+   > luovutusta. Testit: `ffmpegMixerWindow.test.ts`.
+   >
+   > Kosmeettinen sivuhuomio korjattu samalla: pistefraasin perään liitetty
+   > tilanne alkaa nyt isolla ("… tuojana Amal Gazdali. Tasan 7, 7.") —
+   > `capitalize(formatScore(...))` kaikissa kolmessa liitoskohdassa
+   > (`speech.ts`), regressiotesti `subEventSpeech.test.ts`:ssä.
 
 ### 7. BUGI: esipelifraasit kasautuvat FIFO-jonoon ennen ffmpegin kytkeytymistä ja soivat putkeen — ✅ KORJATTU (PR #34)
 
@@ -393,7 +432,55 @@ Vuoroparien/jaksojen määrä päätellään tapahtumista — formaatit vaihtele
 (leiripeleissä usein 1 jakso), älä oleta 2 jaksoa. Tämän jälkeen kohdan 1
 hiljaisuussääntö.
 
-### 6. Selvitys: striimaava/osittainen API
+### 6. Selvitys: striimaava/osittainen API — ✅ TOTEUTETTU KOODIIN (PR #34, 2026-07-17)
+
+> **Toteutettu:** `after`-delta + ETag-ehdollinen haku + polli 4000 → 3000 ms.
+>
+> - `packages/core/src/api.ts`: `fetchLiveEvents` saa `after` (Europe/
+>   Helsinki "YYYY-MM-DD HH:mm:ss", %20-enkoodattu — URLSearchParamsin "+"
+>   vältetty tarkoituksella) ja `etag`-optiot; palauttaa `etag`,
+>   `serverDateMs` (Date-header), `notModified` (304) ja `reset`-lipun.
+> - **after-aikaleiman lähde:** tapahtumissa EI ole wall-clock-kenttää
+>   (varmistettu oikealla datalla 144733, 2026-07-17 — vain ottelu-epochiin
+>   suhteutettu `timestamp`), joten after johdetaan edellisen onnistuneen
+>   vastauksen Date-headerista − 180 s turvamarginaali. Marginaalin on
+>   ylitettävä API:n julkaisuviive (~68–123 s skip-delaylla mitattuna), tai
+>   viiveellä julkaistava tapahtuma voisi jäädä pysyvästi väliin. Cursor
+>   etenee vain kun delta tuo muutoksia → hiljaisina jaksoina URL pysyy
+>   samana ja ETag antaa halpoja 304:iä.
+> - `apps/broadcast/src/eventHistory.ts`: paikallinen täyshistoria johon
+>   deltat mergetään (avain vuorokoordinaatit+id — event.id nollautuu
+>   vuoroittain). KAIKKI olemassa oleva käsittely (processEventsLive,
+>   recomputeCurrentOutsKeyed, palo-ordinaalit) ajetaan mergattua täyslistaa
+>   vasten — täyshistoriaoletusta EI muutettu. 304 → tapahtumakäsittely
+>   ohitetaan kokonaan (täytteet/tila elävät normaalisti).
+> - Fallbackit: `reset`-lippu tai epäkonsistentti delta (tapahtuman
+>   alitapahtumalista kutistui) → VÄLITÖN täyshaku samalla pollilla +
+>   historian uudelleenrakennus. Lisäksi määräaikainen täysresync 60 s
+>   välein (korvaa historian — kattaa mm. period 3:n uudelleenavainnetut
+>   transientit).
+> - **Lennossa-kytkimet (control-tiedosto):** `deltaFetch` (oletus true,
+>   env-vastine `RELAY_DELTA_FETCH`; false = puhdas täyshakukäytös heti) ja
+>   `pollIntervalMs` (validoitu ≥2000).
+> - Testit: `commentaryLoopDelta.test.ts` (delta-merge, 304, reset- ja
+>   epäkonsistenssifallback, resync, control-kytkimet),
+>   `eventHistory.test.ts`, `packages/core/test/api.test.ts`.
+>
+> **LIVE-VAHVISTUSLISTA seuraavaan ajoon (katso lokista):**
+> 1. Käynnistysrivi "Selostussilmukka käynnissä… (polli 3000 ms, delta-haku
+>    PÄÄLLÄ)".
+> 2. "Delta-haku: N uutta, M päivittynyttä tapahtumaa (historiassa X)" -rivit
+>    tapahtumien tullessa — X:n pitää kasvaa monotonisesti ja vastata pelin
+>    todellista tapahtumamäärää.
+> 3. EI rivejä "Delta-epäkonsistenssi → täyshaku" toistuvasti (yksittäinen
+>    on ok); "reset-lippu" -rivit kiinnostavat aina.
+> 4. first-seen-deltat (kohta 6c): pitäisi pudota entisestään ~1 s, kun
+>    polli tiheni 4 → 3 s.
+> 5. Palo-ordinaalit ja pistetilanne oikein läpi ottelun (delta-merge ei saa
+>    muuttaa puhetta millään tavalla — sama täyshistoria käsittelyssä).
+> 6. Jos MIKÄÄN näyttää oudolta: kytke delta pois lennossa
+>    `echo '{"deltaFetch": false}' >> control` -tyyliin (ks. skill /
+>    README) — täyshakukäytös palaa seuraavassa pollissa ilman restarttia.
 
 > **Selvitetty 15.7.2026** (frontendin main.js-analyysi + API-kokeet päättyneellä
 > ottelulla 144202). Löydökset:

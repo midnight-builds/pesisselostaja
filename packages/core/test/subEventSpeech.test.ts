@@ -77,21 +77,34 @@ describe("subEventToSpeech: batter change", () => {
     texts: ["Lyöntivuorossa", { type: "player", id: 11 }],
   };
 
+  // Pool weighted toward longer phrasings — very short standalone inputs make
+  // ElevenLabs hallucinate extra syllables (HANDOFF.md 16.7. kohta 3).
+  const batterVariants = (name: string) => [
+    `Vuorossa ${name}.`,
+    `Lyömässä ${name}.`,
+    `Nyt vuorossa on ${name}.`,
+    `Ja lyömässä nyt ${name}.`,
+    `Seuraavaksi vuorossa ${name}.`,
+    `Seuraavaksi lyömässä ${name}.`,
+  ];
+
   it("announces the batter by surname only", () => {
-    expect([
-      "Vuorossa Mäyrä.",
-      "Nyt vuorossa Mäyrä.",
-      "Lyömässä Mäyrä.",
-    ]).toContain(subEventToSpeech(liveEvent(), sub, meta, lookup));
+    expect(batterVariants("Mäyrä")).toContain(subEventToSpeech(liveEvent(), sub, meta, lookup));
   });
 
   it("adds the first name when the match has two players with the same surname", () => {
     const ambiguous: SubEvent = { texts: ["Lyöntivuorossa", { type: "player", id: 13 }] };
-    expect([
-      "Vuorossa Liisa Susi.",
-      "Nyt vuorossa Liisa Susi.",
-      "Lyömässä Liisa Susi.",
-    ]).toContain(subEventToSpeech(liveEvent(), ambiguous, meta, lookup));
+    expect(batterVariants("Liisa Susi")).toContain(subEventToSpeech(liveEvent(), ambiguous, meta, lookup));
+  });
+
+  it("keeps short forms a minority of the variant pool (longer inputs synthesize more reliably)", () => {
+    const outputs = new Set<string>();
+    for (let i = 0; i < 120; i++) {
+      const s = subEventToSpeech(liveEvent(), sub, meta, lookup);
+      if (s) outputs.add(s);
+    }
+    const long = [...outputs].filter((o) => o.length > "Lyömässä Mäyrä.".length);
+    expect(long.length).toBeGreaterThanOrEqual(3); // longer phrasings dominate the pool
   });
 
   it("stays silent when batter-change announcements are off", () => {
@@ -114,6 +127,23 @@ describe("subEventToSpeech: scoring events", () => {
       "Juoksun löi Mäyrä, tuojana Ilves. 1, 0, Ketut johtaa.",
       "Tulospalveluun on kirjattu juoksu: sen löi Mäyrä, tuojana Ilves. 1, 0, Ketut johtaa.",
     ]).toContain(subEventToSpeech(liveEvent(), sub, meta, lookup, true, ctx));
+  });
+
+  it("capitalizes an appended tie score — it starts a new sentence (regression: '… tuojana X. tasan 7, 7.')", () => {
+    const sub: SubEvent = {
+      texts: [
+        { type: "player", id: 11 },
+        { type: "event", text: "löi juoksun, tuojana", base: null },
+        { type: "player", id: 12 },
+      ],
+    };
+    const ctx = ctxWith({ periodHomeRuns: 7, periodAwayRuns: 7 });
+    // Enough draws to hit the lowercase "tasan …" tie variant at least once.
+    for (let i = 0; i < 30; i++) {
+      const s = subEventToSpeech(liveEvent(), sub, meta, lookup, true, ctx);
+      expect(s).not.toBeNull();
+      expect(s!).not.toMatch(/\. tasan/); // never a lowercase sentence start
+    }
   });
 
   it("speaks a kunnari with the batter's name (first name on a shared surname)", () => {
@@ -151,10 +181,18 @@ describe("subEventToSpeech: palo", () => {
 
 describe("subEventToSpeech: match end", () => {
   const endSub: SubEvent = { texts: [{ type: "event", text: "Ottelu päättyi", base: null }] };
+  // The closing line ends with a thanks-to-viewers variant (HANDOFF.md 16.7.
+  // kohta 5); tests accept the whole variant set.
+  const THANKS = ["Kiitos katsojille.", "Kiitokset kaikille katsojille.", "Kiitos, että olitte mukana."];
+  function expectClosingLine(actual: string | null, fixedPart: string): void {
+    expect(actual).not.toBeNull();
+    expect(THANKS.map((t) => `${fixedPart} ${t}`)).toContain(actual!);
+  }
 
   it("reports the run score and vuoropari count in a single-jakso match (camp/tournament)", () => {
     const ctx = ctxWith({ periodsPlayed: 1, periodHomeRuns: 2, periodAwayRuns: 6, currentInning: 2 });
-    expect(subEventToSpeech(liveEvent(), endSub, meta, lookup, true, ctx)).toBe(
+    expectClosingLine(
+      subEventToSpeech(liveEvent(), endSub, meta, lookup, true, ctx),
       "Ottelu päättyi! Sudet voitti, Ketut 2, Sudet 6. Ottelussa pelattiin kolme vuoroparia."
     );
   });
@@ -164,7 +202,8 @@ describe("subEventToSpeech: match end", () => {
       periodsPlayed: 2, periodHomeRuns: 4, periodAwayRuns: 1,
       homePeriodsWon: 2, awayPeriodsWon: 0,
     });
-    expect(subEventToSpeech(liveEvent(), endSub, meta, lookup, true, ctx)).toBe(
+    expectClosingLine(
+      subEventToSpeech(liveEvent(), endSub, meta, lookup, true, ctx),
       "Ottelu päättyi! Ketut voitti, Ketut 2, Sudet 0. Ottelussa pelattiin kaksi jaksoa."
     );
   });
@@ -174,7 +213,8 @@ describe("subEventToSpeech: match end", () => {
       periodsPlayed: 3, currentPeriod: 2,
       homePeriodsWon: 2, awayPeriodsWon: 1,
     });
-    expect(subEventToSpeech(liveEvent({ period: 2 }), endSub, meta, lookup, true, ctx)).toBe(
+    expectClosingLine(
+      subEventToSpeech(liveEvent({ period: 2 }), endSub, meta, lookup, true, ctx),
       "Ottelu päättyi! Ketut voitti, Ketut 2, Sudet 1. Ratkaisu syntyi supervuorossa."
     );
   });
@@ -201,6 +241,28 @@ describe("source attribution variants", () => {
     for (let i = 0; i < 60; i++) outputs.add(formatIdleSummary(meta, ctx));
     expect([...outputs].some((o) => o.startsWith("Tulospalvelun mukaan"))).toBe(true);
     expect([...outputs].some((o) => !o.startsWith("Tulospalvelun mukaan"))).toBe(true);
+  });
+});
+
+describe("idle filler: light stat-style variant with the batting team (HANDOFF.md 16.7. kohta 4)", () => {
+  it("sometimes reports the score home-first with the batting team, in both tie and lead states", () => {
+    // Away leads (2–4) but the score is still spoken home-first; Sudet (200) bat.
+    const lead = ctxWith({ periodHomeRuns: 2, periodAwayRuns: 4, currentBatTeamId: 200 });
+    const leadOutputs = new Set<string>();
+    for (let i = 0; i < 60; i++) leadOutputs.add(formatIdleSummary(meta, lead));
+    expect(leadOutputs).toContain("Tilasto kertoo tilanteeksi 2, 4, Sudet johtaa, ja sisävuorossa on Sudet.");
+
+    const tie = ctxWith({ periodHomeRuns: 3, periodAwayRuns: 3, currentBatTeamId: 100 });
+    const tieOutputs = new Set<string>();
+    for (let i = 0; i < 60; i++) tieOutputs.add(formatIdleSummary(meta, tie));
+    expect(tieOutputs).toContain("Tilasto kertoo tilanteeksi tasan 3, 3, ja sisävuorossa on Ketut.");
+  });
+
+  it("drops the batting clause cleanly when the batting team is unknown", () => {
+    const ctx = ctxWith({ periodHomeRuns: 2, periodAwayRuns: 4, currentBatTeamId: null });
+    const outputs = new Set<string>();
+    for (let i = 0; i < 60; i++) outputs.add(formatIdleSummary(meta, ctx));
+    expect(outputs).toContain("Tilasto kertoo tilanteeksi 2, 4, Sudet johtaa.");
   });
 });
 

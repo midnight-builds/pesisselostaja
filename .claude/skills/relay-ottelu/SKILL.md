@@ -221,9 +221,30 @@ echo '{"narrationDelayMs": 4000}' > apps/broadcast/run/.control-<ID>.json
 echo '{"narrationDelayMs": 0}'    > apps/broadcast/run/.control-<ID>.json
 ```
 
-Control-tiedostoon voi kirjoittaa molemmat avaimet yhtä aikaa
-(`{"announceBatterChanges": false, "narrationDelayMs": 4000}`); jos kirjoitat
-vain toisen avaimen, toinen asetus säilyy ennallaan.
+**Delta-haku ja pollausväli lennossa.** Relay hakee tapahtumat oletuksena
+delta-moodissa (`after=` + ETag, polli 3 s) — käynnistyslokissa "delta-haku
+PÄÄLLÄ" ja ajossa "Delta-haku: N uutta…" -rivejä. Jos delta käyttäytyy oudosti
+(selostuksia puuttuu, toistuvia "Delta-epäkonsistenssi → täyshaku" -rivejä),
+kytke se pois lennossa — täyshakukäytös palaa seuraavassa pollissa ilman
+restarttia:
+
+```bash
+# delta pois (paluu täyshakuihin):
+echo '{"deltaFetch": false}' > apps/broadcast/run/.control-<ID>.json
+# pollausväli lennossa (min 2000 ms):
+echo '{"pollIntervalMs": 5000}' > apps/broadcast/run/.control-<ID>.json
+```
+
+Env-vastineet käynnistykseen: `RELAY_DELTA_FETCH=false`, `RELAY_POLL_INTERVAL`
+(oletus 3000). Muut uudet env-säädöt: `RELAY_FIRST_SPEECH_DELAY_MS` (oletus
+20000 — ensimmäinen puhe vasta ~20 s ffmpegin ensikytkeytymisestä, jotta
+katsojat ehtivät paikalle; 0 = pois) ja `RELAY_FINISHED_FAILURE_WINDOW_MS`
+(oletus 120000 — päättyneen ottelun jälkeen kuollutta lähdettä yritetään vain
+~2 min ennen itsesammutusta).
+
+Control-tiedostoon voi kirjoittaa useita avaimia yhtä aikaa
+(`{"announceBatterChanges": false, "narrationDelayMs": 4000, "deltaFetch": true, "pollIntervalMs": 3000}`);
+jos kirjoitat vain osan avaimista, muut asetukset säilyvät ennallaan.
 
 **Seuranta.** `journalctl --user -u pesisselostaja-relay -f`:
 - "Sydänääni: relay käynnissä … " ~2 min välein = elää (hiljainen jakso ≠ jumi).

@@ -59,12 +59,15 @@ function recordingSink(): SpeechSink & { calls: { text: string; at: number }[] }
 }
 
 /** Mutable stand-in for FfmpegMixer's attach/queue state, so a test can flip
- *  attachment mid-test the way a real ffmpeg connect/exit would. */
-function mutableStatus(attached = false, pending = 0) {
-  const s = { attached, pending };
+ *  attachment mid-test the way a real ffmpeg connect/exit would. firstAt
+ *  defaults to 0 (= "first attach long ago"), so tests not about the
+ *  first-speech grace never trip it. */
+function mutableStatus(attached = false, pending = 0, firstAt: number | null = 0) {
+  const s = { attached, pending, firstAt };
   const port: NarrationStatus = {
     isReaderAttached: () => s.attached,
     pendingClips: () => s.pending,
+    firstAttachedAt: () => s.firstAt,
   };
   return { s, port };
 }
@@ -103,15 +106,22 @@ function latchedLoop(sink: SpeechSink, s: { attached: boolean; pending: number }
 }
 
 describe("CommentaryLoop pre-game filler gating (HANDOFF.md 7)", () => {
-  it("is not ready while ffmpeg is unattached, or while clips are still queued", () => {
+  it("is not ready while ffmpeg is unattached, unlatched, or while clips are still queued", () => {
     const a = mutableStatus(false, 0);
     expect(internals(new CommentaryLoop(makeConfig(), recordingSink(), a.port)).narrationReadyForFiller()).toBe(false);
 
     const b = mutableStatus(true, 2);
-    expect(internals(new CommentaryLoop(makeConfig(), recordingSink(), b.port)).narrationReadyForFiller()).toBe(false);
+    const busy = internals(new CommentaryLoop(makeConfig(), recordingSink(), b.port));
+    busy.maybeLatchNarrationReady(META);
+    expect(busy.narrationReadyForFiller()).toBe(false);
 
     const c = mutableStatus(true, 0);
-    expect(internals(new CommentaryLoop(makeConfig(), recordingSink(), c.port)).narrationReadyForFiller()).toBe(true);
+    const fresh = internals(new CommentaryLoop(makeConfig(), recordingSink(), c.port));
+    // Before the latch even an attached, idle pipeline is not "ready" — a
+    // filler would only be suppressed while burning its bookkeeping.
+    expect(fresh.narrationReadyForFiller()).toBe(false);
+    fresh.maybeLatchNarrationReady(META);
+    expect(fresh.narrationReadyForFiller()).toBe(true);
   });
 
   it("treats narration as always ready when no status port is supplied (dry-run/tests)", () => {
@@ -270,6 +280,63 @@ describe("CommentaryLoop pre-first-attach suppression + connect recap (HANDOFF.m
     loop.speak("Palo! Ensimmäinen palo.");
     await loop.synthQueue;
     expect(sink.calls.map((c) => c.text)).toEqual(["Palo! Ensimmäinen palo."]);
+  });
+});
+
+describe("CommentaryLoop first-speech grace (HANDOFF.md 16.7. kohta 1)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("holds the latch until ffmpeg has been attached for the configured grace", () => {
+    const { s, port } = mutableStatus(true, 0, 0); // first attach at t=0
+    const loop = internals(new CommentaryLoop(makeConfig({ firstSpeechDelayMs: 20000 }), recordingSink(), port));
+    expect(s.attached).toBe(true);
+
+    loop.maybeLatchNarrationReady(META);
+    expect(loop.narrationEverReady).toBe(false); // attached, but grace still running
+
+    vi.setSystemTime(19999);
+    loop.maybeLatchNarrationReady(META);
+    expect(loop.narrationEverReady).toBe(false);
+
+    vi.setSystemTime(20000);
+    loop.maybeLatchNarrationReady(META);
+    expect(loop.narrationEverReady).toBe(true);
+  });
+
+  it("measures the grace from the FIRST attach ever, so a respawn after the grace latches immediately", () => {
+    const { s, port } = mutableStatus(false, 0, 0); // first attach happened at t=0, then ffmpeg died
+    const loop = internals(new CommentaryLoop(makeConfig({ firstSpeechDelayMs: 20000 }), recordingSink(), port));
+
+    vi.setSystemTime(25000);
+    loop.maybeLatchNarrationReady(META);
+    expect(loop.narrationEverReady).toBe(false); // detached: no latch regardless of elapsed time
+
+    s.attached = true; // respawn re-attaches at t=25s — grace (from t=0) already elapsed
+    loop.maybeLatchNarrationReady(META);
+    expect(loop.narrationEverReady).toBe(true);
+  });
+
+  it("keeps the pre-game welcome filler quiet through the grace without burning its cadence", async () => {
+    const sink = recordingSink();
+    const { port } = mutableStatus(true, 0, 0);
+    const loop = internals(new CommentaryLoop(makeConfig({ firstSpeechDelayMs: 20000 }), sink, port));
+
+    vi.setSystemTime(10000); // attached, grace running, silence > WELCOME cadence? (lastSpeechAt=0)
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+    expect(sink.calls).toHaveLength(0);
+    expect(loop.lastSpeechAt).toBe(0); // cadence untouched — fires fresh once ready
+  });
+
+  it("applies no grace when firstSpeechDelayMs is 0 (default off in tests)", () => {
+    const { port } = mutableStatus(true, 0, null); // attached but mixer never reported a first-attach time
+    const loop = internals(new CommentaryLoop(makeConfig({ firstSpeechDelayMs: 0 }), recordingSink(), port));
+    loop.maybeLatchNarrationReady(META);
+    expect(loop.narrationEverReady).toBe(true);
   });
 });
 

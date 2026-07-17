@@ -92,10 +92,47 @@ stalls the poll loop or reorders clips.
   echo '{"narrationDelayMs": 4000}' > apps/broadcast/run/.control-143280.json   # add 4s
   echo '{"narrationDelayMs": 0}'    > apps/broadcast/run/.control-143280.json   # off
   ```
-  The control-file value wins over the env/CLI seed. You can set both keys in
-  one file (`{"announceBatterChanges": false, "narrationDelayMs": 4000}`);
-  writing only one key leaves the other setting unchanged. The right value is
+  The control-file value wins over the env/CLI seed. You can set several keys
+  in one file (`{"announceBatterChanges": false, "narrationDelayMs": 4000}`);
+  writing only some keys leaves the others unchanged. The right value is
   calibrated live — the video path's latency varies between broadcasts.
+
+### First-speech grace
+
+The very first line used to play the instant the relay went live, before any
+viewer had joined. `RELAY_FIRST_SPEECH_DELAY_MS` (default `20000`, `0` = off)
+holds all narration until ffmpeg has been attached that long, measured from
+the FIRST attach ever — not relay start (the source may go live minutes
+later), and respawns after that add no new delay. Distinct from the narration
+delay above, which shifts each clip's playback.
+
+### Delta polling (after= + ETag)
+
+The poll loop fetches events in delta mode by default: `after=` limits the
+response to recent events, an ETag turns quiet polls into cheap 304s, and the
+default poll interval is `3000` ms (`RELAY_POLL_INTERVAL`). Responses merge
+into a local full-history mirror, so all event processing still sees the
+complete history every poll; the server's reset flag or an inconsistent delta
+triggers an immediate full refetch, and a full resync runs every ~60 s as
+insurance. Watch the log for `Delta-haku: N uutta …` lines and fall back live
+if anything looks off:
+
+- **At startup:** `RELAY_DELTA_FETCH=false` reverts to plain full fetches.
+- **Live, without restarting:** control file keys `deltaFetch` (boolean) and
+  `pollIntervalMs` (min 2000):
+  ```bash
+  echo '{"deltaFetch": false}'    > apps/broadcast/run/.control-143280.json  # full fetches
+  echo '{"pollIntervalMs": 5000}' > apps/broadcast/run/.control-143280.json  # slower poll
+  ```
+
+### Give-up window after the match ends
+
+While a match is running, a dead source is retried for the generous
+`RELAY_MAX_FAILURE_WINDOW_MS` (12 min) before the relay shuts itself down.
+Once the match has finished ("Ottelu päättyi" spoken), the source won't come
+back — the shorter `RELAY_FINISHED_FAILURE_WINDOW_MS` (default `120000`)
+applies instead. Clean ffmpeg exits (a flapping source) still never count
+toward giving up.
 
 ### Testing without touching YouTube (dry run)
 
