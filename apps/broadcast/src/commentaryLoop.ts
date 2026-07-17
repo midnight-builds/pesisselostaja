@@ -1,4 +1,5 @@
-import { fetchMatchMetadata, fetchLiveEvents } from "@pesisselostaja/core";
+import { fetchMatchMetadata, fetchLiveEvents, formatHelsinkiTimestamp, type LiveEventsResult } from "@pesisselostaja/core";
+import { EventHistory } from "./eventHistory.js";
 import {
   buildPlayerLookup,
   subEventToSpeech,
