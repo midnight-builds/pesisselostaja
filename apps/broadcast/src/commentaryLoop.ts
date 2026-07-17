@@ -359,6 +359,7 @@ export class CommentaryLoop {
       // synth queue ahead of any events found in this same poll — the recap
       // covers the suppressed past, the events then narrate the present.
       this.maybeLatchNarrationReady(meta);
+      const cycleStartedAt = Date.now();
       try {
         // Full fetch or delta merge; either way `history` holds the complete
         // event list afterwards, which is what ALL processing below runs on —
