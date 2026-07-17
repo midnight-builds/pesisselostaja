@@ -271,6 +271,7 @@ export class FfmpegMixer {
     }
 
     this.sessionActive = true;
+    if (this.firstAttachedAtMs === null) this.firstAttachedAtMs = Date.now();
     this.opts.onSessionStart?.(Date.now());
 
     const refreshMs = this.opts.urlRefreshMs ?? 15 * 60 * 1000;
