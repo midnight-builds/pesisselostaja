@@ -160,6 +160,25 @@ describe("CommentaryLoop delta polling (HANDOFF.md 15.7. kohta 6)", () => {
     expect(loop.history.events.map((e) => e.id)).toEqual([1, 2]);
   });
 
+  it("polls with full fetches while the history is empty — no delta, no reset loop (HANDOFF.md 17.7. kohta 1)", async () => {
+    const loop = makeLoop();
+    // Match being initialized: the full fetch succeeds but returns no events.
+    fetchMock.mockResolvedValue(result([]));
+    await loop.fetchFullEvents();
+    await loop.fetchEventsForPoll();
+    await loop.fetchEventsForPoll();
+    for (const call of fetchMock.mock.calls) {
+      expect((call[1] as { after?: string }).after).toBeUndefined();
+    }
+    // First events arrive → delta engages on the following poll.
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+    await loop.fetchEventsForPoll(); // still full (history was empty)
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])]));
+    await loop.fetchEventsForPoll();
+    const lastOpts = fetchMock.mock.calls.at(-1)![1] as { after?: string };
+    expect(lastOpts.after).toBeDefined();
+  });
+
   it("deltaFetch=false reverts to plain full fetches", async () => {
     const loop = makeLoop({ deltaFetch: false });
     fetchMock.mockResolvedValue(result([ev({ id: 1 })]));

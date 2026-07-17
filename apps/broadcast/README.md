@@ -86,7 +86,7 @@ and scoring bookkeeping still run synchronously at detection time — and never
 stalls the poll loop or reorders clips.
 
 - **At startup:** `RELAY_NARRATION_DELAY_MS=4000` in `.env.relay`, or
-  `--narration-delay-ms 4000`. Default `0` (no delay, unchanged behavior).
+  `--narration-delay-ms 4000`. Default `2000` (calibrated live, match 144742).
 - **Live, without restarting:** the same control file, `narrationDelayMs` key:
   ```bash
   echo '{"narrationDelayMs": 4000}' > apps/broadcast/run/.control-143280.json   # add 4s
@@ -184,6 +184,10 @@ so the stream never goes silent. Details:
 - **No pronunciation substitutions:** ElevenLabs reads abbreviations like `KPL`
   correctly, so it gets the readable text as-is. The `.pronunciations.json`
   substitutions still apply on the Piper fallback path.
+- **Numbers are spelled out:** EL reads bare digits in short Finnish phrases
+  unclearly ("Tasan 4, 4" — live 144742), so the EL path converts them to
+  Finnish words ("Tasan neljä, neljä") before synthesis (`spellOutNumbers` in
+  `packages/core`). Logs and the Piper path keep the digits.
 - **Cache:** synthesized audio is cached as PCM in `apps/broadcast/run/tts-cache/`
   keyed by model+voice+text, so repeated phrases ("Palo! KPL.") cost credits only
   once — also across matches. Safe to delete anytime.
