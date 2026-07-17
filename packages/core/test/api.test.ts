@@ -69,6 +69,17 @@ describe("fetchLiveEvents delta options", () => {
     expect(res.serverDateMs).toBe(Date.parse("Fri, 17 Jul 2026 01:00:26 GMT"));
   });
 
+  it("normalizes a bare [] body (match never opened by the scorer) into an empty events list", async () => {
+    // Seen live 2026-07-17 (144743 pre-open): the endpoint answers `[]`
+    // instead of {"events": [...]}, which used to crash the startup fetch.
+    const fetchMock = vi.fn(async (_url: string | URL, _init?: RequestInit) => jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await fetchLiveEvents(144743, { skipDelay: true });
+    expect(res.events).toEqual([]);
+    expect(res.notModified).toBe(false);
+  });
+
   it("stays backward compatible: no new options → plain URL, plain events out", async () => {
     const fetchMock = vi.fn(async (_url: string | URL, _init?: RequestInit) => jsonResponse({ events: [], period: 1, team: 7 }));
     vi.stubGlobal("fetch", fetchMock);
