@@ -46,18 +46,27 @@ export class ElevenLabsTts {
       .digest("hex");
     const cachePath = join(this.opts.cacheDir, `${key}.pcm`);
     try {
-      return await readFile(cachePath);
+      const cached = await readFile(cachePath);
+      this.lastText = text;
+      return cached;
     } catch {
       /* cache miss */
     }
 
+    const previousText = this.lastText;
     const fetchImpl = this.opts.fetchImpl ?? fetch;
     const res = await fetchImpl(
       `https://api.elevenlabs.io/v1/text-to-speech/${this.opts.voiceId}?output_format=mp3_44100_128`,
       {
         method: "POST",
         headers: { "xi-api-key": this.opts.apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({ text, model_id: this.opts.modelId }),
+        body: JSON.stringify({
+          text,
+          model_id: this.opts.modelId,
+          // Context only — not spoken. previous_text is the documented
+          // text-to-speech body field for conditioning on preceding speech.
+          ...(previousText ? { previous_text: previousText } : {}),
+        }),
       }
     );
     if (!res.ok) {
