@@ -43,7 +43,8 @@ export class ElevenLabsTts {
     return this.charsUsed;
   }
 
-  async synthesize(text: string): Promise<Buffer> {
+  async synthesize(rawText: string): Promise<Buffer> {
+    const text = spellOutNumbers(rawText);
     const key = createHash("sha256")
       .update(`${this.opts.modelId}|${this.opts.voiceId}|${text}`)
       .digest("hex");
