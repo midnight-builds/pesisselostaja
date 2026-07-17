@@ -534,6 +534,13 @@ function formatDrawOfChoice(texts: EventTextElement[], meta: MatchMetadata, look
  *  the connect-moment recap must speak this same closing line instead of a
  *  mid-game situation summary. */
 export function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
+  // The closing announcement is the last thing the audience hears (narration
+  // goes silent after it), so thank them here (HANDOFF.md 16.7. kohta 5).
+  const thanks = pickVariant("thanks-viewers", [
+    "Kiitos katsojille.",
+    "Kiitokset kaikille katsojille.",
+    "Kiitos, että olitte mukana.",
+  ]);
   if (ctx) {
     // A single-jakso match (camps/tournaments) never reaches a second period,
     // so periodsWon is always 0-1 or 1-0 regardless of margin — report the
