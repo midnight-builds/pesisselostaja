@@ -80,6 +80,10 @@ export interface NarrationStatus {
   isReaderAttached(): boolean;
   /** Clips still queued for playback but not yet drained. */
   pendingClips(): number;
+  /** Wall clock of the FIRST ffmpeg attach ever (never reset on respawns),
+   *  or null before any attach. The first-speech grace period
+   *  (RELAY_FIRST_SPEECH_DELAY_MS) is measured from this. */
+  firstAttachedAt(): number | null;
 }
 
 /** Standalone ~6s poll loop that reproduces WatcherController's announcement
@@ -132,6 +136,27 @@ export class CommentaryLoop {
    *  delay seen so far — good enough to compare jitter/trends within a run,
    *  not an authoritative clock. */
   private matchEpochMs: number | null = null;
+  /** Current effective poll interval. Seeded from config, overridable live
+   *  via the control file's pollIntervalMs (min MIN_POLL_INTERVAL_MS). */
+  private pollIntervalMs: number;
+  /** Delta polling on/off. Seeded from config (RELAY_DELTA_FETCH), flippable
+   *  live via the control file's deltaFetch — false reverts to plain full
+   *  fetches on the next poll, no restart needed. */
+  private deltaFetch: boolean;
+  /** Local full-history mirror the delta responses merge into, so all event
+   *  processing keeps seeing the complete history every poll (the existing
+   *  logic assumes that — see EventHistory). */
+  private history = new EventHistory();
+  /** Date header (ms epoch) of the last successful 200 events response; the
+   *  next `after=` value derives from this (see AFTER_MARGIN_MS). */
+  private lastServerDateMs: number | null = null;
+  /** When the local history was last replaced by a full fetch (RESYNC_EVERY_MS). */
+  private lastFullFetchAt = 0;
+  /** The exact `after` string currently in use plus the ETag its last 200
+   *  carried. The ETag is only ever sent while the URL (the after value)
+   *  stays the same — the base only advances when new events arrive, so quiet
+   *  stretches poll a stable URL and get cheap 304s. */
+  private deltaCursor: { after: string; etag: string | null } | null = null;
 
   constructor(
     private config: RelayConfig,
@@ -142,8 +167,17 @@ export class CommentaryLoop {
     this.pronunciations = loadPronunciations(config.pronunciationsFile);
     this.announceBatterChanges = config.announceBatterChanges;
     this.narrationDelayMs = config.narrationDelayMs;
+    this.pollIntervalMs = config.pollInterval;
+    this.deltaFetch = config.deltaFetch;
     // No status port = nothing to wait for: latch immediately (old behavior).
     this.narrationEverReady = !narrationStatus;
+  }
+
+  /** Whether the match has ended ("Ottelu päättyi" seen, not reopened) — read
+   *  by the ffmpeg supervisor to pick the shorter give-up window
+   *  (finishedFailureWindowMs) once retrying a dead source is pointless. */
+  get matchFinished(): boolean {
+    return this.state.finished;
   }
 
   /** Writes the current setting to the control file so there is always a
@@ -155,7 +189,12 @@ export class CommentaryLoop {
       writeFileSync(
         this.config.controlFile,
         JSON.stringify(
-          { announceBatterChanges: this.announceBatterChanges, narrationDelayMs: this.narrationDelayMs },
+          {
+            announceBatterChanges: this.announceBatterChanges,
+            narrationDelayMs: this.narrationDelayMs,
+            deltaFetch: this.deltaFetch,
+            pollIntervalMs: this.pollIntervalMs,
+          },
           null,
           2
         ) + "\n"
@@ -191,6 +230,20 @@ export class CommentaryLoop {
         log(`Selostusviive vaihdettu ajon aikana: ${next} ms (control-tiedostosta).`);
       }
     }
+    // Delta polling on/off live — false reverts to plain full fetches on the
+    // very next poll (the local history is simply rebuilt from each response).
+    if (typeof parsed.deltaFetch === "boolean" && parsed.deltaFetch !== this.deltaFetch) {
+      this.deltaFetch = parsed.deltaFetch;
+      log(`Delta-haku vaihdettu ajon aikana: ${this.deltaFetch ? "PÄÄLLÄ" : "POIS (täyshaut)"} (control-tiedostosta).`);
+    }
+    // Poll cadence live; clamped to the floor so a typo can't hammer the API.
+    if (typeof parsed.pollIntervalMs === "number" && Number.isFinite(parsed.pollIntervalMs)) {
+      const next = Math.max(MIN_POLL_INTERVAL_MS, Math.round(parsed.pollIntervalMs));
+      if (next !== this.pollIntervalMs) {
+        this.pollIntervalMs = next;
+        log(`Pollausväli vaihdettu ajon aikana: ${next} ms (control-tiedostosta).`);
+      }
+    }
   }
 
   async run(): Promise<void> {
@@ -213,11 +266,9 @@ export class CommentaryLoop {
     log(`${meta.home.name} vs ${meta.away.name}`);
 
     log("Ohitetaan historialliset tapahtumat…");
-    const initial = await fetchLiveEvents(this.config.matchId, {
-      apiBase: this.config.apiBase,
-      timeoutMs: API_TIMEOUT_MS,
-      skipDelay: true,
-    });
+    // Full fetch — also seeds the local history + delta cursor (see
+    // fetchEventsForPoll).
+    const initial = await this.fetchFullEvents();
     this.state.periodRuns = {};
     this.state.currentOuts = 0;
     this.state.paloTurnKey = null;
@@ -269,60 +320,64 @@ export class CommentaryLoop {
     this.state.lastSummaryTime = Date.now();
     this.lastSummaryCount = this.state.announcementCount;
 
-    log("Selostussilmukka käynnissä…");
+    log(`Selostussilmukka käynnissä… (polli ${this.pollIntervalMs} ms, delta-haku ${this.deltaFetch ? "PÄÄLLÄ" : "POIS"})`);
     // Fixed poll cadence, independent of how long a cycle's fetch/processing
     // takes — synthesis no longer blocks this loop (see speak()/synthQueue),
     // so cycles should normally be fast, but a slow fetch must not add to the
     // next wait on top of its own delay. If a cycle overruns the interval,
     // resume the cadence from now instead of firing a burst of catch-up ticks
     // (no-overlap guard).
-    let nextPollAt = Date.now() + this.config.pollInterval;
+    let nextPollAt = Date.now() + this.pollIntervalMs;
     while (!signal.aborted) {
       const waitMs = nextPollAt - Date.now();
       if (waitMs > 0) await this.sleepAbortable(waitMs, signal);
       if (signal.aborted) break;
-      nextPollAt = Math.max(nextPollAt + this.config.pollInterval, Date.now());
+      nextPollAt = Math.max(nextPollAt + this.pollIntervalMs, Date.now());
       await this.refreshRuntimeControls();
       // Checked before processing so a latch-moment catch-up recap enters the
       // synth queue ahead of any events found in this same poll — the recap
       // covers the suppressed past, the events then narrate the present.
       this.maybeLatchNarrationReady(meta);
       try {
-        const data = await fetchLiveEvents(this.config.matchId, {
-          apiBase: this.config.apiBase,
-          timeoutMs: API_TIMEOUT_MS,
-          skipDelay: true,
-        });
+        // Full fetch or delta merge; either way `history` holds the complete
+        // event list afterwards, which is what ALL processing below runs on —
+        // the existing logic (fingerprints, outs recompute, palo ordinals)
+        // assumes the full history every poll and stays unchanged. Null =
+        // 304, nothing new: skip event processing, keep fillers/state alive.
+        const data = await this.fetchEventsForPoll();
+        if (data !== null) {
+          const events = this.history.events;
 
-        // Ordinary bat-turn changes have no dedicated API text marker; they are
-        // detected and announced inside processEventsLive, keyed off
-        // seenFingerprints/announcedTurnKey (see the comment there).
-        await this.processEventsLive(data.events, meta, lookup);
+          // Ordinary bat-turn changes have no dedicated API text marker; they are
+          // detected and announced inside processEventsLive, keyed off
+          // seenFingerprints/announcedTurnKey (see the comment there).
+          await this.processEventsLive(events, meta, lookup);
 
-        // Outs for the current turn, kept monotonic per turn key. The API briefly
-        // re-keys a turn-ending palo into the next sub-inning, which would make a
-        // raw recompute rewind mid-turn (e.g. 3 → 2) after the 3rd palo was
-        // already announced; keying the running max to the counted turn resets
-        // cleanly on a real turn change but never drops mid-turn.
-        if (data.events.length > 0) {
-          const { outs, turnKey } = recomputeCurrentOutsKeyed(data.events);
-          if (turnKey !== this.state.paloTurnKey) {
-            this.state.paloTurnKey = turnKey;
+          // Outs for the current turn, kept monotonic per turn key. The API briefly
+          // re-keys a turn-ending palo into the next sub-inning, which would make a
+          // raw recompute rewind mid-turn (e.g. 3 → 2) after the 3rd palo was
+          // already announced; keying the running max to the counted turn resets
+          // cleanly on a real turn change but never drops mid-turn.
+          if (events.length > 0) {
+            const { outs, turnKey } = recomputeCurrentOutsKeyed(events);
+            if (turnKey !== this.state.paloTurnKey) {
+              this.state.paloTurnKey = turnKey;
+              this.state.paloTurnMax = 0;
+            }
+            this.state.paloTurnMax = Math.max(this.state.paloTurnMax, outs);
+            this.state.currentOuts = this.state.paloTurnMax;
+          }
+
+          // Reconcile with the API's authoritative fields. After a turn-ending out
+          // the API reports the new batting team / period before any explicit
+          // bat-change event arrives; period only ever advances.
+          if ((data.period ?? 0) > this.state.currentPeriod) this.state.currentPeriod = data.period!;
+          if (data.team != null && data.team !== this.state.currentBatTeamId) {
+            this.state.currentBatTeamId = data.team;
+            this.state.currentOuts = 0;
+            this.state.paloTurnKey = null;
             this.state.paloTurnMax = 0;
           }
-          this.state.paloTurnMax = Math.max(this.state.paloTurnMax, outs);
-          this.state.currentOuts = this.state.paloTurnMax;
-        }
-
-        // Reconcile with the API's authoritative fields. After a turn-ending out
-        // the API reports the new batting team / period before any explicit
-        // bat-change event arrives; period only ever advances.
-        if ((data.period ?? 0) > this.state.currentPeriod) this.state.currentPeriod = data.period!;
-        if (data.team != null && data.team !== this.state.currentBatTeamId) {
-          this.state.currentBatTeamId = data.team;
-          this.state.currentOuts = 0;
-          this.state.paloTurnKey = null;
-          this.state.paloTurnMax = 0;
         }
 
         await this.maybeAnnounceSummary(meta);
@@ -332,6 +387,71 @@ export class CommentaryLoop {
         log(`Hakuvirhe: ${err instanceof Error ? err.message : err}`);
       }
     }
+  }
+
+  /** Full events fetch: replaces the local history and re-bases the delta
+   *  cursor. Used at startup, when delta polling is off, for the periodic
+   *  resync, and as the fallback whenever a delta looks untrustworthy. */
+  private async fetchFullEvents(): Promise<LiveEventsResult> {
+    const res = await fetchLiveEvents(this.config.matchId, {
+      apiBase: this.config.apiBase,
+      timeoutMs: API_TIMEOUT_MS,
+      skipDelay: true,
+    });
+    this.history.replace(res.events);
+    if (res.serverDateMs) this.lastServerDateMs = res.serverDateMs;
+    this.lastFullFetchAt = Date.now();
+    this.deltaCursor = null; // next delta re-bases on the fresh server date
+    return res;
+  }
+
+  /** One poll's events fetch (HANDOFF.md 15.7. kohta 6). Delta mode asks only
+   *  for recent events (`after=` + If-None-Match) and merges them into the
+   *  local full history; returns null on 304 (nothing changed). Falls back to
+   *  an immediate full fetch on the server's reset flag or an inconsistent
+   *  merge, and does a periodic full resync regardless as cheap insurance.
+   *
+   *  The `after` value: events carry no wall-clock field, so it derives from
+   *  the last 200's Date header minus AFTER_MARGIN_MS. The base only advances
+   *  when a delta actually delivers changes, keeping the URL stable through
+   *  quiet stretches so the ETag can 304. */
+  private async fetchEventsForPoll(): Promise<LiveEventsResult | null> {
+    if (!this.deltaFetch) return this.fetchFullEvents();
+    if (this.lastServerDateMs === null || Date.now() - this.lastFullFetchAt >= RESYNC_EVERY_MS) {
+      return this.fetchFullEvents();
+    }
+    const after =
+      this.deltaCursor?.after ?? formatHelsinkiTimestamp(new Date(this.lastServerDateMs - AFTER_MARGIN_MS));
+    const res = await fetchLiveEvents(this.config.matchId, {
+      apiBase: this.config.apiBase,
+      timeoutMs: API_TIMEOUT_MS,
+      skipDelay: true,
+      after,
+      etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,
+    });
+    if (res.notModified) return null;
+    if (res.reset) {
+      log("Delta-vastauksessa reset-lippu → täyshaku ja paikallisen historian uudelleenrakennus.");
+      return this.fetchFullEvents();
+    }
+    const merge = this.history.merge(res.events);
+    if (merge.inconsistent) {
+      log("Delta-epäkonsistenssi (tapahtuman alitapahtumalista kutistui) → täyshaku.");
+      return this.fetchFullEvents();
+    }
+    if (merge.added > 0 || merge.updated > 0) {
+      log(`Delta-haku: ${merge.added} uutta, ${merge.updated} päivittynyttä tapahtumaa (historiassa ${this.history.size}).`);
+      // Advance the cursor only now: the new base's URL changes, so its ETag
+      // starts fresh on the next poll's 200.
+      if (res.serverDateMs) {
+        this.lastServerDateMs = res.serverDateMs;
+        this.deltaCursor = null;
+      }
+    } else {
+      // Nothing new — keep the URL stable and remember its ETag for a 304.
+      this.deltaCursor = { after, etag: res.etag ?? null };
+    }
+    return res;
   }
 
   stop(): void {
@@ -620,6 +740,17 @@ export class CommentaryLoop {
   private maybeLatchNarrationReady(meta: MatchMetadata): void {
     if (this.narrationEverReady) return;
     if (!this.narrationStatus?.isReaderAttached()) return;
+    // First-speech grace (HANDOFF.md 16.7. kohta 1): hold the latch until
+    // ffmpeg has been attached for firstSpeechDelayMs, measured from the
+    // FIRST attach ever (not relay start — the source can go live minutes
+    // later), so early viewers have time to join before the first line.
+    // Only delays the start of the run: once latched, respawns/flaps add no
+    // new wait. Kept separate from narrationDelayMs, which shifts each
+    // clip's playback, not the readiness itself.
+    if (this.config.firstSpeechDelayMs > 0) {
+      const firstAt = this.narrationStatus.firstAttachedAt();
+      if (firstAt === null || Date.now() - firstAt < this.config.firstSpeechDelayMs) return;
+    }
     this.narrationEverReady = true;
     if (!this.suppressedBeforeAttach || !this.matchStarted) return;
     this.suppressedBeforeAttach = false;
@@ -636,7 +767,15 @@ export class CommentaryLoop {
    *  narration never goes through this gate — only fillers. */
   private narrationReadyForFiller(): boolean {
     if (!this.narrationStatus) return true;
-    return this.narrationStatus.isReaderAttached() && this.narrationStatus.pendingClips() === 0;
+    // Requires the latch too: during the pre-latch window (first attach not
+    // yet made / first-speech grace still running) a filler would only be
+    // suppressed by speak() while still burning its dedupe/lastSpeechAt
+    // bookkeeping — skip the round entirely instead.
+    return (
+      this.narrationEverReady &&
+      this.narrationStatus.isReaderAttached() &&
+      this.narrationStatus.pendingClips() === 0
+    );
   }
 
   private sleep(ms: number): Promise<void> {

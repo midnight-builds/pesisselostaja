@@ -60,6 +60,9 @@ async function main(): Promise<void> {
       // (HANDOFF.md 7).
       isReaderAttached: () => config.dryRun || (mixer?.isReaderAttached ?? false),
       pendingClips: () => mixer?.pendingClips ?? 0,
+      // Dry-run reports epoch 0 = "attached long ago", so the first-speech
+      // grace never delays dry-run logging.
+      firstAttachedAt: () => (config.dryRun ? 0 : (mixer?.firstAttachedAt ?? null)),
     }
   );
 
@@ -85,6 +88,10 @@ async function main(): Promise<void> {
       narrationGain: config.narrationGain,
       urlRefreshMs: config.urlRefreshMs,
       maxFailureWindowMs: config.maxFailureWindowMs,
+      finishedFailureWindowMs: config.finishedFailureWindowMs,
+      // The loop owns the finished state; the supervisor uses it to give up
+      // on a dead source quickly once the match has ended (HANDOFF 6.2).
+      isMatchFinished: () => loop.matchFinished,
       fifoPath,
       recordFile: config.recordFile,
     });
