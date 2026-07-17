@@ -460,7 +460,10 @@ export class CommentaryLoop {
       after,
       etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,
     });
-    if (res.notModified) return null;
+    if (res.notModified) {
+      this.pollStats.notModified++;
+      return null;
+    }
     if (res.reset) {
       log("Delta-vastauksessa reset-lippu → täyshaku ja paikallisen historian uudelleenrakennus.");
       return this.fetchFullEvents();
