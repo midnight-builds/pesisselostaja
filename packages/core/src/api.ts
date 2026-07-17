@@ -12,14 +12,31 @@ export interface ApiOptions {
   timeoutMs?: number;
 }
 
-async function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  timeoutMs = 8000,
+  headers?: Record<string, string>
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { signal: controller.signal });
+    return await fetch(url, { signal: controller.signal, headers });
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** "YYYY-MM-DD HH:mm:ss" in Europe/Helsinki — the exact format the events
+ *  endpoint's `after=` parameter requires (anything else → 400
+ *  "Virheellinen aikaleima"; verified against the pesistulokset.fi
+ *  frontend's own formatting). sv-SE locale conveniently renders ISO-like. */
+export function formatHelsinkiTimestamp(date: Date): string {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Helsinki",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hour12: false,
+  }).format(date);
 }
 
 export async function fetchMatchMetadata(
