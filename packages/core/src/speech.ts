@@ -301,11 +301,19 @@ export function formatSituationSummary(meta: MatchMetadata, ctx: SpeechContext):
 export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): string {
   const h = ctx.periodHomeRuns;
   const a = ctx.periodAwayRuns;
+  // Light stat-style variant with the batting team included (user request,
+  // HANDOFF.md 16.7. kohta 4) — the clause is dropped when the batting team
+  // isn't known, so the sentence stays complete either way. Score is always
+  // home-first regardless of who leads.
+  const batting = ctx.currentBatTeamId != null
+    ? `, ja sisävuorossa on ${getTeamName(meta, ctx.currentBatTeamId)}.`
+    : ".";
   if (h === a) {
     return pickVariant("idle-tie", [
       `Tilanne on edelleen tasan ${h}, ${a}.`,
       `Ottelu jatkuu tasatilanteessa, ${h}, ${a}.`,
       `Tulospalvelun mukaan tilanne on yhä tasan ${h}, ${a}.`,
+      `Tilasto kertoo tilanteeksi tasan ${h}, ${a}${batting}`,
     ]);
   }
   const leader = h > a ? meta.home.shorthand : meta.away.shorthand;
@@ -315,6 +323,7 @@ export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): stri
     `Tilanne edelleen ${h}, ${a}, ${leader} johdossa ${adv}.`,
     `Ottelu jatkuu, ${leader} johtaa ${adv}, tilanne ${h}, ${a}.`,
     `Tulospalvelun mukaan tilanne on edelleen ${h}, ${a}, ${leader} johdossa.`,
+    `Tilasto kertoo tilanteeksi ${h}, ${a}, ${leader} johtaa${batting}`,
   ]);
 }
 
