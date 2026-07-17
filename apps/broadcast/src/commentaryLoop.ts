@@ -423,6 +423,7 @@ export class CommentaryLoop {
     if (res.serverDateMs) this.lastServerDateMs = res.serverDateMs;
     this.lastFullFetchAt = Date.now();
     this.deltaCursor = null; // next delta re-bases on the fresh server date
+    this.pollStats.fullFetches++;
     return res;
   }
 
