@@ -74,6 +74,7 @@ export class ElevenLabsTts {
       throw new Error(`ElevenLabs HTTP ${res.status}: ${detail}`);
     }
     const mp3 = Buffer.from(await res.arrayBuffer());
+    this.lastText = text;
     this.charsUsed += text.length;
     log(`ElevenLabs-synteesi: ${text.length} merkkiä (ajon aikana yhteensä ${this.charsUsed})`);
 
