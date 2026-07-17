@@ -554,14 +554,14 @@ export function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string
     const headline = winner
       ? `Ottelu päättyi! ${winner} voitti, ${result}.`
       : `Ottelu päättyi! Tasatilanne, ${result}.`;
-    return `${headline} ${formatMatchEndRecap(ctx)}`;
+    return `${headline} ${formatMatchEndRecap(ctx)} ${thanks}`;
   }
   const result = meta.result;
   if (result) {
     const d = result.details;
-    return `Ottelu päättyi! ${meta.home.shorthand} ${d.periods_home}, ${meta.away.shorthand} ${d.periods_away}.`;
+    return `Ottelu päättyi! ${meta.home.shorthand} ${d.periods_home}, ${meta.away.shorthand} ${d.periods_away}. ${thanks}`;
   }
-  return `Ottelu päättyi! ${meta.home.shorthand} vastaan ${meta.away.shorthand}.`;
+  return `Ottelu päättyi! ${meta.home.shorthand} vastaan ${meta.away.shorthand}. ${thanks}`;
 }
 
 /** One-off closing recap appended to the match-end announcement — after it the
