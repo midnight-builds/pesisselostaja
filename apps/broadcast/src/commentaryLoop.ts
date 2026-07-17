@@ -163,6 +163,14 @@ export class CommentaryLoop {
    *  stays the same — the base only advances when new events arrive, so quiet
    *  stretches poll a stable URL and get cheap 304s. */
   private deltaCursor: { after: string; etag: string | null } | null = null;
+  /** Cumulative per-run poll statistics, surfaced on the mixer's heartbeat
+   *  line (HANDOFF.md 17.7.) — 304 skips and full-fetch fallbacks are
+   *  otherwise invisible in the log (the 304 path is deliberately silent). */
+  private pollStats = { polls: 0, deltaMerges: 0, fullFetches: 0, notModified: 0, fetchFailures: 0 };
+  /** Consecutive failed poll cycles; reset by the first success. Drives the
+   *  alarm threshold (FETCH_FAILURE_ALARM_STREAK) and the streak position on
+   *  the failure log line. */
+  private consecutiveFetchFailures = 0;
 
   constructor(
     private config: RelayConfig,
