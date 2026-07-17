@@ -16,6 +16,15 @@ export interface FfmpegMixerOptions {
    *  start-up failures — protects against retrying forever once the source
    *  broadcast has genuinely ended (default 5 min). */
   maxFailureWindowMs?: number;
+  /** Shorter give-up window used in place of maxFailureWindowMs while
+   *  isMatchFinished() reports true — after "Ottelu päättyi" a dead source
+   *  won't come back, so waiting the full generous window only delays
+   *  cleanup (default 2 min). Applies to the same unbroken start-up-failure
+   *  accounting; clean ffmpeg exits (flapping source) still never accrue. */
+  finishedFailureWindowMs?: number;
+  /** Lets the supervisor know the match has ended (the commentary loop owns
+   *  that state), for finishedFailureWindowMs. Absent → always false. */
+  isMatchFinished?: () => boolean;
   /** Local-file test mode: write the mixed result to this path instead of
    *  pushing RTMP, so the mix can be reviewed before a second broadcast
    *  exists. Takes precedence over rtmpUrl/streamKey when set. Each spawn
@@ -139,6 +148,13 @@ export class FfmpegMixer {
   private readonly maxFailureWindowMs: number;
   /** Counts spawn attempts so recordFile can be indexed per session. */
   private sessionIndex = 0;
+  /** True only while an ffmpeg session is attached as a FIFO reader (between a
+   *  completed handshake and the process exiting). */
+  private sessionActive = false;
+  /** Wall clock of the FIRST completed FIFO handshake ever, never reset —
+   *  the commentary loop's first-speech grace period (RELAY_FIRST_SPEECH_DELAY_MS)
+   *  is measured from this, so respawns don't restart the wait. */
+  private firstAttachedAtMs: number | null = null;
 
   constructor(private opts: FfmpegMixerOptions) {
     this.fifo = new NarrationFifo(opts.fifoPath);
@@ -147,6 +163,27 @@ export class FfmpegMixer {
 
   enqueueNarration(pcm: Buffer): void {
     this.fifo.enqueue(pcm);
+  }
+
+  /** True while ffmpeg is attached and reading the FIFO, i.e. queued narration
+   *  actually drains in real time. The commentary loop reads this to avoid
+   *  synthesizing pre-game filler nobody would hear yet — otherwise those
+   *  welcome clips pile up in the FIFO before ffmpeg attaches and all play
+   *  back-to-back on connect (HANDOFF.md 7). */
+  get isReaderAttached(): boolean {
+    return this.sessionActive;
+  }
+
+  /** Narration clips still waiting in the FIFO queue (not yet handed to the
+   *  write stream). */
+  get pendingClips(): number {
+    return this.fifo.pendingClips;
+  }
+
+  /** Wall clock of the first time ffmpeg ever attached as a FIFO reader, or
+   *  null before that. Never reset across respawns. */
+  get firstAttachedAt(): number | null {
+    return this.firstAttachedAtMs;
   }
 
   async start(): Promise<void> {
@@ -158,10 +195,18 @@ export class FfmpegMixer {
       } catch (err) {
         log(`ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
         if (this.failingSince === null) this.failingSince = Date.now();
-        if (Date.now() - this.failingSince > this.maxFailureWindowMs) {
+        // A finished match's source won't come back — use the much shorter
+        // window then (HANDOFF.md 16.7. kohta 6.2). Only this start-up-failure
+        // accounting is affected; clean exits (flapping source) still reset
+        // failingSince above and never accrue toward giving up.
+        const windowMs = this.opts.isMatchFinished?.()
+          ? (this.opts.finishedFailureWindowMs ?? 2 * 60 * 1000)
+          : this.maxFailureWindowMs;
+        if (Date.now() - this.failingSince > windowMs) {
           this.stopped = true;
           throw new SourceExhaustedError(
-            `Lähde ei ole vastannut ${Math.round(this.maxFailureWindowMs / 60000)} minuuttiin — luovutetaan.`
+            `Lähde ei ole vastannut ${Math.round(windowMs / 60000)} minuuttiin` +
+              `${this.opts.isMatchFinished?.() ? " ja ottelu on päättynyt" : ""} — luovutetaan.`
           );
         }
       }
@@ -174,6 +219,7 @@ export class FfmpegMixer {
 
   stop(): void {
     this.stopped = true;
+    this.sessionActive = false;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.fifo.stop();
     this.child?.kill("SIGTERM");
@@ -224,6 +270,8 @@ export class FfmpegMixer {
       throw new Error(`ffmpeg ei käynnistynyt: ${detail}`);
     }
 
+    this.sessionActive = true;
+    if (this.firstAttachedAtMs === null) this.firstAttachedAtMs = Date.now();
     this.opts.onSessionStart?.(Date.now());
 
     const refreshMs = this.opts.urlRefreshMs ?? 15 * 60 * 1000;
@@ -241,6 +289,7 @@ export class FfmpegMixer {
     }, HEARTBEAT_MS);
 
     const result = await childDone;
+    this.sessionActive = false;
     clearInterval(heartbeat);
     this.fifo.closeIo();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);

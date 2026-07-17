@@ -22,6 +22,14 @@ export interface ElevenLabsTtsOptions {
  *  Callers handle fallback to Piper on failure. */
 export class ElevenLabsTts {
   private charsUsed = 0;
+  /** Most recently synthesized text, sent as `previous_text` on the next
+   *  request. It conditions the model without being spoken, which stabilizes
+   *  very short inputs — EL is known to hallucinate extra syllables at the
+   *  start of short standalone phrases ("reewer lyömässä X", HANDOFF.md 16.7.
+   *  kohta 3). Updated on cache hits too: the cached clip still precedes the
+   *  next one acoustically. Note the cache key deliberately ignores
+   *  previous_text — identical text = same cached clip. */
+  private lastText: string | null = null;
 
   constructor(private opts: ElevenLabsTtsOptions) {
     mkdirSync(opts.cacheDir, { recursive: true });
@@ -38,18 +46,27 @@ export class ElevenLabsTts {
       .digest("hex");
     const cachePath = join(this.opts.cacheDir, `${key}.pcm`);
     try {
-      return await readFile(cachePath);
+      const cached = await readFile(cachePath);
+      this.lastText = text;
+      return cached;
     } catch {
       /* cache miss */
     }
 
+    const previousText = this.lastText;
     const fetchImpl = this.opts.fetchImpl ?? fetch;
     const res = await fetchImpl(
       `https://api.elevenlabs.io/v1/text-to-speech/${this.opts.voiceId}?output_format=mp3_44100_128`,
       {
         method: "POST",
         headers: { "xi-api-key": this.opts.apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({ text, model_id: this.opts.modelId }),
+        body: JSON.stringify({
+          text,
+          model_id: this.opts.modelId,
+          // Context only — not spoken. previous_text is the documented
+          // text-to-speech body field for conditioning on preceding speech.
+          ...(previousText ? { previous_text: previousText } : {}),
+        }),
       }
     );
     if (!res.ok) {
@@ -57,6 +74,7 @@ export class ElevenLabsTts {
       throw new Error(`ElevenLabs HTTP ${res.status}: ${detail}`);
     }
     const mp3 = Buffer.from(await res.arrayBuffer());
+    this.lastText = text;
     this.charsUsed += text.length;
     log(`ElevenLabs-synteesi: ${text.length} merkkiä (ajon aikana yhteensä ${this.charsUsed})`);
 

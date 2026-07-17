@@ -32,25 +32,39 @@ async function main(): Promise<void> {
 
   let mixer: FfmpegMixer | null = null;
 
-  const loop = new CommentaryLoop(config, async (spoken, readable) => {
-    if (config.dryRun || !mixer) {
-      log(`[DRY-RUN synteesi] ${readable}`);
-      return;
-    }
-    let pcm: Buffer;
-    if (elevenLabs) {
-      try {
-        // ElevenLabs reads abbreviations correctly → readable text, no substitutions.
-        pcm = await elevenLabs.synthesize(readable);
-      } catch (err) {
-        log(`ElevenLabs epäonnistui (${err instanceof Error ? err.message : err}) — Piper-fallback`);
+  const loop = new CommentaryLoop(
+    config,
+    async (spoken, readable) => {
+      if (config.dryRun || !mixer) {
+        log(`[DRY-RUN synteesi] ${readable}`);
+        return;
+      }
+      let pcm: Buffer;
+      if (elevenLabs) {
+        try {
+          // ElevenLabs reads abbreviations correctly → readable text, no substitutions.
+          pcm = await elevenLabs.synthesize(readable);
+        } catch (err) {
+          log(`ElevenLabs epäonnistui (${err instanceof Error ? err.message : err}) — Piper-fallback`);
+          pcm = await piper.synthesize(spoken);
+        }
+      } else {
         pcm = await piper.synthesize(spoken);
       }
-    } else {
-      pcm = await piper.synthesize(spoken);
+      mixer.enqueueNarration(pcm);
+    },
+    {
+      // Dry-run never attaches ffmpeg but should still log fillers, so report
+      // "ready" there; otherwise defer to the live mixer's session/queue state
+      // so pre-game filler isn't synthesized before ffmpeg is reading it
+      // (HANDOFF.md 7).
+      isReaderAttached: () => config.dryRun || (mixer?.isReaderAttached ?? false),
+      pendingClips: () => mixer?.pendingClips ?? 0,
+      // Dry-run reports epoch 0 = "attached long ago", so the first-speech
+      // grace never delays dry-run logging.
+      firstAttachedAt: () => (config.dryRun ? 0 : (mixer?.firstAttachedAt ?? null)),
     }
-    mixer.enqueueNarration(pcm);
-  });
+  );
 
   let shuttingDown = false;
   const shutdown = () => {
@@ -74,6 +88,10 @@ async function main(): Promise<void> {
       narrationGain: config.narrationGain,
       urlRefreshMs: config.urlRefreshMs,
       maxFailureWindowMs: config.maxFailureWindowMs,
+      finishedFailureWindowMs: config.finishedFailureWindowMs,
+      // The loop owns the finished state; the supervisor uses it to give up
+      // on a dead source quickly once the match has ended (HANDOFF 6.2).
+      isMatchFinished: () => loop.matchFinished,
       fifoPath,
       recordFile: config.recordFile,
     });

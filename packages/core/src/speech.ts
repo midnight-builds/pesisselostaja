@@ -163,7 +163,21 @@ function formatBatterChangeSubEvent(sub: SubEvent, lookup: PlayerLookup): string
   for (const el of sub.texts) {
     if (typeof el === "object" && el.type === "player") {
       const name = resolvePlayerName(lookup, el);
-      if (name) return pickVariant("batter", [`Vuorossa ${name}.`, `Nyt vuorossa ${name}.`, `Lyömässä ${name}.`]);
+      // Weighted toward longer phrasings: ElevenLabs hallucinates extra
+      // syllables at the start of very short inputs ("Lyömässä X." alone can
+      // come out as "reewer lyömässä X", HANDOFF.md 16.7. kohta 3) — more
+      // context stabilizes the synthesis. Short forms stay in the pool but as
+      // a minority.
+      if (name) {
+        return pickVariant("batter", [
+          `Vuorossa ${name}.`,
+          `Lyömässä ${name}.`,
+          `Nyt vuorossa on ${name}.`,
+          `Ja lyömässä nyt ${name}.`,
+          `Seuraavaksi vuorossa ${name}.`,
+          `Seuraavaksi lyömässä ${name}.`,
+        ]);
+      }
     }
   }
   return null;
@@ -287,11 +301,19 @@ export function formatSituationSummary(meta: MatchMetadata, ctx: SpeechContext):
 export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): string {
   const h = ctx.periodHomeRuns;
   const a = ctx.periodAwayRuns;
+  // Light stat-style variant with the batting team included (user request,
+  // HANDOFF.md 16.7. kohta 4) — the clause is dropped when the batting team
+  // isn't known, so the sentence stays complete either way. Score is always
+  // home-first regardless of who leads.
+  const batting = ctx.currentBatTeamId != null
+    ? `, ja sisävuorossa on ${getTeamName(meta, ctx.currentBatTeamId)}.`
+    : ".";
   if (h === a) {
     return pickVariant("idle-tie", [
       `Tilanne on edelleen tasan ${h}, ${a}.`,
       `Ottelu jatkuu tasatilanteessa, ${h}, ${a}.`,
       `Tulospalvelun mukaan tilanne on yhä tasan ${h}, ${a}.`,
+      `Tilasto kertoo tilanteeksi tasan ${h}, ${a}${batting}`,
     ]);
   }
   const leader = h > a ? meta.home.shorthand : meta.away.shorthand;
@@ -301,6 +323,7 @@ export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): stri
     `Tilanne edelleen ${h}, ${a}, ${leader} johdossa ${adv}.`,
     `Ottelu jatkuu, ${leader} johtaa ${adv}, tilanne ${h}, ${a}.`,
     `Tulospalvelun mukaan tilanne on edelleen ${h}, ${a}, ${leader} johdossa.`,
+    `Tilasto kertoo tilanteeksi ${h}, ${a}, ${leader} johtaa${batting}`,
   ]);
 }
 
@@ -363,19 +386,22 @@ export function subEventToSpeech(
   const rawText = combined.join(" ").trim();
   if (!rawText) return null;
 
+  // The appended score starts a new sentence after the run phrase, so it must
+  // be capitalized — the tie variant used to leak through lowercase ("…
+  // tuojana X. tasan 7, 7.", HANDOFF.md 16.7. kohta 6.2 sivuhuomio).
   if (rawText.includes("löi juoksun")) {
     const base = formatRunScored(texts, meta, lookup);
-    return ctx ? `${base} ${formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns)}.` : base;
+    return ctx ? `${base} ${capitalize(formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns))}.` : base;
   }
 
   if (rawText.includes("löi kunnarin")) {
     const base = formatKunnari(texts, meta, lookup);
-    return ctx ? `${base} ${formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns)}.` : base;
+    return ctx ? `${base} ${capitalize(formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns))}.` : base;
   }
 
   if (rawText.includes("toi juoksun")) {
     const base = formatRunBrought(texts, meta, lookup);
-    return ctx ? `${base} ${formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns)}.` : base;
+    return ctx ? `${base} ${capitalize(formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns))}.` : base;
   }
 
   if (rawText.includes("Palo")) {
@@ -503,7 +529,18 @@ function formatDrawOfChoice(texts: EventTextElement[], meta: MatchMetadata, look
   return ttsClean(parts.join(" ")) + ".";
 }
 
-function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
+/** Also exported for the broadcast relay's first-attach recap: if the match
+ *  ended while narration was still suppressed (ffmpeg never attached in time),
+ *  the connect-moment recap must speak this same closing line instead of a
+ *  mid-game situation summary. */
+export function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
+  // The closing announcement is the last thing the audience hears (narration
+  // goes silent after it), so thank them here (HANDOFF.md 16.7. kohta 5).
+  const thanks = pickVariant("thanks-viewers", [
+    "Kiitos katsojille.",
+    "Kiitokset kaikille katsojille.",
+    "Kiitos, että olitte mukana.",
+  ]);
   if (ctx) {
     // A single-jakso match (camps/tournaments) never reaches a second period,
     // so periodsWon is always 0-1 or 1-0 regardless of margin — report the
@@ -517,14 +554,14 @@ function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
     const headline = winner
       ? `Ottelu päättyi! ${winner} voitti, ${result}.`
       : `Ottelu päättyi! Tasatilanne, ${result}.`;
-    return `${headline} ${formatMatchEndRecap(ctx)}`;
+    return `${headline} ${formatMatchEndRecap(ctx)} ${thanks}`;
   }
   const result = meta.result;
   if (result) {
     const d = result.details;
-    return `Ottelu päättyi! ${meta.home.shorthand} ${d.periods_home}, ${meta.away.shorthand} ${d.periods_away}.`;
+    return `Ottelu päättyi! ${meta.home.shorthand} ${d.periods_home}, ${meta.away.shorthand} ${d.periods_away}. ${thanks}`;
   }
-  return `Ottelu päättyi! ${meta.home.shorthand} vastaan ${meta.away.shorthand}.`;
+  return `Ottelu päättyi! ${meta.home.shorthand} vastaan ${meta.away.shorthand}. ${thanks}`;
 }
 
 /** One-off closing recap appended to the match-end announcement — after it the
