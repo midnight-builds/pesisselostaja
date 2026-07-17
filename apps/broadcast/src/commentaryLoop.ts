@@ -42,14 +42,31 @@ import { log } from "./log.js";
 import type { RelayConfig } from "./config.js";
 
 const SUMMARY_EVERY_N = 10;
-/** No speech for this long → break the silence with an idle filler. */
-const IDLE_FILLER_MS = 2 * 60 * 1000;
+/** No speech for this long → break the silence with an idle filler. 90 s
+ *  (was 2 min): with the pipeline's own latency on top, a 2 min gap already
+ *  felt like the narration had died (HANDOFF.md 16.7. kohta 4). */
+const IDLE_FILLER_MS = 90 * 1000;
 /** Pre-game: welcome-filler cadence while waiting for the match to start. */
 const WELCOME_FILLER_MS = 90 * 1000;
 /** API fetch timeout. The server response cache is ~5s (see HANDOFF.md 6b),
  *  so waiting longer than the poll interval for a hung request buys nothing —
  *  keep it short so a stuck fetch doesn't stall the fixed poll cadence. */
 const API_TIMEOUT_MS = 4000;
+/** Delta polling (HANDOFF.md 15.7. kohta 6): events carry no per-event
+ *  wall-clock field (verified against real data 2026-07-17 — only the
+ *  match-epoch-relative `timestamp`), so the `after=` value is derived from
+ *  the last successful response's Date header minus this safety margin. The
+ *  margin must exceed the API's publish delay (~68–123 s measured with
+ *  skip-delay), or an event could become visible only after our `after` has
+ *  already moved past its server-side wall-clock time and be missed. */
+const AFTER_MARGIN_MS = 180 * 1000;
+/** Periodic full refetch that replaces the local delta-merged history —
+ *  cheap insurance against anything the merge can't see (server rewrites,
+ *  period-3 re-keyed transients). */
+const RESYNC_EVERY_MS = 60 * 1000;
+/** Floor for the control file's pollIntervalMs — the server response cache is
+ *  ~5 s, so polling much faster only burns requests. */
+const MIN_POLL_INTERVAL_MS = 2000;
 
 export type SpeechSink = (spokenText: string, readableText: string) => Promise<void>;
 
