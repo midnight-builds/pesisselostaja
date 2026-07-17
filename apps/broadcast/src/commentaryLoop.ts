@@ -194,6 +194,13 @@ export class CommentaryLoop {
     return this.state.finished;
   }
 
+  /** Compact poll-statistics fragment for the mixer's heartbeat line, e.g.
+   *  "pollit 118 (delta 102, täyshaku 9, 304 5, hakuvirheitä 2)". */
+  get pollStatsSummary(): string {
+    const s = this.pollStats;
+    return `pollit ${s.polls} (delta ${s.deltaMerges}, täyshaku ${s.fullFetches}, 304 ${s.notModified}, hakuvirheitä ${s.fetchFailures})`;
+  }
+
   /** Writes the current setting to the control file so there is always a
    *  discoverable, editable file. Called once at startup, so the config value
    *  (env/CLI/default) is authoritative on start; runtime edits take over
