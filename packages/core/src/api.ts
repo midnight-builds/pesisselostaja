@@ -121,21 +121,58 @@ export async function fetchTodayMatches(opts: ApiOptions = {}): Promise<LiveMatc
   return result;
 }
 
+export interface LiveEventsFetchOptions extends ApiOptions {
+  /** Delta query: only events after this instant. A string is the required
+   *  "YYYY-MM-DD HH:mm:ss" Europe/Helsinki wall-clock form (see
+   *  formatHelsinkiTimestamp); a number is passed through as-is (legacy).
+   *  Verified live 2026-07-16 to work as a true delta on a running match. */
+  after?: string | number;
+  /** The API delays the public feed ~2 min by default; skip-delay=true (same
+   *  parameter the pesistulokset.fi frontend sends) serves events sooner.
+   *  Verified live 2026-07-16: cut publication delay ~25-45%. */
+  skipDelay?: boolean;
+  /** Previous response's ETag → sent as If-None-Match. On 304 the result has
+   *  notModified=true and an empty events list (verified live 2026-07-16:
+   *  the endpoint honors conditional requests). */
+  etag?: string;
+}
+
+/** LiveEventsResponse plus transport metadata for delta polling. All fields
+ *  optional/additive, so existing callers are unaffected. */
+export interface LiveEventsResult extends LiveEventsResponse {
+  /** True when the server answered 304 Not Modified (events is then []). */
+  notModified?: boolean;
+  /** ETag of this response (or the request ETag on a 304), for the next
+   *  conditional request. */
+  etag?: string | null;
+  /** Server's Date header as ms epoch — the wall clock the `after` parameter
+   *  is judged against server-side. Events carry no per-event wall-clock
+   *  field (verified against real data 2026-07-17), so delta callers derive
+   *  the next `after` from this instead of from event timestamps. */
+  serverDateMs?: number | null;
+}
+
 export async function fetchLiveEvents(
   matchId: number,
-  opts: ApiOptions & { after?: number; skipDelay?: boolean } = {}
-): Promise<LiveEventsResponse> {
+  opts: LiveEventsFetchOptions = {}
+): Promise<LiveEventsResult> {
   const base = opts.apiBase ?? DEFAULT_API_BASE;
   let url = `${base}/online/${matchId}/events`;
-  const params = new URLSearchParams();
-  if (opts.after !== undefined) params.set("after", String(opts.after));
-  // The API delays the public feed ~2 min by default; skip-delay=true (same
-  // parameter the pesistulokset.fi frontend sends) serves events sooner.
-  // Verified live 2026-07-16: cut publication delay ~25-45%.
-  if (opts.skipDelay) params.set("skip-delay", "true");
-  const qs = params.toString();
-  if (qs) url += `?${qs}`;
-  const res = await fetchWithTimeout(url, opts.timeoutMs);
+  // Built by hand instead of URLSearchParams: the timestamp must encode its
+  // space as %20 (the form verified against the live API), not the "+" that
+  // URLSearchParams produces.
+  const parts: string[] = [];
+  if (opts.after !== undefined) parts.push(`after=${encodeURIComponent(String(opts.after))}`);
+  if (opts.skipDelay) parts.push("skip-delay=true");
+  if (parts.length > 0) url += `?${parts.join("&")}`;
+  const headers = opts.etag ? { "If-None-Match": opts.etag } : undefined;
+  const res = await fetchWithTimeout(url, opts.timeoutMs, headers);
+  const dateHeader = res.headers.get("date");
+  const serverDateMs = dateHeader ? Date.parse(dateHeader) || null : null;
+  if (res.status === 304) {
+    return { events: [], notModified: true, etag: opts.etag ?? null, serverDateMs };
+  }
   if (!res.ok) throw new Error(`Live events fetch failed: ${res.status}`);
-  return res.json() as Promise<LiveEventsResponse>;
+  const body = (await res.json()) as LiveEventsResponse;
+  return { ...body, notModified: false, etag: res.headers.get("etag"), serverDateMs };
 }
