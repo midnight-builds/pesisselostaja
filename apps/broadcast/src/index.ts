@@ -92,6 +92,7 @@ async function main(): Promise<void> {
       // The loop owns the finished state; the supervisor uses it to give up
       // on a dead source quickly once the match has ended (HANDOFF 6.2).
       isMatchFinished: () => loop.matchFinished,
+      heartbeatExtra: () => loop.pollStatsSummary,
       fifoPath,
       recordFile: config.recordFile,
     });
