@@ -163,7 +163,21 @@ function formatBatterChangeSubEvent(sub: SubEvent, lookup: PlayerLookup): string
   for (const el of sub.texts) {
     if (typeof el === "object" && el.type === "player") {
       const name = resolvePlayerName(lookup, el);
-      if (name) return pickVariant("batter", [`Vuorossa ${name}.`, `Nyt vuorossa ${name}.`, `Lyömässä ${name}.`]);
+      // Weighted toward longer phrasings: ElevenLabs hallucinates extra
+      // syllables at the start of very short inputs ("Lyömässä X." alone can
+      // come out as "reewer lyömässä X", HANDOFF.md 16.7. kohta 3) — more
+      // context stabilizes the synthesis. Short forms stay in the pool but as
+      // a minority.
+      if (name) {
+        return pickVariant("batter", [
+          `Vuorossa ${name}.`,
+          `Lyömässä ${name}.`,
+          `Nyt vuorossa on ${name}.`,
+          `Ja lyömässä nyt ${name}.`,
+          `Seuraavaksi vuorossa ${name}.`,
+          `Seuraavaksi lyömässä ${name}.`,
+        ]);
+      }
     }
   }
   return null;
