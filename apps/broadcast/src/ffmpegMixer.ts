@@ -180,6 +180,12 @@ export class FfmpegMixer {
     return this.fifo.pendingClips;
   }
 
+  /** Wall clock of the first time ffmpeg ever attached as a FIFO reader, or
+   *  null before that. Never reset across respawns. */
+  get firstAttachedAt(): number | null {
+    return this.firstAttachedAtMs;
+  }
+
   async start(): Promise<void> {
     this.stopped = false;
     while (!this.stopped) {
