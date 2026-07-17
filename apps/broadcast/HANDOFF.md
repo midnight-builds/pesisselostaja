@@ -1,5 +1,62 @@
 # Relay — handoff seuraavaa live-testiä varten
 
+## 2026-07-17 iltapäivä: live-ajon (ottelu 144743) löydökset — PR #36/#37 -vahvistusajo
+
+> Mailajuniorit E14, Kankaanpää – Pesä Ysit, Lappeenranta, Tenavaleiri Kempele,
+> klo 14.30 (11.30 UTC). Lopputulos 6–5 MaJu E14, kolme vuoroparia, ajo
+> 11.24–12.15 UTC. Ajettiin työhakemistosta haaralta, jossa PR #36:n ja #37:n
+> muutokset (mergeämättömiä ajohetkellä). EL-merkkejä kului 4124.
+
+### Aamun löydösten (144742) korjausten vahvistukset
+
+1. **Numero→sana EL-polulla (PR #36): TOIMII.** Pistetilanteet ja palomäärät
+   menivät EL:lle sanoiksi kirjoitettuina ("kuusi, viisi"); käyttäjä vahvisti
+   kuulokuvan hyväksi, ei korjattavaa. Loki/feed säilytti numerot.
+2. **Selostusviiveen oletus 2000 ms (PR #36): TOIMII.** Käytössä koko ajon
+   ilman control-säätöä; käyttäjä ei havainnut ajoitusongelmia.
+3. **Tyhjän historian reset-guard (PR #36): TOIMII.** Ennen ottelun avausta
+   pollattiin täyshauilla (~160 kpl, tyhjät rungot) ilman ainuttakaan
+   reset-lokiriviä — eilinen 15 krt/50 s -silmukka poissa. Ottelun alettua
+   delta kytkeytyi heti (yksi yksittäinen reset-rivi siirtymähetkellä 11.32,
+   ok).
+4. **Rikastetut hakuvirherivit (PR #37): TOIMIVAT.** 48 hakuvirhettä, kaikki
+   "1. peräkkäinen" — ei yhtään HUOM-sarjaa eikä all-clear-riviä tarvittu.
+5. **Delta-tilastot sydänäänessä (PR #37): TOIMIVAT.** Loppulukema:
+   pollit 929 (delta 207, täyshaku 242, 304 433, hakuvirheitä 48). 304:ien
+   osuus pelin aikana ~2/3 — delta+ETag toimii kuten suunniteltu.
+6. **Ensipuheviive ja itsesammutus: TOIMIVAT edelleen.** Ensipuhe ~22 s
+   kytkeytymisestä; loppuselostus 12.10.32, lähde loppui 12.12.39,
+   itsesammutus 12.15.00 (2 min 21 s).
+
+### Uusi bugilöytö, korjattu ajopäivänä ennen lähetystä (PR #37 -haara)
+
+**Avaamaton ottelu palauttaa paljaan `[]`-rungon** `online/{id}/events`-
+päätepisteestä — ei `{"events": [...]}`-kuorta. Spread jätti `events`-kentän
+määrittelemättä ja relayn käynnistyshaku kaatui (`events is not iterable`,
+fataali). Löytyi dry-run-esitestissä ~3 h ennen lähetystä; ilman korjausta
+käynnistys ennen kirjurin ottelunavausta olisi kaatunut joka lähetyksessä.
+Korjaus: `fetchLiveEvents` normalisoi rungon (`api.ts`), regressiotesti
+`api.test.ts`:ssä.
+
+### Uudet havainnot
+
+1. **Reset-purske kesken pelin (11.54.38–11.55.17):** palvelin lähetti
+   reset-lipun ~10 peräkkäiseen deltaan (~40 s), todennäköisesti kirjurin
+   tekemän korjauksen takia — historia oli koko ajan täysi, eli eri ilmiö
+   kuin tyhjän historian tapaus. Relay toimi oikein (täyshaku + uudelleen-
+   rakennus joka kerralla, selostus ei häiriintynyt, jono pysyi tyhjänä) ja
+   delta+304-rytmi palasi itsestään. **Kehitysidea:** niputa peräkkäisten
+   resettien lokirivit (esim. "reset-lippu ×10 40 s aikana") ja/tai lyhyt
+   delta-backoff resetin jälkeen, ettei purske aja täyshakua joka pollissa.
+2. **Hakuvirhetiheys nousi:** 48 kpl / ~50 min (~1/min) vs. aamun 22 / 45 min
+   (~0,5/min). Yhä kaikki yksittäisiä 4 s timeoutteja, ei pudonneita
+   tapahtumia — harmiton mutta trendi kannattaa pitää silmällä sydänäänen
+   tilastoista.
+3. **Lähdepään alkuhuojunta:** lähteen ensimmäisten ~3 min aikana kaksi
+   code=0-EOF:ää (sessiot 120 s ja 31 s, katsojille näkyviä katkoja), sitten
+   yhtenäinen 44 min sessio loppuun asti. Puhelimen striimin käynnistysvaiheen
+   ilmiö — ei relay-päässä korjattavaa, respawn+uusi URL hoiti.
+
 ## 2026-07-17: live-ajon (ottelu 144742) löydökset — PR #34:n vahvistusajo
 
 > Pesä Ysit E-tytöt kilpa – Manse PP, Tenavaleiri Kempele, klo 9.30 (6.30 UTC).
