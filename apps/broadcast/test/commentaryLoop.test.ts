@@ -26,8 +26,11 @@ function makeConfig(overrides: Partial<RelayConfig> = {}): RelayConfig {
     pollInterval: 4000,
     narrationGain: 1.3,
     narrationDelayMs: 0,
+    firstSpeechDelayMs: 0, // most tests exercise gating/latching without the start-up grace
     urlRefreshMs: 900000,
     maxFailureWindowMs: 720000,
+    finishedFailureWindowMs: 120000,
+    deltaFetch: true,
     announceBatterChanges: true,
     dryRun: false,
     apiKey: "test",

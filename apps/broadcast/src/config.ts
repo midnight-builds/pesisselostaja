@@ -15,8 +15,21 @@ export interface RelayConfig {
    *  (HANDOFF.md 8). Default 0 (no delay). Runtime-overridable via the control
    *  file — see commentaryLoop. */
   narrationDelayMs: number;
+  /** Don't speak until ffmpeg has been attached this long, measured from the
+   *  FIRST attach ever (not relay start — the source can go live minutes
+   *  later), so early viewers have time to join before the first line
+   *  (HANDOFF.md 16.7. kohta 1). 0 = off. Only affects the start of the run;
+   *  respawns after the first attach add no new delay. */
+  firstSpeechDelayMs: number;
   urlRefreshMs: number;
   maxFailureWindowMs: number;
+  /** Shorter give-up window used instead of maxFailureWindowMs once the match
+   *  has finished — retrying a dead source for 12 min after "Ottelu päättyi"
+   *  only delays cleanup (HANDOFF.md 16.7. kohta 6.2). */
+  finishedFailureWindowMs: number;
+  /** Delta polling (after= + ETag) on by default; RELAY_DELTA_FETCH=false or
+   *  the control file's deltaFetch key flips back to full fetches live. */
+  deltaFetch: boolean;
   announceBatterChanges: boolean;
   dryRun: boolean;
   recordFile?: string;
@@ -89,13 +102,20 @@ export function parseRelayConfig(): RelayConfig {
 
   const voice = values.voice ?? process.env.RELAY_VOICE ?? "harri-medium";
   const piperBin = values["piper-bin"] ?? process.env.RELAY_PIPER_BIN ?? "piper";
-  const pollInterval = parseInt(values["poll-interval"] ?? process.env.RELAY_POLL_INTERVAL ?? "4000", 10);
+  // 3000 ms (was 4000): the delta+ETag path makes a tighter poll cheap, and
+  // the server-side response cache is ~5 s anyway. Runtime-adjustable via the
+  // control file's pollIntervalMs (min 2000 — see commentaryLoop).
+  const pollInterval = parseInt(values["poll-interval"] ?? process.env.RELAY_POLL_INTERVAL ?? "3000", 10);
   const narrationGain = parseFloat(values["narration-gain"] ?? process.env.RELAY_NARRATION_GAIN ?? "1.3");
   // Artificial narration delay (HANDOFF.md 8). Default 0 = current behavior;
   // the real value is calibrated live. A bad value falls back to 0 rather than
   // NaN (which would make every wait computation NaN). Negative is clamped to 0.
   const narrationDelayRaw = parseInt(values["narration-delay-ms"] ?? process.env.RELAY_NARRATION_DELAY_MS ?? "0", 10);
   const narrationDelayMs = Number.isNaN(narrationDelayRaw) ? 0 : Math.max(0, narrationDelayRaw);
+  // ~20 s grace from the FIRST ffmpeg attach before anything is spoken, so
+  // viewers have time to open the stream (HANDOFF.md 16.7. kohta 1). 0 = off.
+  const firstSpeechDelayRaw = parseInt(process.env.RELAY_FIRST_SPEECH_DELAY_MS ?? "20000", 10);
+  const firstSpeechDelayMs = Number.isNaN(firstSpeechDelayRaw) ? 20000 : Math.max(0, firstSpeechDelayRaw);
   const urlRefreshMs = parseInt(values["url-refresh-ms"] ?? process.env.RELAY_URL_REFRESH_MS ?? String(15 * 60 * 1000), 10);
   // How long resolveSourceUrl/ffmpeg-start may fail continuously before the
   // relay gives up and shuts down (see SourceExhaustedError). Kept generous
@@ -105,6 +125,15 @@ export function parseRelayConfig(): RelayConfig {
     values["max-failure-window-ms"] ?? process.env.RELAY_MAX_FAILURE_WINDOW_MS ?? String(12 * 60 * 1000),
     10
   );
+  // Once the match has finished, keeping the process up for the full generous
+  // window is pointless — give up much sooner (HANDOFF.md 16.7. kohta 6.2).
+  const finishedFailureWindowMs = parseInt(
+    process.env.RELAY_FINISHED_FAILURE_WINDOW_MS ?? String(2 * 60 * 1000),
+    10
+  );
+  // Delta polling on by default (user decision); env or the control file's
+  // deltaFetch key turns it off without a restart.
+  const deltaFetch = process.env.RELAY_DELTA_FETCH !== "false";
   // Off if either the CLI flag or the env var says so; the control file (see
   // commentaryLoop) can still override this live once the loop is running.
   const announceBatterChanges =
@@ -136,8 +165,11 @@ export function parseRelayConfig(): RelayConfig {
     pollInterval,
     narrationGain,
     narrationDelayMs,
+    firstSpeechDelayMs,
     urlRefreshMs,
     maxFailureWindowMs,
+    finishedFailureWindowMs,
+    deltaFetch,
     announceBatterChanges,
     dryRun,
     recordFile,

@@ -16,6 +16,15 @@ export interface FfmpegMixerOptions {
    *  start-up failures — protects against retrying forever once the source
    *  broadcast has genuinely ended (default 5 min). */
   maxFailureWindowMs?: number;
+  /** Shorter give-up window used in place of maxFailureWindowMs while
+   *  isMatchFinished() reports true — after "Ottelu päättyi" a dead source
+   *  won't come back, so waiting the full generous window only delays
+   *  cleanup (default 2 min). Applies to the same unbroken start-up-failure
+   *  accounting; clean ffmpeg exits (flapping source) still never accrue. */
+  finishedFailureWindowMs?: number;
+  /** Lets the supervisor know the match has ended (the commentary loop owns
+   *  that state), for finishedFailureWindowMs. Absent → always false. */
+  isMatchFinished?: () => boolean;
   /** Local-file test mode: write the mixed result to this path instead of
    *  pushing RTMP, so the mix can be reviewed before a second broadcast
    *  exists. Takes precedence over rtmpUrl/streamKey when set. Each spawn
