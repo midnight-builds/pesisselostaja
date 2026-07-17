@@ -68,6 +68,12 @@ const RESYNC_EVERY_MS = 60 * 1000;
  *  ~5 s, so polling much faster only burns requests. */
 const MIN_POLL_INTERVAL_MS = 2000;
 
+/** How many consecutive failed poll cycles before the failure log line turns
+ *  alarming. A lone timeout is routine — live 144742 saw 22 isolated 8 s
+ *  client-timeout blips in 45 min with zero events lost (the next poll always
+ *  caught up) — so only a streak deserves attention (HANDOFF.md 17.7.). */
+const FETCH_FAILURE_ALARM_STREAK = 3;
+
 export type SpeechSink = (spokenText: string, readableText: string) => Promise<void>;
 
 /** Lets the loop see the narration output stage so it can decide whether a
