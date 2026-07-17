@@ -386,19 +386,22 @@ export function subEventToSpeech(
   const rawText = combined.join(" ").trim();
   if (!rawText) return null;
 
+  // The appended score starts a new sentence after the run phrase, so it must
+  // be capitalized — the tie variant used to leak through lowercase ("…
+  // tuojana X. tasan 7, 7.", HANDOFF.md 16.7. kohta 6.2 sivuhuomio).
   if (rawText.includes("löi juoksun")) {
     const base = formatRunScored(texts, meta, lookup);
-    return ctx ? `${base} ${formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns)}.` : base;
+    return ctx ? `${base} ${capitalize(formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns))}.` : base;
   }
 
   if (rawText.includes("löi kunnarin")) {
     const base = formatKunnari(texts, meta, lookup);
-    return ctx ? `${base} ${formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns)}.` : base;
+    return ctx ? `${base} ${capitalize(formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns))}.` : base;
   }
 
   if (rawText.includes("toi juoksun")) {
     const base = formatRunBrought(texts, meta, lookup);
-    return ctx ? `${base} ${formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns)}.` : base;
+    return ctx ? `${base} ${capitalize(formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns))}.` : base;
   }
 
   if (rawText.includes("Palo")) {
