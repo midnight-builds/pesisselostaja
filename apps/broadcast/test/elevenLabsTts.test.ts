@@ -72,6 +72,29 @@ describe("ElevenLabsTts", () => {
     expect(tts.totalCharsUsed).toBe(7);
   });
 
+  describe("number spelling (HANDOFF.md 17.7. kohta 4)", () => {
+    it("sends numbers spelled out as Finnish words, and counts the spoken chars", async () => {
+      const tts = makeTts();
+      await tts.synthesize("Tasan 4, 4.");
+      expect(JSON.parse(calls[0].body).text).toBe("Tasan neljä, neljä.");
+      expect(tts.totalCharsUsed).toBe("Tasan neljä, neljä.".length);
+    });
+
+    it("caches by the normalized text: raw variants with the same numbers share a clip", async () => {
+      const tts = makeTts();
+      await tts.synthesize("Tasan 4, 4.");
+      await tts.synthesize("Tasan neljä, neljä.");
+      expect(calls).toHaveLength(1);
+    });
+
+    it("uses the normalized text as previous_text context", async () => {
+      const tts = makeTts();
+      await tts.synthesize("Tilanne 2, 1.");
+      await tts.synthesize("Palo!");
+      expect(JSON.parse(calls[1].body).previous_text).toBe("Tilanne kaksi, yksi.");
+    });
+  });
+
   describe("previous_text context (HANDOFF.md 16.7. kohta 3)", () => {
     it("sends no previous_text on the first request, then the prior text on the next", async () => {
       const tts = makeTts();

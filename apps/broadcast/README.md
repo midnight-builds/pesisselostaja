@@ -86,7 +86,7 @@ and scoring bookkeeping still run synchronously at detection time — and never
 stalls the poll loop or reorders clips.
 
 - **At startup:** `RELAY_NARRATION_DELAY_MS=4000` in `.env.relay`, or
-  `--narration-delay-ms 4000`. Default `0` (no delay, unchanged behavior).
+  `--narration-delay-ms 4000`. Default `2000` (calibrated live, match 144742).
 - **Live, without restarting:** the same control file, `narrationDelayMs` key:
   ```bash
   echo '{"narrationDelayMs": 4000}' > apps/broadcast/run/.control-143280.json   # add 4s
