@@ -151,6 +151,10 @@ export class FfmpegMixer {
   /** True only while an ffmpeg session is attached as a FIFO reader (between a
    *  completed handshake and the process exiting). */
   private sessionActive = false;
+  /** Wall clock of the FIRST completed FIFO handshake ever, never reset —
+   *  the commentary loop's first-speech grace period (RELAY_FIRST_SPEECH_DELAY_MS)
+   *  is measured from this, so respawns don't restart the wait. */
+  private firstAttachedAtMs: number | null = null;
 
   constructor(private opts: FfmpegMixerOptions) {
     this.fifo = new NarrationFifo(opts.fifoPath);
