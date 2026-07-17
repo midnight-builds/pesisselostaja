@@ -473,6 +473,7 @@ export class CommentaryLoop {
       log("Delta-epäkonsistenssi (tapahtuman alitapahtumalista kutistui) → täyshaku.");
       return this.fetchFullEvents();
     }
+    this.pollStats.deltaMerges++;
     if (merge.added > 0 || merge.updated > 0) {
       log(`Delta-haku: ${merge.added} uutta, ${merge.updated} päivittynyttä tapahtumaa (historiassa ${this.history.size}).`);
       // Advance the cursor only now: the new base's URL changes, so its ETag
