@@ -34,6 +34,11 @@ export interface LiveEventsResponse {
   team?: number | null;
   bat_turn?: number;
   finished?: boolean;
+  /** Set by the server on delta (`after=`) queries when the client should
+   *  discard its local history and treat this response as authoritative —
+   *  the pesistulokset.fi frontend handles the same flag. Null/absent in
+   *  normal responses (observed live 2026-07-16). */
+  reset?: boolean | null;
 }
 
 export interface Player {
