@@ -173,6 +173,10 @@ export async function fetchLiveEvents(
     return { events: [], notModified: true, etag: opts.etag ?? null, serverDateMs };
   }
   if (!res.ok) throw new Error(`Live events fetch failed: ${res.status}`);
-  const body = (await res.json()) as LiveEventsResponse;
-  return { ...body, notModified: false, etag: res.headers.get("etag"), serverDateMs };
+  // A match the scorer has never opened returns a bare `[]` instead of the
+  // {"events": [...]} envelope (seen live 2026-07-17, match 144743 pre-open;
+  // spreading the array would leave `events` undefined and crash callers).
+  const raw = (await res.json()) as LiveEventsResponse | LiveEventsResponse["events"] | null;
+  const body: LiveEventsResponse = Array.isArray(raw) ? { events: raw } : (raw ?? { events: [] });
+  return { ...body, events: body.events ?? [], notModified: false, etag: res.headers.get("etag"), serverDateMs };
 }

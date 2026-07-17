@@ -68,6 +68,12 @@ const RESYNC_EVERY_MS = 60 * 1000;
  *  ~5 s, so polling much faster only burns requests. */
 const MIN_POLL_INTERVAL_MS = 2000;
 
+/** How many consecutive failed poll cycles before the failure log line turns
+ *  alarming. A lone timeout is routine — live 144742 saw 22 isolated 8 s
+ *  client-timeout blips in 45 min with zero events lost (the next poll always
+ *  caught up) — so only a streak deserves attention (HANDOFF.md 17.7.). */
+const FETCH_FAILURE_ALARM_STREAK = 3;
+
 export type SpeechSink = (spokenText: string, readableText: string) => Promise<void>;
 
 /** Lets the loop see the narration output stage so it can decide whether a
@@ -157,6 +163,14 @@ export class CommentaryLoop {
    *  stays the same — the base only advances when new events arrive, so quiet
    *  stretches poll a stable URL and get cheap 304s. */
   private deltaCursor: { after: string; etag: string | null } | null = null;
+  /** Cumulative per-run poll statistics, surfaced on the mixer's heartbeat
+   *  line (HANDOFF.md 17.7.) — 304 skips and full-fetch fallbacks are
+   *  otherwise invisible in the log (the 304 path is deliberately silent). */
+  private pollStats = { polls: 0, deltaMerges: 0, fullFetches: 0, notModified: 0, fetchFailures: 0 };
+  /** Consecutive failed poll cycles; reset by the first success. Drives the
+   *  alarm threshold (FETCH_FAILURE_ALARM_STREAK) and the streak position on
+   *  the failure log line. */
+  private consecutiveFetchFailures = 0;
 
   constructor(
     private config: RelayConfig,
@@ -178,6 +192,13 @@ export class CommentaryLoop {
    *  (finishedFailureWindowMs) once retrying a dead source is pointless. */
   get matchFinished(): boolean {
     return this.state.finished;
+  }
+
+  /** Compact poll-statistics fragment for the mixer's heartbeat line, e.g.
+   *  "pollit 118 (delta 102, täyshaku 9, 304 5, hakuvirheitä 2)". */
+  get pollStatsSummary(): string {
+    const s = this.pollStats;
+    return `pollit ${s.polls} (delta ${s.deltaMerges}, täyshaku ${s.fullFetches}, 304 ${s.notModified}, hakuvirheitä ${s.fetchFailures})`;
   }
 
   /** Writes the current setting to the control file so there is always a
@@ -338,6 +359,7 @@ export class CommentaryLoop {
       // synth queue ahead of any events found in this same poll — the recap
       // covers the suppressed past, the events then narrate the present.
       this.maybeLatchNarrationReady(meta);
+      const cycleStartedAt = Date.now();
       try {
         // Full fetch or delta merge; either way `history` holds the complete
         // event list afterwards, which is what ALL processing below runs on —
@@ -383,10 +405,33 @@ export class CommentaryLoop {
         await this.maybeAnnounceSummary(meta);
 
         await saveState(this.config.stateFile, this.state);
+        this.recordPollSuccess();
       } catch (err) {
-        log(`Hakuvirhe: ${err instanceof Error ? err.message : err}`);
+        this.recordPollFailure(err, cycleStartedAt);
       }
     }
+  }
+
+  /** A lone poll failure is routine noise (8 s client-timeout blips — live
+   *  144742 had 22 in 45 min with zero events lost); the log line carries the
+   *  cycle duration and the streak position, and only a streak of
+   *  FETCH_FAILURE_ALARM_STREAK+ turns the line alarming (HANDOFF.md 17.7.). */
+  private recordPollFailure(err: unknown, cycleStartedAt: number): void {
+    this.pollStats.fetchFailures++;
+    const streak = ++this.consecutiveFetchFailures;
+    const seconds = ((Date.now() - cycleStartedAt) / 1000).toFixed(1);
+    const label = streak >= FETCH_FAILURE_ALARM_STREAK ? "HUOM, hakuvirhesarja" : "Hakuvirhe";
+    log(`${label} (kesto ${seconds} s, ${streak}. peräkkäinen): ${err instanceof Error ? err.message : err}`);
+  }
+
+  /** Closes an alarming failure streak with an explicit all-clear line, so a
+   *  log reader (or the watchdog agent) doesn't have to infer recovery from
+   *  the absence of errors. */
+  private recordPollSuccess(): void {
+    if (this.consecutiveFetchFailures >= FETCH_FAILURE_ALARM_STREAK) {
+      log(`Haku onnistui jälleen — ${this.consecutiveFetchFailures} peräkkäistä hakuvirhettä takana.`);
+    }
+    this.consecutiveFetchFailures = 0;
   }
 
   /** Full events fetch: replaces the local history and re-bases the delta
@@ -402,6 +447,7 @@ export class CommentaryLoop {
     if (res.serverDateMs) this.lastServerDateMs = res.serverDateMs;
     this.lastFullFetchAt = Date.now();
     this.deltaCursor = null; // next delta re-bases on the fresh server date
+    this.pollStats.fullFetches++;
     return res;
   }
 
@@ -416,6 +462,7 @@ export class CommentaryLoop {
    *  when a delta actually delivers changes, keeping the URL stable through
    *  quiet stretches so the ETag can 304. */
   private async fetchEventsForPoll(): Promise<LiveEventsResult | null> {
+    this.pollStats.polls++;
     if (!this.deltaFetch) return this.fetchFullEvents();
     // While the local history is empty (match not started / being initialized)
     // the server answers every delta with the reset flag, which made each poll
@@ -437,7 +484,10 @@ export class CommentaryLoop {
       after,
       etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,
     });
-    if (res.notModified) return null;
+    if (res.notModified) {
+      this.pollStats.notModified++;
+      return null;
+    }
     if (res.reset) {
       log("Delta-vastauksessa reset-lippu → täyshaku ja paikallisen historian uudelleenrakennus.");
       return this.fetchFullEvents();
@@ -447,6 +497,7 @@ export class CommentaryLoop {
       log("Delta-epäkonsistenssi (tapahtuman alitapahtumalista kutistui) → täyshaku.");
       return this.fetchFullEvents();
     }
+    this.pollStats.deltaMerges++;
     if (merge.added > 0 || merge.updated > 0) {
       log(`Delta-haku: ${merge.added} uutta, ${merge.updated} päivittynyttä tapahtumaa (historiassa ${this.history.size}).`);
       // Advance the cursor only now: the new base's URL changes, so its ETag

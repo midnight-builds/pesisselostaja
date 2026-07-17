@@ -25,6 +25,10 @@ export interface FfmpegMixerOptions {
   /** Lets the supervisor know the match has ended (the commentary loop owns
    *  that state), for finishedFailureWindowMs. Absent → always false. */
   isMatchFinished?: () => boolean;
+  /** Extra fragment appended to the heartbeat line — the commentary loop's
+   *  poll statistics (HANDOFF.md 17.7.), since 304 skips and full-fetch
+   *  fallbacks are otherwise invisible in the log. Absent → plain heartbeat. */
+  heartbeatExtra?: () => string;
   /** Local-file test mode: write the mixed result to this path instead of
    *  pushing RTMP, so the mix can be reviewed before a second broadcast
    *  exists. Takes precedence over rtmpUrl/streamKey when set. Each spawn
@@ -285,7 +289,8 @@ export class FfmpegMixer {
     // "silently hung" look identical. Cleared on exit below.
     const heartbeat = setInterval(() => {
       const up = Math.round((Date.now() - startedAt) / 1000);
-      log(`Sydänääni: relay käynnissä ${up}s, selostusjonossa ${this.fifo.pendingClips} klippiä.`);
+      const extra = this.opts.heartbeatExtra?.();
+      log(`Sydänääni: relay käynnissä ${up}s, selostusjonossa ${this.fifo.pendingClips} klippiä${extra ? `, ${extra}` : ""}.`);
     }, HEARTBEAT_MS);
 
     const result = await childDone;
