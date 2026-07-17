@@ -289,7 +289,8 @@ export class FfmpegMixer {
     // "silently hung" look identical. Cleared on exit below.
     const heartbeat = setInterval(() => {
       const up = Math.round((Date.now() - startedAt) / 1000);
-      log(`Sydänääni: relay käynnissä ${up}s, selostusjonossa ${this.fifo.pendingClips} klippiä.`);
+      const extra = this.opts.heartbeatExtra?.();
+      log(`Sydänääni: relay käynnissä ${up}s, selostusjonossa ${this.fifo.pendingClips} klippiä${extra ? `, ${extra}` : ""}.`);
     }, HEARTBEAT_MS);
 
     const result = await childDone;
