@@ -438,6 +438,7 @@ export class CommentaryLoop {
    *  when a delta actually delivers changes, keeping the URL stable through
    *  quiet stretches so the ETag can 304. */
   private async fetchEventsForPoll(): Promise<LiveEventsResult | null> {
+    this.pollStats.polls++;
     if (!this.deltaFetch) return this.fetchFullEvents();
     // While the local history is empty (match not started / being initialized)
     // the server answers every delta with the reset flag, which made each poll
