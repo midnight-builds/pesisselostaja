@@ -405,10 +405,33 @@ export class CommentaryLoop {
         await this.maybeAnnounceSummary(meta);
 
         await saveState(this.config.stateFile, this.state);
+        this.recordPollSuccess();
       } catch (err) {
-        log(`Hakuvirhe: ${err instanceof Error ? err.message : err}`);
+        this.recordPollFailure(err, cycleStartedAt);
       }
     }
+  }
+
+  /** A lone poll failure is routine noise (8 s client-timeout blips — live
+   *  144742 had 22 in 45 min with zero events lost); the log line carries the
+   *  cycle duration and the streak position, and only a streak of
+   *  FETCH_FAILURE_ALARM_STREAK+ turns the line alarming (HANDOFF.md 17.7.). */
+  private recordPollFailure(err: unknown, cycleStartedAt: number): void {
+    this.pollStats.fetchFailures++;
+    const streak = ++this.consecutiveFetchFailures;
+    const seconds = ((Date.now() - cycleStartedAt) / 1000).toFixed(1);
+    const label = streak >= FETCH_FAILURE_ALARM_STREAK ? "HUOM, hakuvirhesarja" : "Hakuvirhe";
+    log(`${label} (kesto ${seconds} s, ${streak}. peräkkäinen): ${err instanceof Error ? err.message : err}`);
+  }
+
+  /** Closes an alarming failure streak with an explicit all-clear line, so a
+   *  log reader (or the watchdog agent) doesn't have to infer recovery from
+   *  the absence of errors. */
+  private recordPollSuccess(): void {
+    if (this.consecutiveFetchFailures >= FETCH_FAILURE_ALARM_STREAK) {
+      log(`Haku onnistui jälleen — ${this.consecutiveFetchFailures} peräkkäistä hakuvirhettä takana.`);
+    }
+    this.consecutiveFetchFailures = 0;
   }
 
   /** Full events fetch: replaces the local history and re-bases the delta
