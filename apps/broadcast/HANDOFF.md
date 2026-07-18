@@ -1,5 +1,152 @@
 # Relay — handoff seuraavaa live-testiä varten
 
+## 2026-07-18: ottelu 145164 — puhelin striimasi väärällä avaimella suoraan kohteeseen, selostus jäi ajamatta
+
+> Ylihärmän Pesis-Junkkarit – Pesä Ysit, Tenavaleiri Kempele, klo 9.30
+> (6.30 UTC). Relay käynnistettiin 6.24 normaalisti, mutta selostusta ei
+> koskaan lähetetty: EL-merkkejä 0, alasajo siististi 6.44 käyttäjän
+> päätöksellä.
+
+**Mitä tapahtui:** puhelimen striimaussovelluksessa oli KOHTEEN (selostetun
+lähetyksen) stream key, joten puhelin työnsi kuvan+kenttäänen suoraan
+selostettuun lähetykseen ohi relayn. Varsinainen lähdelähetys jäi pysyvästi
+offline-tilaan ("This live event will begin in a few moments" vaikka peli
+alkoi tulospalvelussa 6.35), relayn yt-dlp ei koskaan resolvannut lähdettä
+eikä ffmpeg kytkeytynyt kertaakaan. Katsojille lähetys näkyi ja kuului
+(puhelimen ääni) — ilman selostusta. Käyttäjä päätti jättää lähetyksen
+sellaisekseen (avaimen vaihto kesken pelin olisi tuonut katkon); relay
+ajettiin alas. Vaimennuslogiikka (PR #34) toimi: puhetta ei jonotettu eikä
+syntetisoitu turhaan koko odotuksen aikana.
+
+**Etädiagnoosin resepti (todennettu livenä):** väärä avain tunnistetaan
+näiden yhdistelmästä, ilman pääsyä puhelimeen:
+1. Lähteen watch-sivu: `curl -s <lähde-URL> | grep -o '"isLiveNow":[a-z]*'`
+   → `false` / `LIVE_STREAM_OFFLINE`, vaikka ottelu on jo alkanut
+   tulospalvelussa (relay lokittaa tapahtumia vaimennettuina).
+2. Kohteen watch-sivu: `isLiveNow:true` **vaikka relayn ffmpeg ei ole
+   työntänyt tavuakaan** (lokissa ei yhtään onnistunutta "Käynnistetään
+   ffmpeg" -sessiota). Kohde ei voi olla livenä ilman meidän pushia — paitsi
+   jos joku muu pushaa siihen = puhelin väärällä avaimella.
+
+**PARANNUSIDEA (käyttäjän pyyntö, kirjattu 18.7.):** tunnista tämä
+automaattisesti ENNEN lähetyksen alkua ja varoita operaattoria, että puhelin
+striimaa väärään lähetykseen. Toteutusvaihtoehtoja:
+1. **Agentti-/runbook-taso (halvin, ei koodia):** relay-ottelu-skillin
+   odotusvaiheeseen tarkistus — kun relay odottaa lähdettä eikä se tule
+   liveksi ilmoitettuun alkuun mennessä, tarkista kohteen live-tila (curl
+   yllä); jos kohde on livenä ennen ensimmäistäkään ffmpeg-kytkeytymistä →
+   hälytä käyttäjälle heti ("puhelimessa on todennäköisesti väärä stream
+   key"). Kohteen videoId on jo valmiiksi tiedossa käynnistysvaiheessa.
+2. **Relay-koodin taso:** ffmpegMixerin odotussilmukkaan sama tarkistus
+   (uusi `RELAY_TARGET_VIDEO_ID`-env config.ts:ään) + selkeä lokirivi
+   "HUOM: kohdelähetys on livenä vaikka emme ole työntäneet — puhelin
+   striimaa todennäköisesti väärällä avaimella". Watchdog/agentti poimii
+   rivin ja eskaloi. Ei automaattitoimia — vain varoitus (avaimen vaihto on
+   aina operaattorin päätös, vrt. tämä ajo jossa käyttäjä valitsi jatkaa
+   ilman selostusta).
+
+**TUTKITTAVA IDEA (käyttäjä, 18.7.): kenttäaudion normalisointi ja tuulen
+suhinan poisto livenä.** Havainto: puhelimen kenttäääni on lähtökohtaisesti
+hiljainen, tuulenpuuskat jyräävät mikrofoniin ja lähellä huudetut
+kannustushuudot piikkaavat — taso hyppii. Kysymykset: (1) saadaanko hyvä
+normalisointi aikaan livenä (onko käsittelyssä tarpeeksi pitkä pätkä
+audiota), (2) saadaanko tuulen suhina pois digitaalisesti kesken
+live-lähetyksen.
+
+Pohjatiedot tutkimusta varten (arkkitehtuurista jo tiedossa):
+
+- **Ääni dekoodataan/enkoodataan jo nyt** — amix-selostusmiksaus vaatii sen
+  (vain video on `-c:v copy`). Äänifiltterit lisätään olemassa olevaan
+  filtteriketjuun (`ffmpegMixer.ts`) ilman arkkitehtuurimuutosta; CPU-lisä
+  on äänifiltteriluokkaa eli pieni.
+- **Normalisointi livenä:** täysi kaksivaiheinen loudness-normalisointi ei
+  onnistu suoratoistossa, mutta live-työkalut ovat olemassa:
+  `dynaudnorm` (liukuva ikkuna ~0,5–15 s, nostaa hiljaista perustasoa
+  tasaisesti), `acompressor`+`alimiter` (leikkaa äkkipiikit — lähihuudot),
+  yksivaiheinen `loudnorm`. Ikkunapohjainen tasoitus ei riko A/V-synkkaa.
+  Todennäköinen yhdistelmä: limitteri piikkeihin + dynaudnorm perustasoon.
+  Huomioitava vuorovaikutus selostuksen kanssa: normalisoitu kenttääni
+  muuttaa selostuksen ja taustan tasapainoa (`RELAY_NARRATION_GAIN` 1.3
+  kalibroitava uudelleen); samalla voisi harkita sidechain-duckingia
+  (kenttäääni hiljenee automaattisesti selostuksen ajaksi,
+  `sidechaincompress`).
+- **Tuulen suhina:** ensiapu on ylipäästösuodatin (`highpass f=100–150`) —
+  tuulen jyrinä on valtaosin matalataajuista, suodatus halpaa ja
+  artefaktitonta. Järeämmät reaaliaikaiset kohinanpoistajat: `afftdn`
+  (FFT-pohjainen), `arnndn` (RNNoise-malli). Riski: aggressiivinen
+  kohinanpoisto latistaa yleisön äänet ja pelin tunnelman — puhemalleille
+  opetettu arnndn voi kohdella kenttäambienssia "kohinana".
+- **Testipolku:** ÄLÄ säädä livenä sokkona — relayn `recordFile`-moodilla
+  (tai lataamalla mennyt lähetys) voi ajaa saman filtteriketjun tallenteeseen
+  ja kuunnella variantit rinnakkain ennen käyttöönottoa. Filtteriketju
+  kannattaa tehdä env-säädettäväksi (esim. `RELAY_AUDIO_FILTERS` tai
+  erilliset on/off-kytkimet), jotta livenä voi pudottaa takaisin
+  käsittelemättömään jos jokin kuulostaa oudolta.
+
+**Sivulöydös samasta ajosta:** reset-tulva myös ottelun ALUSTUSVAIHEESSA
+kun historia on pieni muttei tyhjä: 6.31–6.33 ~32 reset-riviä (2/16/14 per
+minuutti) kirjurin avatessa ottelua, loppui itsestään kun kirjaukset
+vakiintuivat. Tyhjän historian guard (PR #36) ei kata tätä — vahvistaa
+144743-kirjauksen niputus-/backoff-idean tarpeen (reset-purskeen lokirivien
+niputus ja/tai lyhyt delta-backoff resetin jälkeen).
+
+## 2026-07-17 iltapäivä: live-ajon (ottelu 144743) löydökset — PR #36/#37 -vahvistusajo
+
+> Mailajuniorit E14, Kankaanpää – Pesä Ysit, Lappeenranta, Tenavaleiri Kempele,
+> klo 14.30 (11.30 UTC). Lopputulos 6–5 MaJu E14, kolme vuoroparia, ajo
+> 11.24–12.15 UTC. Ajettiin työhakemistosta haaralta, jossa PR #36:n ja #37:n
+> muutokset (mergeämättömiä ajohetkellä). EL-merkkejä kului 4124.
+
+### Aamun löydösten (144742) korjausten vahvistukset
+
+1. **Numero→sana EL-polulla (PR #36): TOIMII.** Pistetilanteet ja palomäärät
+   menivät EL:lle sanoiksi kirjoitettuina ("kuusi, viisi"); käyttäjä vahvisti
+   kuulokuvan hyväksi, ei korjattavaa. Loki/feed säilytti numerot.
+2. **Selostusviiveen oletus 2000 ms (PR #36): TOIMII.** Käytössä koko ajon
+   ilman control-säätöä; käyttäjä ei havainnut ajoitusongelmia.
+3. **Tyhjän historian reset-guard (PR #36): TOIMII.** Ennen ottelun avausta
+   pollattiin täyshauilla (~160 kpl, tyhjät rungot) ilman ainuttakaan
+   reset-lokiriviä — eilinen 15 krt/50 s -silmukka poissa. Ottelun alettua
+   delta kytkeytyi heti (yksi yksittäinen reset-rivi siirtymähetkellä 11.32,
+   ok).
+4. **Rikastetut hakuvirherivit (PR #37): TOIMIVAT.** 48 hakuvirhettä, kaikki
+   "1. peräkkäinen" — ei yhtään HUOM-sarjaa eikä all-clear-riviä tarvittu.
+5. **Delta-tilastot sydänäänessä (PR #37): TOIMIVAT.** Loppulukema:
+   pollit 929 (delta 207, täyshaku 242, 304 433, hakuvirheitä 48). 304:ien
+   osuus pelin aikana ~2/3 — delta+ETag toimii kuten suunniteltu.
+6. **Ensipuheviive ja itsesammutus: TOIMIVAT edelleen.** Ensipuhe ~22 s
+   kytkeytymisestä; loppuselostus 12.10.32, lähde loppui 12.12.39,
+   itsesammutus 12.15.00 (2 min 21 s).
+
+### Uusi bugilöytö, korjattu ajopäivänä ennen lähetystä (PR #37 -haara)
+
+**Avaamaton ottelu palauttaa paljaan `[]`-rungon** `online/{id}/events`-
+päätepisteestä — ei `{"events": [...]}`-kuorta. Spread jätti `events`-kentän
+määrittelemättä ja relayn käynnistyshaku kaatui (`events is not iterable`,
+fataali). Löytyi dry-run-esitestissä ~3 h ennen lähetystä; ilman korjausta
+käynnistys ennen kirjurin ottelunavausta olisi kaatunut joka lähetyksessä.
+Korjaus: `fetchLiveEvents` normalisoi rungon (`api.ts`), regressiotesti
+`api.test.ts`:ssä.
+
+### Uudet havainnot
+
+1. **Reset-purske kesken pelin (11.54.38–11.55.17):** palvelin lähetti
+   reset-lipun ~10 peräkkäiseen deltaan (~40 s), todennäköisesti kirjurin
+   tekemän korjauksen takia — historia oli koko ajan täysi, eli eri ilmiö
+   kuin tyhjän historian tapaus. Relay toimi oikein (täyshaku + uudelleen-
+   rakennus joka kerralla, selostus ei häiriintynyt, jono pysyi tyhjänä) ja
+   delta+304-rytmi palasi itsestään. **Kehitysidea:** niputa peräkkäisten
+   resettien lokirivit (esim. "reset-lippu ×10 40 s aikana") ja/tai lyhyt
+   delta-backoff resetin jälkeen, ettei purske aja täyshakua joka pollissa.
+2. **Hakuvirhetiheys nousi:** 48 kpl / ~50 min (~1/min) vs. aamun 22 / 45 min
+   (~0,5/min). Yhä kaikki yksittäisiä 4 s timeoutteja, ei pudonneita
+   tapahtumia — harmiton mutta trendi kannattaa pitää silmällä sydänäänen
+   tilastoista.
+3. **Lähdepään alkuhuojunta:** lähteen ensimmäisten ~3 min aikana kaksi
+   code=0-EOF:ää (sessiot 120 s ja 31 s, katsojille näkyviä katkoja), sitten
+   yhtenäinen 44 min sessio loppuun asti. Puhelimen striimin käynnistysvaiheen
+   ilmiö — ei relay-päässä korjattavaa, respawn+uusi URL hoiti.
+
 ## 2026-07-17: live-ajon (ottelu 144742) löydökset — PR #34:n vahvistusajo
 
 > Pesä Ysit E-tytöt kilpa – Manse PP, Tenavaleiri Kempele, klo 9.30 (6.30 UTC).
