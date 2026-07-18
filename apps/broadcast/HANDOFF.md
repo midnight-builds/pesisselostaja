@@ -45,6 +45,44 @@ striimaa väärään lähetykseen. Toteutusvaihtoehtoja:
    aina operaattorin päätös, vrt. tämä ajo jossa käyttäjä valitsi jatkaa
    ilman selostusta).
 
+**TUTKITTAVA IDEA (käyttäjä, 18.7.): kenttäaudion normalisointi ja tuulen
+suhinan poisto livenä.** Havainto: puhelimen kenttäääni on lähtökohtaisesti
+hiljainen, tuulenpuuskat jyräävät mikrofoniin ja lähellä huudetut
+kannustushuudot piikkaavat — taso hyppii. Kysymykset: (1) saadaanko hyvä
+normalisointi aikaan livenä (onko käsittelyssä tarpeeksi pitkä pätkä
+audiota), (2) saadaanko tuulen suhina pois digitaalisesti kesken
+live-lähetyksen.
+
+Pohjatiedot tutkimusta varten (arkkitehtuurista jo tiedossa):
+
+- **Ääni dekoodataan/enkoodataan jo nyt** — amix-selostusmiksaus vaatii sen
+  (vain video on `-c:v copy`). Äänifiltterit lisätään olemassa olevaan
+  filtteriketjuun (`ffmpegMixer.ts`) ilman arkkitehtuurimuutosta; CPU-lisä
+  on äänifiltteriluokkaa eli pieni.
+- **Normalisointi livenä:** täysi kaksivaiheinen loudness-normalisointi ei
+  onnistu suoratoistossa, mutta live-työkalut ovat olemassa:
+  `dynaudnorm` (liukuva ikkuna ~0,5–15 s, nostaa hiljaista perustasoa
+  tasaisesti), `acompressor`+`alimiter` (leikkaa äkkipiikit — lähihuudot),
+  yksivaiheinen `loudnorm`. Ikkunapohjainen tasoitus ei riko A/V-synkkaa.
+  Todennäköinen yhdistelmä: limitteri piikkeihin + dynaudnorm perustasoon.
+  Huomioitava vuorovaikutus selostuksen kanssa: normalisoitu kenttääni
+  muuttaa selostuksen ja taustan tasapainoa (`RELAY_NARRATION_GAIN` 1.3
+  kalibroitava uudelleen); samalla voisi harkita sidechain-duckingia
+  (kenttäääni hiljenee automaattisesti selostuksen ajaksi,
+  `sidechaincompress`).
+- **Tuulen suhina:** ensiapu on ylipäästösuodatin (`highpass f=100–150`) —
+  tuulen jyrinä on valtaosin matalataajuista, suodatus halpaa ja
+  artefaktitonta. Järeämmät reaaliaikaiset kohinanpoistajat: `afftdn`
+  (FFT-pohjainen), `arnndn` (RNNoise-malli). Riski: aggressiivinen
+  kohinanpoisto latistaa yleisön äänet ja pelin tunnelman — puhemalleille
+  opetettu arnndn voi kohdella kenttäambienssia "kohinana".
+- **Testipolku:** ÄLÄ säädä livenä sokkona — relayn `recordFile`-moodilla
+  (tai lataamalla mennyt lähetys) voi ajaa saman filtteriketjun tallenteeseen
+  ja kuunnella variantit rinnakkain ennen käyttöönottoa. Filtteriketju
+  kannattaa tehdä env-säädettäväksi (esim. `RELAY_AUDIO_FILTERS` tai
+  erilliset on/off-kytkimet), jotta livenä voi pudottaa takaisin
+  käsittelemättömään jos jokin kuulostaa oudolta.
+
 **Sivulöydös samasta ajosta:** reset-tulva myös ottelun ALUSTUSVAIHEESSA
 kun historia on pieni muttei tyhjä: 6.31–6.33 ~32 reset-riviä (2/16/14 per
 minuutti) kirjurin avatessa ottelua, loppui itsestään kun kirjaukset
