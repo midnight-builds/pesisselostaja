@@ -1,5 +1,57 @@
 # Relay — handoff seuraavaa live-testiä varten
 
+## 2026-07-18: ottelu 145164 — puhelin striimasi väärällä avaimella suoraan kohteeseen, selostus jäi ajamatta
+
+> Ylihärmän Pesis-Junkkarit – Pesä Ysit, Tenavaleiri Kempele, klo 9.30
+> (6.30 UTC). Relay käynnistettiin 6.24 normaalisti, mutta selostusta ei
+> koskaan lähetetty: EL-merkkejä 0, alasajo siististi 6.44 käyttäjän
+> päätöksellä.
+
+**Mitä tapahtui:** puhelimen striimaussovelluksessa oli KOHTEEN (selostetun
+lähetyksen) stream key, joten puhelin työnsi kuvan+kenttäänen suoraan
+selostettuun lähetykseen ohi relayn. Varsinainen lähdelähetys jäi pysyvästi
+offline-tilaan ("This live event will begin in a few moments" vaikka peli
+alkoi tulospalvelussa 6.35), relayn yt-dlp ei koskaan resolvannut lähdettä
+eikä ffmpeg kytkeytynyt kertaakaan. Katsojille lähetys näkyi ja kuului
+(puhelimen ääni) — ilman selostusta. Käyttäjä päätti jättää lähetyksen
+sellaisekseen (avaimen vaihto kesken pelin olisi tuonut katkon); relay
+ajettiin alas. Vaimennuslogiikka (PR #34) toimi: puhetta ei jonotettu eikä
+syntetisoitu turhaan koko odotuksen aikana.
+
+**Etädiagnoosin resepti (todennettu livenä):** väärä avain tunnistetaan
+näiden yhdistelmästä, ilman pääsyä puhelimeen:
+1. Lähteen watch-sivu: `curl -s <lähde-URL> | grep -o '"isLiveNow":[a-z]*'`
+   → `false` / `LIVE_STREAM_OFFLINE`, vaikka ottelu on jo alkanut
+   tulospalvelussa (relay lokittaa tapahtumia vaimennettuina).
+2. Kohteen watch-sivu: `isLiveNow:true` **vaikka relayn ffmpeg ei ole
+   työntänyt tavuakaan** (lokissa ei yhtään onnistunutta "Käynnistetään
+   ffmpeg" -sessiota). Kohde ei voi olla livenä ilman meidän pushia — paitsi
+   jos joku muu pushaa siihen = puhelin väärällä avaimella.
+
+**PARANNUSIDEA (käyttäjän pyyntö, kirjattu 18.7.):** tunnista tämä
+automaattisesti ENNEN lähetyksen alkua ja varoita operaattoria, että puhelin
+striimaa väärään lähetykseen. Toteutusvaihtoehtoja:
+1. **Agentti-/runbook-taso (halvin, ei koodia):** relay-ottelu-skillin
+   odotusvaiheeseen tarkistus — kun relay odottaa lähdettä eikä se tule
+   liveksi ilmoitettuun alkuun mennessä, tarkista kohteen live-tila (curl
+   yllä); jos kohde on livenä ennen ensimmäistäkään ffmpeg-kytkeytymistä →
+   hälytä käyttäjälle heti ("puhelimessa on todennäköisesti väärä stream
+   key"). Kohteen videoId on jo valmiiksi tiedossa käynnistysvaiheessa.
+2. **Relay-koodin taso:** ffmpegMixerin odotussilmukkaan sama tarkistus
+   (uusi `RELAY_TARGET_VIDEO_ID`-env config.ts:ään) + selkeä lokirivi
+   "HUOM: kohdelähetys on livenä vaikka emme ole työntäneet — puhelin
+   striimaa todennäköisesti väärällä avaimella". Watchdog/agentti poimii
+   rivin ja eskaloi. Ei automaattitoimia — vain varoitus (avaimen vaihto on
+   aina operaattorin päätös, vrt. tämä ajo jossa käyttäjä valitsi jatkaa
+   ilman selostusta).
+
+**Sivulöydös samasta ajosta:** reset-tulva myös ottelun ALUSTUSVAIHEESSA
+kun historia on pieni muttei tyhjä: 6.31–6.33 ~32 reset-riviä (2/16/14 per
+minuutti) kirjurin avatessa ottelua, loppui itsestään kun kirjaukset
+vakiintuivat. Tyhjän historian guard (PR #36) ei kata tätä — vahvistaa
+144743-kirjauksen niputus-/backoff-idean tarpeen (reset-purskeen lokirivien
+niputus ja/tai lyhyt delta-backoff resetin jälkeen).
+
 ## 2026-07-17 iltapäivä: live-ajon (ottelu 144743) löydökset — PR #36/#37 -vahvistusajo
 
 > Mailajuniorit E14, Kankaanpää – Pesä Ysit, Lappeenranta, Tenavaleiri Kempele,
