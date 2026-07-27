@@ -298,20 +298,27 @@ export class FfmpegMixer {
     }
   }
 
-  /** Judges a finished ffmpeg session: only a run long enough to be real
-   *  broadcast clears the give-up window (and the backoff). A session that
-   *  died right after starting counts as a failed attempt no matter how
-   *  cleanly ffmpeg exited — that is exactly the shape of a source whose
-   *  broadcast has ended abnormally while yt-dlp still resolves a URL
-   *  (issue #45). A respawn we asked for ourselves is neutral: it neither
-   *  clears the window nor accrues toward it. */
+  /** Judges a finished ffmpeg session: a run long enough to be real broadcast
+   *  clears the give-up window (and the backoff). A session that died right
+   *  after starting counts as a failed attempt no matter how cleanly ffmpeg
+   *  exited — that is exactly the shape of a source whose broadcast has ended
+   *  abnormally while yt-dlp still resolves a URL (issue #45).
+   *
+   *  Order matters: the productive-run check comes FIRST, so a healthy session
+   *  that happens to end in our own scheduled URL refresh still clears the
+   *  window. In production every healthy session ends that way (urlRefreshMs
+   *  15 min > maxFailureWindowMs 12 min), so treating a refresh kill as
+   *  neutral up front would mean a once-set failingSince never cleared again
+   *  and the next brief blip would shut a perfectly healthy relay down
+   *  mid-match. refreshKill only excuses a SHORT session: there the kill, not
+   *  the source, is why the run was short. */
   private noteSessionEnd(session: SessionResult): void {
-    if (session.refreshKill) return;
     if (session.ranMs >= this.minProductiveRunMs) {
       this.failingSince = null;
       this.backoffMs = 1000; // fresh backoff after a healthy run
       return;
     }
+    if (session.refreshKill) return;
     log(
       `ffmpeg kuoli alle ${Math.round(this.minProductiveRunMs / 1000)} s käynnistyksestä — ` +
         "lasketaan epäonnistuneeksi yritykseksi (lähde ei tuota lähetystä)."
