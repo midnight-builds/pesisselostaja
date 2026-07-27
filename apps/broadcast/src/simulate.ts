@@ -1,4 +1,4 @@
-import "dotenv/config";
+import { loadRelayEnv } from "./relayEnv.js";
 import { parseArgs } from "node:util";
 import { mkdirSync, existsSync, openSync, writeSync, ftruncateSync, closeSync, statSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
