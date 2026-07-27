@@ -253,6 +253,93 @@ describe("CommentaryLoop poll statistics + failure streaks (HANDOFF.md 17.7.)", 
   });
 });
 
+describe("CommentaryLoop delta reset breaker (live 144918, 27.7.)", () => {
+  /** Server answers every delta with reset:true; full fetches (no `after`)
+   *  answer normally. This is exactly what match 144918 saw for 1098 polls. */
+  function mockAlwaysResetting() {
+    fetchMock.mockImplementation(async (_id, opts) => {
+      const after = (opts as { after?: string } | undefined)?.after;
+      return after
+        ? result([ev({ id: 99 })], { reset: true })
+        : result([ev({ id: 1 }, [palo]), ev({ id: 2 }, [run])]);
+    });
+  }
+
+  it("turns delta off for the run after 5 consecutive resets and says so once", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const loop = makeLoop();
+      mockAlwaysResetting();
+      await loop.fetchFullEvents(); // seed history + server date so delta engages
+
+      for (let i = 0; i < 4; i++) await loop.fetchEventsForPoll();
+      expect(loop.deltaFetch).toBe(true); // 4 in a row is not yet enough
+
+      await loop.fetchEventsForPoll(); // the 5th trips it
+      expect(loop.deltaFetch).toBe(false);
+      const huom = logSpy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("HUOM: delta-haku"));
+      expect(huom).toHaveLength(1);
+      expect(huom[0]).toContain("5 kertaa peräkkäin");
+
+      // From here on the poll is a plain full fetch — no second delta request,
+      // and no further reset lines however long the run continues.
+      fetchMock.mockClear();
+      await loop.fetchEventsForPoll();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect((fetchMock.mock.calls[0][1] as { after?: string }).after).toBeUndefined();
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("keeps delta on when resets are interrupted by a delta that actually merges", async () => {
+    const loop = makeLoop();
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+    await loop.fetchFullEvents();
+
+    for (let i = 0; i < 4; i++) {
+      fetchMock.mockResolvedValueOnce(result([ev({ id: 99 })], { reset: true }));
+      fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+      await loop.fetchEventsForPoll();
+    }
+    // One healthy delta clears the streak…
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])], { serverDateMs: T0 + 3000 }));
+    await loop.fetchEventsForPoll();
+    // …so four more resets still don't reach the threshold.
+    for (let i = 0; i < 4; i++) {
+      fetchMock.mockResolvedValueOnce(result([ev({ id: 99 })], { reset: true }));
+      fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+      await loop.fetchEventsForPoll();
+    }
+    expect(loop.deltaFetch).toBe(true);
+  });
+
+  it("reports the tripped breaker on every later heartbeat, and a manual re-enable clears it", async () => {
+    const controlFile = "/tmp/pesis-test-control-breaker.json";
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const loop = makeLoop({ controlFile });
+      mockAlwaysResetting();
+      await loop.fetchFullEvents();
+      for (let i = 0; i < 5; i++) await loop.fetchEventsForPoll();
+
+      expect(loop.pollStatsSummary).toContain("delta POIS (katkaisija)");
+
+      writeFileSync(controlFile, JSON.stringify({ deltaFetch: true }));
+      await loop.refreshRuntimeControls();
+      expect(loop.deltaFetch).toBe(true);
+      expect(loop.pollStatsSummary).not.toContain("katkaisija");
+
+      // The streak restarted: 4 more resets are tolerated again.
+      for (let i = 0; i < 4; i++) await loop.fetchEventsForPoll();
+      expect(loop.deltaFetch).toBe(true);
+    } finally {
+      logSpy.mockRestore();
+      rmSync(controlFile, { force: true });
+    }
+  });
+});
+
 describe("CommentaryLoop runtime controls: deltaFetch + pollIntervalMs", () => {
   const controlFile = "/tmp/pesis-test-control-runtime.json";
   afterEach(() => rmSync(controlFile, { force: true }));
