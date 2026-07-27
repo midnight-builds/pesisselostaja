@@ -18,6 +18,10 @@ import { PiperTts } from "./piperTts.js";
 import { buildMixFilterComplex } from "./ffmpegMixer.js";
 import { log } from "./log.js";
 
+// Same .env.relay systemd's EnvironmentFile gives the live service, so an
+// offline replay is configured identically to the real run (issue #55).
+loadRelayEnv();
+
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
 const BYTES_PER_SAMPLE = 2;
