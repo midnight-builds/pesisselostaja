@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { log } from "./log.js";
 import { NarrationFifo } from "./narrationFifo.js";
-import { resolveSourceUrl } from "./ytdlpSource.js";
+import { resolveSourceUrl, SourceNotLiveYetError } from "./ytdlpSource.js";
 
 export interface FfmpegMixerOptions {
   youtubeUrl: string;
