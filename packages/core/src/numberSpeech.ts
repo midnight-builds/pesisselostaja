@@ -1,4 +1,6 @@
-/** Number → Finnish-word normalization for the ElevenLabs path.
+/** Number → Finnish-word helpers: spoken ordinals (see {@link finnishOrdinal},
+ *  used by speech.ts for palo ordinals) and digit normalization for the
+ *  ElevenLabs path.
  *
  *  ElevenLabs multilingual v2 reads bare digits in short Finnish phrases
  *  unclearly ("4, 3", "3 paloa" — HANDOFF.md 17.7.), while the same numbers
