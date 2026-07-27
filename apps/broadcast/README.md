@@ -163,6 +163,21 @@ is not something to try to eliminate.
 - **yt-dlp returns no URL / 403** — the original broadcast may have ended, be
   private, or YouTube may be rate-limiting; `yt-dlp --version` should also be
   reasonably current (update it if extraction starts failing repo-wide).
+- **`HUOM: yt-dlp ei palauttanut HLS-manifestia`** — the picture is going out
+  at whatever the progressive fallback offers (typically 360p) instead of the
+  full-quality HLS rendition. Since the 2026.07 releases yt-dlp needs a
+  JavaScript runtime to list the m3u8 formats, and Deno — its only default —
+  isn't installed here, so `resolveSourceUrl` passes the running Node binary
+  via `--js-runtimes`. If the warning appears anyway, check that `yt-dlp` is
+  current and that the process can execute `process.execPath`. Verify by hand
+  with:
+
+  ```bash
+  yt-dlp -g -f "best[protocol^=m3u8]/best" --js-runtimes "node:$(which node)" <URL>
+  ```
+
+  A good result starts `https://manifest.googlevideo.com/api/manifest/hls_…`;
+  a bad one is `…/videoplayback?…&itag=18`.
 - **No narration audible on the second broadcast, but ffmpeg looks healthy**
   — check `RELAY_NARRATION_GAIN` isn't 0, and confirm `commentaryLoop` is
   actually seeing new pesistulokset.fi events (compare against the main app's
