@@ -443,9 +443,9 @@ export function subEventToSpeech(
       const winner = ctx.periodHomeRuns > ctx.periodAwayRuns ? meta.home.shorthand
         : ctx.periodAwayRuns > ctx.periodHomeRuns ? meta.away.shorthand : null;
       const verdict = winner ? ` ${winner} voitti, ${score}.` : ` Tasan, ${score}.`;
-      return `${ttsClean(rawText)}.${verdict}`;
+      return `${endSentence(ttsClean(rawText))}${verdict}`;
     }
-    return `${ttsClean(rawText)}.`;
+    return endSentence(ttsClean(rawText));
   }
 
   if (rawText.includes("alkoi") && (rawText.includes("jakso") || rawText.includes("Supervuoro"))) {
@@ -458,7 +458,7 @@ export function subEventToSpeech(
     const batting = ctx?.currentBatTeamId
       ? ` Sisävuorossa ${getTeamName(meta, ctx.currentBatTeamId)}.`
       : "";
-    return `${ttsClean(rawText)}.${standing}${pair}${batting}`;
+    return `${endSentence(ttsClean(rawText))}${standing}${pair}${batting}`;
   }
 
   if (rawText === "Ottelu alkoi") {
@@ -473,7 +473,7 @@ export function subEventToSpeech(
   }
 
   if (eventTexts.some((t) => t.length > 3)) {
-    return ttsClean(rawText) + ".";
+    return endSentence(ttsClean(rawText));
   }
 
   return null;
