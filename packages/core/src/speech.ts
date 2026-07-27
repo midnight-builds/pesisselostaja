@@ -284,7 +284,16 @@ export function formatBatTurnChangeSpeech(
       `${next} siirtyy sisävuoroon.`,
       `Seuraavaksi lyömään ${next}.`,
     ]);
-    return `${label} ${prev}:n vuoro päättyi. ${scoreStr} ${toBat}`;
+    // No genitive: "KPL:n vuoro päättyi" is the abbreviation convention leaking
+    // into every team name, and TTS reads the colon clumsily (issue #49).
+    // Inflecting arbitrary Finnish team names (abbreviations, multi-word,
+    // foreign) correctly isn't feasible — phrase around it instead.
+    const ended = pickVariant("turn-ended", [
+      `Vuoro päättyi, ${prev}.`,
+      `${prev} lopetti vuoronsa.`,
+      `Sisävuoro päättyi, ${prev}.`,
+    ]);
+    return `${label} ${ended} ${scoreStr} ${toBat}`;
   }
   if (next) {
     return `${label} ${scoreStr} Sisävuoroon ${next}.`;
