@@ -370,6 +370,33 @@ describe("subEventToFeedText: lineup change (issue #74)", () => {
     expect(subEventFeedDetail(sub, lookup)).toBe("Uusi lyöntijärjestys: 5 Mäyrä, pelaaja 999.");
   });
 
+  it("omits a null pitcher instead of writing 'pelaaja null'", () => {
+    // The API sends `pitcher: null` when none is designated — JSON tells absent
+    // and null apart even though the optional field type doesn't.
+    const sub: SubEvent = {
+      texts: [{ type: "substitution", newLineUp: ["11", "12"], pitcher: null } as never],
+    };
+    const detail = subEventFeedDetail(sub, lookup);
+    expect(detail).toBe("Uusi lyöntijärjestys: 5 Mäyrä, 8 Ilves.");
+    expect(detail).not.toMatch(/null/);
+  });
+
+  it("skips null and empty slots inside the lineup list", () => {
+    const sub: SubEvent = {
+      texts: [{ type: "substitution", newLineUp: ["11", null, "", "12"] } as never],
+    };
+    expect(subEventFeedDetail(sub, lookup)).toBe("Uusi lyöntijärjestys: 5 Mäyrä, 8 Ilves.");
+  });
+
+  it("shows nothing for a substitution with a null lineup", () => {
+    const sub: SubEvent = {
+      texts: [{ type: "substitution", newLineUp: null, pitcher: null } as never],
+    };
+    expect(subEventFeedDetail(sub, lookup)).toBeNull();
+    expect(subEventToFeedText("Ketut muutti lyöntijärjestystä.", sub, lookup))
+      .toBe("Ketut muutti lyöntijärjestystä.");
+  });
+
   it("passes ordinary sub-events through unchanged", () => {
     const sub: SubEvent = { texts: [{ type: "event", text: "Vaihto", base: null }] };
     expect(subEventToFeedText("Vaihto.", sub, lookup)).toBe("Vaihto.");
