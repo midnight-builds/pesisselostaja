@@ -180,18 +180,23 @@ export class CommentaryLoop {
    *  carried. The ETag is only ever sent while the URL (the after value)
    *  stays the same — the base only advances when new events arrive, so quiet
    *  stretches poll a stable URL and get cheap 304s. */
-  private deltaCursor: { after: string; etag: string | null } | null = null;
+  private deltaCursor: { after: string; afterMs: number; etag: string | null } | null = null;
   /** Cumulative per-run poll statistics, surfaced on the mixer's heartbeat
-   *  line (HANDOFF.md 17.7.) — 304 skips and full-fetch fallbacks are
-   *  otherwise invisible in the log (the 304 path is deliberately silent). */
-  private pollStats = { polls: 0, deltaMerges: 0, fullFetches: 0, notModified: 0, fetchFailures: 0 };
+   *  line (HANDOFF.md 17.7.) — 304 skips, full-fetch fallbacks and reset
+   *  answers are otherwise invisible in the log (the 304 path is deliberately
+   *  silent, and reset answers only log once per streak). */
+  private pollStats = { polls: 0, deltaMerges: 0, fullFetches: 0, notModified: 0, deltaResets: 0, fetchFailures: 0 };
   /** Consecutive failed poll cycles; reset by the first success. Drives the
    *  alarm threshold (FETCH_FAILURE_ALARM_STREAK) and the streak position on
    *  the failure log line. */
   private consecutiveFetchFailures = 0;
-  /** Consecutive reset-flagged delta responses; cleared by any delta that
-   *  actually merges or 304s. Drives DELTA_RESET_BREAKER_STREAK. */
+  /** Consecutive reset answers of any kind; cleared by any delta that actually
+   *  merges or 304s. Only drives the log (one line per streak, not per poll —
+   *  the match-start streak is ~60 polls long at the default cadence). */
   private consecutiveDeltaResets = 0;
+  /** Consecutive reset answers our own `after` does NOT explain. Drives
+   *  DELTA_RESET_BREAKER_STREAK; cleared alongside consecutiveDeltaResets. */
+  private consecutiveUnexplainedResets = 0;
   /** Set when the breaker turned delta off by itself, so the reset log line
    *  stays silent afterwards and a manual re-enable can tell the two apart. */
   private deltaBreakerTripped = false;
@@ -225,7 +230,7 @@ export class CommentaryLoop {
   get pollStatsSummary(): string {
     const s = this.pollStats;
     const breaker = this.deltaBreakerTripped ? ", delta POIS (katkaisija)" : "";
-    return `pollit ${s.polls} (delta ${s.deltaMerges}, täyshaku ${s.fullFetches}, 304 ${s.notModified}, hakuvirheitä ${s.fetchFailures}${breaker})`;
+    return `pollit ${s.polls} (delta ${s.deltaMerges}, täyshaku ${s.fullFetches}, 304 ${s.notModified}, reset ${s.deltaResets}, hakuvirheitä ${s.fetchFailures}${breaker})`;
   }
 
   /** Writes the current setting to the control file so there is always a
@@ -286,6 +291,7 @@ export class CommentaryLoop {
       // streak — otherwise one earlier bad patch would keep it off for good.
       if (this.deltaFetch) {
         this.consecutiveDeltaResets = 0;
+        this.consecutiveUnexplainedResets = 0;
         this.deltaBreakerTripped = false;
       }
       log(`Delta-haku vaihdettu ajon aikana: ${this.deltaFetch ? "PÄÄLLÄ" : "POIS (täyshaut)"} (control-tiedostosta).`);
@@ -476,12 +482,75 @@ export class CommentaryLoop {
       timeoutMs: API_TIMEOUT_MS,
       skipDelay: true,
     });
+    return this.adoptFullSnapshot(res);
+  }
+
+  /** A delta that merged or 304'd proves the cursor is healthy again. */
+  private clearResetStreak(): void {
+    this.consecutiveDeltaResets = 0;
+    this.consecutiveUnexplainedResets = 0;
+  }
+
+  /** Makes a response that carries the complete history the new local history
+   *  and re-bases the delta cursor on it. Used for genuine full fetches and
+   *  for reset answers, which are full snapshots too (handleResetResponse). */
+  private adoptFullSnapshot(res: LiveEventsResult): LiveEventsResult {
     this.history.replace(res.events);
     if (res.serverDateMs) this.lastServerDateMs = res.serverDateMs;
     this.lastFullFetchAt = Date.now();
     this.deltaCursor = null; // next delta re-bases on the fresh server date
     this.pollStats.fullFetches++;
     return res;
+  }
+
+  /** The server answered our delta with a reset instant (issue #46).
+   *
+   *  That answer is NOT "your delta failed, go fetch everything": it already
+   *  IS everything — the server ignores `after` and returns the complete
+   *  history plus the authoritative period/team fields (see
+   *  LiveEventsResponse.reset). The old code threw it away and immediately ran
+   *  a second full fetch, which is what made every poll cost two API requests
+   *  for the whole reset streak. Adopting the response we already hold costs
+   *  exactly one request per poll — no worse than delta-off mode.
+   *
+   *  Breaker accounting: a reset instant NEWER than the `after` we sent is
+   *  self-explanatory (our baseline predates the match's online data, which is
+   *  unavoidable for AFTER_MARGIN_MS after the scorer opens the match), so it
+   *  must not consume the breaker's budget. Anything else does. */
+  private async handleResetResponse(
+    res: LiveEventsResult,
+    after: string,
+    afterMs: number
+  ): Promise<LiveEventsResult> {
+    this.pollStats.deltaResets++;
+    const resetAtMs = typeof res.reset === "string" ? Date.parse(res.reset) : NaN;
+    const explained = Number.isFinite(resetAtMs) && resetAtMs >= afterMs;
+    const firstOfStreak = this.consecutiveDeltaResets === 0;
+    this.consecutiveDeltaResets++;
+    if (!explained) this.consecutiveUnexplainedResets++;
+
+    if (this.consecutiveUnexplainedResets >= DELTA_RESET_BREAKER_STREAK && this.deltaFetch) {
+      this.deltaFetch = false;
+      this.deltaBreakerTripped = true;
+      log(
+        `HUOM: delta-haku vastasi selittämättömällä reset-leimalla ${this.consecutiveUnexplainedResets} kertaa peräkkäin ` +
+          "— kytketään delta pois tältä ajolta ja jatketaan täyshauilla. " +
+          "Takaisin päälle control-tiedostosta: {\"deltaFetch\": true}."
+      );
+    } else if (firstOfStreak) {
+      // One line per streak, not per poll: the match-start streak runs for
+      // AFTER_MARGIN_MS (~60 polls at the default cadence).
+      const why = explained
+        ? `haettu after ${after} on vanhempi kuin ottelun datan reset-hetki`
+        : "syy tuntematon";
+      log(`Delta-vastaus sisälsi reset-leiman ${String(res.reset)} (${why}) → vastaus on koko historia, käytetään sellaisenaan.`);
+    }
+
+    // Trust, but verify: an authoritative snapshot can only be shorter than
+    // what we hold if the scorer deleted events — rare enough that paying for
+    // one real full fetch there is the safe call.
+    if (res.events.length < this.history.size) return this.fetchFullEvents();
+    return this.adoptFullSnapshot(res);
   }
 
   /** One poll's events fetch (HANDOFF.md 15.7. kohta 6). Delta mode asks only
@@ -508,8 +577,8 @@ export class CommentaryLoop {
     ) {
       return this.fetchFullEvents();
     }
-    const after =
-      this.deltaCursor?.after ?? formatHelsinkiTimestamp(new Date(this.lastServerDateMs - AFTER_MARGIN_MS));
+    const afterMs = this.deltaCursor?.afterMs ?? this.lastServerDateMs - AFTER_MARGIN_MS;
+    const after = this.deltaCursor?.after ?? formatHelsinkiTimestamp(new Date(afterMs));
     const res = await fetchLiveEvents(this.config.matchId, {
       apiBase: this.config.apiBase,
       timeoutMs: API_TIMEOUT_MS,
@@ -518,31 +587,17 @@ export class CommentaryLoop {
       etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,
     });
     if (res.notModified) {
-      this.consecutiveDeltaResets = 0;
+      this.clearResetStreak();
       this.pollStats.notModified++;
       return null;
     }
-    if (res.reset) {
-      this.consecutiveDeltaResets++;
-      if (this.consecutiveDeltaResets >= DELTA_RESET_BREAKER_STREAK) {
-        this.deltaFetch = false;
-        this.deltaBreakerTripped = true;
-        log(
-          `HUOM: delta-haku vastasi reset-lipulla ${this.consecutiveDeltaResets} kertaa peräkkäin ` +
-            "— kytketään delta pois tältä ajolta ja jatketaan täyshauilla. " +
-            "Takaisin päälle control-tiedostosta: {\"deltaFetch\": true}."
-        );
-      } else {
-        log("Delta-vastauksessa reset-lippu → täyshaku ja paikallisen historian uudelleenrakennus.");
-      }
-      return this.fetchFullEvents();
-    }
+    if (res.reset) return this.handleResetResponse(res, after, afterMs);
     const merge = this.history.merge(res.events);
     if (merge.inconsistent) {
       log("Delta-epäkonsistenssi (tapahtuman alitapahtumalista kutistui) → täyshaku.");
       return this.fetchFullEvents();
     }
-    this.consecutiveDeltaResets = 0;
+    this.clearResetStreak();
     this.pollStats.deltaMerges++;
     if (merge.added > 0 || merge.updated > 0) {
       log(`Delta-haku: ${merge.added} uutta, ${merge.updated} päivittynyttä tapahtumaa (historiassa ${this.history.size}).`);
@@ -554,7 +609,7 @@ export class CommentaryLoop {
       }
     } else {
       // Nothing new — keep the URL stable and remember its ETag for a 304.
-      this.deltaCursor = { after, etag: res.etag ?? null };
+      this.deltaCursor = { after, afterMs, etag: res.etag ?? null };
     }
     return res;
   }
