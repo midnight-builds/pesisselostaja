@@ -1,5 +1,86 @@
 # Relay — handoff seuraavaa live-testiä varten
 
+## 2026-07-17: live-ajon (ottelu 144742) löydökset — PR #34:n vahvistusajo
+
+> Pesä Ysit E-tytöt kilpa – Manse PP, Tenavaleiri Kempele, klo 9.30 (6.30 UTC).
+> Lopputulos 6–4 Ysit Kylmä, kolme vuoroparia, ajo 6.24–7.09 UTC.
+> PR #34:n muutokset ensimmäistä kertaa livenä. EL-merkkejä kului 3711.
+
+### PR #34 -tarkistuslistan tulokset
+
+1. **Delta-polli: toimii pelin aikana, mutta reset-silmukka tyhjällä
+   historialla (BUGI, korjattava).** Kirjurin avatessa ottelun (6.29.16–
+   6.30.04) "Delta-vastauksessa reset-lippu → täyshaku" toistui JOKA pollissa
+   (15 krt / 50 s). Kytkettiin `{"deltaFetch": false}` control-tiedostoon →
+   vaihto lennossa toimi heti. Kytkettiin takaisin PÄÄLLE 6.40 kun historiaa
+   oli → loppuottelu täysin terve ("N uutta, 0 päivittynyttä", ei yhtään
+   resettiä/epäkonsistenssia), tapahtumat selostukseen samassa pollissa kuin
+   kirjuri merkitsee. Hypoteesi: reset-tunnistus laukeaa aina kun paikallinen
+   historia on tyhjä / ottelua alustetaan. Korjaa tämä reunatapaus.
+   Huom: 304-osumia EI voi todentaa lokista — commentaryLoop ohittaa ne
+   hiljaa (~rivi 346). Ehdotus: sydänääniriville delta-tilastot
+   (pollit/304/täyshaut/abortit).
+2. **Selostusviive: kalibroitu 2000 ms → TEE UUSI OLETUS.** Käyttäjä kuuli
+   selostuksen ennen kuvaa; `{"narrationDelayMs": 2000}` control-tiedostoon
+   6.33, käyttäjä vahvisti riittäväksi. Muuta `config.ts`:n
+   RELAY_NARRATION_DELAY_MS -oletus 0 → 2000.
+3. **Ensipuheviive: TOIMII.** ffmpeg kytkeytyi 6.24.12, ensimmäinen puhe
+   6.24.34 (~22 s), yksi tilannefraasi, ei tervetulopursketta. ✅
+4. **ElevenLabs-siansaksa lyhyiden fraasien alussa: EI havaittu** —
+   previous_text + pidemmät variantit näyttävät purreen. SEN SIJAAN uusi
+   löydös: **EL lukee irtonumerot epäselvästi** (3 kuulohavaintoa: "3 paloa",
+   "4, 3", "Tasan 4, 4"). A/B/C-vertailunäytteillä todennettu ajon aikana
+   (~/projects/elevenlabs-aanitestit/numerot-2026-07-17/): numerot ilman
+   kontekstia JA previous_textillä molemmat epäselviä, sanoiksi kirjoitettuna
+   hyvä. → Vika EL:n numeroluvussa, EI previous_textissä. KORJAUS: numero→
+   sana-muunnos EL-polun esikäsittelyyn (`elevenLabsTts.ts` + webin
+   EL-adapteri; ei speech.ts:ään, koska Piper lukee numerot oikein; ei riko
+   PR #26 -linjausta — deterministinen normalisointi, ei ääntämyskorvaus).
+5. **90 s hiljaisuusfilleri: EI LAUENNUT KERTAAKAAN** — peli oli niin
+   tapahtumarikas ettei 90 s hiljaisuutta syntynyt (pisin väli ~67 s).
+   "Tilasto kertoo…" -poolin variaatio jäi siis livenä vahvistamatta;
+   määräaikainen tilannekuva ("Menossa…/Tulospalvelun mukaan menossa…")
+   pyöri 9 krt hyvällä variaatiolla. Testaa filleri seuraavassa
+   hiljaisemmassa ottelussa.
+6. **Loppu: TOIMII TÄYDELLISESTI.** 7.05.40 "Ottelu päättyi! … Kiitokset
+   kaikille katsojille." ✅; lähde loppui 7.07.20, itsesammutus 7.09.41 eli
+   2 min 21 s (finished-ikkuna 2 min + backoff-yritys) — ei enää 12 min. ✅
+
+### Muut havainnot
+
+- **"Hakuvirhe: This operation was aborted" 22 krt ajossa (~45 min).**
+  Clientin oma 8 s fetch-timeout (`packages/core/src/api.ts`), EI API-virhe.
+  Curl-testit samaan aikaan: 0,09–0,14 s vastaukset (myös after=-delta) —
+  eli satunnaisia piikkejä/undici-oikkuja, ei API:n yleishitautta eikä
+  koneen kuormaa (load 0.3). Ei pudottanut yhtään tapahtumaa (3 s polli
+  paikkaa). KEHITYSIDEA (käyttäjä): armollisempi käsittely — lokiriville
+  kesto + monesko peräkkäinen epäonnistuminen; hälyttävä vasta sarjana.
+- Ottelu ei ollut alkanut -tila EI hidasta API:a (testattu) — abortit eivät
+  liity siihen.
+
+### Kehitysideat (käyttäjältä, ajon aikana)
+
+1. **Peräkkäisten palojen yhdistäminen jonossa:** jos jonossa on useamman
+   palon fraasit joita ei ole alettu puhua ("toinen palo" + "kolmas palo"
+   samassa pollissa, havaittu livenä 6.35.57), yhdistä yhdeksi: "Pesä
+   Yseille tuli toinen ja kolmas palo".
+2. **Sama yhdistäminen pelaajanvaihdoille + historiaviittaus:** useampi
+   vaihto jonossa kerralla → "Äskettäin oli lyömässä Jokinen ja nyt
+   vuorossa Kuusinen" — nykyisin kaikki luetaan preesensissä vaikka tieto
+   on jonossa jo vanhentunut.
+3. **Mikserin ja selostuslogiikan eriytys omiksi prosesseikseen** (ffmpeg +
+   FIFO erilleen commentary-loopista): selostuspuolen voisi restartata
+   uudella koodilla kesken lähetyksen ilman kuvakatkoa — livekorjaukset
+   mahdollisiksi. Nyt hotfix vaatii koko relayn restartin (ffmpeg kuolee).
+
+### Ajon kulku (kontrollitoimet)
+
+- 6.24 käynnistys (~6 min ennen lähteen alkua) — ajoitus toimi.
+- 6.30 deltaFetch pois (reset-silmukka) → 6.40 takaisin päälle (terve).
+- 6.33 narrationDelayMs 2000.
+- Control-tiedoston lennossa-vaihdot kuittautuivat joka kerta seuraavassa
+  pollissa — mekanismi luotettava.
+
 ## TODO 2026-07-16: live-ajon (ottelu 144733) löydökset
 
 > Kerätty ajon aikana, **ei toteutettu** — käyttäjän pyynnöstä vain kirjattu
