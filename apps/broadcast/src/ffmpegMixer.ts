@@ -219,7 +219,30 @@ export class FfmpegMixer {
       try {
         await this.spawnOnce();
         this.failingSince = null;
+        this.scheduledSince = null;
       } catch (err) {
+        // A broadcast scheduled to start later is not a failure: YouTube is
+        // confirming the source exists. Counting those answers toward the
+        // give-up window is what forced starting the relay in a narrow slot
+        // just before kickoff (match 144918, 27.7.) — wait instead.
+        if (err instanceof SourceNotLiveYetError) {
+          if (this.scheduledSince === null) this.scheduledSince = Date.now();
+          if (Date.now() - this.scheduledSince > SCHEDULED_WAIT_MAX_MS) {
+            this.stopped = true;
+            throw new SourceExhaustedError(
+              `Lähde on ollut "alkaa pian" -tilassa yli ${Math.round(SCHEDULED_WAIT_MAX_MS / 3600000)} h ` +
+                "eikä ole alkanut — luovutetaan."
+            );
+          }
+          this.failingSince = null;
+          this.backoffMs = 1000; // fresh backoff for when it does go live
+          const waitMs = scheduledRecheckDelayMs(err.startsInMs);
+          const eta = err.startsInMs === null ? "" : ` — alkaa noin ${formatEta(err.startsInMs)} kuluttua`;
+          log(`Lähde ei ole vielä livenä${eta}. Tarkistetaan uudelleen ${Math.round(waitMs / 1000)} s kuluttua.`);
+          await this.interruptibleDelay(waitMs);
+          continue;
+        }
+        this.scheduledSince = null;
         log(`ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
         if (this.failingSince === null) this.failingSince = Date.now();
         // A finished match's source won't come back — use the much shorter
@@ -241,6 +264,16 @@ export class FfmpegMixer {
       log(`Uudelleenyritys ${this.backoffMs}ms kuluttua…`);
       await delay(this.backoffMs);
       this.backoffMs = Math.min(this.backoffMs * 2, 30000);
+    }
+  }
+
+  /** Sleeps in short slices so a stop() during a multi-minute scheduled wait
+   *  is still honoured within a second — the plain backoff delay is capped at
+   *  30 s and can afford to block, this one can't. */
+  private async interruptibleDelay(ms: number): Promise<void> {
+    const until = Date.now() + ms;
+    while (!this.stopped && Date.now() < until) {
+      await delay(Math.min(1000, until - Date.now()));
     }
   }
 
