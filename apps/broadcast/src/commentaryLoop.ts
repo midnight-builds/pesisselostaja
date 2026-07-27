@@ -210,10 +210,13 @@ export class CommentaryLoop {
   }
 
   /** Compact poll-statistics fragment for the mixer's heartbeat line, e.g.
-   *  "pollit 118 (delta 102, täyshaku 9, 304 5, hakuvirheitä 2)". */
+   *  "pollit 118 (delta 102, täyshaku 9, 304 5, hakuvirheitä 2)". A tripped
+   *  delta breaker is appended so every later heartbeat still says why the
+   *  delta count stopped moving — the one-off trip line scrolls away. */
   get pollStatsSummary(): string {
     const s = this.pollStats;
-    return `pollit ${s.polls} (delta ${s.deltaMerges}, täyshaku ${s.fullFetches}, 304 ${s.notModified}, hakuvirheitä ${s.fetchFailures})`;
+    const breaker = this.deltaBreakerTripped ? ", delta POIS (katkaisija)" : "";
+    return `pollit ${s.polls} (delta ${s.deltaMerges}, täyshaku ${s.fullFetches}, 304 ${s.notModified}, hakuvirheitä ${s.fetchFailures}${breaker})`;
   }
 
   /** Writes the current setting to the control file so there is always a
