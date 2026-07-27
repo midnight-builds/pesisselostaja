@@ -266,6 +266,37 @@ describe("idle filler: light stat-style variant with the batting team (HANDOFF.m
   });
 });
 
+describe("subEventToSpeech: lineup change (issue #48)", () => {
+  // Shape taken from the live API, player ids replaced with fictional ones.
+  const substitutionSub: SubEvent = {
+    texts: [
+      { type: "team", id: 100 },
+      "muutti lyöntijärjestystä. Uusi lyöntijärjestys:",
+      { type: "substitution", team: 100, newLineUp: ["11", "12", "13"], pitcher: 13 },
+    ],
+  };
+
+  it("speaks a complete sentence and drops the unspoken lineup list", () => {
+    const speech = subEventToSpeech(liveEvent({ team: 100 }), substitutionSub, meta, lookup);
+    expect(speech).toBe("Ketut muutti lyöntijärjestystä.");
+  });
+
+  it("never leaves the narration dangling on a colon for an unknown element type", () => {
+    const sub: SubEvent = {
+      texts: ["Jotain tapahtui. Yksityiskohdat:", { type: "tuntematon" } as never],
+    };
+    const speech = subEventToSpeech(liveEvent(), sub, meta, lookup);
+    expect(speech).toBe("Jotain tapahtui.");
+  });
+
+  it("says nothing at all when no complete sentence is left", () => {
+    const sub: SubEvent = {
+      texts: ["Uusi lyöntijärjestys:", { type: "substitution", newLineUp: ["11", "12"] }],
+    };
+    expect(subEventToSpeech(liveEvent(), sub, meta, lookup)).toBeNull();
+  });
+});
+
 describe("subEventToSpeech: filtering and generic texts", () => {
   it("returns null when only hidden/stat elements remain", () => {
     const sub: SubEvent = {

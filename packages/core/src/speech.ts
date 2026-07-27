@@ -166,6 +166,12 @@ function dropDanglingClause(text: string): string | null {
   return cut || null;
 }
 
+/** Terminates a sentence without doubling punctuation the source text already
+ *  has (dropDanglingClause can cut back to a text that already ends in "."). */
+function endSentence(text: string): string {
+  return /[.!?]$/.test(text) ? text : `${text}.`;
+}
+
 function isBatterChangeSubEvent(sub: SubEvent): boolean {
   const firstText = sub.texts[0];
   if (typeof firstText === "string" && firstText.startsWith("Lyöntivuorossa")) return true;
