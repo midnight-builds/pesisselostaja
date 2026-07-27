@@ -171,7 +171,8 @@ riitä.
 alkua.** Erillistä ajastusrituaalia ei tarvita: jos yt-dlp vastaa "this live
 event will begin in N minutes", relay tulkitsee sen odotukseksi eikä virheeksi,
 nukkuu ja tarkistaa tilanteen uudelleen vähän ennen ilmoitettua alkua
-(`SourceNotLiveYetError` / `scheduledRecheckDelayMs`, `ffmpegMixer.ts`). Odotus
+(`SourceNotLiveYetError`, `ytdlpSource.ts` — odotushaara ja
+`scheduledRecheckDelayMs` `ffmpegMixer.ts`:ssä). Odotus
 ei kuluta luovutusikkunaa. Jos lähde ei koskaan ala, odotus katkeaa
 `SCHEDULED_WAIT_MAX_MS`:n jälkeen (`ffmpegMixer.ts`).
 

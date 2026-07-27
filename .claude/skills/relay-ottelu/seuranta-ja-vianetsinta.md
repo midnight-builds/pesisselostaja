@@ -16,8 +16,8 @@ Kaikki alla olevat lokirivit tulevat `apps/broadcast/src/`:stä
 
 - `Lähde ei ole vielä livenä — alkaa noin N min kuluttua. Tarkistetaan uudelleen
   N s kuluttua.` = lähde on ajastettu myöhemmäksi, relay odottaa sen alkua.
-  **Tämä ei ole virhe** eikä kuluta luovutusikkunaa (`ffmpegMixer.ts`,
-  `SourceNotLiveYetError`-haara).
+  **Tämä ei ole virhe** eikä kuluta luovutusikkunaa (`SourceNotLiveYetError`
+  määritellään `ytdlpSource.ts`:ssä, odotushaara on `ffmpegMixer.ts`:ssä).
 - `Sydänääni: relay käynnissä Ns, selostusjonossa N klippiä, pollit N (delta N,
   täyshaku N, 304 N, hakuvirheitä N).` = elää. Rivi tulee säännöllisin välein
   (`HEARTBEAT_MS`, `ffmpegMixer.ts`), joten hiljainen jakso ≠ jumi. Pollitilastot
