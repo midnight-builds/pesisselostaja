@@ -117,6 +117,16 @@ triggers an immediate full refetch, and a full resync runs every ~60 s as
 insurance. Watch the log for `Delta-haku: N uutta …` lines and fall back live
 if anything looks off:
 
+If the server answers **5 deltas in a row** with the reset flag, delta mode is
+pure overhead — every poll pays a delta request *and* a full one — so a breaker
+turns it off for the rest of the run and logs `HUOM: delta-haku vastasi
+reset-lipulla 5 kertaa peräkkäin …` once. Later heartbeats keep saying `delta
+POIS (katkaisija)` so the stalled delta count doesn't look mysterious. Without
+this, match 144918 (27.7.) ran 1098 polls with exactly one successful delta
+merge until the breaker was applied by hand mid-broadcast. Writing
+`{"deltaFetch": true}` to the control file overrules the breaker and gives
+delta a fresh streak.
+
 - **At startup:** `RELAY_DELTA_FETCH=false` reverts to plain full fetches.
 - **Live, without restarting:** control file keys `deltaFetch` (boolean) and
   `pollIntervalMs` (min 2000):

@@ -67,6 +67,15 @@ const RESYNC_EVERY_MS = 60 * 1000;
 /** Floor for the control file's pollIntervalMs — the server response cache is
  *  ~5 s, so polling much faster only burns requests. */
 const MIN_POLL_INTERVAL_MS = 2000;
+/** Consecutive reset-flagged delta responses that trip the breaker and drop
+ *  the run back to plain full fetches. When the server answers every delta
+ *  with reset, delta mode is pure overhead: each poll pays a delta request AND
+ *  a full one, and rebuilds the local history in between. Live match 144918
+ *  (27.7.) did that from the first event to the last — 1098 polls, exactly ONE
+ *  successful delta merge — until the operator flipped deltaFetch off by hand
+ *  mid-broadcast. 5 in a row is well past noise (a genuine reset resolves on
+ *  the next poll) and still trips within ~15 s at the default cadence. */
+const DELTA_RESET_BREAKER_STREAK = 5;
 
 /** How many consecutive failed poll cycles before the failure log line turns
  *  alarming. A lone timeout is routine — live 144742 saw 22 isolated 8 s
@@ -171,6 +180,12 @@ export class CommentaryLoop {
    *  alarm threshold (FETCH_FAILURE_ALARM_STREAK) and the streak position on
    *  the failure log line. */
   private consecutiveFetchFailures = 0;
+  /** Consecutive reset-flagged delta responses; cleared by any delta that
+   *  actually merges or 304s. Drives DELTA_RESET_BREAKER_STREAK. */
+  private consecutiveDeltaResets = 0;
+  /** Set when the breaker turned delta off by itself, so the reset log line
+   *  stays silent afterwards and a manual re-enable can tell the two apart. */
+  private deltaBreakerTripped = false;
 
   constructor(
     private config: RelayConfig,
@@ -195,10 +210,13 @@ export class CommentaryLoop {
   }
 
   /** Compact poll-statistics fragment for the mixer's heartbeat line, e.g.
-   *  "pollit 118 (delta 102, täyshaku 9, 304 5, hakuvirheitä 2)". */
+   *  "pollit 118 (delta 102, täyshaku 9, 304 5, hakuvirheitä 2)". A tripped
+   *  delta breaker is appended so every later heartbeat still says why the
+   *  delta count stopped moving — the one-off trip line scrolls away. */
   get pollStatsSummary(): string {
     const s = this.pollStats;
-    return `pollit ${s.polls} (delta ${s.deltaMerges}, täyshaku ${s.fullFetches}, 304 ${s.notModified}, hakuvirheitä ${s.fetchFailures})`;
+    const breaker = this.deltaBreakerTripped ? ", delta POIS (katkaisija)" : "";
+    return `pollit ${s.polls} (delta ${s.deltaMerges}, täyshaku ${s.fullFetches}, 304 ${s.notModified}, hakuvirheitä ${s.fetchFailures}${breaker})`;
   }
 
   /** Writes the current setting to the control file so there is always a
@@ -255,6 +273,12 @@ export class CommentaryLoop {
     // very next poll (the local history is simply rebuilt from each response).
     if (typeof parsed.deltaFetch === "boolean" && parsed.deltaFetch !== this.deltaFetch) {
       this.deltaFetch = parsed.deltaFetch;
+      // A manual re-enable overrules the breaker and gives delta a fresh
+      // streak — otherwise one earlier bad patch would keep it off for good.
+      if (this.deltaFetch) {
+        this.consecutiveDeltaResets = 0;
+        this.deltaBreakerTripped = false;
+      }
       log(`Delta-haku vaihdettu ajon aikana: ${this.deltaFetch ? "PÄÄLLÄ" : "POIS (täyshaut)"} (control-tiedostosta).`);
     }
     // Poll cadence live; clamped to the floor so a typo can't hammer the API.
@@ -485,11 +509,23 @@ export class CommentaryLoop {
       etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,
     });
     if (res.notModified) {
+      this.consecutiveDeltaResets = 0;
       this.pollStats.notModified++;
       return null;
     }
     if (res.reset) {
-      log("Delta-vastauksessa reset-lippu → täyshaku ja paikallisen historian uudelleenrakennus.");
+      this.consecutiveDeltaResets++;
+      if (this.consecutiveDeltaResets >= DELTA_RESET_BREAKER_STREAK) {
+        this.deltaFetch = false;
+        this.deltaBreakerTripped = true;
+        log(
+          `HUOM: delta-haku vastasi reset-lipulla ${this.consecutiveDeltaResets} kertaa peräkkäin ` +
+            "— kytketään delta pois tältä ajolta ja jatketaan täyshauilla. " +
+            "Takaisin päälle control-tiedostosta: {\"deltaFetch\": true}."
+        );
+      } else {
+        log("Delta-vastauksessa reset-lippu → täyshaku ja paikallisen historian uudelleenrakennus.");
+      }
       return this.fetchFullEvents();
     }
     const merge = this.history.merge(res.events);
@@ -497,6 +533,7 @@ export class CommentaryLoop {
       log("Delta-epäkonsistenssi (tapahtuman alitapahtumalista kutistui) → täyshaku.");
       return this.fetchFullEvents();
     }
+    this.consecutiveDeltaResets = 0;
     this.pollStats.deltaMerges++;
     if (merge.added > 0 || merge.updated > 0) {
       log(`Delta-haku: ${merge.added} uutta, ${merge.updated} päivittynyttä tapahtumaa (historiassa ${this.history.size}).`);
