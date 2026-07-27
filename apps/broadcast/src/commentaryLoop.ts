@@ -3,6 +3,7 @@ import { EventHistory } from "./eventHistory.js";
 import {
   buildPlayerLookup,
   subEventToSpeech,
+  subEventFeedDetail,
   isRunScoringSubEvent,
   isOutSubEvent,
   isMatchEndSubEvent,
@@ -655,6 +656,12 @@ export class CommentaryLoop {
           const team = event.team === meta.home.id ? meta.home.shorthand : meta.away.shorthand;
           log(`Palo: ${team} ${ctx.currentOuts}`);
         }
+
+        // The relay has no feed; its log is the written mirror of the source, so
+        // the lineup list the narration leaves out (issue #48) is logged here
+        // instead of vanishing (issue #74). Logged even when nothing is spoken.
+        const feedDetail = subEventFeedDetail(sub, lookup);
+        if (feedDetail) log(`Tapahtuma: ${feedDetail}`);
 
         const speech = subEventToSpeech(event, sub, meta, lookup, this.announceBatterChanges, ctx);
         if (!speech) continue;
