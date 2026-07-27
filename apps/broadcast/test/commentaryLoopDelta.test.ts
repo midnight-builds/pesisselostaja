@@ -64,6 +64,9 @@ interface LoopInternals {
   deltaFetch: boolean;
   pollIntervalMs: number;
   narrationDelayMs: number;
+  pollStatsSummary: string;
+  recordPollFailure(err: unknown, cycleStartedAt: number): void;
+  recordPollSuccess(): void;
 }
 
 function makeLoop(overrides: Partial<RelayConfig> = {}): LoopInternals {
@@ -186,6 +189,66 @@ describe("CommentaryLoop delta polling (HANDOFF.md 15.7. kohta 6)", () => {
     await loop.fetchEventsForPoll();
     for (const call of fetchMock.mock.calls) {
       expect((call[1] as { after?: string }).after).toBeUndefined();
+    }
+  });
+});
+
+describe("CommentaryLoop poll statistics + failure streaks (HANDOFF.md 17.7.)", () => {
+  it("counts polls, delta merges, 304 skips and full fetches into the heartbeat summary", async () => {
+    const loop = makeLoop();
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+    await loop.fetchFullEvents(); // startup fetch: full +1, not a poll
+
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])], { serverDateMs: T0 + 3000 })); // delta merge
+    await loop.fetchEventsForPoll();
+    fetchMock.mockResolvedValueOnce(result([], { etag: 'W/"quiet"' })); // quiet 200 = delta merge with 0 changes
+    await loop.fetchEventsForPoll();
+    fetchMock.mockResolvedValueOnce({ events: [], notModified: true, etag: 'W/"quiet"', serverDateMs: T0 + 9000 }); // 304
+    await loop.fetchEventsForPoll();
+    loop.lastFullFetchAt = Date.now() - 61_000; // force a resync full fetch
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])]));
+    await loop.fetchEventsForPoll();
+
+    expect(loop.pollStatsSummary).toBe("pollit 4 (delta 2, täyshaku 2, 304 1, hakuvirheitä 0)");
+  });
+
+  it("logs each failure with its duration and streak position, alarming only from the 3rd on", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const loop = makeLoop();
+      const startedAt = Date.now() - 8000;
+      loop.recordPollFailure(new Error("This operation was aborted"), startedAt);
+      loop.recordPollFailure(new Error("This operation was aborted"), startedAt);
+      expect(logSpy.mock.calls[0][0]).toMatch(/Hakuvirhe \(kesto 8\.\d s, 1\. peräkkäinen\): This operation was aborted/);
+      expect(logSpy.mock.calls[1][0]).toContain("2. peräkkäinen");
+      expect(logSpy.mock.calls[1][0]).not.toContain("HUOM");
+
+      loop.recordPollFailure(new Error("This operation was aborted"), startedAt);
+      expect(logSpy.mock.calls[2][0]).toMatch(/HUOM, hakuvirhesarja \(kesto 8\.\d s, 3\. peräkkäinen\)/);
+      expect(loop.pollStatsSummary).toContain("hakuvirheitä 3");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("closes an alarming streak with an explicit all-clear line; short streaks reset silently", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const loop = makeLoop();
+      const startedAt = Date.now();
+      loop.recordPollFailure(new Error("x"), startedAt);
+      loop.recordPollSuccess(); // streak of 1 → no all-clear noise
+      expect(logSpy.mock.calls.filter((c) => String(c[0]).includes("onnistui jälleen"))).toHaveLength(0);
+
+      for (let i = 0; i < 3; i++) loop.recordPollFailure(new Error("x"), startedAt);
+      loop.recordPollSuccess();
+      expect(logSpy.mock.calls.at(-1)![0]).toContain("Haku onnistui jälleen — 3 peräkkäistä hakuvirhettä takana.");
+
+      // The streak reset: the next failure counts as the 1st again.
+      loop.recordPollFailure(new Error("x"), startedAt);
+      expect(logSpy.mock.calls.at(-1)![0]).toContain("1. peräkkäinen");
+    } finally {
+      logSpy.mockRestore();
     }
   });
 });

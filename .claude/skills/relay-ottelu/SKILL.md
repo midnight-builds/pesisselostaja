@@ -208,11 +208,12 @@ tämän puolestasi kesken ajon — hoidan sen yhdellä komennolla.)
 
 **Selostusviive (jos selostus tulee ennen kuvaa) lennossa.** Jos kuulet
 selostuksen ENNEN kuin tilanne näkyy videolla, lisää keinotekoista
-viivettä selostuksen ja kuvan kohdistamiseksi. Oletus on 2000 ms (kalibroitu
-livenä ottelussa 144742); tarkka arvo kannattaa yhä varmistaa kuulemalla
-(video-pipelinen viive vaihtelee lähetyksittäin). Voi asettaa jo käynnistyksessä
-(`RELAY_NARRATION_DELAY_MS`) tai vaihtaa kesken ajon samaan control-tiedostoon —
-viive koskee vain toistoa (kuvaan kohdistusta), ei muuta selostuslogiikkaa:
+viivettä selostuksen ja kuvan kohdistamiseksi. Oletusarvo tulee asetuksista
+(`RELAY_NARRATION_DELAY_MS`, ks. `apps/broadcast/src/config.ts`) — älä luota
+tässä toistettuun lukuun, vaan **varmista tarkka arvo kuulemalla**, koska
+video-pipelinen viive vaihtelee lähetyksittäin. Voi asettaa jo käynnistyksessä
+tai vaihtaa kesken ajon samaan control-tiedostoon — viive koskee vain toistoa
+(kuvaan kohdistusta), ei muuta selostuslogiikkaa:
 
 ```bash
 # lisää 4 s selostusviive:
@@ -248,7 +249,13 @@ jos kirjoitat vain osan avaimista, muut asetukset säilyvät ennallaan.
 
 **Seuranta.** `journalctl --user -u pesisselostaja-relay -f`:
 - "Sydänääni: relay käynnissä … " ~2 min välein = elää (hiljainen jakso ≠ jumi).
+  Rivin lopussa pollitilastot: "pollit N (delta …, täyshaku …, 304 …,
+  hakuvirheitä …)" — 304:t ja täyshakufallbackit näkyvät vain tässä.
 - "Palo: … ", "Pisteet: … ", "Selostus: … " = normaali toiminta.
+- "Hakuvirhe (kesto … s, N. peräkkäinen)" = yksittäisenä normaalia kohinaa
+  (API-timeout-piikki, seuraava polli paikkaa). Hälyttävä vasta kun rivi
+  vaihtuu muotoon "HUOM, hakuvirhesarja" (≥3 peräkkäistä); sarjan päättyessä
+  lokiin tulee "Haku onnistui jälleen — …".
 - "Määräaikainen URL-päivitys … Selostusjono tyhjeni" = siisti respawn.
   "EI tyhjentynyt" = jono ei ehtinyt tyhjentyä (10 s katkaisu) — kirjaa ylös.
 - "Alkuperäinen lähde ei palautunut — sammutetaan koko relay" = lähde loppui
