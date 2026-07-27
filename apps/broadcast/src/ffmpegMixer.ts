@@ -13,8 +13,9 @@ export interface FfmpegMixerOptions {
    *  rotated source URL gets picked up (default 15 min). */
   urlRefreshMs?: number;
   /** Give up and stop retrying after this many milliseconds of unbroken
-   *  start-up failures — protects against retrying forever once the source
-   *  broadcast has genuinely ended (default 5 min). */
+   *  unproductive attempts — a start-up failure, or a session that died in
+   *  under minProductiveRunMs — which protects against retrying forever once
+   *  the source broadcast has genuinely ended (default 5 min). */
   maxFailureWindowMs?: number;
   /** Shorter give-up window used in place of maxFailureWindowMs while
    *  isMatchFinished() reports true — after "Ottelu päättyi" a dead source
