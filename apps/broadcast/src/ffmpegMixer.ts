@@ -190,10 +190,27 @@ export class FfmpegMixer {
   private stopped = false;
   private backoffMs = 1000;
   private refreshTimer: NodeJS.Timeout | null = null;
-  /** When the current unbroken run of start-up failures began, or null if
-   *  the last attempt succeeded. Used to give up after maxFailureWindowMs. */
+  /** When the current unbroken run of *unproductive* attempts began, or null
+   *  if the source has since produced a real run. Used to give up after
+   *  maxFailureWindowMs. An attempt is unproductive when it either never
+   *  started (yt-dlp/ffmpeg start-up failure) or started and then ended in
+   *  under minProductiveRunMs. A successful *start* on its own must never
+   *  clear this: when the source device dies mid-match (issue #45) yt-dlp
+   *  keeps handing out a valid URL, every spawn succeeds, and ffmpeg exits
+   *  cleanly (code=0) seconds later — an endless respawn loop in which the
+   *  old "reset on any successful spawn" rule meant the window never accrued
+   *  and the relay never shut itself down. */
   private failingSince: number | null = null;
   private readonly maxFailureWindowMs: number;
+  /** Shortest run that counts as the source actually producing broadcast.
+   *  Chosen well above a respawn's start-up cost but well below any believable
+   *  broadcast segment (the scheduled URL refresh runs every 15 min, and is
+   *  exempt from this accounting anyway), because a false give-up mid-match is
+   *  worse than a relay left standing. */
+  private readonly minProductiveRunMs: number;
+  /** Set while a kill we requested ourselves (URL refresh) is in flight, so
+   *  the resulting short session isn't mistaken for a dying source. */
+  private refreshKillRequested = false;
   /** Counts spawn attempts so recordFile can be indexed per session. */
   private sessionIndex = 0;
   /** True only while an ffmpeg session is attached as a FIFO reader (between a
@@ -211,6 +228,7 @@ export class FfmpegMixer {
   constructor(private opts: FfmpegMixerOptions) {
     this.fifo = new NarrationFifo(opts.fifoPath);
     this.maxFailureWindowMs = opts.maxFailureWindowMs ?? 5 * 60 * 1000;
+    this.minProductiveRunMs = opts.minProductiveRunMs ?? 60 * 1000;
   }
 
   enqueueNarration(pcm: Buffer): void {
