@@ -207,10 +207,10 @@ echo '{"announceBatterChanges": true}'  > apps/broadcast/run/.control-<ID>.json
 tämän puolestasi kesken ajon — hoidan sen yhdellä komennolla.)
 
 **Selostusviive (jos selostus tulee ennen kuvaa) lennossa.** Jos kuulet
-selostuksen ~2–3 s ENNEN kuin tilanne näkyy videolla, lisää keinotekoista
-viivettä selostuksen ja kuvan kohdistamiseksi. Oletus on 0 ms (ei viivettä);
-oikea arvo kalibroidaan livenä (video-pipelinen viive vaihtelee lähetyksittäin,
-suuruusluokka ~3000–5000 ms). Voi asettaa jo käynnistyksessä
+selostuksen ENNEN kuin tilanne näkyy videolla, lisää keinotekoista
+viivettä selostuksen ja kuvan kohdistamiseksi. Oletus on 2000 ms (kalibroitu
+livenä ottelussa 144742); tarkka arvo kannattaa yhä varmistaa kuulemalla
+(video-pipelinen viive vaihtelee lähetyksittäin). Voi asettaa jo käynnistyksessä
 (`RELAY_NARRATION_DELAY_MS`) tai vaihtaa kesken ajon samaan control-tiedostoon —
 viive koskee vain toistoa (kuvaan kohdistusta), ei muuta selostuslogiikkaa:
 

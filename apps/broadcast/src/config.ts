@@ -107,11 +107,13 @@ export function parseRelayConfig(): RelayConfig {
   // control file's pollIntervalMs (min 2000 — see commentaryLoop).
   const pollInterval = parseInt(values["poll-interval"] ?? process.env.RELAY_POLL_INTERVAL ?? "3000", 10);
   const narrationGain = parseFloat(values["narration-gain"] ?? process.env.RELAY_NARRATION_GAIN ?? "1.3");
-  // Artificial narration delay (HANDOFF.md 8). Default 0 = current behavior;
-  // the real value is calibrated live. A bad value falls back to 0 rather than
-  // NaN (which would make every wait computation NaN). Negative is clamped to 0.
-  const narrationDelayRaw = parseInt(values["narration-delay-ms"] ?? process.env.RELAY_NARRATION_DELAY_MS ?? "0", 10);
-  const narrationDelayMs = Number.isNaN(narrationDelayRaw) ? 0 : Math.max(0, narrationDelayRaw);
+  // Artificial narration delay (HANDOFF.md 8). Default 2000 ms, calibrated and
+  // confirmed live (match 144742, 17.7.) — narration must land just after the
+  // video path, which the ~2 s floor achieves; still runtime-adjustable via the
+  // control file's narrationDelayMs. A bad value falls back to the default
+  // rather than NaN (which would make every wait computation NaN).
+  const narrationDelayRaw = parseInt(values["narration-delay-ms"] ?? process.env.RELAY_NARRATION_DELAY_MS ?? "2000", 10);
+  const narrationDelayMs = Number.isNaN(narrationDelayRaw) ? 2000 : Math.max(0, narrationDelayRaw);
   // ~20 s grace from the FIRST ffmpeg attach before anything is spoken, so
   // viewers have time to open the stream (HANDOFF.md 16.7. kohta 1). 0 = off.
   const firstSpeechDelayRaw = parseInt(process.env.RELAY_FIRST_SPEECH_DELAY_MS ?? "20000", 10);

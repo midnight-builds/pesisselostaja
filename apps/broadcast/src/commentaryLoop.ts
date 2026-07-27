@@ -417,7 +417,15 @@ export class CommentaryLoop {
    *  quiet stretches so the ETag can 304. */
   private async fetchEventsForPoll(): Promise<LiveEventsResult | null> {
     if (!this.deltaFetch) return this.fetchFullEvents();
-    if (this.lastServerDateMs === null || Date.now() - this.lastFullFetchAt >= RESYNC_EVERY_MS) {
+    // While the local history is empty (match not started / being initialized)
+    // the server answers every delta with the reset flag, which made each poll
+    // log + full-fetch in a loop (live 144742, 17.7.). Full fetches are cheap
+    // there (empty body) — delta engages once the first events exist.
+    if (
+      this.lastServerDateMs === null ||
+      this.history.size === 0 ||
+      Date.now() - this.lastFullFetchAt >= RESYNC_EVERY_MS
+    ) {
       return this.fetchFullEvents();
     }
     const after =

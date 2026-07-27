@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { spellOutNumbers } from "@pesisselostaja/core";
 import { log } from "./log.js";
 
 export interface ElevenLabsTtsOptions {
@@ -18,7 +19,9 @@ export interface ElevenLabsTtsOptions {
 
 /** Synthesizes Finnish text to 48kHz stereo s16le PCM via the ElevenLabs API.
  *  Unlike PiperTts this gets the *readable* text (no pronunciation
- *  substitutions) — ElevenLabs reads abbreviations like KPL correctly.
+ *  substitutions) — ElevenLabs reads abbreviations like KPL correctly. Bare
+ *  digits it reads unclearly, so they are spelled out as Finnish words here
+ *  (spellOutNumbers), before the cache key / previous_text / char count.
  *  Callers handle fallback to Piper on failure. */
 export class ElevenLabsTts {
   private charsUsed = 0;
@@ -40,7 +43,8 @@ export class ElevenLabsTts {
     return this.charsUsed;
   }
 
-  async synthesize(text: string): Promise<Buffer> {
+  async synthesize(rawText: string): Promise<Buffer> {
+    const text = spellOutNumbers(rawText);
     const key = createHash("sha256")
       .update(`${this.opts.modelId}|${this.opts.voiceId}|${text}`)
       .digest("hex");

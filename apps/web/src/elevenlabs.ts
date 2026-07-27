@@ -3,10 +3,15 @@
 // no proxy, so the public GitHub Pages deploy works identically. Same voice
 // and model the broadcast pipeline uses.
 
+import { spellOutNumbers } from "@pesisselostaja/core";
+
 export const ELEVENLABS_VOICE_ID = "onwK4e9ZLuTAKqWW03F9"; // Daniel — valittu kuuntelemalla 2026-07-15
 export const ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 
-export async function elevenLabsSynthesize(text: string, apiKey: string): Promise<Blob> {
+export async function elevenLabsSynthesize(rawText: string, apiKey: string): Promise<Blob> {
+  // EL reads bare digits unclearly in short Finnish phrases (HANDOFF.md 17.7.)
+  // — spell them out as words on this path only; Piper/Web Speech read digits fine.
+  const text = spellOutNumbers(rawText);
   const res = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}?output_format=mp3_44100_128`,
     {
