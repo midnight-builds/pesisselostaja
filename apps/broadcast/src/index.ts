@@ -1,4 +1,4 @@
-import "dotenv/config";
+import { loadRelayEnv } from "./relayEnv.js";
 import { mkdirSync } from "node:fs";
 import { parseRelayConfig } from "./config.js";
 import { log } from "./log.js";
