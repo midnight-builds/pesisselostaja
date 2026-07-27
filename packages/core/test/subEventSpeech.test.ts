@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   subEventToSpeech,
+  subEventToFeedText,
+  subEventFeedDetail,
   runValueOfSubEvent,
   buildPlayerLookup,
   formatWelcomeFiller,
@@ -321,6 +323,57 @@ describe("subEventToSpeech: lineup change (issue #48)", () => {
       texts: ["Uusi lyöntijärjestys:", { type: "substitution", newLineUp: ["11", "12"] }],
     };
     expect(subEventToSpeech(liveEvent(), sub, meta, lookup)).toBeNull();
+  });
+});
+
+describe("subEventToFeedText: lineup change (issue #74)", () => {
+  // Same shape as above: what the speech drops must still reach the feed.
+  const substitutionSub: SubEvent = {
+    texts: [
+      { type: "team", id: 100 },
+      "muutti lyöntijärjestystä. Uusi lyöntijärjestys:",
+      { type: "substitution", team: 100, newLineUp: ["11", "12", "13"], pitcher: 13 },
+    ],
+  };
+
+  it("keeps the lineup out of the speech but shows it in the feed", () => {
+    const speech = subEventToSpeech(liveEvent({ team: 100 }), substitutionSub, meta, lookup);
+    expect(speech).toBe("Ketut muutti lyöntijärjestystä.");
+    expect(speech).not.toMatch(/Mäyrä|Ilves|Susi/);
+
+    const feed = subEventToFeedText(speech, substitutionSub, lookup);
+    expect(feed).toBe(
+      "Ketut muutti lyöntijärjestystä. Uusi lyöntijärjestys: 5 Mäyrä, 8 Ilves, 9 Susi. Lukkarina 9 Susi."
+    );
+  });
+
+  it("does not leave the feed text dangling on a colon either", () => {
+    const feed = subEventToFeedText(
+      subEventToSpeech(liveEvent({ team: 100 }), substitutionSub, meta, lookup),
+      substitutionSub,
+      lookup
+    );
+    expect(feed).not.toMatch(/[:;,]$/);
+  });
+
+  it("shows the lineup even when the sub-event has nothing speakable left", () => {
+    const sub: SubEvent = {
+      texts: ["Uusi lyöntijärjestys:", { type: "substitution", newLineUp: ["11", "12"] }],
+    };
+    const speech = subEventToSpeech(liveEvent(), sub, meta, lookup);
+    expect(speech).toBeNull();
+    expect(subEventToFeedText(speech, sub, lookup)).toBe("Uusi lyöntijärjestys: 5 Mäyrä, 8 Ilves.");
+  });
+
+  it("falls back to the raw id for a player missing from the rosters", () => {
+    const sub: SubEvent = { texts: [{ type: "substitution", newLineUp: ["11", "999"] }] };
+    expect(subEventFeedDetail(sub, lookup)).toBe("Uusi lyöntijärjestys: 5 Mäyrä, pelaaja 999.");
+  });
+
+  it("passes ordinary sub-events through unchanged", () => {
+    const sub: SubEvent = { texts: [{ type: "event", text: "Vaihto", base: null }] };
+    expect(subEventToFeedText("Vaihto.", sub, lookup)).toBe("Vaihto.");
+    expect(subEventFeedDetail(sub, lookup)).toBeNull();
   });
 });
 
