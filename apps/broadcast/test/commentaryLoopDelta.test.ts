@@ -46,6 +46,8 @@ function makeConfig(overrides: Partial<RelayConfig> = {}): RelayConfig {
     apiKey: "test", apiBase: "https://example.invalid/api",
     stateFile: "/tmp/pesis-test-nonexistent-state.json",
     runDir: "/tmp/",
+    runRetentionDays: 0,
+    ttsCacheMaxBytes: 0,
     pronunciationsFile: "/tmp/pesis-test-nonexistent-pron.json",
     controlFile: "/tmp/pesis-test-nonexistent-control.json",
     elevenLabsVoiceId: "x", elevenLabsModelId: "y",

@@ -6,6 +6,7 @@ import { CommentaryLoop } from "./commentaryLoop.js";
 import { PiperTts } from "./piperTts.js";
 import { ElevenLabsTts } from "./elevenLabsTts.js";
 import { FfmpegMixer, SourceExhaustedError } from "./ffmpegMixer.js";
+import { pruneRunDir, DAY_MS } from "./runRetention.js";
 
 async function main(): Promise<void> {
   const config = parseRelayConfig();
