@@ -20,6 +20,21 @@ async function main(): Promise<void> {
   if (!config.dryRun) log(`Lähteen antelias aikaikkuna ennen luovutusta: ${Math.round(config.maxFailureWindowMs / 60000)} min`);
   if (config.recordFile) log(`Tallennetaan paikalliseen tiedostoon: ${config.recordFile}`);
 
+  // run/ retention (issue #39) — before synthesis starts, so the TTS cache has
+  // room. Only the relay's own artifacts are in scope; operator material in
+  // run/ is never removed automatically.
+  const pruned = await pruneRunDir(config.runDir, {
+    maxAgeMs: config.runRetentionDays * DAY_MS,
+    ttsCacheMaxBytes: config.ttsCacheMaxBytes,
+    keepMatchIds: [config.matchId],
+  });
+  if (pruned.removed.length > 0) {
+    log(
+      `Säilytyskäytäntö: poistettu ${pruned.removed.length} vanhaa ajotiedostoa ` +
+        `(${(pruned.freedBytes / (1024 * 1024)).toFixed(1)} MiB vapautui).`
+    );
+  }
+
   const voicesDir = new URL("../voices/", import.meta.url).pathname;
   const piper = new PiperTts({ piperBin: config.piperBin, voice: config.voice, voicesDir });
   const elevenLabs = config.elevenLabsApiKey
