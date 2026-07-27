@@ -75,7 +75,7 @@ export function buildMixFilterComplex(narrationGain: number): string {
   return (
     `[0:a]aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo[orig];` +
     `[1:a]volume=${narrationGain}[narr];` +
-    `[orig][narr]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[aout]`
+    `[orig][narr]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95:level=disabled[aout]`
   );
 }
 
