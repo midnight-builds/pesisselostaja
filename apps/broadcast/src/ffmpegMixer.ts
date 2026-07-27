@@ -178,6 +178,10 @@ export class FfmpegMixer {
    *  the commentary loop's first-speech grace period (RELAY_FIRST_SPEECH_DELAY_MS)
    *  is measured from this, so respawns don't restart the wait. */
   private firstAttachedAtMs: number | null = null;
+  /** When the current unbroken run of "scheduled, not live yet" answers began,
+   *  or null if the source has since responded some other way. Bounds the wait
+   *  via SCHEDULED_WAIT_MAX_MS. */
+  private scheduledSince: number | null = null;
 
   constructor(private opts: FfmpegMixerOptions) {
     this.fifo = new NarrationFifo(opts.fifoPath);
