@@ -67,6 +67,15 @@ const RESYNC_EVERY_MS = 60 * 1000;
 /** Floor for the control file's pollIntervalMs — the server response cache is
  *  ~5 s, so polling much faster only burns requests. */
 const MIN_POLL_INTERVAL_MS = 2000;
+/** Consecutive reset-flagged delta responses that trip the breaker and drop
+ *  the run back to plain full fetches. When the server answers every delta
+ *  with reset, delta mode is pure overhead: each poll pays a delta request AND
+ *  a full one, and rebuilds the local history in between. Live match 144918
+ *  (27.7.) did that from the first event to the last — 1098 polls, exactly ONE
+ *  successful delta merge — until the operator flipped deltaFetch off by hand
+ *  mid-broadcast. 5 in a row is well past noise (a genuine reset resolves on
+ *  the next poll) and still trips within ~15 s at the default cadence. */
+const DELTA_RESET_BREAKER_STREAK = 5;
 
 /** How many consecutive failed poll cycles before the failure log line turns
  *  alarming. A lone timeout is routine — live 144742 saw 22 isolated 8 s
