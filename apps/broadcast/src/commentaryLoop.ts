@@ -180,6 +180,12 @@ export class CommentaryLoop {
    *  alarm threshold (FETCH_FAILURE_ALARM_STREAK) and the streak position on
    *  the failure log line. */
   private consecutiveFetchFailures = 0;
+  /** Consecutive reset-flagged delta responses; cleared by any delta that
+   *  actually merges or 304s. Drives DELTA_RESET_BREAKER_STREAK. */
+  private consecutiveDeltaResets = 0;
+  /** Set when the breaker turned delta off by itself, so the reset log line
+   *  stays silent afterwards and a manual re-enable can tell the two apart. */
+  private deltaBreakerTripped = false;
 
   constructor(
     private config: RelayConfig,
