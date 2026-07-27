@@ -172,6 +172,33 @@ describe("subEventToSpeech: palo", () => {
     ]).toContain(subEventToSpeech(liveEvent({ team: 200 }), paloSub, meta, lookup, true, ctx));
   });
 
+  // Camp-format turns continue until three palot *and* everyone has batted, so
+  // a turn can rack up far more than three palot (9 seen live). The ordinal used
+  // to come from a table that stopped at 12, after which TTS read "13. palo".
+  it("speaks a word ordinal for every palo in a long camp-format turn (issue #50)", () => {
+    for (let outs = 1; outs <= 20; outs++) {
+      const ctx = ctxWith({ currentOuts: outs, currentBatTeamId: 200 });
+      const speech = subEventToSpeech(liveEvent({ team: 200 }), paloSub, meta, lookup, true, ctx);
+      expect(speech).not.toBeNull();
+      expect(speech!).not.toMatch(/\d/);
+    }
+  });
+
+  it("names palot past the old 12 ceiling with the right Finnish ordinal", () => {
+    const spoken = (outs: number) =>
+      subEventToSpeech(
+        liveEvent({ team: 200 }),
+        paloSub,
+        meta,
+        lookup,
+        true,
+        ctxWith({ currentOuts: outs, currentBatTeamId: 200 }),
+      )!.toLowerCase();
+    expect(spoken(13)).toContain("kolmastoista palo");
+    expect(spoken(19)).toContain("yhdeksästoista palo");
+    expect(spoken(20)).toContain("kahdeskymmenes palo");
+  });
+
   it("omits the ordinal without context", () => {
     expect(subEventToSpeech(liveEvent({ team: 100 }), paloSub, meta, lookup)).toBe(
       "Palo! Ketut."
