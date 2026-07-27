@@ -152,6 +152,20 @@ function ttsClean(text: string): string {
     .trim();
 }
 
+/** Sub-event elements the renderer can't speak are dropped, which can leave the
+ *  surrounding text hanging mid-sentence. A `substitution` element (the new
+ *  batting order) leaves "X muutti lyöntijärjestystä. Uusi lyöntijärjestys:" —
+ *  TTS then reads a bare colon and the listener hears half a sentence. Cut back
+ *  to the last completed sentence; if nothing complete is left, say nothing at
+ *  all. Guards every unrenderable element type, present and future — not just
+ *  substitutions. */
+function dropDanglingClause(text: string): string | null {
+  const trimmed = text.trim();
+  if (!/[:;,]$/.test(trimmed)) return trimmed || null;
+  const cut = trimmed.replace(/[^.!?]*[:;,]$/, "").trim();
+  return cut || null;
+}
+
 function isBatterChangeSubEvent(sub: SubEvent): boolean {
   const firstText = sub.texts[0];
   if (typeof firstText === "string" && firstText.startsWith("Lyöntivuorossa")) return true;
