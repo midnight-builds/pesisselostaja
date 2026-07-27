@@ -1,4 +1,5 @@
 import type { LiveEvent, SubEvent, EventTextElement, MatchMetadata, Player } from "./types.js";
+import { finnishOrdinal } from "./numberSpeech.js";
 
 export interface PlayerLookup {
   byId: Map<number, Player>;
@@ -106,11 +107,14 @@ function getEventText(el: EventTextElement): string | null {
   return null;
 }
 
-const FI_ORDINAL: Record<number, string> = {
-  1: "ensimmäinen", 2: "toinen", 3: "kolmas", 4: "neljäs", 5: "viides",
-  6: "kuudes", 7: "seitsemäs", 8: "kahdeksas", 9: "yhdeksäs", 10: "kymmenes",
-  11: "yhdestoista", 12: "kahdestoista",
-};
+/** Finnish ordinal word, or null outside the supported 1–99 range so callers
+ *  can fall back instead of throwing mid-narration. Ordinals are generated, not
+ *  tabulated: palot have no ceiling (camp-format turns run until three palot
+ *  *and* everyone has batted), and a table that stopped at 12 made the speech
+ *  read "13. palo" (issue #50). */
+function ordinalWord(n: number): string | null {
+  return Number.isInteger(n) && n >= 1 && n <= 99 ? finnishOrdinal(n) : null;
+}
 
 const FI_CARDINAL: Record<number, string> = {
   1: "yksi", 2: "kaksi", 3: "kolme", 4: "neljä", 5: "viisi",
@@ -119,12 +123,12 @@ const FI_CARDINAL: Record<number, string> = {
 };
 
 function ordinalPalo(n: number): string {
-  const ord = FI_ORDINAL[n];
+  const ord = ordinalWord(n);
   return ord ? `${ord} palo` : `${n}. palo`;
 }
 
 function vuoropariLabel(inning: number, batTurn: number): string {
-  const ord = FI_ORDINAL[inning + 1] ?? `${inning + 1}.`;
+  const ord = ordinalWord(inning + 1) ?? `${inning + 1}.`;
   const role = batTurn === 0 ? "aloittava" : "lopettava";
   return `${capitalize(ord)} vuoropari, ${role}.`;
 }
