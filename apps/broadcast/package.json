@@ -10,7 +10,8 @@
     "simulate": "tsx src/simulate.ts",
     "flap-test": "tsx src/flapTest.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/ test/"
+    "lint": "eslint src/ test/",
+    "preflight": "tsx src/preflightCli.ts"
   },
   "dependencies": {
     "@pesisselostaja/core": "*",
