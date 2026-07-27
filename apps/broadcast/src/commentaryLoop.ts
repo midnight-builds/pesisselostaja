@@ -58,7 +58,14 @@ const API_TIMEOUT_MS = 4000;
  *  the last successful response's Date header minus this safety margin. The
  *  margin must exceed the API's publish delay (~68–123 s measured with
  *  skip-delay), or an event could become visible only after our `after` has
- *  already moved past its server-side wall-clock time and be missed. */
+ *  already moved past its server-side wall-clock time and be missed.
+ *
+ *  Consequence, and the root cause behind issue #46: for the first
+ *  AFTER_MARGIN_MS after the scorer opens a match, `after` necessarily points
+ *  BEFORE the instant the server created that match's online data, which is
+ *  precisely when the server answers with `reset` (see LiveEventsResponse.reset
+ *  and handleResetResponse). That burst is expected, self-healing and cheap —
+ *  as long as the reset answer is used as the full snapshot it already is. */
 const AFTER_MARGIN_MS = 180 * 1000;
 /** Periodic full refetch that replaces the local delta-merged history —
  *  cheap insurance against anything the merge can't see (server rewrites,
