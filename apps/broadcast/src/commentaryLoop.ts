@@ -314,7 +314,7 @@ export class CommentaryLoop {
     const meta = await fetchMatchMetadata(this.config.matchId, {
       apiBase: this.config.apiBase,
       apiKey: this.config.apiKey,
-      timeoutMs: API_TIMEOUT_MS,
+      timeoutMs: this.apiTimeoutMs(),
     });
     const lookup = buildPlayerLookup(meta);
     log(`${meta.home.name} vs ${meta.away.name}`);
@@ -481,7 +481,7 @@ export class CommentaryLoop {
   private async fetchFullEvents(): Promise<LiveEventsResult> {
     const res = await fetchLiveEvents(this.config.matchId, {
       apiBase: this.config.apiBase,
-      timeoutMs: API_TIMEOUT_MS,
+      timeoutMs: this.apiTimeoutMs(),
       skipDelay: true,
     });
     this.history.replace(res.events);
@@ -520,7 +520,7 @@ export class CommentaryLoop {
       this.deltaCursor?.after ?? formatHelsinkiTimestamp(new Date(this.lastServerDateMs - AFTER_MARGIN_MS));
     const res = await fetchLiveEvents(this.config.matchId, {
       apiBase: this.config.apiBase,
-      timeoutMs: API_TIMEOUT_MS,
+      timeoutMs: this.apiTimeoutMs(),
       skipDelay: true,
       after,
       etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,

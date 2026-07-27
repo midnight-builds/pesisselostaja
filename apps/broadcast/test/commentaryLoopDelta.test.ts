@@ -367,3 +367,32 @@ describe("CommentaryLoop runtime controls: deltaFetch + pollIntervalMs", () => {
     expect(loop.pollIntervalMs).toBe(2000);
   });
 });
+
+/** Issue #47: the 4 s constant aborted healthy full fetches once the match
+ *  history had grown (live 146210: 12 aborts in 2 min, all cut at 4.0 s). */
+describe("API fetch timeout", () => {
+  const timeoutOf = (call: number) => (fetchMock.mock.calls[call][1] as { timeoutMs?: number }).timeoutMs;
+
+  it("is 10 s by default, not the old 4 s", async () => {
+    const loop = makeLoop();
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+    await loop.fetchFullEvents();
+    expect(timeoutOf(0)).toBe(10_000);
+  });
+
+  it("applies to delta polls too", async () => {
+    const loop = makeLoop();
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+    await loop.fetchFullEvents();
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])], { serverDateMs: T0 + 3000 }));
+    await loop.fetchEventsForPoll();
+    expect(timeoutOf(1)).toBe(10_000);
+  });
+
+  it("is never shorter than the poll interval, however slow the cadence is set", async () => {
+    const loop = makeLoop({ pollInterval: 15000 });
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+    await loop.fetchFullEvents();
+    expect(timeoutOf(0)).toBe(15000);
+  });
+});

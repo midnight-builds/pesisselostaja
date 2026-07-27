@@ -67,7 +67,8 @@ keep playing.
 - **At startup:** set `RELAY_ANNOUNCE_BATTER_CHANGES=false` in `.env.relay`, or
   pass `--no-batter-changes` to `relay:dev`.
 - **Live, without restarting:** the loop re-reads `apps/broadcast/run/.control-<matchId>.json`
-  every poll (~4 s). Flip it and the change takes effect within one poll:
+  every poll (see the poll interval below). Flip it and the change takes effect
+  within one poll:
   ```bash
   echo '{"announceBatterChanges": false}' > apps/broadcast/run/.control-143280.json   # off
   echo '{"announceBatterChanges": true}'  > apps/broadcast/run/.control-143280.json   # back on
@@ -85,8 +86,11 @@ the video path), add an artificial delay. It affects **only playback** — dedup
 and scoring bookkeeping still run synchronously at detection time — and never
 stalls the poll loop or reorders clips.
 
-- **At startup:** `RELAY_NARRATION_DELAY_MS=4000` in `.env.relay`, or
-  `--narration-delay-ms 4000`. Default `2000` (calibrated live, match 144742).
+- **At startup:** `RELAY_NARRATION_DELAY_MS=5000` in `.env.relay`, or
+  `--narration-delay-ms 5000`. Default `4000` — a value **calibrated live**
+  (match 146210; an earlier `2000` default had to be raised by hand in every
+  broadcast). It stays adjustable from the control file, so treat `4000` as the
+  starting point, not a fixed truth.
 - **Live, without restarting:** the same control file, `narrationDelayMs` key:
   ```bash
   echo '{"narrationDelayMs": 4000}' > apps/broadcast/run/.control-143280.json   # add 4s
@@ -134,6 +138,12 @@ delta a fresh streak.
   echo '{"deltaFetch": false}'    > apps/broadcast/run/.control-143280.json  # full fetches
   echo '{"pollIntervalMs": 5000}' > apps/broadcast/run/.control-143280.json  # slower poll
   ```
+
+Each API fetch is aborted after **10 s** (never less than the current poll
+interval). A full fetch returns the whole match history, which keeps growing, so
+the earlier 4 s cut healthy requests short late in a match — live 146210 logged
+12 aborts in two minutes, all at exactly 4.0 s. Polls are sequential, so the
+longer timeout cannot stack requests; a hung fetch only postpones the next poll.
 
 ### Starting before the source goes live
 
