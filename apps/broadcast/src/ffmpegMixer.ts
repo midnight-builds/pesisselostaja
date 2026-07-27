@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { log } from "./log.js";
 import { NarrationFifo } from "./narrationFifo.js";
-import { resolveSourceUrl } from "./ytdlpSource.js";
+import { resolveSourceUrl, SourceNotLiveYetError } from "./ytdlpSource.js";
 
 export interface FfmpegMixerOptions {
   youtubeUrl: string;
@@ -136,6 +136,29 @@ const HEARTBEAT_MS = 2 * 60 * 1000;
  *  instead of hammering yt-dlp every 30s forever. */
 export class SourceExhaustedError extends Error {}
 
+/** Total time a merely-*scheduled* source may keep not starting before the
+ *  relay gives up anyway. Waiting is the right default — YouTube is telling us
+ *  the broadcast exists — but an unbounded wait would leave a forgotten relay
+ *  polling yt-dlp for days if the broadcaster silently cancels. */
+const SCHEDULED_WAIT_MAX_MS = 3 * 60 * 60 * 1000;
+/** Re-check cadence while waiting for a scheduled start: aim to land ~20 s
+ *  before the announced time, but never sleep longer than this (YouTube's
+ *  estimate moves, and a far-off start shouldn't mean hammering yt-dlp). */
+const SCHEDULED_RECHECK_MAX_MS = 5 * 60 * 1000;
+const SCHEDULED_RECHECK_MIN_MS = 5000;
+
+/** How long to wait before asking yt-dlp again about a scheduled source. */
+export function scheduledRecheckDelayMs(startsInMs: number | null): number {
+  if (startsInMs === null) return SCHEDULED_RECHECK_MAX_MS;
+  return Math.min(Math.max(startsInMs - 20_000, SCHEDULED_RECHECK_MIN_MS), SCHEDULED_RECHECK_MAX_MS);
+}
+
+function formatEta(ms: number): string {
+  const mins = Math.round(ms / 60000);
+  if (mins >= 60) return `${Math.floor(mins / 60)} h ${mins % 60} min`;
+  return mins >= 1 ? `${mins} min` : `${Math.max(1, Math.round(ms / 1000))} s`;
+}
+
 /** Supervises the long-running ffmpeg pull+mix+republish process: resolves a
  *  fresh source URL and respawns with exponential backoff whenever ffmpeg
  *  exits (crash, source URL rotation, RTMP drop — ffmpeg has no automatic
@@ -159,6 +182,10 @@ export class FfmpegMixer {
    *  the commentary loop's first-speech grace period (RELAY_FIRST_SPEECH_DELAY_MS)
    *  is measured from this, so respawns don't restart the wait. */
   private firstAttachedAtMs: number | null = null;
+  /** When the current unbroken run of "scheduled, not live yet" answers began,
+   *  or null if the source has since responded some other way. Bounds the wait
+   *  via SCHEDULED_WAIT_MAX_MS. */
+  private scheduledSince: number | null = null;
 
   constructor(private opts: FfmpegMixerOptions) {
     this.fifo = new NarrationFifo(opts.fifoPath);
@@ -196,7 +223,30 @@ export class FfmpegMixer {
       try {
         await this.spawnOnce();
         this.failingSince = null;
+        this.scheduledSince = null;
       } catch (err) {
+        // A broadcast scheduled to start later is not a failure: YouTube is
+        // confirming the source exists. Counting those answers toward the
+        // give-up window is what forced starting the relay in a narrow slot
+        // just before kickoff (match 144918, 27.7.) — wait instead.
+        if (err instanceof SourceNotLiveYetError) {
+          if (this.scheduledSince === null) this.scheduledSince = Date.now();
+          if (Date.now() - this.scheduledSince > SCHEDULED_WAIT_MAX_MS) {
+            this.stopped = true;
+            throw new SourceExhaustedError(
+              `Lähde on ollut "alkaa pian" -tilassa yli ${Math.round(SCHEDULED_WAIT_MAX_MS / 3600000)} h ` +
+                "eikä ole alkanut — luovutetaan."
+            );
+          }
+          this.failingSince = null;
+          this.backoffMs = 1000; // fresh backoff for when it does go live
+          const waitMs = scheduledRecheckDelayMs(err.startsInMs);
+          const eta = err.startsInMs === null ? "" : ` — alkaa noin ${formatEta(err.startsInMs)} kuluttua`;
+          log(`Lähde ei ole vielä livenä${eta}. Tarkistetaan uudelleen ${Math.round(waitMs / 1000)} s kuluttua.`);
+          await this.interruptibleDelay(waitMs);
+          continue;
+        }
+        this.scheduledSince = null;
         log(`ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
         if (this.failingSince === null) this.failingSince = Date.now();
         // A finished match's source won't come back — use the much shorter
@@ -218,6 +268,16 @@ export class FfmpegMixer {
       log(`Uudelleenyritys ${this.backoffMs}ms kuluttua…`);
       await delay(this.backoffMs);
       this.backoffMs = Math.min(this.backoffMs * 2, 30000);
+    }
+  }
+
+  /** Sleeps in short slices so a stop() during a multi-minute scheduled wait
+   *  is still honoured within a second — the plain backoff delay is capped at
+   *  30 s and can afford to block, this one can't. */
+  private async interruptibleDelay(ms: number): Promise<void> {
+    const until = Date.now() + ms;
+    while (!this.stopped && Date.now() < until) {
+      await delay(Math.min(1000, until - Date.now()));
     }
   }
 
