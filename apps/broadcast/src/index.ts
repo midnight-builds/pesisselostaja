@@ -7,6 +7,10 @@ import { PiperTts } from "./piperTts.js";
 import { ElevenLabsTts } from "./elevenLabsTts.js";
 import { FfmpegMixer, SourceExhaustedError } from "./ffmpegMixer.js";
 
+// Before any config is parsed: same .env.relay systemd's EnvironmentFile
+// provides, so a manual dry-run and the live service read identical settings.
+loadRelayEnv();
+
 async function main(): Promise<void> {
   const config = parseRelayConfig();
   mkdirSync(config.runDir, { recursive: true });
