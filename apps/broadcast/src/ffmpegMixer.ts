@@ -266,6 +266,12 @@ export class FfmpegMixer {
         if (this.stopped) break;
         this.noteSessionEnd(session);
       } catch (err) {
+        // Our own give-up verdict (from noteSessionEnd above) passes straight
+        // through: it is not a start-up failure, and letting it fall into the
+        // handling below would log "ffmpeg-käynnistysvirhe" and replace the
+        // real reason with the misleading "Lähde ei ole vastannut" wording,
+        // even though ffmpeg started every single time.
+        if (err instanceof SourceExhaustedError) throw err;
         // A broadcast scheduled to start later is not a failure: YouTube is
         // confirming the source exists. Counting those answers toward the
         // give-up window is what forced starting the relay in a narrow slot
