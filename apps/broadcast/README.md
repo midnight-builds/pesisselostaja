@@ -125,6 +125,27 @@ if anything looks off:
   echo '{"pollIntervalMs": 5000}' > apps/broadcast/run/.control-143280.json  # slower poll
   ```
 
+### Starting before the source goes live
+
+The relay can be started **any time before** the phone's broadcast begins. If
+yt-dlp answers `This live event will begin in N minutes`, that is YouTube
+confirming the source exists, so it counts as a wait rather than a failure: the
+give-up window below is not touched, and the relay re-checks ~20 s before the
+announced time (never sleeping more than 5 min at a stretch, since the estimate
+moves). The log says:
+
+```
+Lähde ei ole vielä livenä — alkaa noin 103 min kuluttua. Tarkistetaan uudelleen 300 s kuluttua.
+```
+
+A source that stays in that state for over **3 hours** is treated as cancelled
+and the relay shuts down. Any *other* yt-dlp error is a genuine failure and
+accrues toward the give-up window as before.
+
+Before this, a scheduled start looked identical to a dead source, which meant
+the relay had to be started in a narrow slot ~6 min before kickoff or it would
+give up before the match began (match 144918, 27.7.).
+
 ### Give-up window after the match ends
 
 While a match is running, a dead source is retried for the generous
