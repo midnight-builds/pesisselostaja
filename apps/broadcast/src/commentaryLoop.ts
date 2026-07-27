@@ -467,6 +467,14 @@ export class CommentaryLoop {
     this.consecutiveFetchFailures = 0;
   }
 
+  /** Effective API fetch timeout: API_TIMEOUT_MS, but never shorter than the
+   *  current poll interval (which the control file can raise past the base
+   *  value live). A timeout below the cadence would abort fetches the very
+   *  cadence expects to be slow — issue #47's acceptance criterion. */
+  private apiTimeoutMs(): number {
+    return Math.max(API_TIMEOUT_MS, this.pollIntervalMs);
+  }
+
   /** Full events fetch: replaces the local history and re-bases the delta
    *  cursor. Used at startup, when delta polling is off, for the periodic
    *  resync, and as the fallback whenever a delta looks untrustworthy. */
