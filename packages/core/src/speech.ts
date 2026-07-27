@@ -170,6 +170,42 @@ function dropDanglingClause(text: string): string | null {
   return cut || null;
 }
 
+function feedPlayerLabel(lookup: PlayerLookup, id: string | number): string {
+  const player = lookup.byId.get(typeof id === "string" ? Number(id) : id);
+  return player ? `${player.number} ${player.last_name}` : `pelaaja ${id}`;
+}
+
+/** What the speech deliberately leaves unsaid, rendered for a reader. The feed
+ *  mirrors the source data and only the speech trims and dedupes — dropping the
+ *  lineup list from the narration (issue #48) must not drop it from the feed
+ *  too (issue #74). Batting order as jersey number + surname, pitcher last.
+ *  Null when the sub-event carries nothing the speech left out. */
+export function subEventFeedDetail(sub: SubEvent, lookup: PlayerLookup): string | null {
+  const parts: string[] = [];
+  for (const el of sub.texts) {
+    if (typeof el !== "object" || el === null || el.type !== "substitution") continue;
+    const lineUp = (el.newLineUp ?? []).map((id) => feedPlayerLabel(lookup, id));
+    if (lineUp.length > 0) parts.push(`Uusi lyöntijärjestys: ${lineUp.join(", ")}.`);
+    if (el.pitcher !== undefined) parts.push(`Lukkarina ${feedPlayerLabel(lookup, el.pitcher)}.`);
+  }
+  return parts.length > 0 ? parts.join(" ") : null;
+}
+
+/** Feed line for a sub-event: the spoken sentence plus the payload the speech
+ *  had to leave out. Takes the already-rendered speech instead of re-rendering
+ *  it, so the feed shows exactly the phrasing that was spoken (pickVariant would
+ *  otherwise roll a different variant). Null only when neither channel has
+ *  anything to show. */
+export function subEventToFeedText(
+  speech: string | null,
+  sub: SubEvent,
+  lookup: PlayerLookup
+): string | null {
+  const detail = subEventFeedDetail(sub, lookup);
+  if (!detail) return speech;
+  return speech ? `${speech} ${detail}` : detail;
+}
+
 /** Terminates a sentence without doubling punctuation the source text already
  *  has (dropDanglingClause can cut back to a text that already ends in "."). */
 function endSentence(text: string): string {
