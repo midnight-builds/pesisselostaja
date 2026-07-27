@@ -397,7 +397,7 @@ export function subEventToSpeech(
 
   const combined = [...eventTexts, ...players].filter(Boolean);
   if (combined.length === 0) return null;
-  const rawText = combined.join(" ").trim();
+  const rawText = dropDanglingClause(combined.join(" "));
   if (!rawText) return null;
 
   // The appended score starts a new sentence after the run phrase, so it must
