@@ -56,6 +56,22 @@ export interface FfmpegMixerOptions {
   onSessionStart?: (epochMs: number) => void;
   /** Test-only: fired once a session's ffmpeg process has exited. */
   onSessionEnd?: (epochMs: number, ranMs: number) => void;
+  /** Test-only: spawns the mixing process in place of ffmpeg, given the exact
+   *  argv the real ffmpeg would have received. Lets a test drive the whole
+   *  supervisor loop — FIFO handshake, session accounting, respawn, give-up —
+   *  with a stand-in process whose lifetime and exit code it controls, without
+   *  any ffmpeg binary or real broadcast. Never set in production; see
+   *  apps/broadcast/docs/adr/0002-ffmpeg-mixer-process-seam.md. */
+  spawnMixerProcess?: (args: string[]) => ChildProcess;
+}
+
+/** A finished ffmpeg session, as reported back to the supervisor loop. */
+interface SessionResult {
+  /** Wall-clock milliseconds from spawn to process exit. */
+  ranMs: number;
+  /** True when *we* ended the session on purpose (scheduled URL refresh), so
+   *  its length says nothing about the source's health. */
+  refreshKill: boolean;
 }
 
 /** foo.mp4 -> foo.session3.mp4, so successive respawns never overwrite each
