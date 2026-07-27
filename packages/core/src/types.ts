@@ -34,11 +34,18 @@ export interface LiveEventsResponse {
   team?: number | null;
   bat_turn?: number;
   finished?: boolean;
-  /** Set by the server on delta (`after=`) queries when the client should
-   *  discard its local history and treat this response as authoritative —
-   *  the pesistulokset.fi frontend handles the same flag. Null/absent in
-   *  normal responses (observed live 2026-07-16). */
-  reset?: boolean | null;
+  /** Delta (`after=`) queries only, and NOT a boolean despite reading like a
+   *  flag: the server answers with the ISO instant its online data for this
+   *  match was created / last rebuilt (e.g. "2026-07-27T18:25:29+03:00"), and
+   *  it does so exactly when the requested `after` is OLDER than that instant.
+   *  Such a response ignores `after` entirely and carries the COMPLETE event
+   *  history plus the period/team/inning fields a plain delta leaves null —
+   *  i.e. it already is a full fetch, and the client only has to replace its
+   *  local history with it (verified live 2026-07-28 against a running match:
+   *  `after` one second either side of the reported instant flipped the flag,
+   *  and the reset response's event list matched the plain full fetch's).
+   *  Null/absent in normal responses. */
+  reset?: string | boolean | null;
 }
 
 export interface Player {
