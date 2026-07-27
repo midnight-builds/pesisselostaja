@@ -165,6 +165,39 @@ back — the shorter `RELAY_FINISHED_FAILURE_WINDOW_MS` (default `120000`)
 applies instead. Clean ffmpeg exits (a flapping source) still never count
 toward giving up.
 
+### Preflight (run this before every match)
+
+```bash
+npm run broadcast:preflight              # reads apps/broadcast/.env.relay
+npm run broadcast:preflight -- /path/to/other.env
+```
+
+Checks everything that has ever gone wrong before a broadcast, in one pass, and
+exits nonzero if anything blocks:
+
+```
+✓ Levytila             37.0 Gt vapaana / 78.6 Gt
+✓ Roikkuvat prosessit  ei roikkuvia ajoja
+✓ Relay-palvelu        inactive (odotettu)
+✓ yt-dlp               2026.07.04
+✓ ffmpeg               ffmpeg version 6.1.1
+✓ Ottelu               Laihian Luja vs Pesä Ysit, Lappeenranta
+✓ Tapahtumat           0 tapahtumaa — ottelua ei ole vielä avattu (normaali ennen alkua)
+✓ Lähde                ei vielä livenä, ajastettu alkavaksi (~103 min) — relay odottaa
+✓ Kohde                rtmp://a.rtmp.youtube.com/live2 + stream key asetettu
+✓ ElevenLabs           14760 merkkiä jäljellä (ottelu kuluttaa ~5000)
+
+Kaikki kunnossa — relay voidaan käynnistää.
+```
+
+`✗` = blocker (exit 1), `⚠` = worth reading but not fatal (a stale process,
+low ElevenLabs quota, a source that resolves to something other than HLS).
+
+It reads `.env.relay` **the same way systemd does**, so it checks what the
+service will actually run — a plain `npm run` shell has none of those variables,
+which is how an earlier check reported Piper while the real run used ElevenLabs.
+Variables already set in the environment win over the file.
+
 ### Testing without touching YouTube (dry run)
 
 ```bash
