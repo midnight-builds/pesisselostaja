@@ -19,9 +19,14 @@ export interface FfmpegMixerOptions {
   /** Shorter give-up window used in place of maxFailureWindowMs while
    *  isMatchFinished() reports true — after "Ottelu päättyi" a dead source
    *  won't come back, so waiting the full generous window only delays
-   *  cleanup (default 2 min). Applies to the same unbroken start-up-failure
-   *  accounting; clean ffmpeg exits (flapping source) still never accrue. */
+   *  cleanup (default 2 min). Applies to the same unproductive-attempt
+   *  accounting. */
   finishedFailureWindowMs?: number;
+  /** Shortest ffmpeg run that counts as the source actually producing
+   *  broadcast (default 60 s). A session that ends sooner is counted as a
+   *  failed attempt even when ffmpeg exited cleanly with code=0 — see
+   *  minProductiveRunMs below / issue #45. */
+  minProductiveRunMs?: number;
   /** Lets the supervisor know the match has ended (the commentary loop owns
    *  that state), for finishedFailureWindowMs. Absent → always false. */
   isMatchFinished?: () => boolean;
