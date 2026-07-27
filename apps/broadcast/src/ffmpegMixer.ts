@@ -132,6 +132,29 @@ const HEARTBEAT_MS = 2 * 60 * 1000;
  *  instead of hammering yt-dlp every 30s forever. */
 export class SourceExhaustedError extends Error {}
 
+/** Total time a merely-*scheduled* source may keep not starting before the
+ *  relay gives up anyway. Waiting is the right default — YouTube is telling us
+ *  the broadcast exists — but an unbounded wait would leave a forgotten relay
+ *  polling yt-dlp for days if the broadcaster silently cancels. */
+const SCHEDULED_WAIT_MAX_MS = 3 * 60 * 60 * 1000;
+/** Re-check cadence while waiting for a scheduled start: aim to land ~20 s
+ *  before the announced time, but never sleep longer than this (YouTube's
+ *  estimate moves, and a far-off start shouldn't mean hammering yt-dlp). */
+const SCHEDULED_RECHECK_MAX_MS = 5 * 60 * 1000;
+const SCHEDULED_RECHECK_MIN_MS = 5000;
+
+/** How long to wait before asking yt-dlp again about a scheduled source. */
+export function scheduledRecheckDelayMs(startsInMs: number | null): number {
+  if (startsInMs === null) return SCHEDULED_RECHECK_MAX_MS;
+  return Math.min(Math.max(startsInMs - 20_000, SCHEDULED_RECHECK_MIN_MS), SCHEDULED_RECHECK_MAX_MS);
+}
+
+function formatEta(ms: number): string {
+  const mins = Math.round(ms / 60000);
+  if (mins >= 60) return `${Math.floor(mins / 60)} h ${mins % 60} min`;
+  return mins >= 1 ? `${mins} min` : `${Math.max(1, Math.round(ms / 1000))} s`;
+}
+
 /** Supervises the long-running ffmpeg pull+mix+republish process: resolves a
  *  fresh source URL and respawns with exponential backoff whenever ffmpeg
  *  exits (crash, source URL rotation, RTMP drop — ffmpeg has no automatic
