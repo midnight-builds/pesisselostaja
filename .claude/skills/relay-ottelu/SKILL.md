@@ -141,14 +141,23 @@ https://studio.youtube.com/video/<VIDEO_ID>/livestreaming
 
 ## 4. Esitesti ilman RTMP:tä (suositus, jos aikaa)
 
-Varmistaa että ottelu-ID ja API vastaavat ennen kuin mennään liveen:
+Varmistaa että ottelu-ID ja API vastaavat ennen kuin mennään liveen. API:n
+base-URL ja avain ovat valmiina `packages/core/src/api.ts`:ssä
+(`DEFAULT_API_BASE`, `DEFAULT_API_KEY`) — **lue tiedosto suoraan** jos tarvitset
+niitä käsin (esim. curl-testiin), älä greppaa niitä paloissa usealla komennolla.
+
+**HUOM — älä käytä `npm run broadcast:dev --`:ää dry-run-katkaisuun.** npm
+puskuroi lapsiprosessin stdoutin eikä tulosta mitään ennen kuin prosessi
+päättyy itse — jos katkaiset sen `timeout`-komennolla (dry-run ei pääty
+itsestään), loki jää tyhjäksi eikä testistä näe mitään. Aja sen sijaan suoraan:
 
 ```bash
-npm run broadcast:dev -- --match-id <ID> --youtube-url "<URL>" --dry-run
+set -a; . apps/broadcast/.env.relay; set +a
+timeout 30 npx tsx apps/broadcast/src/index.ts --match-id <ID> --youtube-url "<URL>" --dry-run
 ```
 
-Lokittaa mitä selostettaisiin, ei käynnistä ffmpegiä eikä koske RTMP:ään.
-Katkaise (Ctrl-C / prosessin tappo) kun näet oikean ottelun tapahtumia.
+Tämä tulostaa heti eikä jää tyhjäksi katkaisusta huolimatta. Lokittaa mitä
+selostettaisiin, ei käynnistä ffmpegiä eikä koske RTMP:ään.
 
 ---
 
