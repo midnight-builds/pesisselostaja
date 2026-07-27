@@ -12,8 +12,8 @@ export interface RelayConfig {
   /** Artificial delay (ms) inserted between detecting an event and handing its
    *  narration to synthesis, so speech lands after the corresponding video
    *  instead of ahead of it once the API skip-delay shortened the feed lag
-   *  (HANDOFF.md 8). Default 0 (no delay). Runtime-overridable via the control
-   *  file — see commentaryLoop. */
+   *  (HANDOFF.md 8). Default DEFAULT_NARRATION_DELAY_MS. Runtime-overridable
+   *  via the control file — see commentaryLoop. */
   narrationDelayMs: number;
   /** Don't speak until ffmpeg has been attached this long, measured from the
    *  FIRST attach ever (not relay start — the source can go live minutes
