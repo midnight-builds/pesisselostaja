@@ -469,6 +469,7 @@ export class FfmpegMixer {
       `Määräaikainen URL-päivitys — käynnistetään ffmpeg uudelleen. ` +
         `Selostusjono ${drainStatus}; odotettiin ${waited}ms, jonossa ${pendingAtStart} klippiä respawnin alkaessa.`
     );
+    this.refreshKillRequested = true;
     childToKill.kill("SIGTERM");
   }
 }
