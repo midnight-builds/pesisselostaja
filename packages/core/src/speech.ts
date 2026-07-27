@@ -184,9 +184,15 @@ export function subEventFeedDetail(sub: SubEvent, lookup: PlayerLookup): string 
   const parts: string[] = [];
   for (const el of sub.texts) {
     if (typeof el !== "object" || el === null || el.type !== "substitution") continue;
-    const lineUp = (el.newLineUp ?? []).map((id) => feedPlayerLabel(lookup, id));
+    // JSON tells "absent" and "null" apart while the optional-field types don't:
+    // a match with no designated pitcher sends `pitcher: null`, which used to
+    // render as "Lukkarina pelaaja null." Every id is checked with `!= null`,
+    // including individual lineup slots.
+    const lineUp = (el.newLineUp ?? [])
+      .filter((id) => id != null && id !== "")
+      .map((id) => feedPlayerLabel(lookup, id));
     if (lineUp.length > 0) parts.push(`Uusi lyöntijärjestys: ${lineUp.join(", ")}.`);
-    if (el.pitcher !== undefined) parts.push(`Lukkarina ${feedPlayerLabel(lookup, el.pitcher)}.`);
+    if (el.pitcher != null) parts.push(`Lukkarina ${feedPlayerLabel(lookup, el.pitcher)}.`);
   }
   return parts.length > 0 ? parts.join(" ") : null;
 }
