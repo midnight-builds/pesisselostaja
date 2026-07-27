@@ -51,6 +51,11 @@ export class ElevenLabsTts {
     const cachePath = join(this.opts.cacheDir, `${key}.pcm`);
     try {
       const cached = await readFile(cachePath);
+      // Bump mtime so the run/ retention sweep (runRetention.ts) evicts by
+      // least-recently-*used*, not by creation time: a phrase that keeps
+      // recurring match after match should outlive a one-off from July.
+      const now = new Date();
+      await utimes(cachePath, now, now).catch(() => undefined);
       this.lastText = text;
       return cached;
     } catch {
