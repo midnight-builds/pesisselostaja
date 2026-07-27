@@ -112,20 +112,26 @@ The poll loop fetches events in delta mode by default: `after=` limits the
 response to recent events, an ETag turns quiet polls into cheap 304s, and the
 default poll interval is `3000` ms (`RELAY_POLL_INTERVAL`). Responses merge
 into a local full-history mirror, so all event processing still sees the
-complete history every poll; the server's reset flag or an inconsistent delta
-triggers an immediate full refetch, and a full resync runs every ~60 s as
-insurance. Watch the log for `Delta-haku: N uutta …` lines and fall back live
-if anything looks off:
+complete history every poll; an inconsistent delta triggers an immediate full
+refetch, and a full resync runs every ~60 s as insurance. Watch the log for
+`Delta-haku: N uutta …` lines and fall back live if anything looks off:
 
-If the server answers **5 deltas in a row** with the reset flag, delta mode is
-pure overhead — every poll pays a delta request *and* a full one — so a breaker
-turns it off for the rest of the run and logs `HUOM: delta-haku vastasi
-reset-lipulla 5 kertaa peräkkäin …` once. Later heartbeats keep saying `delta
-POIS (katkaisija)` so the stalled delta count doesn't look mysterious. Without
-this, match 144918 (27.7.) ran 1098 polls with exactly one successful delta
-merge until the breaker was applied by hand mid-broadcast. Writing
-`{"deltaFetch": true}` to the control file overrules the breaker and gives
-delta a fresh streak.
+**Reset answers are not failures.** `reset` is not a boolean flag but the ISO
+instant the match's online data was created (`"2026-07-27T18:25:29+03:00"`), and
+the server returns it — together with the *complete* history — whenever the
+requested `after` is older than that instant. Since `after` is the last server
+Date minus a 180 s margin, that is guaranteed for the first ~3 minutes of every
+match: the response is simply used as the full snapshot it already is, one
+request, and the log says so once per streak. The heartbeat's `reset N` counts
+them. Before this was understood (issue #46) each such poll also fired a second,
+redundant full fetch — two API requests per poll for the whole streak, which is
+what made the 4 s timeout bite in matches 144918 and 146210 (27.7.).
+
+A reset whose instant our own `after` does **not** explain still counts toward a
+breaker: **5 in a row** turn delta off for the rest of the run with one
+`HUOM: delta-haku vastasi selittämättömällä reset-leimalla …` line, and later
+heartbeats keep saying `delta POIS (katkaisija)`. Writing `{"deltaFetch": true}`
+to the control file overrules the breaker and gives delta a fresh streak.
 
 - **At startup:** `RELAY_DELTA_FETCH=false` reverts to plain full fetches.
 - **Live, without restarting:** control file keys `deltaFetch` (boolean) and
