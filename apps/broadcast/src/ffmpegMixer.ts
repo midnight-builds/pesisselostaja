@@ -68,7 +68,7 @@ export interface FfmpegMixerOptions {
 
 /** A finished ffmpeg session, as reported back to the supervisor loop. */
 interface SessionResult {
-  /** Wall-clock milliseconds from spawn to process exit. */
+  /** Monotonic milliseconds from spawn to process exit. */
   ranMs: number;
   /** True when *we* ended the session on purpose (scheduled URL refresh), so
    *  its length says nothing about the source's health. */
@@ -287,8 +287,8 @@ export class FfmpegMixer {
         // give-up window is what forced starting the relay in a narrow slot
         // just before kickoff (match 144918, 27.7.) — wait instead.
         if (err instanceof SourceNotLiveYetError) {
-          if (this.scheduledSince === null) this.scheduledSince = Date.now();
-          if (Date.now() - this.scheduledSince > SCHEDULED_WAIT_MAX_MS) {
+          if (this.scheduledSince === null) this.scheduledSince = monoNow();
+          if (monoNow() - this.scheduledSince > SCHEDULED_WAIT_MAX_MS) {
             this.stopped = true;
             throw new SourceExhaustedError(
               `Lähde on ollut "alkaa pian" -tilassa yli ${Math.round(SCHEDULED_WAIT_MAX_MS / 3600000)} h ` +
@@ -352,12 +352,12 @@ export class FfmpegMixer {
    *  match's source won't come back, so it uses the much shorter window
    *  (HANDOFF.md 16.7. kohta 6.2). */
   private noteUnproductiveAttempt(describe: (windowMins: number) => string): void {
-    if (this.failingSince === null) this.failingSince = Date.now();
+    if (this.failingSince === null) this.failingSince = monoNow();
     const finished = this.opts.isMatchFinished?.() ?? false;
     const windowMs = finished
       ? (this.opts.finishedFailureWindowMs ?? 2 * 60 * 1000)
       : this.maxFailureWindowMs;
-    if (Date.now() - this.failingSince > windowMs) {
+    if (monoNow() - this.failingSince > windowMs) {
       this.stopped = true;
       throw new SourceExhaustedError(
         `${describe(Math.round(windowMs / 60000))}${finished ? " ja ottelu on päättynyt" : ""} — luovutetaan.`
@@ -369,9 +369,9 @@ export class FfmpegMixer {
    *  is still honoured within a second — the plain backoff delay is capped at
    *  30 s and can afford to block, this one can't. */
   private async interruptibleDelay(ms: number): Promise<void> {
-    const until = Date.now() + ms;
-    while (!this.stopped && Date.now() < until) {
-      await delay(Math.min(1000, until - Date.now()));
+    const until = monoNow() + ms;
+    while (!this.stopped && monoNow() < until) {
+      await delay(Math.min(1000, until - monoNow()));
     }
   }
 
@@ -411,7 +411,7 @@ export class FfmpegMixer {
     // spawn() itself fails, Node emits "error" but never "exit", so without
     // this the supervisor would hang forever awaiting an exit that never
     // comes — no backoff, no log, stuck silently.
-    const startedAt = Date.now();
+    const startedAt = monoNow();
     const childDone = new Promise<{ code: number | null; signal: NodeJS.Signals | null; error?: Error }>((resolve) => {
       this.child!.once("error", (err) => resolve({ code: null, signal: null, error: err }));
       this.child!.once("exit", (code, signal) => resolve({ code, signal }));
@@ -445,7 +445,7 @@ export class FfmpegMixer {
     // minutes there is otherwise nothing in the log, so "still alive" and
     // "silently hung" look identical. Cleared on exit below.
     const heartbeat = setInterval(() => {
-      const up = Math.round((Date.now() - startedAt) / 1000);
+      const up = Math.round((monoNow() - startedAt) / 1000);
       const extra = this.opts.heartbeatExtra?.();
       log(`Sydänääni: relay käynnissä ${up}s, selostusjonossa ${this.fifo.pendingClips} klippiä${extra ? `, ${extra}` : ""}.`);
     }, HEARTBEAT_MS);
@@ -455,7 +455,7 @@ export class FfmpegMixer {
     clearInterval(heartbeat);
     this.fifo.closeIo();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
-    const ranMs = Date.now() - startedAt;
+    const ranMs = monoNow() - startedAt;
     const detail = result.error ? result.error.message : `code=${result.code}, signal=${result.signal}`;
     log(`ffmpeg päättyi (${detail}), ajoaika ${Math.round(ranMs / 1000)}s`);
     this.opts.onSessionEnd?.(Date.now(), ranMs);
@@ -472,9 +472,9 @@ export class FfmpegMixer {
   private async killForRefresh(childToKill: ChildProcess | null): Promise<void> {
     if (!childToKill || childToKill !== this.child) return;
     const pendingAtStart = this.fifo.pendingClips;
-    const waitStart = Date.now();
+    const waitStart = monoNow();
     const deadline = waitStart + 10000;
-    while (this.fifo.pendingClips > 0 && Date.now() < deadline && !this.stopped && this.child === childToKill) {
+    while (this.fifo.pendingClips > 0 && monoNow() < deadline && !this.stopped && this.child === childToKill) {
       await delay(200);
     }
     if (this.stopped || this.child !== childToKill) return;
@@ -482,7 +482,7 @@ export class FfmpegMixer {
     // pipe buffer before we pull it out from under it.
     await delay(500);
     if (this.stopped || this.child !== childToKill) return;
-    const waited = Date.now() - waitStart;
+    const waited = monoNow() - waitStart;
     const remaining = this.fifo.pendingClips;
     // Whether the queue actually drained is the evidence that the respawn
     // didn't sever a clip mid-word (apps/broadcast/HANDOFF.md fix #2): "tyhjeni" =
