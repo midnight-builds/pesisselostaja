@@ -506,11 +506,23 @@ export class CommentaryLoop {
       etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,
     });
     if (res.notModified) {
+      this.consecutiveDeltaResets = 0;
       this.pollStats.notModified++;
       return null;
     }
     if (res.reset) {
-      log("Delta-vastauksessa reset-lippu → täyshaku ja paikallisen historian uudelleenrakennus.");
+      this.consecutiveDeltaResets++;
+      if (this.consecutiveDeltaResets >= DELTA_RESET_BREAKER_STREAK) {
+        this.deltaFetch = false;
+        this.deltaBreakerTripped = true;
+        log(
+          `HUOM: delta-haku vastasi reset-lipulla ${this.consecutiveDeltaResets} kertaa peräkkäin ` +
+            "— kytketään delta pois tältä ajolta ja jatketaan täyshauilla. " +
+            "Takaisin päälle control-tiedostosta: {\"deltaFetch\": true}."
+        );
+      } else {
+        log("Delta-vastauksessa reset-lippu → täyshaku ja paikallisen historian uudelleenrakennus.");
+      }
       return this.fetchFullEvents();
     }
     const merge = this.history.merge(res.events);
@@ -518,6 +530,7 @@ export class CommentaryLoop {
       log("Delta-epäkonsistenssi (tapahtuman alitapahtumalista kutistui) → täyshaku.");
       return this.fetchFullEvents();
     }
+    this.consecutiveDeltaResets = 0;
     this.pollStats.deltaMerges++;
     if (merge.added > 0 || merge.updated > 0) {
       log(`Delta-haku: ${merge.added} uutta, ${merge.updated} päivittynyttä tapahtumaa (historiassa ${this.history.size}).`);
