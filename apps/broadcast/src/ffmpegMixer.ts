@@ -148,6 +148,16 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Monotonic milliseconds. Every *duration* the supervisor measures uses this
+ *  rather than Date.now(): an NTP step backwards would otherwise make a
+ *  healthy hour-long session look like a seconds-long failed one (→ false
+ *  self-shutdown), and a step forwards could blow through the give-up window
+ *  in one tick. Wall-clock time is kept only where an actual epoch is reported
+ *  outward (firstAttachedAt, onSessionStart/onSessionEnd). */
+function monoNow(): number {
+  return performance.now();
+}
+
 /** How often to emit a liveness line during an otherwise quiet healthy run,
  *  so a long eventless stretch is distinguishable from a hang in the logs. */
 const HEARTBEAT_MS = 2 * 60 * 1000;
