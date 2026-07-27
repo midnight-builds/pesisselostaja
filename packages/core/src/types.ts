@@ -39,11 +39,13 @@ export interface LiveEventsResponse {
    *  match was created / last rebuilt (e.g. "2026-07-27T18:25:29+03:00"), and
    *  it does so exactly when the requested `after` is OLDER than that instant.
    *  Such a response ignores `after` entirely and carries the COMPLETE event
-   *  history plus the period/team/inning fields a plain delta leaves null —
-   *  i.e. it already is a full fetch, and the client only has to replace its
-   *  local history with it (verified live 2026-07-28 against a running match:
-   *  `after` one second either side of the reported instant flipped the flag,
-   *  and the reset response's event list matched the plain full fetch's).
+   *  history — i.e. it already is a full fetch, and the client only has to
+   *  replace its local history with it (verified live 2026-07-28 against a
+   *  running match: `after` one second either side of the reported instant
+   *  flipped the flag, and the reset response's event list matched the plain
+   *  full fetch's). The period/team/inning fields are NOT a reset speciality:
+   *  any response carrying events carries them too, and only an empty delta
+   *  (nothing changed since `after`) leaves them null.
    *  Null/absent in normal responses. */
   reset?: string | boolean | null;
 }
