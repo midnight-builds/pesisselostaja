@@ -260,9 +260,10 @@ export class FfmpegMixer {
     this.stopped = false;
     while (!this.stopped) {
       try {
-        await this.spawnOnce();
-        this.failingSince = null;
+        const session = await this.spawnOnce();
         this.scheduledSince = null;
+        if (this.stopped) break;
+        this.noteSessionEnd(session);
       } catch (err) {
         // A broadcast scheduled to start later is not a failure: YouTube is
         // confirming the source exists. Counting those answers toward the
@@ -287,26 +288,56 @@ export class FfmpegMixer {
         }
         this.scheduledSince = null;
         log(`ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
-        if (this.failingSince === null) this.failingSince = Date.now();
-        // A finished match's source won't come back — use the much shorter
-        // window then (HANDOFF.md 16.7. kohta 6.2). Only this start-up-failure
-        // accounting is affected; clean exits (flapping source) still reset
-        // failingSince above and never accrue toward giving up.
-        const windowMs = this.opts.isMatchFinished?.()
-          ? (this.opts.finishedFailureWindowMs ?? 2 * 60 * 1000)
-          : this.maxFailureWindowMs;
-        if (Date.now() - this.failingSince > windowMs) {
-          this.stopped = true;
-          throw new SourceExhaustedError(
-            `Lähde ei ole vastannut ${Math.round(windowMs / 60000)} minuuttiin` +
-              `${this.opts.isMatchFinished?.() ? " ja ottelu on päättynyt" : ""} — luovutetaan.`
-          );
-        }
+        this.noteUnproductiveAttempt((mins) => `Lähde ei ole vastannut ${mins} minuuttiin`);
       }
       if (this.stopped) break;
       log(`Uudelleenyritys ${this.backoffMs}ms kuluttua…`);
       await delay(this.backoffMs);
       this.backoffMs = Math.min(this.backoffMs * 2, 30000);
+    }
+  }
+
+  /** Judges a finished ffmpeg session: only a run long enough to be real
+   *  broadcast clears the give-up window (and the backoff). A session that
+   *  died right after starting counts as a failed attempt no matter how
+   *  cleanly ffmpeg exited — that is exactly the shape of a source whose
+   *  broadcast has ended abnormally while yt-dlp still resolves a URL
+   *  (issue #45). A respawn we asked for ourselves is neutral: it neither
+   *  clears the window nor accrues toward it. */
+  private noteSessionEnd(session: SessionResult): void {
+    if (session.refreshKill) return;
+    if (session.ranMs >= this.minProductiveRunMs) {
+      this.failingSince = null;
+      this.backoffMs = 1000; // fresh backoff after a healthy run
+      return;
+    }
+    log(
+      `ffmpeg kuoli alle ${Math.round(this.minProductiveRunMs / 1000)} s käynnistyksestä — ` +
+        "lasketaan epäonnistuneeksi yritykseksi (lähde ei tuota lähetystä)."
+    );
+    this.noteUnproductiveAttempt(
+      (mins) =>
+        `Lähde on käynnistynyt mutta kuollut alle ${Math.round(this.minProductiveRunMs / 1000)} sekunnissa ` +
+        `${mins} minuutin ajan`
+    );
+  }
+
+  /** Records an attempt that produced no broadcast and gives up (throws
+   *  SourceExhaustedError, which the caller turns into a relay shutdown) once
+   *  the unbroken run of such attempts outlasts the give-up window. A finished
+   *  match's source won't come back, so it uses the much shorter window
+   *  (HANDOFF.md 16.7. kohta 6.2). */
+  private noteUnproductiveAttempt(describe: (windowMins: number) => string): void {
+    if (this.failingSince === null) this.failingSince = Date.now();
+    const finished = this.opts.isMatchFinished?.() ?? false;
+    const windowMs = finished
+      ? (this.opts.finishedFailureWindowMs ?? 2 * 60 * 1000)
+      : this.maxFailureWindowMs;
+    if (Date.now() - this.failingSince > windowMs) {
+      this.stopped = true;
+      throw new SourceExhaustedError(
+        `${describe(Math.round(windowMs / 60000))}${finished ? " ja ottelu on päättynyt" : ""} — luovutetaan.`
+      );
     }
   }
 
@@ -328,7 +359,8 @@ export class FfmpegMixer {
     this.child?.kill("SIGTERM");
   }
 
-  private async spawnOnce(): Promise<void> {
+  private async spawnOnce(): Promise<SessionResult> {
+    this.refreshKillRequested = false;
     const sourceUrl = this.opts.resolveTestSource
       ? await this.opts.resolveTestSource()
       : await (async () => {
@@ -345,7 +377,9 @@ export class FfmpegMixer {
       ? indexedRecordPath(this.opts.recordFile, this.sessionIndex++)
       : undefined;
     const args = buildFfmpegArgs(sourceUrl, this.opts, recordFilePath, !!this.opts.resolveTestSource);
-    this.child = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+    this.child = this.opts.spawnMixerProcess
+      ? this.opts.spawnMixerProcess(args)
+      : spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
     this.child.stdout?.on("data", (d: Buffer) => process.stdout.write(d));
     this.child.stderr?.on("data", (d: Buffer) => process.stderr.write(d));
 
@@ -398,10 +432,12 @@ export class FfmpegMixer {
     this.fifo.closeIo();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     const ranMs = Date.now() - startedAt;
-    if (ranMs > 60000) this.backoffMs = 1000; // reset backoff after a healthy run
     const detail = result.error ? result.error.message : `code=${result.code}, signal=${result.signal}`;
     log(`ffmpeg päättyi (${detail}), ajoaika ${Math.round(ranMs / 1000)}s`);
     this.opts.onSessionEnd?.(Date.now(), ranMs);
+    // The caller judges the run (noteSessionEnd): backoff and give-up window
+    // both hang off whether this was real broadcast, not off the exit code.
+    return { ranMs, refreshKill: this.refreshKillRequested };
   }
 
   /** Waits for a natural gap in the narration before killing ffmpeg for a
