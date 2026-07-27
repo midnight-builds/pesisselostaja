@@ -2,6 +2,7 @@ import { fetchMatchMetadata, fetchLiveEvents, type ApiOptions } from "@pesisselo
 import {
   buildPlayerLookup,
   subEventToSpeech,
+  subEventToFeedText,
   isRunScoringSubEvent,
   isOutSubEvent,
   isMatchEndSubEvent,
@@ -539,13 +540,20 @@ export class BrowserWatcher {
         const speech = subEventToSpeech(
           event, sub, meta, lookup, this.config.announceBatterChanges, ctx
         );
-        if (!speech) continue;
+        // The feed mirrors the source, the speech trims: a lineup change is
+        // spoken without the 11-name list (issue #48) but the feed shows it
+        // (issue #74), so the two texts are built separately from here on.
+        const feedText = subEventToFeedText(speech, sub, lookup);
+        if (!speech) {
+          if (feedText) this.emitFeed(this.classifyFeed(sub, feedText), feedText);
+          continue;
+        }
 
         // After the closing announcement everything else stays silent (the
         // match-end sub-event itself speaks that closing line). The feed still
         // shows the event — it mirrors the source, only the speech is gated.
         if (state.finished && !isMatchEndSubEvent(sub)) {
-          this.emitFeed(this.classifyFeed(sub, speech), speech);
+          this.emitFeed(this.classifyFeed(sub, speech), feedText ?? speech);
           continue;
         }
 
