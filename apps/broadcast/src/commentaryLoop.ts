@@ -555,9 +555,10 @@ export class CommentaryLoop {
 
   /** One poll's events fetch (HANDOFF.md 15.7. kohta 6). Delta mode asks only
    *  for recent events (`after=` + If-None-Match) and merges them into the
-   *  local full history; returns null on 304 (nothing changed). Falls back to
-   *  an immediate full fetch on the server's reset flag or an inconsistent
-   *  merge, and does a periodic full resync regardless as cheap insurance.
+   *  local full history; returns null on 304 (nothing changed). A reset answer
+   *  replaces the history in place (handleResetResponse), an inconsistent
+   *  merge falls back to an immediate full fetch, and a periodic full resync
+   *  runs regardless as cheap insurance.
    *
    *  The `after` value: events carry no wall-clock field, so it derives from
    *  the last 200's Date header minus AFTER_MARGIN_MS. The base only advances
