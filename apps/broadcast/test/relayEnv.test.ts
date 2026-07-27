@@ -41,8 +41,10 @@ describe("relay env loading (issue #55)", () => {
     expect(RELAY_ENV_FILE.endsWith(`apps${sep}broadcast${sep}.env.relay`)).toBe(true);
   });
 
-  it("is what the relay entrypoint loads — not bare dotenv/config", () => {
-    const source = readFileSync(resolve(import.meta.dirname, "../src/index.ts"), "utf8");
+  // Every executable entrypoint, not just the live relay: bare dotenv/config
+  // reads the repo-root .env only, which is how the dry-run drifted from live.
+  it.each(["index.ts", "simulate.ts"])("is what %s loads — not bare dotenv/config", (entrypoint) => {
+    const source = readFileSync(resolve(import.meta.dirname, "../src", entrypoint), "utf8");
     expect(source).toMatch(/loadRelayEnv\(\)/);
     expect(source).not.toMatch(/dotenv\/config/);
   });
