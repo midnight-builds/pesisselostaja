@@ -561,7 +561,7 @@ export class BrowserWatcher {
         const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
           `${JSON.stringify(sub.texts)}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
         this.say(speech, state, dedupeKey);
-        this.emitFeed(this.classifyFeed(sub, speech), speech);
+        this.emitFeed(this.classifyFeed(sub, speech), feedText ?? speech);
       }
 
       if (event.timestamp !== null && event.timestamp > state.lastTimestamp) {
