@@ -270,6 +270,12 @@ export class CommentaryLoop {
     // very next poll (the local history is simply rebuilt from each response).
     if (typeof parsed.deltaFetch === "boolean" && parsed.deltaFetch !== this.deltaFetch) {
       this.deltaFetch = parsed.deltaFetch;
+      // A manual re-enable overrules the breaker and gives delta a fresh
+      // streak — otherwise one earlier bad patch would keep it off for good.
+      if (this.deltaFetch) {
+        this.consecutiveDeltaResets = 0;
+        this.deltaBreakerTripped = false;
+      }
       log(`Delta-haku vaihdettu ajon aikana: ${this.deltaFetch ? "PÄÄLLÄ" : "POIS (täyshaut)"} (control-tiedostosta).`);
     }
     // Poll cadence live; clamped to the floor so a typo can't hammer the API.
