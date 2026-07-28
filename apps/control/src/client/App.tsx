@@ -10,7 +10,15 @@ import { MatchesView } from "./views/MatchesView";
 
 /** App shell: one SSE-backed LiveState for the whole UI, plus tab state.
  *  No router — four tabs do not justify a dependency, and a URL-less shell is
- *  what an installed PWA behaves like anyway. */
+ *  what an installed PWA behaves like anyway.
+ *
+ *  All four views stay MOUNTED; the tab only decides which one is displayed.
+ *  Unmounting them threw away each view's own state — the Ottelut filters and
+ *  ticks, the log level, the selected job — and refetched the day on the way
+ *  back. On a camp day of 200 matches that means re-picking the field filter
+ *  every single time the operator glances at Live, which is a thing they do
+ *  constantly mid-broadcast. The state lives where it is used; only its
+ *  visibility is lifted here. */
 
 export function App() {
   const [live, setLive] = useState<LiveState | null>(null);
