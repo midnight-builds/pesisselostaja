@@ -545,17 +545,17 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       await track("system", getSystemState, (value) => {
         system = value;
       });
-      await track("relay", () => readLog({ limit: LOG_LINES }), (value) => {
+      await track("log", () => readLog({ limit: LOG_LINES }), (value) => {
         log = value;
       });
       // The job file is a local read; it drives which match we poll, so it has
       // to refresh at the fast cadence rather than the match one.
-      await track("relay", readActiveJob, (value) => {
+      await track("job", readActiveJob, (value) => {
         job = value;
       });
       if (job) {
         const matchId = job.matchId;
-        await track("relay", () => readKnobs(matchId), (value) => {
+        await track("knobs", () => readKnobs(matchId), (value) => {
           knobs = value;
         });
       } else {
