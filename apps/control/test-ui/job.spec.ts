@@ -3,7 +3,7 @@
  *  a safety feature: if blockers can be clicked past, the relay starts into a
  *  known-broken configuration. */
 
-import { expect, test, shot } from "./support/harness";
+import { expect, test, shot, view } from "./support/harness";
 import { job, liveState, preflightResult, preflightWithBlockers, relayProcess } from "./support/state";
 
 async function openJob(page: import("@playwright/test").Page): Promise<void> {
@@ -16,7 +16,11 @@ test.describe("työn lomake", () => {
     await openApp();
     await openJob(page);
 
-    await expect(page.getByText("Kuvitteellisen Kylän Veikot – Lapinlahden Peikot")).toBeVisible();
+    // Scoped to the job view: the same pairing is also listed (hidden) in the
+    // always-mounted Ottelut view.
+    await expect(
+      view(page, "job").getByText("Kuvitteellisen Kylän Veikot – Lapinlahden Peikot"),
+    ).toBeVisible();
     await expect(page.getByText(/ottelu 999001/)).toBeVisible();
     await shot(page, info, "job-form");
   });

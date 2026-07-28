@@ -155,6 +155,26 @@ test.describe("ottelun valinta", () => {
     expect(api.calledWith("POST", "/api/jobs")[0].body).toEqual({ matchId: 999123 });
   });
 
+  /** Käsin liitetty väärä numero on tavallisin virhelähde tässä näkymässä.
+   *  Palvelin vastaa 404 + suomenkielinen lause (jobs.ts MatchNotFoundError),
+   *  ja sen pitää päätyä ruudulle sellaisenaan — ei "Palvelinvirhe (HTTP
+   *  500)" eikä raakaa "Match metadata fetch failed: 404". */
+  test("tuntematon ottelu-ID näytetään luettavana virheenä", async ({ page, openApp, api }) => {
+    api.failures.set("POST /api/jobs", {
+      status: 404,
+      error: "Ottelua 999999999 ei löytynyt tulospalvelusta — tarkista ottelu-ID.",
+    });
+    await openApp();
+    await openMatches(page);
+
+    await page.getByPlaceholder(/146210/).fill("999999999");
+    await page.getByRole("button", { name: /Luo työ ID:stä/ }).click();
+
+    await expect(
+      page.getByText("Ottelua 999999999 ei löytynyt tulospalvelusta — tarkista ottelu-ID."),
+    ).toBeVisible();
+  });
+
   test("tyhjä päivä kerrotaan käyttäjälle", async ({ page, openApp, api }) => {
     api.day = (date) => ({ ...dayMatches(date), matches: [], stadiums: [], seriesNames: [] });
     await openApp();

@@ -60,14 +60,10 @@ test.describe("ulkoasu", () => {
   });
 
   test("kosketuskohteet ovat vähintään 44×44 px", async ({ page, openApp }, info) => {
-    /** Known-undersized controls, MEASURED not guessed:
-     *    button.chip          53×38  (pollausväli, lokin tasosuodatin)
-     *    button.field__reveal 55×22  ("Näytä" stream keyn vieressä)
-     *  Both are REPORTED as findings rather than fixed here. The point of the
-     *  allowlist is that anything NEW dropping below 44 px still fails — and
-     *  that these two show up in the attachment on every run. */
-    const KNOWN_UNDERSIZED = ["button.chip", "button.field__reveal"];
-
+    /** No allowlist: the rule holds for every visible control in every view.
+     *  The two that used to be exempt (button.chip 53×38, button.field__reveal
+     *  55×22) are fixed in style.css, so an exception here would only hide the
+     *  next one. The attachment keeps reporting whatever it measures. */
     await openApp();
     const undersizedEverywhere: string[] = [];
 
@@ -82,10 +78,9 @@ test.describe("ulkoasu", () => {
       for (const t of small) {
         undersizedEverywhere.push(`${tab}: ${t.selector} "${t.label}" ${t.width}×${t.height}`);
       }
-      const unexpected = small.filter((t) => !KNOWN_UNDERSIZED.includes(t.selector));
       expect(
-        unexpected.map((t) => `${t.selector} "${t.label}" ${t.width}×${t.height}`),
-        `${tab}: uusia alle 44 px kosketuskohteita`,
+        small.map((t) => `${t.selector} "${t.label}" ${t.width}×${t.height}`),
+        `${tab}: alle 44 px kosketuskohteita`,
       ).toEqual([]);
     }
 
@@ -158,14 +153,13 @@ test.describe("ulkoasu", () => {
       // Body text is held to the full WCAG AA 4.5:1 (measured 11–15:1).
       expect(headlineRatio, `${variant.health}: leipätekstin kontrasti`).toBeGreaterThanOrEqual(4.5);
 
-      // The big status word: 4.5:1 everywhere EXCEPT the fail state, which
-      // measures 4.18:1 — red text on the red tint the fail banner paints
-      // behind it. That is above WCAG's 3:1 for large text (30 px / weight
-      // 900), below the 4.5:1 this app wants for sunlight. REPORTED, not
-      // fixed: the floor here is set to the measured value so a further
-      // regression still fails the test.
-      const floor = variant.health === "fail" ? 4.0 : 4.5;
-      expect(wordRatio, `${variant.health}: ison terveystilan kontrasti`).toBeGreaterThanOrEqual(floor);
+      // The big status word is held to 4.5:1 in EVERY state — including fail,
+      // which used to sit at 4.18:1 (red on the red tint the fail banner
+      // paints behind it). WCAG would allow 3:1 for text this large, but the
+      // fail state is the one read in a panic in direct sunlight, so it gets
+      // the body-text floor like the rest. --fail-ink + a lighter top tint put
+      // it around 6:1.
+      expect(wordRatio, `${variant.health}: ison terveystilan kontrasti`).toBeGreaterThanOrEqual(4.5);
     }
 
     await info.attach("mitatut-kontrastit", { body: measured.join("\n"), contentType: "text/plain" });

@@ -16,9 +16,13 @@ import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MatchOption } from "../src/shared/types.js";
 
+/** An id the source has never heard of — the mock answers it the way the real
+ *  getMatch does for a 404: null, not a throw and not a half-filled object. */
+const UNKNOWN_MATCH_ID = 999_999_999;
+
 vi.mock("../src/server/matches.js", () => ({
   getMatch: vi.fn(
-    async (id: number): Promise<MatchOption> => ({
+    async (id: number): Promise<MatchOption | null> => (id === UNKNOWN_MATCH_ID ? null : {
       id,
       home: `Koti-${id}`,
       away: `Vieras-${id}`,
@@ -39,9 +43,8 @@ const tmpDir = mkdtempSync(join(tmpdir(), "pesis-control-jobs-"));
 CONFIG.stateDir = tmpDir;
 const jobsFile = join(tmpDir, "jobs.json");
 
-const { activateJob, createJob, getActiveJob, setJobStatus } = await import(
-  "../src/server/jobs.js"
-);
+const { activateJob, createJob, getActiveJob, listJobs, setJobStatus, MatchNotFoundError } =
+  await import("../src/server/jobs.js");
 
 beforeEach(() => {
   writeFileSync(jobsFile, "[]", "utf8");
@@ -49,6 +52,28 @@ beforeEach(() => {
 
 afterAll(() => {
   rmSync(tmpDir, { recursive: true, force: true });
+});
+
+// A match id reaches createJob straight from a hand-typed field or a pasted
+// URL, so "no such match" is an ordinary mistake — not a crash, and not a 500
+// carrying a raw English fetch error to a phone standing in a field.
+describe("unknown match id", () => {
+  it("rejects with a Finnish message naming the id, not a TypeError", async () => {
+    await expect(createJob({ matchId: UNKNOWN_MATCH_ID })).rejects.toThrow(MatchNotFoundError);
+    await expect(createJob({ matchId: UNKNOWN_MATCH_ID })).rejects.toThrow(
+      /Ottelua 999999999 ei löytynyt tulospalvelusta — tarkista ottelu-ID\./
+    );
+  });
+
+  it("stores no job for a match that does not exist", async () => {
+    await expect(createJob({ matchId: UNKNOWN_MATCH_ID })).rejects.toThrow();
+    expect(await listJobs()).toEqual([]);
+  });
+
+  it("still creates a job for a match that does exist", async () => {
+    const job = await createJob({ matchId: 1 });
+    expect(job).toMatchObject({ matchId: 1, home: "Koti-1", status: "draft" });
+  });
 });
 
 describe("single active job invariant", () => {

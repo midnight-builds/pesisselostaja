@@ -41,8 +41,10 @@ export class ApiMock {
   preflight: PreflightResult = fixture.preflightResult();
   log: LogLine[] = fixture.logLines();
   day: (date: string) => DayMatches = (date) => fixture.dayMatches(date);
-  /** Routes to answer with an error, e.g. { "POST /api/relay/start": "..." }. */
-  failures = new Map<string, string>();
+  /** Routes to answer with an error, e.g. { "POST /api/relay/start": "..." }.
+   *  A bare string is a 500; give `{ status, error }` when the status itself
+   *  is part of what's under test (404 for an unknown match id). */
+  failures = new Map<string, string | { status: number; error: string }>();
 
   calledWith(method: string, path: string): ApiCall[] {
     return this.calls.filter((c) => c.method === method && c.path === path);
@@ -151,7 +153,8 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
 
     const failure = api.failures.get(`${method} ${path}`);
     if (failure) {
-      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: failure }) });
+      const { status, error } = typeof failure === "string" ? { status: 500, error: failure } : failure;
+      await route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ error }) });
       return;
     }
 
@@ -308,6 +311,14 @@ export const test = base.extend<Fixtures>({
 });
 
 export { expect };
+
+/** One tab's panel. Every view stays mounted (App.tsx renders all four and
+ *  hides the inactive ones), so a text that occurs in more than one view — the
+ *  same match named both in the Ottelut list and in the job card — has to be
+ *  scoped to the view under test instead of being looked up page-wide. */
+export function view(page: Page, tab: "live" | "matches" | "job" | "log"): Locator {
+  return page.locator(`[data-view="${tab}"]`);
+}
 
 /** Writes a screenshot artifact under apps/control/test-results/screenshots/. */
 export async function shot(page: Page, info: TestInfo, name: string): Promise<void> {

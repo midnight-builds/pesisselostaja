@@ -29,18 +29,12 @@ test.describe("välilehdet", () => {
     expect(api.called("GET", "/api/live"), "eikä hakea kertakuvaa uudelleen").toBe(false);
   });
 
-  /** LÖYDÖS, ei korjattu: näkymät renderöidään ehdollisesti (`tab === "matches" &&
-   *  <MatchesView/>`), joten välilehden vaihto purkaa näkymän ja sen oma tila
-   *  katoaa — suodattimet nollautuvat, rastit häviävät ja päivä haetaan
-   *  uudelleen. 200 ottelun päivänä se tarkoittaa suodattimien uudelleen­valintaa
-   *  joka kerta kun operaattori käy vilkaisemassa Live-välilehteä.
-   *  Tämä testi kuvaa NYKYISEN käytöksen: jos se joskus korjataan, testi
-   *  hajoaa ja se on oikea hetki päivittää se odottamaan säilymistä. */
-  test("näkymäkohtainen tila EI säily välilehden vaihdossa (tunnettu löydös)", async ({
-    page,
-    openApp,
-    api,
-  }) => {
+  /** Views stay mounted (App.tsx), so each view's own state — the Ottelut
+   *  filters and ticks, the log level, the selected job — outlives a trip to
+   *  another tab, and the day is not refetched on the way back. On a camp day
+   *  of 200 matches, losing the field filter every time the operator glances
+   *  at Live is the difference between usable and not. */
+  test("näkymäkohtainen tila säilyy välilehden vaihdossa", async ({ page, openApp, api }) => {
     await openApp();
     await page.getByRole("button", { name: "Ottelut", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Päivä" })).toBeVisible();
@@ -54,15 +48,36 @@ test.describe("välilehdet", () => {
     const fetchesBefore = api.calledWith("GET", "/api/matches").length;
 
     await page.getByRole("button", { name: "Live", exact: true }).click();
+    await expect(page.getByText("Lähetys kunnossa, 42 min")).toBeVisible();
     await page.getByRole("button", { name: "Ottelut", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Päivä" })).toBeVisible();
 
-    await expect(stadium, "kenttäsuodatin nollautuu").toHaveValue("__all__");
+    await expect(stadium, "kenttäsuodatin säilyy").toHaveValue("Testikenttä 1");
     await expect(
       page.getByRole("button", { name: /Kuvitteellisen Kylän Veikot/ }),
-      "rastitus katoaa",
-    ).toHaveAttribute("aria-pressed", "false");
-    await expect.poll(() => api.calledWith("GET", "/api/matches").length).toBeGreaterThan(fetchesBefore);
+      "rastitus säilyy",
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: /^Luo työ \(1\)$/ })).toBeEnabled();
+
+    // Nor is the day refetched: 200 matches over mobile data, for nothing.
+    await page.waitForTimeout(400);
+    expect(
+      api.calledWith("GET", "/api/matches").length,
+      "päivää ei haeta uudelleen välilehden vaihdosta",
+    ).toBe(fetchesBefore);
+  });
+
+  test("lokin tasosuodatin säilyy välilehden vaihdossa", async ({ page, openApp }) => {
+    await openApp();
+    await page.getByRole("button", { name: "Loki", exact: true }).click();
+    await page.getByRole("button", { name: "Virhe", exact: true }).click();
+    await expect(page.getByText(/Tulospalvelun haku epäonnistui/)).toBeVisible();
+
+    await page.getByRole("button", { name: "Live", exact: true }).click();
+    await page.getByRole("button", { name: "Loki", exact: true }).click();
+
+    await expect(page.getByText(/Tulospalvelun haku epäonnistui/)).toBeVisible();
+    await expect(page.getByText(/Sydänääni: relay käynnissä/)).toBeHidden();
   });
 
   test("aktiivinen välilehti on merkitty ja SSE-tila päivittyy myös muilla välilehdillä", async ({
