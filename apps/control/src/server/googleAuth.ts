@@ -604,13 +604,13 @@ export function buildAuthHealth(input: AuthHealthInput): AuthHealth {
     warnings.push(
       `Viimeisimmästä onnistuneesta tokenin päivityksestä on ${round1(daysSinceSuccess)} vrk. Yhteys on lähes varmasti jo katkennut: OAuth-sovellus on jäänyt Testing-tilaan, jolloin refresh token vanhenee 7 vuorokaudessa. Julkaise sovellus (Publishing status: In production) tai kirjaudu uudelleen laitevirralla.`
     );
-    health = "fail";
+    health = worse(health, "fail");
     headline = `Google-yhteys todennäköisesti vanhentunut (${round1(daysSinceSuccess)} vrk ilman onnistunutta päivitystä).`;
   } else if (daysSinceSuccess !== null && daysSinceSuccess >= TOKEN_WARN_AGE_DAYS) {
     warnings.push(
       `Tokenia ei ole päivitetty onnistuneesti ${round1(daysSinceSuccess)} vuorokauteen. Jos OAuth-sovellus on Testing-tilassa, refresh token vanhenee 7 vuorokaudessa — uusi yhteys nyt, älä kesken lähetyksen.`
     );
-    if (health !== "fail") health = "warn";
+    health = worse(health, "warn");
     headline = `Google-yhteys vanhenemassa: ${round1(daysSinceSuccess)} vrk ilman onnistunutta päivitystä.`;
   }
 
