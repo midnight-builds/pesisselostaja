@@ -334,17 +334,58 @@ export function templateInputFromMatch(
 
 // --- Kaavat -----------------------------------------------------------------
 
+/** Kumpi joukkue on "meidän" ja kumpi vastustaja. Otsikossa oma joukkue on
+ *  aina vasemmalla riippumatta koti/vieras-asetelmasta (runbookin esimerkit). */
+function teamPair(input: MatchTemplateInput): { own: TeamNames; opponent: TeamNames } {
+  const home: TeamNames = { full: input.home, short: input.homeShort, code: input.homeCode };
+  const away: TeamNames = { full: input.away, short: input.awayShort, code: input.awayCode };
+  const ownIsAway = isOwnTeam(input.away) && !isOwnTeam(input.home);
+  const own = ownIsAway ? away : home;
+  const opponent = ownIsAway ? home : away;
+  return {
+    // Kutsujan antama teamLabel/opponent ohittaa päättelyn, mutta säilyttää
+    // silti lyhennysmuodot kun ne osuvat samaan joukkueeseen.
+    own: input.teamLabel ? { full: input.teamLabel, short: own.short, code: own.code } : own,
+    opponent: input.opponent ? { full: input.opponent, short: opponent.short, code: opponent.code } : opponent,
+  };
+}
+
+/** Ottelupari annetulla lyhennystasolla, esim. "Pesä Ysit E-tytöt kilpa - Tahko". */
+export function buildMatchupLabel(input: MatchTemplateInput, level: ShorteningLevel): string {
+  const { own, opponent } = teamPair(input);
+  return `${nameAtLevel(own, level)} - ${nameAtLevel(opponent, level)}`;
+}
+
 /** `<joukkue/sarja> - <vastustaja>, <pvm> <lyhyt paikka>` (runbook
- *  "Otsikointisaannot"). Ei lopputulosta — koskaan. */
-export function buildTitle(input: MatchTemplateInput): string {
-  const ownIsHome = isOwnTeam(input.home);
-  const ownIsAway = isOwnTeam(input.away);
-  const teamLabel = input.teamLabel ?? (ownIsAway && !ownIsHome ? input.away : input.home);
-  const opponent = input.opponent ?? (ownIsAway && !ownIsHome ? input.home : input.away);
+ *  "Otsikointisaannot"). Ei lopputulosta — koskaan.
+ *
+ *  Nimet lyhennetään asteittain (täysi → shorthand → three_letters) kunnes
+ *  otsikko mahtuu budjettiin. Kova katkaisu on vasta viimeinen keino: se
+ *  pudottaa loppuosan näkyvistä, mikä on juuri se vika joka thumbnailissa
+ *  hukkasi vastustajan nimen kokonaan. */
+export function buildTitle(input: MatchTemplateInput, maxLength: number = TITLE_MAX_LENGTH): string {
   const { date } = localPartsOf(input);
   const place = input.shortVenue ?? input.city ?? input.venue ?? null;
   const tail = place ? `${date} ${place}` : date;
-  return shortenTitle(`${teamLabel} - ${opponent}, ${tail}`);
+  for (const level of [0, 1, 2] as ShorteningLevel[]) {
+    const candidate = `${buildMatchupLabel(input, level)}, ${tail}`;
+    if (candidate.length <= maxLength) return candidate;
+  }
+  return shortenTitle(`${buildMatchupLabel(input, 2)}, ${tail}`, maxLength);
+}
+
+/** Thumbnailin rivi 1: pelkkä ottelupari, lyhennettynä niin että se mahtuu
+ *  renderöijän kahdelle riville. renderThumbnail (thumbnail.ts) ottaa otsikon
+ *  valmiina merkkijonona eikä lyhennä mitään — se vain katkaisee. */
+export function buildThumbnailHeadline(
+  input: MatchTemplateInput,
+  maxLength: number = THUMBNAIL_HEADLINE_MAX_LENGTH
+): string {
+  for (const level of [0, 1, 2] as ShorteningLevel[]) {
+    const candidate = buildMatchupLabel(input, level);
+    if (candidate.length <= maxLength) return candidate;
+  }
+  return shortenTitle(buildMatchupLabel(input, 2), maxLength);
 }
 
 export function buildNarratedTitle(title: string): string {
