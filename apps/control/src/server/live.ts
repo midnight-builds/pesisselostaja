@@ -195,7 +195,7 @@ function minutes(sec: number | null): string {
 /** The one sentence the operator reads standing in a field, in priority order.
  *  Every rule is a decision, not a formula — hence the comments. First match
  *  wins, so the order below IS the policy. */
-function deriveHealth(snap: Snapshot): { health: Health; headline: string } {
+export function deriveHealth(snap: Snapshot): { health: Health; headline: string } {
   const { job, relay, match, system } = snap;
   const respawns = countRecentRespawns(snap.log, snap.now);
 
