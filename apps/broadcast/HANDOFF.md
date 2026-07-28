@@ -511,6 +511,17 @@ luovutusikkunaa), mikä tässä tapauksessa oli haluttu käytös. Vahvistaa
 HANDOFFin aiemman "stalled source" -analyysin: automaattitappo olisi ollut
 väärä ratkaisu, operaattorin/agentin päätös oikea taso.
 
+> **Päivitys 27.7.2026 (issue #45): tämä käytös on muuttunut.** Sama kuvio
+> toistui ottelussa 146210 ottelun *päätyttyä*, ja relay jäi ikuiseen
+> respawn-silmukkaan kunnes se pysäytettiin käsin — vastoin sitä mitä
+> operaattorin runbook lupaa. Nyt alle 60 s kestävä sessio kerryttää
+> luovutusikkunaa exit-koodista riippumatta, eli kuvio johtaa
+> itsesammutukseen `RELAY_FINISHED_FAILURE_WINDOW_MS`:n (päättynyt ottelu,
+> ~2 min) tai `RELAY_MAX_FAILURE_WINDOW_MS`:n (kesken ottelun, 12 min)
+> kuluessa. Kesken ottelun 12 min ikkuna jättää yhä tilaa sille, että
+> puhelin palaa — ja jos ei palaa, myös kohteen auto-stop pääsee vihdoin
+> laukeamaan (ks. sivumekanismi alla).
+
 **Sivumekanismi (käyttäjän havainto samasta ajosta):** kumpikaan striimi ei
 päättynyt katsojille, vaikka puhelin oli selvästi kuollut. Kaksi eri syytä:
 (1) lähde: YouTube pitää lähetystä "live"-tilassa useita minuutteja ingestin

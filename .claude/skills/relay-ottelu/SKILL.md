@@ -215,7 +215,7 @@ jos kirjoitat vain osan avaimista, muut asetukset säilyvät ennallaan.
 # yksi avain kerrallaan:
 echo '{"announceBatterChanges": false}' > apps/broadcast/run/.control-<ID>.json
 # tai useita yhdellä kertaa:
-echo '{"announceBatterChanges": false, "narrationDelayMs": 4000, "deltaFetch": true, "pollIntervalMs": 3000}' \
+echo '{"announceBatterChanges": false, "narrationDelayMs": 5000, "deltaFetch": true, "pollIntervalMs": 3000}' \
   > apps/broadcast/run/.control-<ID>.json
 ```
 
@@ -244,11 +244,13 @@ kaikki kirjoittavat operaatiot heti (globaali sääntö).
 
 ## LOPETUS
 
-> **⚠ Relay ei välttämättä sammu itse, vaikka lähde loppuisi.** Luovutuslaskuri
-> kertyy vain käynnistysvirheistä, ja jos ffmpeg käynnistyy onnistuneesti mutta
-> kuolee heti `code=0`, laskuri nollautuu joka kierroksella → relay respawnaa
-> ikuisesti (**issue #45**, ottelu 146210). **Tarkista aina itse, että ajo on
-> todella loppunut, ja pysäytä palvelu käsin.**
+> **⚠ Älä luota itsesammutukseen sokeasti — tarkista aina itse, että ajo on
+> todella loppunut.** Relay osaa nyt luovuttaa myös silloin kun ffmpeg
+> käynnistyy onnistuneesti mutta kuolee heti `code=0` (issue #45 korjattu:
+> vain riittävän pitkä ajo kelpaa todisteeksi etenemisestä, ks.
+> `ffmpegMixer.ts`). Ennen korjausta relay respawnasi ikuisesti ja operaattori
+> joutui pysäyttämään palvelun käsin (ottelu 146210, 27.7.). Korjausta ei ole
+> vielä koeteltu oikeassa lähetyksessä, joten pysäytä käsin jos ajo jää pystyyn.
 
 Ottelun ollessa kesken älä pysäytä: kuollut lähde voi palata, ja striimin uptime
 on ykkösprioriteetti. Vasta kun ottelu on oikeasti ohi:

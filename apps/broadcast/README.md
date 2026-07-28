@@ -67,7 +67,8 @@ keep playing.
 - **At startup:** set `RELAY_ANNOUNCE_BATTER_CHANGES=false` in `.env.relay`, or
   pass `--no-batter-changes` to `relay:dev`.
 - **Live, without restarting:** the loop re-reads `apps/broadcast/run/.control-<matchId>.json`
-  every poll (~4 s). Flip it and the change takes effect within one poll:
+  every poll (see the poll interval below). Flip it and the change takes effect
+  within one poll:
   ```bash
   echo '{"announceBatterChanges": false}' > apps/broadcast/run/.control-143280.json   # off
   echo '{"announceBatterChanges": true}'  > apps/broadcast/run/.control-143280.json   # back on
@@ -85,15 +86,18 @@ the video path), add an artificial delay. It affects **only playback** — dedup
 and scoring bookkeeping still run synchronously at detection time — and never
 stalls the poll loop or reorders clips.
 
-- **At startup:** `RELAY_NARRATION_DELAY_MS=4000` in `.env.relay`, or
-  `--narration-delay-ms 4000`. Default `2000` (calibrated live, match 144742).
+- **At startup:** `RELAY_NARRATION_DELAY_MS=5000` in `.env.relay`, or
+  `--narration-delay-ms 5000`. Default `4000` — a value **calibrated live**
+  (match 146210; an earlier `2000` default had to be raised by hand in every
+  broadcast). It stays adjustable from the control file, so treat `4000` as the
+  starting point, not a fixed truth.
 - **Live, without restarting:** the same control file, `narrationDelayMs` key:
   ```bash
-  echo '{"narrationDelayMs": 4000}' > apps/broadcast/run/.control-143280.json   # add 4s
+  echo '{"narrationDelayMs": 5000}' > apps/broadcast/run/.control-143280.json   # 5s (1s more than the default)
   echo '{"narrationDelayMs": 0}'    > apps/broadcast/run/.control-143280.json   # off
   ```
   The control-file value wins over the env/CLI seed. You can set several keys
-  in one file (`{"announceBatterChanges": false, "narrationDelayMs": 4000}`);
+  in one file (`{"announceBatterChanges": false, "narrationDelayMs": 5000}`);
   writing only some keys leaves the others unchanged. The right value is
   calibrated live — the video path's latency varies between broadcasts.
 
@@ -112,20 +116,26 @@ The poll loop fetches events in delta mode by default: `after=` limits the
 response to recent events, an ETag turns quiet polls into cheap 304s, and the
 default poll interval is `3000` ms (`RELAY_POLL_INTERVAL`). Responses merge
 into a local full-history mirror, so all event processing still sees the
-complete history every poll; the server's reset flag or an inconsistent delta
-triggers an immediate full refetch, and a full resync runs every ~60 s as
-insurance. Watch the log for `Delta-haku: N uutta …` lines and fall back live
-if anything looks off:
+complete history every poll; an inconsistent delta triggers an immediate full
+refetch, and a full resync runs every ~60 s as insurance. Watch the log for
+`Delta-haku: N uutta …` lines and fall back live if anything looks off:
 
-If the server answers **5 deltas in a row** with the reset flag, delta mode is
-pure overhead — every poll pays a delta request *and* a full one — so a breaker
-turns it off for the rest of the run and logs `HUOM: delta-haku vastasi
-reset-lipulla 5 kertaa peräkkäin …` once. Later heartbeats keep saying `delta
-POIS (katkaisija)` so the stalled delta count doesn't look mysterious. Without
-this, match 144918 (27.7.) ran 1098 polls with exactly one successful delta
-merge until the breaker was applied by hand mid-broadcast. Writing
-`{"deltaFetch": true}` to the control file overrules the breaker and gives
-delta a fresh streak.
+**Reset answers are not failures.** `reset` is not a boolean flag but the ISO
+instant the match's online data was created (`"2026-07-27T18:25:29+03:00"`), and
+the server returns it — together with the *complete* history — whenever the
+requested `after` is older than that instant. Since `after` is the last server
+Date minus a 180 s margin, that is guaranteed for the first ~3 minutes of every
+match: the response is simply used as the full snapshot it already is, one
+request, and the log says so once per streak. The heartbeat's `reset N` counts
+them. Before this was understood (issue #46) each such poll also fired a second,
+redundant full fetch — two API requests per poll for the whole streak, which is
+what made the 4 s timeout bite in matches 144918 and 146210 (27.7.).
+
+A reset whose instant our own `after` does **not** explain still counts toward a
+breaker: **5 in a row** turn delta off for the rest of the run with one
+`HUOM: delta-haku vastasi selittämättömällä reset-leimalla …` line, and later
+heartbeats keep saying `delta POIS (katkaisija)`. Writing `{"deltaFetch": true}`
+to the control file overrules the breaker and gives delta a fresh streak.
 
 - **At startup:** `RELAY_DELTA_FETCH=false` reverts to plain full fetches.
 - **Live, without restarting:** control file keys `deltaFetch` (boolean) and
@@ -134,6 +144,12 @@ delta a fresh streak.
   echo '{"deltaFetch": false}'    > apps/broadcast/run/.control-143280.json  # full fetches
   echo '{"pollIntervalMs": 5000}' > apps/broadcast/run/.control-143280.json  # slower poll
   ```
+
+Each API fetch is aborted after **10 s** (never less than the current poll
+interval). A full fetch returns the whole match history, which keeps growing, so
+the earlier 4 s cut healthy requests short late in a match — live 146210 logged
+12 aborts in two minutes, all at exactly 4.0 s. Polls are sequential, so the
+longer timeout cannot stack requests; a hung fetch only postpones the next poll.
 
 ### Starting before the source goes live
 
@@ -162,8 +178,26 @@ While a match is running, a dead source is retried for the generous
 `RELAY_MAX_FAILURE_WINDOW_MS` (12 min) before the relay shuts itself down.
 Once the match has finished ("Ottelu päättyi" spoken), the source won't come
 back — the shorter `RELAY_FINISHED_FAILURE_WINDOW_MS` (default `120000`)
-applies instead. Clean ffmpeg exits (a flapping source) still never count
-toward giving up.
+applies instead.
+
+An attempt counts toward the window when it produces no broadcast: either
+ffmpeg never started (yt-dlp error, bad args), or it started and the session
+ended in under `minProductiveRunMs` (60 s). The exit code is deliberately
+ignored — when the source phone dies mid-match, yt-dlp keeps resolving a valid
+URL and ffmpeg reads the frozen DVR tail for a few seconds and exits `code=0`,
+so a "successful start" alone proves nothing (issue #45; before the fix that
+pattern respawned forever and the operator had to stop the service by hand).
+Only a run long enough to be real broadcast clears the window — whether it
+ended by itself or in the relay's own 15 min URL refresh. That last part
+matters: `urlRefreshMs` (15 min) is longer than `RELAY_MAX_FAILURE_WINDOW_MS`
+(12 min), so on a healthy source *every* session ends in a refresh kill, and
+excusing those from clearing the window would leave a `failingSince` set by
+one early blip standing for the rest of the match. A refresh kill only excuses
+a session from *accruing*: there the kill, not the source, is why the run was
+short.
+
+All durations here are measured on a monotonic clock, so an NTP step can't
+turn a healthy session into a seconds-long "failure".
 
 ### Preflight (run this before every match)
 
@@ -269,9 +303,47 @@ so the stream never goes silent. Details:
   `packages/core`). Logs and the Piper path keep the digits.
 - **Cache:** synthesized audio is cached as PCM in `apps/broadcast/run/tts-cache/`
   keyed by model+voice+text, so repeated phrases ("Palo! KPL.") cost credits only
-  once — also across matches. Safe to delete anytime.
+  once — also across matches. Safe to delete anytime; kept under a size ceiling
+  automatically (see "Disk retention in `run/`" below).
 - **Cost visibility:** each synthesis logs its character count and a running
   total; the total is logged again at shutdown (≈ credits on multilingual v2).
+
+## Disk retention in `run/`
+
+`apps/broadcast/run/` is the relay's scratch directory (git-ignored via the
+repo-root `.gitignore`, so nothing here is ever committed). Every run leaves
+artifacts behind, and before issue #39 nothing ever removed them — the directory
+had grown to 1.4 G. On startup `index.ts` now applies a retention policy
+(`runRetention.ts`) before synthesis begins:
+
+| What | Rule | Env var (default) |
+|------|------|-------------------|
+| `relay-<matchId>.pcm`, `.state-<matchId>.json`, `.control-<matchId>.json` | removed when older than N days | `RELAY_RUN_RETENTION_DAYS` (`30`, `0` = off) |
+| `run/tts-cache/<sha256>.pcm` | least-recently-used clips evicted until the directory fits the ceiling | `RELAY_TTS_CACHE_MAX_MB` (`512`, `0` = off) |
+
+Two properties matter more than the numbers:
+
+- **It is an allowlist, not a sweep.** Only the filename shapes above are ever
+  deleted, only at the top level of `run/`, and **never a directory**. Operator
+  material living in `run/` — `field-audio-demo/`, `voice-tuning-demo*/`,
+  `simulate-<id>/`, hand-made `live-test-*.mp4` recordings — is invisible to the
+  policy no matter how old or how large it gets. Deleting those stays a
+  deliberate human action.
+- **The starting match is exempt.** Its own state/control files survive
+  regardless of age, so a resumed relay never loses its progress.
+
+The sweep is best-effort: a missing `run/`, a missing `tts-cache/`, or an
+unlinkable file is logged-and-ignored rather than allowed to block a broadcast.
+It logs one line when it removed anything (`Säilytyskäytäntö: poistettu N …`).
+
+TTS-cache eviction is genuine LRU: `elevenLabsTts.ts` bumps a clip's mtime on
+every cache hit, so a phrase that recurs match after match outlives a one-off.
+Evicted clips are regenerable — the only cost of a wrong guess is re-spending
+ElevenLabs credits on that phrase once.
+
+Because everything else in `run/` is out of scope by design, periodically
+checking `du -sh apps/broadcast/run/*` and deleting reviewed demo/simulation
+output by hand is still part of operating the relay.
 
 ## Swapping Piper voices later
 

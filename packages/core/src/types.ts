@@ -3,6 +3,10 @@ export type EventTextElement =
   | { type: "event"; text: string; base?: string | null }
   | { type: "player"; id?: number; number?: number; role?: string; team?: number; "settling-at-bat"?: boolean }
   | { type: "team"; id: number }
+  // Lineup change: the API sends the whole new batting order (player ids as
+  // strings) plus the pitcher. Not spoken — 11 numbers in a row is unlistenable
+  // and would block the narration queue; see speech.ts dropDanglingClause.
+  | { type: "substitution"; team?: number; newLineUp?: string[]; pitcher?: number }
   | { type: "stat"; score?: number; out?: number; [key: string]: unknown }
   | { hide?: boolean; type: "stat"; [key: string]: unknown };
 
@@ -34,11 +38,20 @@ export interface LiveEventsResponse {
   team?: number | null;
   bat_turn?: number;
   finished?: boolean;
-  /** Set by the server on delta (`after=`) queries when the client should
-   *  discard its local history and treat this response as authoritative —
-   *  the pesistulokset.fi frontend handles the same flag. Null/absent in
-   *  normal responses (observed live 2026-07-16). */
-  reset?: boolean | null;
+  /** Delta (`after=`) queries only, and NOT a boolean despite reading like a
+   *  flag: the server answers with the ISO instant its online data for this
+   *  match was created / last rebuilt (e.g. "2026-07-27T18:25:29+03:00"), and
+   *  it does so exactly when the requested `after` is OLDER than that instant.
+   *  Such a response ignores `after` entirely and carries the COMPLETE event
+   *  history — i.e. it already is a full fetch, and the client only has to
+   *  replace its local history with it (verified live 2026-07-28 against a
+   *  running match: `after` one second either side of the reported instant
+   *  flipped the flag, and the reset response's event list matched the plain
+   *  full fetch's). The period/team/inning fields are NOT a reset speciality:
+   *  any response carrying events carries them too, and only an empty delta
+   *  (nothing changed since `after`) leaves them null.
+   *  Null/absent in normal responses. */
+  reset?: string | boolean | null;
 }
 
 export interface Player {

@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import { DEFAULT_RETENTION_DAYS, DEFAULT_TTS_CACHE_MAX_MB } from "./runRetention.js";
 
 export interface RelayConfig {
   matchId: number;
@@ -12,8 +13,8 @@ export interface RelayConfig {
   /** Artificial delay (ms) inserted between detecting an event and handing its
    *  narration to synthesis, so speech lands after the corresponding video
    *  instead of ahead of it once the API skip-delay shortened the feed lag
-   *  (HANDOFF.md 8). Default 0 (no delay). Runtime-overridable via the control
-   *  file — see commentaryLoop. */
+   *  (HANDOFF.md 8). Default DEFAULT_NARRATION_DELAY_MS. Runtime-overridable
+   *  via the control file — see commentaryLoop. */
   narrationDelayMs: number;
   /** Don't speak until ffmpeg has been attached this long, measured from the
    *  FIRST attach ever (not relay start — the source can go live minutes
@@ -37,6 +38,13 @@ export interface RelayConfig {
   apiBase: string;
   stateFile: string;
   runDir: string;
+  /** run/ retention (issue #39): relay-owned artifacts older than this many
+   *  days are swept on startup. 0 = off. Only touches the relay's own
+   *  filename patterns — see runRetention.ts. */
+  runRetentionDays: number;
+  /** Size ceiling for run/tts-cache/ in bytes; least-recently-used clips are
+   *  evicted above it. 0 = off. */
+  ttsCacheMaxBytes: number;
   pronunciationsFile: string;
   /** JSON file the commentary loop re-reads each poll so an operator can flip
    *  announceBatterChanges mid-match without restarting — see commentaryLoop. */
@@ -47,6 +55,20 @@ export interface RelayConfig {
   elevenLabsModelId: string;
 }
 
+/** Default artificial narration delay (ms) — the gap between detecting an event
+ *  and handing its narration to synthesis, so speech lands just after the video
+ *  instead of ahead of it (HANDOFF.md 8).
+ *
+ *  4000 ms, not the earlier 2000: every live-calibrated match has needed the
+ *  operator to raise it by hand mid-broadcast (match 146210 settled on 4000 ms,
+ *  a later run on 5000 ms), so 2000 only meant every broadcast started with
+ *  speech running ahead of the picture until someone noticed (issue #53).
+ *  4000 is the value confirmed live and is the conservative end of what
+ *  calibration has produced. Still runtime-adjustable without a restart via the
+ *  control file's `narrationDelayMs` (and at startup via
+ *  `RELAY_NARRATION_DELAY_MS` / `--narration-delay-ms`). */
+export const DEFAULT_NARRATION_DELAY_MS = 4000;
+
 function requireValue(name: string, cliValue: string | undefined, envName: string): string {
   const value = cliValue ?? process.env[envName];
   if (!value) {
@@ -54,6 +76,14 @@ function requireValue(name: string, cliValue: string | undefined, envName: strin
     process.exit(1);
   }
   return value;
+}
+
+/** Env override that falls back to the default on garbage or negative input —
+ *  a typo must never turn retention into an aggressive or NaN-driven sweep. */
+function nonNegativeNumber(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
 export function parseRelayConfig(): RelayConfig {
@@ -107,13 +137,16 @@ export function parseRelayConfig(): RelayConfig {
   // control file's pollIntervalMs (min 2000 — see commentaryLoop).
   const pollInterval = parseInt(values["poll-interval"] ?? process.env.RELAY_POLL_INTERVAL ?? "3000", 10);
   const narrationGain = parseFloat(values["narration-gain"] ?? process.env.RELAY_NARRATION_GAIN ?? "1.3");
-  // Artificial narration delay (HANDOFF.md 8). Default 2000 ms, calibrated and
-  // confirmed live (match 144742, 17.7.) — narration must land just after the
-  // video path, which the ~2 s floor achieves; still runtime-adjustable via the
-  // control file's narrationDelayMs. A bad value falls back to the default
-  // rather than NaN (which would make every wait computation NaN).
-  const narrationDelayRaw = parseInt(values["narration-delay-ms"] ?? process.env.RELAY_NARRATION_DELAY_MS ?? "2000", 10);
-  const narrationDelayMs = Number.isNaN(narrationDelayRaw) ? 2000 : Math.max(0, narrationDelayRaw);
+  // Artificial narration delay (HANDOFF.md 8), see DEFAULT_NARRATION_DELAY_MS.
+  // A bad value falls back to the default rather than NaN (which would make
+  // every wait computation NaN).
+  const narrationDelayRaw = parseInt(
+    values["narration-delay-ms"] ?? process.env.RELAY_NARRATION_DELAY_MS ?? String(DEFAULT_NARRATION_DELAY_MS),
+    10
+  );
+  const narrationDelayMs = Number.isNaN(narrationDelayRaw)
+    ? DEFAULT_NARRATION_DELAY_MS
+    : Math.max(0, narrationDelayRaw);
   // ~20 s grace from the FIRST ffmpeg attach before anything is spoken, so
   // viewers have time to open the stream (HANDOFF.md 16.7. kohta 1). 0 = off.
   const firstSpeechDelayRaw = parseInt(process.env.RELAY_FIRST_SPEECH_DELAY_MS ?? "20000", 10);
@@ -147,6 +180,12 @@ export function parseRelayConfig(): RelayConfig {
   const apiKey = process.env.PESISTULOKSET_API_KEY ?? "wRX0tTke3DZ8RLKAMntjZ81LwgNQuSN9";
   const apiBase = process.env.PESISTULOKSET_API_BASE ?? "https://api.pesistulokset.fi/api/v1";
 
+  // run/ retention (issue #39). Deliberately cautious: a month of history is
+  // kept and only the relay's own artifacts are in scope, so operator material
+  // in run/ (demos, simulation output, recordings) survives untouched.
+  const runRetentionDays = nonNegativeNumber(process.env.RELAY_RUN_RETENTION_DAYS, DEFAULT_RETENTION_DAYS);
+  const ttsCacheMaxMb = nonNegativeNumber(process.env.RELAY_TTS_CACHE_MAX_MB, DEFAULT_TTS_CACHE_MAX_MB);
+
   const runDir = new URL("../run/", import.meta.url).pathname;
   const stateFile = `${runDir}.state-${matchId}.json`;
   const controlFile = `${runDir}.control-${matchId}.json`;
@@ -179,6 +218,8 @@ export function parseRelayConfig(): RelayConfig {
     apiBase,
     stateFile,
     runDir,
+    runRetentionDays,
+    ttsCacheMaxBytes: Math.round(ttsCacheMaxMb * 1024 * 1024),
     pronunciationsFile,
     controlFile,
     elevenLabsApiKey,

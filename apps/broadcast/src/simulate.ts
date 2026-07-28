@@ -1,4 +1,4 @@
-import "dotenv/config";
+import { loadRelayEnv } from "./relayEnv.js";
 import { parseArgs } from "node:util";
 import { mkdirSync, existsSync, openSync, writeSync, ftruncateSync, closeSync, statSync } from "node:fs";
 import { execFile, spawn } from "node:child_process";
@@ -17,6 +17,10 @@ import { loadPronunciations, applyPronunciations, preventOrdinalReading } from "
 import { PiperTts } from "./piperTts.js";
 import { buildMixFilterComplex } from "./ffmpegMixer.js";
 import { log } from "./log.js";
+
+// Same .env.relay systemd's EnvironmentFile gives the live service, so an
+// offline replay is configured identically to the real run (issue #55).
+loadRelayEnv();
 
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;

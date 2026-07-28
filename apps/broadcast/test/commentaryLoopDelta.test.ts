@@ -29,6 +29,11 @@ const palo: SubEvent = { texts: [{ type: "event", text: "Palo", base: null }, { 
 const run: SubEvent = { texts: [{ type: "stat", score: 1 }] };
 
 const T0 = Date.parse("2026-07-17T08:00:00Z");
+/** Shape of a real reset answer: the instant the match's online data was
+ *  created, ISO with the Helsinki offset — and here newer than the `after` a
+ *  poll derives from T0 (T0 - 180 s), i.e. the match-start case that made
+ *  every early poll reset (verified live 2026-07-28, issue #46). */
+const RESET_AT_ISO = new Date(T0 - 60 * 1000).toISOString();
 
 function result(events: LiveEvent[], extra: Partial<LiveEventsResult> = {}): LiveEventsResult {
   return { events, notModified: false, etag: 'W/"tag"', serverDateMs: T0, ...extra };
@@ -46,6 +51,8 @@ function makeConfig(overrides: Partial<RelayConfig> = {}): RelayConfig {
     apiKey: "test", apiBase: "https://example.invalid/api",
     stateFile: "/tmp/pesis-test-nonexistent-state.json",
     runDir: "/tmp/",
+    runRetentionDays: 0,
+    ttsCacheMaxBytes: 0,
     pronunciationsFile: "/tmp/pesis-test-nonexistent-pron.json",
     controlFile: "/tmp/pesis-test-nonexistent-control.json",
     elevenLabsVoiceId: "x", elevenLabsModelId: "y",
@@ -121,19 +128,31 @@ describe("CommentaryLoop delta polling (HANDOFF.md 15.7. kohta 6)", () => {
     expect(thirdOpts.etag).toBe('W/"quiet"');
   });
 
-  it("falls back to an immediate full fetch in the same poll when the server sets the reset flag", async () => {
+  it("uses the reset answer itself as the full snapshot — one request, no second full fetch (issue #46)", async () => {
     const loop = makeLoop();
     fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
     await loop.fetchFullEvents();
 
-    fetchMock.mockResolvedValueOnce(result([ev({ id: 99 })], { reset: true }));
-    fetchMock.mockResolvedValueOnce(result([ev({ id: 5 }), ev({ id: 6 })]));
+    // A real reset answer ignores `after` and carries the whole history.
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 5 }), ev({ id: 6 })], { reset: RESET_AT_ISO }));
     await loop.fetchEventsForPoll();
 
-    expect(fetchMock).toHaveBeenCalledTimes(3); // delta + fallback full, same poll
-    const fallbackOpts = fetchMock.mock.calls[2][1] as { after?: string };
-    expect(fallbackOpts.after).toBeUndefined();
-    expect(loop.history.events.map((e) => e.id)).toEqual([5, 6]); // rebuilt, not merged
+    expect(fetchMock).toHaveBeenCalledTimes(2); // startup full + this delta. NOT 3.
+    expect(loop.history.events.map((e) => e.id)).toEqual([5, 6]); // rebuilt from the reset answer
+  });
+
+  it("still pays for a real full fetch if a reset answer holds fewer events than the local history", async () => {
+    const loop = makeLoop();
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo]), ev({ id: 2 }, [run])]));
+    await loop.fetchFullEvents();
+
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])], { reset: RESET_AT_ISO })); // suspiciously short
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo]), ev({ id: 2 }, [run])]));
+    await loop.fetchEventsForPoll();
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect((fetchMock.mock.calls[2][1] as { after?: string }).after).toBeUndefined();
+    expect(loop.history.events.map((e) => e.id)).toEqual([1, 2]);
   });
 
   it("falls back to a full fetch when a delta shrinks an event's sub-event list (inconsistent)", async () => {
@@ -209,7 +228,7 @@ describe("CommentaryLoop poll statistics + failure streaks (HANDOFF.md 17.7.)", 
     fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])]));
     await loop.fetchEventsForPoll();
 
-    expect(loop.pollStatsSummary).toBe("pollit 4 (delta 2, täyshaku 2, 304 1, hakuvirheitä 0)");
+    expect(loop.pollStatsSummary).toBe("pollit 4 (delta 2, täyshaku 2, 304 1, reset 0, hakuvirheitä 0)");
   });
 
   it("logs each failure with its duration and streak position, alarming only from the 3rd on", () => {
@@ -253,19 +272,82 @@ describe("CommentaryLoop poll statistics + failure streaks (HANDOFF.md 17.7.)", 
   });
 });
 
-describe("CommentaryLoop delta reset breaker (live 144918, 27.7.)", () => {
-  /** Server answers every delta with reset:true; full fetches (no `after`)
-   *  answer normally. This is exactly what match 144918 saw for 1098 polls. */
-  function mockAlwaysResetting() {
+describe("CommentaryLoop match-start reset streak (issue #46 root cause)", () => {
+  /** What every match looks like for the first AFTER_MARGIN_MS: `after`
+   *  (server date − 180 s) predates the instant the scorer's match data was
+   *  created, so the server answers every delta with that instant — and the
+   *  complete history alongside it. Verified live 2026-07-28. */
+  function mockStartOfMatchResets() {
     fetchMock.mockImplementation(async (_id, opts) => {
       const after = (opts as { after?: string } | undefined)?.after;
-      return after
-        ? result([ev({ id: 99 })], { reset: true })
-        : result([ev({ id: 1 }, [palo]), ev({ id: 2 }, [run])]);
+      const events = [ev({ id: 1 }, [palo]), ev({ id: 2 }, [run])];
+      return after ? result(events, { reset: RESET_AT_ISO }) : result(events);
     });
   }
 
-  it("turns delta off for the run after 5 consecutive resets and says so once", async () => {
+  it("costs exactly one request per poll and never trips the breaker", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const loop = makeLoop();
+      mockStartOfMatchResets();
+      await loop.fetchFullEvents(); // seed history + server date so delta engages
+
+      fetchMock.mockClear();
+      for (let i = 0; i < 20; i++) await loop.fetchEventsForPoll();
+
+      // Before the fix this was 2 requests per poll (delta + fallback full)
+      // and the breaker turned delta off after 5 of them.
+      expect(fetchMock).toHaveBeenCalledTimes(20);
+      expect(loop.deltaFetch).toBe(true);
+      expect(loop.history.events.map((e) => e.id)).toEqual([1, 2]);
+      expect(loop.pollStatsSummary).toContain("reset 20");
+      expect(loop.pollStatsSummary).not.toContain("katkaisija");
+
+      // One line for the whole streak, not one per poll.
+      const resetLines = logSpy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("reset-leiman"));
+      expect(resetLines).toHaveLength(1);
+      expect(resetLines[0]).toContain(RESET_AT_ISO);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("logs a fresh line once the streak has been broken by a healthy delta", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const loop = makeLoop();
+      mockStartOfMatchResets();
+      await loop.fetchFullEvents();
+      await loop.fetchEventsForPoll();
+      await loop.fetchEventsForPoll();
+
+      fetchMock.mockResolvedValueOnce(result([ev({ id: 3 }, [run])], { serverDateMs: T0 + 3000 }));
+      await loop.fetchEventsForPoll(); // healthy delta clears the streak
+      mockStartOfMatchResets();
+      await loop.fetchEventsForPoll();
+
+      const resetLines = logSpy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("reset-leiman"));
+      expect(resetLines).toHaveLength(2);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+});
+
+describe("CommentaryLoop delta reset breaker (live 144918, 27.7.)", () => {
+  /** Every delta resets for a reason our own `after` does NOT explain: the
+   *  reset instant is OLDER than what we asked for. Full fetches (no `after`)
+   *  answer normally. */
+  const UNEXPLAINED_RESET_ISO = new Date(T0 - 600 * 1000).toISOString();
+  function mockAlwaysResetting() {
+    fetchMock.mockImplementation(async (_id, opts) => {
+      const after = (opts as { after?: string } | undefined)?.after;
+      const events = [ev({ id: 1 }, [palo]), ev({ id: 2 }, [run])];
+      return after ? result(events, { reset: UNEXPLAINED_RESET_ISO }) : result(events);
+    });
+  }
+
+  it("turns delta off for the run after 5 consecutive unexplained resets and says so once", async () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
       const loop = makeLoop();
@@ -294,23 +376,16 @@ describe("CommentaryLoop delta reset breaker (live 144918, 27.7.)", () => {
 
   it("keeps delta on when resets are interrupted by a delta that actually merges", async () => {
     const loop = makeLoop();
-    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+    mockAlwaysResetting();
     await loop.fetchFullEvents();
 
-    for (let i = 0; i < 4; i++) {
-      fetchMock.mockResolvedValueOnce(result([ev({ id: 99 })], { reset: true }));
-      fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
-      await loop.fetchEventsForPoll();
-    }
+    for (let i = 0; i < 4; i++) await loop.fetchEventsForPoll();
     // One healthy delta clears the streak…
-    fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])], { serverDateMs: T0 + 3000 }));
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 3 }, [run])], { serverDateMs: T0 + 3000 }));
     await loop.fetchEventsForPoll();
     // …so four more resets still don't reach the threshold.
-    for (let i = 0; i < 4; i++) {
-      fetchMock.mockResolvedValueOnce(result([ev({ id: 99 })], { reset: true }));
-      fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
-      await loop.fetchEventsForPoll();
-    }
+    mockAlwaysResetting();
+    for (let i = 0; i < 4; i++) await loop.fetchEventsForPoll();
     expect(loop.deltaFetch).toBe(true);
   });
 
@@ -365,5 +440,34 @@ describe("CommentaryLoop runtime controls: deltaFetch + pollIntervalMs", () => {
     writeFileSync(controlFile, JSON.stringify({ pollIntervalMs: 500 }));
     await loop.refreshRuntimeControls();
     expect(loop.pollIntervalMs).toBe(2000);
+  });
+});
+
+/** Issue #47: the 4 s constant aborted healthy full fetches once the match
+ *  history had grown (live 146210: 12 aborts in 2 min, all cut at 4.0 s). */
+describe("API fetch timeout", () => {
+  const timeoutOf = (call: number) => (fetchMock.mock.calls[call][1] as { timeoutMs?: number }).timeoutMs;
+
+  it("is 10 s by default, not the old 4 s", async () => {
+    const loop = makeLoop();
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+    await loop.fetchFullEvents();
+    expect(timeoutOf(0)).toBe(10_000);
+  });
+
+  it("applies to delta polls too", async () => {
+    const loop = makeLoop();
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+    await loop.fetchFullEvents();
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])], { serverDateMs: T0 + 3000 }));
+    await loop.fetchEventsForPoll();
+    expect(timeoutOf(1)).toBe(10_000);
+  });
+
+  it("is never shorter than the poll interval, however slow the cadence is set", async () => {
+    const loop = makeLoop({ pollInterval: 15000 });
+    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+    await loop.fetchFullEvents();
+    expect(timeoutOf(0)).toBe(15000);
   });
 });

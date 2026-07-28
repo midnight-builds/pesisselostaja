@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spellOutNumbers } from "@pesisselostaja/core";
 import { log } from "./log.js";
@@ -51,6 +51,11 @@ export class ElevenLabsTts {
     const cachePath = join(this.opts.cacheDir, `${key}.pcm`);
     try {
       const cached = await readFile(cachePath);
+      // Bump mtime so the run/ retention sweep (runRetention.ts) evicts by
+      // least-recently-*used*, not by creation time: a phrase that keeps
+      // recurring match after match should outlive a one-off from July.
+      const now = new Date();
+      await utimes(cachePath, now, now).catch(() => undefined);
       this.lastText = text;
       return cached;
     } catch {

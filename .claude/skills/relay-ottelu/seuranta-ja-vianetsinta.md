@@ -66,20 +66,23 @@ Relay sammuttaa itsensä vain, kun `FfmpegMixer` heittää `SourceExhaustedError
 (`index.ts` → `Alkuperäinen lähde ei palautunut — sammutetaan koko relay.`).
 Se tapahtuu näissä tilanteissa (`ffmpegMixer.ts`, `config.ts`):
 
-- **Käynnistys epäonnistuu yhtäjaksoisesti liian kauan.** Ikkuna on
-  `RELAY_MAX_FAILURE_WINDOW_MS` (oletus `config.ts`:ssä) — tai ottelun jo
-  päätyttyä (`Ottelu päättyi` nähty) selvästi lyhyempi
+- **Yritykset ovat olleet tuottamattomia yhtäjaksoisesti liian kauan.** Yritys on
+  tuottamaton jos se joko ei käynnistynyt lainkaan **tai** sessio kuoli alle
+  `minProductiveRunMs`:n (`ffmpegMixer.ts`) — exit-koodi ei ratkaise mitään.
+  Ikkuna on `RELAY_MAX_FAILURE_WINDOW_MS` (oletus `config.ts`:ssä) — tai ottelun
+  jo päätyttyä (`Ottelu päättyi` nähty) selvästi lyhyempi
   `RELAY_FINISHED_FAILURE_WINDOW_MS`.
 - **Ajastettu lähde ei koskaan ala.** Yläraja `SCHEDULED_WAIT_MAX_MS`
   (`ffmpegMixer.ts`).
 
-> **⚠ Itsesammutukseen EI voi luottaa lopetuksen hoitajana — issue #45.**
-> Luovutuslaskuri (`failingSince`) kertyy vain **käynnistysvirheistä** ja
-> nollautuu heti kun ffmpeg käynnistyy onnistuneesti. Tunnettu tapaus: lähde on
-> kuollut, mutta yt-dlp palauttaa yhä kelvollisen osoitteen → ffmpeg käynnistyy,
-> kuolee sekunneissa `code=0`, laskuri nollautuu, ja relay respawnaa ikuisesti.
-> **Operaattorin on pysäytettävä palvelu käsin** (ottelu 146210, 27.7.2026).
-> Tunnusmerkit lokissa: lyhenevät ajoajat, `code=0`, ei selostusta ulos.
+> **⚠ Tarkista itsesammutus silti aina itse.** Issue #45 on korjattu: ennen
+> korjausta luovutuslaskuri nollautui heti kun ffmpeg käynnistyi, joten kuollut
+> lähde jonka yt-dlp yhä resolvasi (ffmpeg käynnistyy, kuolee sekunneissa
+> `code=0`) sai relayn respawnaamaan ikuisesti ja operaattorin pysäyttämään
+> palvelun käsin (ottelu 146210, 27.7.2026). Nyt sarja lyhyitä ajoja kerryttää
+> ikkunaa normaalisti. Korjausta ei ole vielä koeteltu oikeassa lähetyksessä —
+> tunnusmerkit lokissa ovat samat: lyhenevät ajoajat, `code=0`, ei selostusta
+> ulos. Jos ajo jää siitä huolimatta pystyyn, pysäytä käsin.
 
 ---
 

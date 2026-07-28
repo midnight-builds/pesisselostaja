@@ -1,4 +1,5 @@
 import type { LiveEvent, SubEvent, EventTextElement, MatchMetadata, Player } from "./types.js";
+import { finnishOrdinal } from "./numberSpeech.js";
 
 export interface PlayerLookup {
   byId: Map<number, Player>;
@@ -106,11 +107,14 @@ function getEventText(el: EventTextElement): string | null {
   return null;
 }
 
-const FI_ORDINAL: Record<number, string> = {
-  1: "ensimmäinen", 2: "toinen", 3: "kolmas", 4: "neljäs", 5: "viides",
-  6: "kuudes", 7: "seitsemäs", 8: "kahdeksas", 9: "yhdeksäs", 10: "kymmenes",
-  11: "yhdestoista", 12: "kahdestoista",
-};
+/** Finnish ordinal word, or null outside the supported 1–99 range so callers
+ *  can fall back instead of throwing mid-narration. Ordinals are generated, not
+ *  tabulated: palot have no ceiling (camp-format turns run until three palot
+ *  *and* everyone has batted), and a table that stopped at 12 made the speech
+ *  read "13. palo" (issue #50). */
+function ordinalWord(n: number): string | null {
+  return Number.isInteger(n) && n >= 1 && n <= 99 ? finnishOrdinal(n) : null;
+}
 
 const FI_CARDINAL: Record<number, string> = {
   1: "yksi", 2: "kaksi", 3: "kolme", 4: "neljä", 5: "viisi",
@@ -119,12 +123,12 @@ const FI_CARDINAL: Record<number, string> = {
 };
 
 function ordinalPalo(n: number): string {
-  const ord = FI_ORDINAL[n];
+  const ord = ordinalWord(n);
   return ord ? `${ord} palo` : `${n}. palo`;
 }
 
 function vuoropariLabel(inning: number, batTurn: number): string {
-  const ord = FI_ORDINAL[inning + 1] ?? `${inning + 1}.`;
+  const ord = ordinalWord(inning + 1) ?? `${inning + 1}.`;
   const role = batTurn === 0 ? "aloittava" : "lopettava";
   return `${capitalize(ord)} vuoropari, ${role}.`;
 }
@@ -150,6 +154,68 @@ function ttsClean(text: string): string {
     .replace(/\s*\/\s*/g, " tai ")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+/** Sub-event elements the renderer can't speak are dropped, which can leave the
+ *  surrounding text hanging mid-sentence. A `substitution` element (the new
+ *  batting order) leaves "X muutti lyöntijärjestystä. Uusi lyöntijärjestys:" —
+ *  TTS then reads a bare colon and the listener hears half a sentence. Cut back
+ *  to the last completed sentence; if nothing complete is left, say nothing at
+ *  all. Guards every unrenderable element type, present and future — not just
+ *  substitutions. */
+function dropDanglingClause(text: string): string | null {
+  const trimmed = text.trim();
+  if (!/[:;,]$/.test(trimmed)) return trimmed || null;
+  const cut = trimmed.replace(/[^.!?]*[:;,]$/, "").trim();
+  return cut || null;
+}
+
+function feedPlayerLabel(lookup: PlayerLookup, id: string | number): string {
+  const player = lookup.byId.get(typeof id === "string" ? Number(id) : id);
+  return player ? `${player.number} ${player.last_name}` : `pelaaja ${id}`;
+}
+
+/** What the speech deliberately leaves unsaid, rendered for a reader. The feed
+ *  mirrors the source data and only the speech trims and dedupes — dropping the
+ *  lineup list from the narration (issue #48) must not drop it from the feed
+ *  too (issue #74). Batting order as jersey number + surname, pitcher last.
+ *  Null when the sub-event carries nothing the speech left out. */
+export function subEventFeedDetail(sub: SubEvent, lookup: PlayerLookup): string | null {
+  const parts: string[] = [];
+  for (const el of sub.texts) {
+    if (typeof el !== "object" || el === null || el.type !== "substitution") continue;
+    // JSON tells "absent" and "null" apart while the optional-field types don't:
+    // a match with no designated pitcher sends `pitcher: null`, which used to
+    // render as "Lukkarina pelaaja null." Every id is checked with `!= null`,
+    // including individual lineup slots.
+    const lineUp = (el.newLineUp ?? [])
+      .filter((id) => id != null && id !== "")
+      .map((id) => feedPlayerLabel(lookup, id));
+    if (lineUp.length > 0) parts.push(`Uusi lyöntijärjestys: ${lineUp.join(", ")}.`);
+    if (el.pitcher != null) parts.push(`Lukkarina ${feedPlayerLabel(lookup, el.pitcher)}.`);
+  }
+  return parts.length > 0 ? parts.join(" ") : null;
+}
+
+/** Feed line for a sub-event: the spoken sentence plus the payload the speech
+ *  had to leave out. Takes the already-rendered speech instead of re-rendering
+ *  it, so the feed shows exactly the phrasing that was spoken (pickVariant would
+ *  otherwise roll a different variant). Null only when neither channel has
+ *  anything to show. */
+export function subEventToFeedText(
+  speech: string | null,
+  sub: SubEvent,
+  lookup: PlayerLookup
+): string | null {
+  const detail = subEventFeedDetail(sub, lookup);
+  if (!detail) return speech;
+  return speech ? `${speech} ${detail}` : detail;
+}
+
+/** Terminates a sentence without doubling punctuation the source text already
+ *  has (dropDanglingClause can cut back to a text that already ends in "."). */
+function endSentence(text: string): string {
+  return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
 function isBatterChangeSubEvent(sub: SubEvent): boolean {
@@ -260,7 +326,16 @@ export function formatBatTurnChangeSpeech(
       `${next} siirtyy sisävuoroon.`,
       `Seuraavaksi lyömään ${next}.`,
     ]);
-    return `${label} ${prev}:n vuoro päättyi. ${scoreStr} ${toBat}`;
+    // No genitive: "KPL:n vuoro päättyi" is the abbreviation convention leaking
+    // into every team name, and TTS reads the colon clumsily (issue #49).
+    // Inflecting arbitrary Finnish team names (abbreviations, multi-word,
+    // foreign) correctly isn't feasible — phrase around it instead.
+    const ended = pickVariant("turn-ended", [
+      `Vuoro päättyi, ${prev}.`,
+      `${prev} lopetti vuoronsa.`,
+      `Sisävuoro päättyi, ${prev}.`,
+    ]);
+    return `${label} ${ended} ${scoreStr} ${toBat}`;
   }
   if (next) {
     return `${label} ${scoreStr} Sisävuoroon ${next}.`;
@@ -383,7 +458,7 @@ export function subEventToSpeech(
 
   const combined = [...eventTexts, ...players].filter(Boolean);
   if (combined.length === 0) return null;
-  const rawText = combined.join(" ").trim();
+  const rawText = dropDanglingClause(combined.join(" "));
   if (!rawText) return null;
 
   // The appended score starts a new sentence after the run phrase, so it must
@@ -423,9 +498,9 @@ export function subEventToSpeech(
       const winner = ctx.periodHomeRuns > ctx.periodAwayRuns ? meta.home.shorthand
         : ctx.periodAwayRuns > ctx.periodHomeRuns ? meta.away.shorthand : null;
       const verdict = winner ? ` ${winner} voitti, ${score}.` : ` Tasan, ${score}.`;
-      return `${ttsClean(rawText)}.${verdict}`;
+      return `${endSentence(ttsClean(rawText))}${verdict}`;
     }
-    return `${ttsClean(rawText)}.`;
+    return endSentence(ttsClean(rawText));
   }
 
   if (rawText.includes("alkoi") && (rawText.includes("jakso") || rawText.includes("Supervuoro"))) {
@@ -438,7 +513,7 @@ export function subEventToSpeech(
     const batting = ctx?.currentBatTeamId
       ? ` Sisävuorossa ${getTeamName(meta, ctx.currentBatTeamId)}.`
       : "";
-    return `${ttsClean(rawText)}.${standing}${pair}${batting}`;
+    return `${endSentence(ttsClean(rawText))}${standing}${pair}${batting}`;
   }
 
   if (rawText === "Ottelu alkoi") {
@@ -453,7 +528,7 @@ export function subEventToSpeech(
   }
 
   if (eventTexts.some((t) => t.length > 3)) {
-    return ttsClean(rawText) + ".";
+    return endSentence(ttsClean(rawText));
   }
 
   return null;

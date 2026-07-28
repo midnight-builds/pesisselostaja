@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   subEventToSpeech,
+  subEventToFeedText,
+  subEventFeedDetail,
   runValueOfSubEvent,
   buildPlayerLookup,
   formatWelcomeFiller,
@@ -172,6 +174,33 @@ describe("subEventToSpeech: palo", () => {
     ]).toContain(subEventToSpeech(liveEvent({ team: 200 }), paloSub, meta, lookup, true, ctx));
   });
 
+  // Camp-format turns continue until three palot *and* everyone has batted, so
+  // a turn can rack up far more than three palot (9 seen live). The ordinal used
+  // to come from a table that stopped at 12, after which TTS read "13. palo".
+  it("speaks a word ordinal for every palo in a long camp-format turn (issue #50)", () => {
+    for (let outs = 1; outs <= 20; outs++) {
+      const ctx = ctxWith({ currentOuts: outs, currentBatTeamId: 200 });
+      const speech = subEventToSpeech(liveEvent({ team: 200 }), paloSub, meta, lookup, true, ctx);
+      expect(speech).not.toBeNull();
+      expect(speech!).not.toMatch(/\d/);
+    }
+  });
+
+  it("names palot past the old 12 ceiling with the right Finnish ordinal", () => {
+    const spoken = (outs: number) =>
+      subEventToSpeech(
+        liveEvent({ team: 200 }),
+        paloSub,
+        meta,
+        lookup,
+        true,
+        ctxWith({ currentOuts: outs, currentBatTeamId: 200 }),
+      )!.toLowerCase();
+    expect(spoken(13)).toContain("kolmastoista palo");
+    expect(spoken(19)).toContain("yhdeksästoista palo");
+    expect(spoken(20)).toContain("kahdeskymmenes palo");
+  });
+
   it("omits the ordinal without context", () => {
     expect(subEventToSpeech(liveEvent({ team: 100 }), paloSub, meta, lookup)).toBe(
       "Palo! Ketut."
@@ -263,6 +292,115 @@ describe("idle filler: light stat-style variant with the batting team (HANDOFF.m
     const outputs = new Set<string>();
     for (let i = 0; i < 60; i++) outputs.add(formatIdleSummary(meta, ctx));
     expect(outputs).toContain("Tilasto kertoo tilanteeksi 2, 4, Sudet johtaa.");
+  });
+});
+
+describe("subEventToSpeech: lineup change (issue #48)", () => {
+  // Shape taken from the live API, player ids replaced with fictional ones.
+  const substitutionSub: SubEvent = {
+    texts: [
+      { type: "team", id: 100 },
+      "muutti lyöntijärjestystä. Uusi lyöntijärjestys:",
+      { type: "substitution", team: 100, newLineUp: ["11", "12", "13"], pitcher: 13 },
+    ],
+  };
+
+  it("speaks a complete sentence and drops the unspoken lineup list", () => {
+    const speech = subEventToSpeech(liveEvent({ team: 100 }), substitutionSub, meta, lookup);
+    expect(speech).toBe("Ketut muutti lyöntijärjestystä.");
+  });
+
+  it("never leaves the narration dangling on a colon for an unknown element type", () => {
+    const sub: SubEvent = {
+      texts: ["Jotain tapahtui. Yksityiskohdat:", { type: "tuntematon" } as never],
+    };
+    const speech = subEventToSpeech(liveEvent(), sub, meta, lookup);
+    expect(speech).toBe("Jotain tapahtui.");
+  });
+
+  it("says nothing at all when no complete sentence is left", () => {
+    const sub: SubEvent = {
+      texts: ["Uusi lyöntijärjestys:", { type: "substitution", newLineUp: ["11", "12"] }],
+    };
+    expect(subEventToSpeech(liveEvent(), sub, meta, lookup)).toBeNull();
+  });
+});
+
+describe("subEventToFeedText: lineup change (issue #74)", () => {
+  // Same shape as above: what the speech drops must still reach the feed.
+  const substitutionSub: SubEvent = {
+    texts: [
+      { type: "team", id: 100 },
+      "muutti lyöntijärjestystä. Uusi lyöntijärjestys:",
+      { type: "substitution", team: 100, newLineUp: ["11", "12", "13"], pitcher: 13 },
+    ],
+  };
+
+  it("keeps the lineup out of the speech but shows it in the feed", () => {
+    const speech = subEventToSpeech(liveEvent({ team: 100 }), substitutionSub, meta, lookup);
+    expect(speech).toBe("Ketut muutti lyöntijärjestystä.");
+    expect(speech).not.toMatch(/Mäyrä|Ilves|Susi/);
+
+    const feed = subEventToFeedText(speech, substitutionSub, lookup);
+    expect(feed).toBe(
+      "Ketut muutti lyöntijärjestystä. Uusi lyöntijärjestys: 5 Mäyrä, 8 Ilves, 9 Susi. Lukkarina 9 Susi."
+    );
+  });
+
+  it("does not leave the feed text dangling on a colon either", () => {
+    const feed = subEventToFeedText(
+      subEventToSpeech(liveEvent({ team: 100 }), substitutionSub, meta, lookup),
+      substitutionSub,
+      lookup
+    );
+    expect(feed).not.toMatch(/[:;,]$/);
+  });
+
+  it("shows the lineup even when the sub-event has nothing speakable left", () => {
+    const sub: SubEvent = {
+      texts: ["Uusi lyöntijärjestys:", { type: "substitution", newLineUp: ["11", "12"] }],
+    };
+    const speech = subEventToSpeech(liveEvent(), sub, meta, lookup);
+    expect(speech).toBeNull();
+    expect(subEventToFeedText(speech, sub, lookup)).toBe("Uusi lyöntijärjestys: 5 Mäyrä, 8 Ilves.");
+  });
+
+  it("falls back to the raw id for a player missing from the rosters", () => {
+    const sub: SubEvent = { texts: [{ type: "substitution", newLineUp: ["11", "999"] }] };
+    expect(subEventFeedDetail(sub, lookup)).toBe("Uusi lyöntijärjestys: 5 Mäyrä, pelaaja 999.");
+  });
+
+  it("omits a null pitcher instead of writing 'pelaaja null'", () => {
+    // The API sends `pitcher: null` when none is designated — JSON tells absent
+    // and null apart even though the optional field type doesn't.
+    const sub: SubEvent = {
+      texts: [{ type: "substitution", newLineUp: ["11", "12"], pitcher: null } as never],
+    };
+    const detail = subEventFeedDetail(sub, lookup);
+    expect(detail).toBe("Uusi lyöntijärjestys: 5 Mäyrä, 8 Ilves.");
+    expect(detail).not.toMatch(/null/);
+  });
+
+  it("skips null and empty slots inside the lineup list", () => {
+    const sub: SubEvent = {
+      texts: [{ type: "substitution", newLineUp: ["11", null, "", "12"] } as never],
+    };
+    expect(subEventFeedDetail(sub, lookup)).toBe("Uusi lyöntijärjestys: 5 Mäyrä, 8 Ilves.");
+  });
+
+  it("shows nothing for a substitution with a null lineup", () => {
+    const sub: SubEvent = {
+      texts: [{ type: "substitution", newLineUp: null, pitcher: null } as never],
+    };
+    expect(subEventFeedDetail(sub, lookup)).toBeNull();
+    expect(subEventToFeedText("Ketut muutti lyöntijärjestystä.", sub, lookup))
+      .toBe("Ketut muutti lyöntijärjestystä.");
+  });
+
+  it("passes ordinary sub-events through unchanged", () => {
+    const sub: SubEvent = { texts: [{ type: "event", text: "Vaihto", base: null }] };
+    expect(subEventToFeedText("Vaihto.", sub, lookup)).toBe("Vaihto.");
+    expect(subEventFeedDetail(sub, lookup)).toBeNull();
   });
 });
 
