@@ -209,7 +209,14 @@ function deriveHealth(snap: Snapshot): { health: Health; headline: string } {
     };
   }
 
-  // 2. A job that believes it is live while the unit is down is the worst
+  // 2. If we couldn't read the job store or systemd, we don't know what SHOULD
+  //    be running — and "unknown" must read as a problem, never as calm.
+  const blind = snap.errors.get("job") ?? snap.errors.get("relay");
+  if (blind) {
+    return { health: "fail", headline: `Tilaa ei saatu luettua: ${blind}` };
+  }
+
+  // 3. A job that believes it is live while the unit is down is the worst
   //    silent failure we have: nothing is being broadcast and nothing says so.
   if (job?.status === "live" && !relay.active) {
     return {
