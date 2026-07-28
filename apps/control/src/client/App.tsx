@@ -58,8 +58,10 @@ export function App() {
       </header>
 
       <main className="scroll">
-        {tab === "live" && <LiveView live={live} connection={connection} notify={notify} />}
-        {tab === "matches" && (
+        <TabPanel id="live" active={tab === "live"}>
+          <LiveView live={live} connection={connection} notify={notify} />
+        </TabPanel>
+        <TabPanel id="matches" active={tab === "matches"}>
           <MatchesView
             notify={notify}
             onJobCreated={() => {
@@ -67,13 +69,40 @@ export function App() {
               setTab("job");
             }}
           />
-        )}
-        {tab === "job" && <JobView live={live} notify={notify} reloadToken={jobReloadToken} />}
-        {tab === "log" && <LogView lines={live?.log ?? []} notify={notify} />}
+        </TabPanel>
+        <TabPanel id="job" active={tab === "job"}>
+          <JobView live={live} notify={notify} reloadToken={jobReloadToken} />
+        </TabPanel>
+        <TabPanel id="log" active={tab === "log"}>
+          <LogView lines={live?.log ?? []} notify={notify} />
+        </TabPanel>
       </main>
 
       <Toast toast={toast} onDismiss={() => setToast(null)} />
       <TabBar active={tab} onChange={setTab} alert={alert} />
+    </div>
+  );
+}
+
+/** One always-mounted view, shown or hidden.
+ *
+ *  The wrapper is `display: contents` when shown, so it adds no box of its own
+ *  and each view lays out inside the scroll region exactly as it did when the
+ *  shell rendered it directly — including the log view's height: 100%. When
+ *  hidden it is `display: none`, which also takes it out of the accessibility
+ *  tree, so a hidden view's buttons cannot be focused or read out. */
+function TabPanel({
+  id,
+  active,
+  children,
+}: {
+  id: TabId;
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="tabpanel" data-view={id} hidden={!active}>
+      {children}
     </div>
   );
 }
