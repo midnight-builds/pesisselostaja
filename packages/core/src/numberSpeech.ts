@@ -1,4 +1,6 @@
-/** Number → Finnish-word normalization for the ElevenLabs path.
+/** Number → Finnish-word helpers: spoken ordinals (see {@link finnishOrdinal},
+ *  used by speech.ts for palo ordinals) and digit normalization for the
+ *  ElevenLabs path.
  *
  *  ElevenLabs multilingual v2 reads bare digits in short Finnish phrases
  *  unclearly ("4, 3", "3 paloa" — HANDOFF.md 17.7.), while the same numbers
@@ -39,6 +41,49 @@ export function finnishCardinal(n: number): string {
   const thousands = Math.floor(n / 1000);
   const rest = n % 1000;
   return `${thousands === 1 ? "tuhat" : `${UNITS[thousands]}tuhatta`}${rest ? finnishCardinal(rest) : ""}`;
+}
+
+const ORDINAL_UNITS = [
+  "",
+  "ensimmäinen",
+  "toinen",
+  "kolmas",
+  "neljäs",
+  "viides",
+  "kuudes",
+  "seitsemäs",
+  "kahdeksas",
+  "yhdeksäs",
+];
+
+/** Ordinal stem used inside compounds — 1 is "yhdes" there, not "ensimmäinen"
+ *  ("yhdestoista", "yhdeksäskymmenes"). */
+const ORDINAL_STEMS = [
+  "",
+  "yhdes",
+  "kahdes",
+  "kolmas",
+  "neljäs",
+  "viides",
+  "kuudes",
+  "seitsemäs",
+  "kahdeksas",
+  "yhdeksäs",
+];
+
+/** Finnish ordinal (nominative) for 1–99, written together per Finnish
+ *  orthography ("kolmastoista", "kahdeskymmenesensimmäinen"). Used for spoken
+ *  palo ordinals, which have no fixed ceiling: camp-format turns continue until
+ *  three palot *and* everyone has batted, so a single turn can rack up well over
+ *  ten palot (issue #50). 99 is far beyond any possible turn — a lineup is
+ *  ~11 players. */
+export function finnishOrdinal(n: number): string {
+  if (!Number.isInteger(n) || n < 1 || n > 99) throw new RangeError(`finnishOrdinal: ${n}`);
+  if (n < 10) return ORDINAL_UNITS[n];
+  if (n === 10) return "kymmenes";
+  if (n < 20) return `${ORDINAL_STEMS[n - 10]}toista`;
+  const rest = n % 10;
+  return `${ORDINAL_STEMS[Math.floor(n / 10)]}kymmenes${rest ? ORDINAL_UNITS[rest] : ""}`;
 }
 
 /** Replaces standalone digit runs with Finnish cardinals: "Tasan 4, 4." →

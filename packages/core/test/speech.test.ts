@@ -22,6 +22,38 @@ const meta: MatchMetadata = {
   live: true, started: true,
 };
 
+// Fictional abbreviation + multi-word names: both used to get a colon genitive
+// ("KTT:n vuoro päättyi"), which TTS reads clumsily and which fires on every
+// single turn change (issue #49).
+const oddNameMeta: MatchMetadata = {
+  ...meta,
+  home: team(100, "KTT"),
+  away: team(200, "Vihreät Ketut"),
+};
+
+describe("formatBatTurnChangeSpeech: team names are never inflected with a colon (issue #49)", () => {
+  it("keeps every phrasing variant colon-free for abbreviations and multi-word names", () => {
+    for (let i = 0; i < 40; i++) {
+      const away = formatBatTurnChangeSpeech(oddNameMeta, 100, 200, 3, 2, 1, 1);
+      expect(away).not.toContain(":");
+      expect(away).toContain("KTT");
+
+      const home = formatBatTurnChangeSpeech(oddNameMeta, 200, 100, 3, 2, 1, 1);
+      expect(home).not.toContain(":");
+      expect(home).toContain("Vihreät Ketut");
+    }
+  });
+
+  it("still names both the team that finished and the team coming in to bat", () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 40; i++) seen.add(formatBatTurnChangeSpeech(oddNameMeta, 100, 200, 3, 2, 1, 1));
+    for (const line of seen) {
+      expect(line).toContain("KTT");
+      expect(line).toContain("Vihreät Ketut");
+    }
+  });
+});
+
 describe("formatScore ordering (via public callers) — HANDOFF task 2", () => {
   // Runs must always be spoken home-first, in match order, regardless of who
   // leads. The old bug printed away-first when the away team led ("6, 3, Sudet

@@ -3,6 +3,10 @@ export type EventTextElement =
   | { type: "event"; text: string; base?: string | null }
   | { type: "player"; id?: number; number?: number; role?: string; team?: number; "settling-at-bat"?: boolean }
   | { type: "team"; id: number }
+  // Lineup change: the API sends the whole new batting order (player ids as
+  // strings) plus the pitcher. Not spoken — 11 numbers in a row is unlistenable
+  // and would block the narration queue; see speech.ts dropDanglingClause.
+  | { type: "substitution"; team?: number; newLineUp?: string[]; pitcher?: number }
   | { type: "stat"; score?: number; out?: number; [key: string]: unknown }
   | { hide?: boolean; type: "stat"; [key: string]: unknown };
 

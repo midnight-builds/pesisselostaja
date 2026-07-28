@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { finnishCardinal, spellOutNumbers } from "../src/numberSpeech.js";
+import { finnishCardinal, finnishOrdinal, spellOutNumbers } from "../src/numberSpeech.js";
 
 describe("finnishCardinal", () => {
   it("units and teens", () => {
@@ -59,5 +59,38 @@ describe("spellOutNumbers (EL path normalization, HANDOFF.md 17.7. kohta 4)", ()
 
   it("leaves digit runs above 9999 as-is instead of guessing", () => {
     expect(spellOutNumbers("ottelu 144742")).toBe("ottelu 144742");
+  });
+});
+
+describe("finnishOrdinal (issue #50: palo ordinals have no ceiling)", () => {
+  it("units and tens", () => {
+    expect(finnishOrdinal(1)).toBe("ensimmäinen");
+    expect(finnishOrdinal(3)).toBe("kolmas");
+    expect(finnishOrdinal(9)).toBe("yhdeksäs");
+    expect(finnishOrdinal(10)).toBe("kymmenes");
+  });
+
+  it("teens use the compound stem, not the standalone ordinal", () => {
+    expect(finnishOrdinal(11)).toBe("yhdestoista");
+    expect(finnishOrdinal(12)).toBe("kahdestoista");
+    expect(finnishOrdinal(13)).toBe("kolmastoista");
+    expect(finnishOrdinal(19)).toBe("yhdeksästoista");
+  });
+
+  it("keeps going past the old 12-entry table", () => {
+    expect(finnishOrdinal(20)).toBe("kahdeskymmenes");
+    expect(finnishOrdinal(21)).toBe("kahdeskymmenesensimmäinen");
+    expect(finnishOrdinal(32)).toBe("kolmaskymmenestoinen");
+    expect(finnishOrdinal(99)).toBe("yhdeksäskymmenesyhdeksäs");
+  });
+
+  it("produces a word for every ordinal a turn could ever need", () => {
+    for (let n = 1; n <= 99; n++) expect(finnishOrdinal(n)).toMatch(/^[a-zäö]+$/);
+  });
+
+  it("rejects out-of-range input instead of guessing", () => {
+    expect(() => finnishOrdinal(0)).toThrow(RangeError);
+    expect(() => finnishOrdinal(100)).toThrow(RangeError);
+    expect(() => finnishOrdinal(1.5)).toThrow(RangeError);
   });
 });
