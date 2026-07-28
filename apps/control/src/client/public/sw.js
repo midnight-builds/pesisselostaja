@@ -28,7 +28,7 @@ self.addEventListener("push", (event) => {
   if (event.data) {
     try {
       data = event.data.json();
-    } catch (err) {
+    } catch {
       // Some push services deliver a bare string (and a test push sent by hand
       // certainly will). Showing it beats swallowing the notification.
       data = { title: "Pesisselostaja", body: event.data.text() };
