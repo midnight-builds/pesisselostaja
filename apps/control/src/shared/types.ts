@@ -116,6 +116,16 @@ export interface NotificationPrefs {
   ended: boolean;
 }
 
+/** What one push actually achieved. Reported by the test route so the operator
+ *  learns "0 lähetetty, 1 vanhentunut tilaus poistettu" instead of a silent OK
+ *  from a chain that is in fact broken. */
+export interface PushSendResult {
+  sent: number;
+  failed: number;
+  /** Subscriptions the push service reported as gone (404/410) and we dropped. */
+  removed: number;
+}
+
 export type JobStatus =
   | "draft"
   | "scheduled"
