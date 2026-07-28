@@ -28,6 +28,7 @@ import {
   getActiveJob,
   MatchNotFoundError,
 } from "./jobs.js";
+import { getSchedulerState, setSchedulerEnabled, startScheduler } from "./scheduler.js";
 import { addSubscription, getSubscriptionCount, getVapidPublicKey, sendPushDetailed } from "./push.js";
 import { getNotificationPrefs, observeLiveState, setNotificationPrefs } from "./notifications.js";
 import {
@@ -251,6 +252,25 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
 
   if (pathname === "/api/preflight" && method === "POST") {
     sendJson(res, 200, await runControlPreflight());
+    return;
+  }
+
+  // --- Ajastin. Kaksi reittiä: tila ulos, kytkin sisään. Käynnistystä ei voi
+  // pyytää tästä — ajastin päättää itse, ja käsikäynnistys on /api/relay/start.
+  if (pathname === "/api/scheduler" && method === "GET") {
+    sendJson(res, 200, await getSchedulerState());
+    return;
+  }
+  if (pathname === "/api/scheduler/enable" && method === "POST") {
+    const body = await readJsonBody<{ enabled?: unknown }>(req);
+    // Strict boolean: this switch decides whether a machine may start a
+    // broadcast on its own, and a truthy string arriving from a hand-written
+    // curl must not arm it by accident.
+    if (typeof body.enabled !== "boolean") {
+      sendError(res, 400, "enabled puuttuu tai ei ole tosi/epätosi");
+      return;
+    }
+    sendJson(res, 200, await setSchedulerEnabled(body.enabled));
     return;
   }
 
@@ -538,6 +558,13 @@ async function main(): Promise<void> {
   // fail to notify.
   live.subscribe(observeLiveState);
 
+  // The scheduler polls on its own timer, independent of the live aggregator:
+  // it has to keep watching a source that no phone is currently looking at.
+  // Starting it here is safe because it boots DISABLED (run/scheduler.json,
+  // default {enabled:false}) — until the operator flips the switch in the UI it
+  // only records what it would have done.
+  const scheduler = startScheduler();
+
   const server = createServer((req, res) => {
     // A single route's error must never take the whole server down — every
     // request funnels through this try/catch, on top of whatever a handler
@@ -569,6 +596,9 @@ async function main(): Promise<void> {
   });
 
   const shutdown = () => {
+    // Stopping the scheduler stops it from acting; it never stops a broadcast
+    // that is already on air (uptime first — that is systemd's business).
+    scheduler.stop();
     live.stop();
     server.close(() => process.exit(0));
   };

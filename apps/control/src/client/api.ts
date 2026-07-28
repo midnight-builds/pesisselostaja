@@ -15,8 +15,48 @@ import type {
   PreflightResult,
   RelayProcess,
 } from "../shared/types";
+/** The YouTube chain's response shapes are the server module's own exported
+ *  types, imported TYPE-ONLY: `import type` is erased before the bundle is
+ *  written, so no node code (fs, child_process, tokens) can follow them into
+ *  the browser — but a change on the server still breaks this typecheck
+ *  instead of the phone. They belong in ../shared eventually; that file is
+ *  being edited by another workstream, so they are referenced at the source
+ *  rather than copied into a second, drifting definition. */
+import type { AuthHealth, DeviceFlowPoll, DeviceFlowStart } from "../server/googleAuth";
+import type { BroadcastPair, BroadcastSummary, PlaylistSummary, PrivacyStatus } from "../server/youtube";
+import type { BroadcastTexts } from "../server/templates";
 
 export { DEFAULT_RTMP_URL };
+export type { AuthHealth, BroadcastPair, BroadcastSummary, DeviceFlowPoll, DeviceFlowStart, PlaylistSummary, PrivacyStatus };
+
+/** An HTTP failure that still carries its status.
+ *
+ *  The status matters in exactly one place and it matters a lot: every
+ *  writing YouTube route answers **409** when there is no Google connection,
+ *  and that is not an error to shout about — it is a state with a next step
+ *  ("yhdistä Google-tili"). Without the status the client could only match on
+ *  message text. */
+export class ApiRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
+
+/** True when the failure is "no Google connection yet" rather than a fault. */
+export function isAuthMissing(err: unknown): boolean {
+  return err instanceof ApiRequestError && err.status === 409;
+}
+
+/** True when the server has no such route — the ElevenLabs quota is behind a
+ *  route that does not exist yet, and the UI says so instead of showing a
+ *  meaningless "palvelinvirhe". */
+export function isRouteMissing(err: unknown): boolean {
+  return err instanceof ApiRequestError && err.status === 404;
+}
 
 /** Turns any failure — network, HTTP status, bad JSON — into a Finnish
  *  sentence, because every call site renders the message verbatim to an
@@ -45,9 +85,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const err = body as ApiError | null;
     if (err && typeof err.error === "string") {
-      throw new Error(err.detail ? `${err.error}: ${err.detail}` : err.error);
+      throw new ApiRequestError(err.detail ? `${err.error}: ${err.detail}` : err.error, res.status);
     }
-    throw new Error(`Palvelinvirhe (HTTP ${res.status})`);
+    throw new ApiRequestError(`Palvelinvirhe (HTTP ${res.status})`, res.status);
   }
   return body as T;
 }
@@ -57,6 +97,62 @@ function postJson<T>(path: string, payload?: unknown): Promise<T> {
     method: "POST",
     body: payload === undefined ? undefined : JSON.stringify(payload),
   });
+}
+
+// ── YouTube-ketjun pyyntö- ja vastausmuodot ───────────────────────────────
+
+/** POST /api/youtube/templates/preview — pelkkää tekstiä, ei luo mitään. */
+export interface TemplatePreview {
+  matchId: number;
+  jobId: string | null;
+  texts: BroadcastTexts;
+}
+
+/** POST /api/youtube/broadcasts — luotu pari + tekstit joilla se luotiin. */
+export interface CreatedBroadcastPair extends BroadcastPair {
+  texts: BroadcastTexts;
+}
+
+export interface CreateBroadcastsBody {
+  jobId?: string;
+  matchId?: number;
+  privacy?: PrivacyStatus;
+  playlistId?: string | null;
+}
+
+export interface VideoPatchBody {
+  title?: string;
+  description?: string;
+  privacyStatus?: PrivacyStatus;
+  playlistId?: string;
+}
+
+export interface ThumbnailRequest {
+  headline: string;
+  datetime: string;
+  venue: string;
+  narrated: boolean;
+}
+
+/** listBroadcasts ei palauta katselukertoja (liveBroadcasts.list ei tunne
+ *  statistics-osaa), joten kenttä on valinnainen: UI näyttää sen jos ja kun
+ *  palvelin alkaa liittää sen mukaan, eikä valehtele nollaa siihen asti. */
+export interface BroadcastRow extends BroadcastSummary {
+  viewCount?: number | null;
+}
+
+/** Mitä ElevenLabsin kiintiömittari tarvitsee. Reittiä `GET
+ *  /api/elevenlabs/quota` EI ole vielä palvelimella — tämä on se muoto, jota
+ *  käyttöliittymä osaa lukea (ks. isRouteMissing-käsittely UI:ssa). */
+export interface ElevenLabsQuota {
+  tier: string | null;
+  /** Merkkejä käytetty tällä laskutuskaudella. */
+  characterCount: number;
+  characterLimit: number;
+  charactersRemaining: number;
+  /** ISO — milloin laskuri nollautuu. */
+  nextResetAt: string | null;
+  status: string | null;
 }
 
 export const api = {
