@@ -290,7 +290,7 @@ export class FfmpegMixer {
         // A broadcast scheduled to start later is not a failure: YouTube is
         // confirming the source exists. Counting those answers toward the
         // give-up window is what forced starting the relay in a narrow slot
-        // just before kickoff (match 144918, 27.7.) — wait instead.
+        // just before kickoff (observed live 27.7.) — wait instead.
         if (err instanceof SourceNotLiveYetError) {
           if (this.scheduledSince === null) this.scheduledSince = monoNow();
           if (monoNow() - this.scheduledSince > SCHEDULED_WAIT_MAX_MS) {

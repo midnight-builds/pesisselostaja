@@ -60,8 +60,8 @@ export interface RelayConfig {
  *  instead of ahead of it (HANDOFF.md 8).
  *
  *  4000 ms, not the earlier 2000: every live-calibrated match has needed the
- *  operator to raise it by hand mid-broadcast (match 146210 settled on 4000 ms,
- *  a later run on 5000 ms), so 2000 only meant every broadcast started with
+ *  operator to raise it by hand mid-broadcast (one match settled on 4000 ms, a
+ *  later run on 5000 ms), so 2000 only meant every broadcast started with
  *  speech running ahead of the picture until someone noticed (issue #53).
  *  4000 is the value confirmed live and is the conservative end of what
  *  calibration has produced. Still runtime-adjustable without a restart via the

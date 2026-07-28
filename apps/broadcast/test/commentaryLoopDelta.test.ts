@@ -334,7 +334,7 @@ describe("CommentaryLoop match-start reset streak (issue #46 root cause)", () =>
   });
 });
 
-describe("CommentaryLoop delta reset breaker (live 144918, 27.7.)", () => {
+describe("CommentaryLoop delta reset breaker (observed live 27.7.)", () => {
   /** Every delta resets for a reason our own `after` does NOT explain: the
    *  reset instant is OLDER than what we asked for. Full fetches (no `after`)
    *  answer normally. */
@@ -444,7 +444,7 @@ describe("CommentaryLoop runtime controls: deltaFetch + pollIntervalMs", () => {
 });
 
 /** Issue #47: the 4 s constant aborted healthy full fetches once the match
- *  history had grown (live 146210: 12 aborts in 2 min, all cut at 4.0 s). */
+ *  history had grown (observed live: 12 aborts in 2 min, all cut at 4.0 s). */
 describe("API fetch timeout", () => {
   const timeoutOf = (call: number) => (fetchMock.mock.calls[call][1] as { timeoutMs?: number }).timeoutMs;
 

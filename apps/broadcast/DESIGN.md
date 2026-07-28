@@ -127,7 +127,7 @@ ohjauskanavan, eikä poistaisi reaaliaikatahdituksen ongelmaa.
 
 - **HLS-URL:n vanhenemiskäyttäytyminen** ei ole varmuudella tiedossa —
   suunnitelma olettaa pahimman (voi vaihtua kesken ottelun); 5 min testiajo
-  (2026-07-10, ottelu 143277) ei osunut URL-rotaatioon (15 min kynnys ei
+  (2026-07-10) ei osunut URL-rotaatioon (15 min kynnys ei
   ehtinyt täyttyä) — vahvistettava vielä pidemmällä testistriimillä.
 - **`-reconnect`/`-reconnect_streamed`/`-reconnect_at_eof`-liput jumittivat
   HLS-luvun kokonaan** googlevideon m3u8-lähteen kanssa (löytyi 2026-07-10
@@ -156,7 +156,7 @@ ohjauskanavan, eikä poistaisi reaaliaikatahdituksen ongelmaa.
 
 | # | Sisältö | Tila |
 |---|---|---|
-| M0 | Käsin ajettu yt-dlp/piper/ffmpeg-savutesti | ✅ (2026-07-10, oikea livestriimi, ottelu 143277) |
+| M0 | Käsin ajettu yt-dlp/piper/ffmpeg-savutesti | ✅ (2026-07-10, oikea livestriimi) |
 | M1 | Runko: config, logitus, systemd | ✅ |
 | M2 | Passthrough pull/republish valvottuna | ✅ (2026-07-10, `--record-file`-tila, 5 min, löytyi+korjattiin reconnect-lippu-bugi) |
 | M3 | FIFO-putkitus testiäänellä | koodi + yksikkötestit ✅; pidempi soak-testi + kuuntelu tekemättä |

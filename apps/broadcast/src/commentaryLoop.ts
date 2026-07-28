@@ -53,7 +53,7 @@ const WELCOME_FILLER_MS = 90 * 1000;
  *
  *  10 s, not the earlier 4 s: a full events fetch returns the WHOLE match
  *  history, which grows monotonically through the match, so a constant tuned on
- *  an empty history stops fitting later on. Live match 146210 hit 12 aborted
+ *  an empty history stops fitting later on. A live match logged 12 aborted
  *  fetches in two minutes, in streaks of 3–5, all cut at exactly 4.0 s — i.e.
  *  the timeout, not the API, was the failure (issue #47). Polls are sequential
  *  (each cycle awaits its fetch before the next is scheduled, see run()), so a
@@ -97,7 +97,7 @@ const MIN_POLL_INTERVAL_MS = 2000;
 const DELTA_RESET_BREAKER_STREAK = 5;
 
 /** How many consecutive failed poll cycles before the failure log line turns
- *  alarming. A lone timeout is routine — live 144742 saw 22 isolated 8 s
+ *  alarming. A lone timeout is routine — one live match saw 22 isolated 8 s
  *  client-timeout blips in 45 min with zero events lost (the next poll always
  *  caught up) — so only a streak deserves attention (HANDOFF.md 17.7.). */
 const FETCH_FAILURE_ALARM_STREAK = 3;
@@ -151,7 +151,7 @@ export class CommentaryLoop {
    *  case B). AFTER the latch the behavior deliberately never reverts —
    *  mid-game ffmpeg drops (flapping source) keep queueing event narration
    *  exactly as before, since a short outage losing all narration is the
-   *  worse failure mode there (144203); revisiting that is a separate open
+   *  worse failure mode there (observed live); revisiting that is a separate open
    *  HANDOFF question. */
   private narrationEverReady: boolean;
   /** True if any speech was suppressed pre-latch, so the latch moment knows
@@ -461,8 +461,8 @@ export class CommentaryLoop {
     }
   }
 
-  /** A lone poll failure is routine noise (8 s client-timeout blips — live
-   *  144742 had 22 in 45 min with zero events lost); the log line carries the
+  /** A lone poll failure is routine noise (8 s client-timeout blips — one
+   *  live match had 22 in 45 min with zero events lost); the log line carries the
    *  cycle duration and the streak position, and only a streak of
    *  FETCH_FAILURE_ALARM_STREAK+ turns the line alarming (HANDOFF.md 17.7.). */
   private recordPollFailure(err: unknown, cycleStartedAt: number): void {
@@ -587,7 +587,7 @@ export class CommentaryLoop {
     if (!this.deltaFetch) return this.fetchFullEvents();
     // While the local history is empty (match not started / being initialized)
     // the server answers every delta with the reset flag, which made each poll
-    // log + full-fetch in a loop (live 144742, 17.7.). Full fetches are cheap
+    // log + full-fetch in a loop (observed live 17.7.). Full fetches are cheap
     // there (empty body) — delta engages once the first events exist.
     if (
       this.lastServerDateMs === null ||

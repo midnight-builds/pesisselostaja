@@ -7,7 +7,7 @@ import { log } from "./log.js";
  *  *succeeds*, but the m3u8 renditions are missing from the format list, so
  *  `best[protocol^=m3u8]/best` falls through to `best` and hands ffmpeg a
  *  progressive 360p mp4. Nothing in the log says so: the broadcast just looks
- *  bad (found while preparing match 144918, 27.7.2026).
+ *  bad (found while preparing a scheduled source, 27.7.2026).
  *
  *  Point yt-dlp at the very Node binary running this process — it is
  *  guaranteed to exist, unlike whatever `node` resolves to on $PATH under
