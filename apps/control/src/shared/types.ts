@@ -159,6 +159,68 @@ export interface Job {
   note: string | null;
 }
 
+/** What the scheduler decided on its last look. One value per branch of
+ *  scheduler.ts's plan, because the UI has to be able to say *why* nothing
+ *  started — "ei mitään tapahtunut" is exactly the report that sends an
+ *  operator to read journald in the middle of a match. */
+export type SchedulerDecision =
+  /** Ei odottavaa työtä — ajastin ei edes kysele lähdettä. */
+  | "idle"
+  /** Työ olemassa, lähde ei ole vielä livenä. Normaali tila ennen ottelua. */
+  | "waiting"
+  /** Lähde livenä, este poissa: käynnistys (tai kuiva-ajossa "olisi käynnistänyt"). */
+  | "start"
+  /** Preflight löysi esteitä — relayta EI käynnistetty. */
+  | "blocked-preflight"
+  /** Levytila kriittinen — globaali sääntö estää kaiken. */
+  | "blocked-disk"
+  /** Toinen työ on jo ajossa. Ajossa olevaa ei katkaista koskaan. */
+  | "blocked-busy"
+  /** yt-dlp ei osannut sanoa lähteestä mitään järkevää. */
+  | "source-error"
+  /** Käynnistys yritettiin mutta se kaatui (systemd, env-kirjoitus). */
+  | "start-failed";
+
+export interface SchedulerAction {
+  at: string;
+  decision: SchedulerDecision;
+  jobId: string | null;
+  /** Yksi suomenkielinen lause, sama teksti jonka käyttöliittymä näyttää. */
+  reason: string;
+  /** true = tämä tehtiin oikeasti. false = pelkkä laskelma (ajastin pois
+   *  päältä), eikä yhtään sivuvaikutusta ajettu. */
+  applied: boolean;
+}
+
+/** The job the scheduler is currently watching, plus what it last saw of its
+ *  source. Flattened out of Job on purpose: the scheduler view needs five
+ *  fields, not the whole job. */
+export interface SchedulerNextJob {
+  id: string;
+  home: string;
+  away: string;
+  startsAt: string | null;
+  sourceUrl: string | null;
+  sourceState: "live" | "scheduled" | "error" | "unknown";
+  /** yt-dlp:n oma sanamuoto ("livenä, HLS-manifesti (täysi laatu)"). */
+  sourceDetail: string | null;
+}
+
+export interface SchedulerState {
+  /** OFF by default and only ever turned on from the UI: an automatic start
+   *  must never surprise an operator who is running a broadcast by hand. */
+  enabled: boolean;
+  lastCheckAt: string | null;
+  nextJob: SchedulerNextJob | null;
+  /** Viimeisin päätös ajastimen ollessa PÄÄLLÄ. */
+  lastAction: SchedulerAction | null;
+  /** Viimeisin päätös ajastimen ollessa POIS PÄÄLTÄ — mitä se olisi tehnyt.
+   *  Tämän varassa käyttäjä uskaltaa kytkeä ajastimen päälle. */
+  wouldHaveDone: SchedulerAction | null;
+  /** Kuinka pian seuraava tarkistus ajetaan; tihenee alkuajan lähestyessä. */
+  nextCheckInMs: number;
+}
+
 export interface PreflightCheck {
   name: string;
   status: "ok" | "warn" | "fail";
