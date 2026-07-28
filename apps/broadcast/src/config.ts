@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import { DEFAULT_RETENTION_DAYS, DEFAULT_TTS_CACHE_MAX_MB } from "./runRetention.js";
 
 export interface RelayConfig {
   matchId: number;
@@ -37,6 +38,13 @@ export interface RelayConfig {
   apiBase: string;
   stateFile: string;
   runDir: string;
+  /** run/ retention (issue #39): relay-owned artifacts older than this many
+   *  days are swept on startup. 0 = off. Only touches the relay's own
+   *  filename patterns — see runRetention.ts. */
+  runRetentionDays: number;
+  /** Size ceiling for run/tts-cache/ in bytes; least-recently-used clips are
+   *  evicted above it. 0 = off. */
+  ttsCacheMaxBytes: number;
   pronunciationsFile: string;
   /** JSON file the commentary loop re-reads each poll so an operator can flip
    *  announceBatterChanges mid-match without restarting — see commentaryLoop. */
@@ -54,6 +62,14 @@ function requireValue(name: string, cliValue: string | undefined, envName: strin
     process.exit(1);
   }
   return value;
+}
+
+/** Env override that falls back to the default on garbage or negative input —
+ *  a typo must never turn retention into an aggressive or NaN-driven sweep. */
+function nonNegativeNumber(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
 export function parseRelayConfig(): RelayConfig {
@@ -147,6 +163,12 @@ export function parseRelayConfig(): RelayConfig {
   const apiKey = process.env.PESISTULOKSET_API_KEY ?? "wRX0tTke3DZ8RLKAMntjZ81LwgNQuSN9";
   const apiBase = process.env.PESISTULOKSET_API_BASE ?? "https://api.pesistulokset.fi/api/v1";
 
+  // run/ retention (issue #39). Deliberately cautious: a month of history is
+  // kept and only the relay's own artifacts are in scope, so operator material
+  // in run/ (demos, simulation output, recordings) survives untouched.
+  const runRetentionDays = nonNegativeNumber(process.env.RELAY_RUN_RETENTION_DAYS, DEFAULT_RETENTION_DAYS);
+  const ttsCacheMaxMb = nonNegativeNumber(process.env.RELAY_TTS_CACHE_MAX_MB, DEFAULT_TTS_CACHE_MAX_MB);
+
   const runDir = new URL("../run/", import.meta.url).pathname;
   const stateFile = `${runDir}.state-${matchId}.json`;
   const controlFile = `${runDir}.control-${matchId}.json`;
@@ -179,6 +201,8 @@ export function parseRelayConfig(): RelayConfig {
     apiBase,
     stateFile,
     runDir,
+    runRetentionDays,
+    ttsCacheMaxBytes: Math.round(ttsCacheMaxMb * 1024 * 1024),
     pronunciationsFile,
     controlFile,
     elevenLabsApiKey,

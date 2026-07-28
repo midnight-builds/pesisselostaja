@@ -269,9 +269,47 @@ so the stream never goes silent. Details:
   `packages/core`). Logs and the Piper path keep the digits.
 - **Cache:** synthesized audio is cached as PCM in `apps/broadcast/run/tts-cache/`
   keyed by model+voice+text, so repeated phrases ("Palo! KPL.") cost credits only
-  once — also across matches. Safe to delete anytime.
+  once — also across matches. Safe to delete anytime; kept under a size ceiling
+  automatically (see "Disk retention in `run/`" below).
 - **Cost visibility:** each synthesis logs its character count and a running
   total; the total is logged again at shutdown (≈ credits on multilingual v2).
+
+## Disk retention in `run/`
+
+`apps/broadcast/run/` is the relay's scratch directory (git-ignored via the
+repo-root `.gitignore`, so nothing here is ever committed). Every run leaves
+artifacts behind, and before issue #39 nothing ever removed them — the directory
+had grown to 1.4 G. On startup `index.ts` now applies a retention policy
+(`runRetention.ts`) before synthesis begins:
+
+| What | Rule | Env var (default) |
+|------|------|-------------------|
+| `relay-<matchId>.pcm`, `.state-<matchId>.json`, `.control-<matchId>.json` | removed when older than N days | `RELAY_RUN_RETENTION_DAYS` (`30`, `0` = off) |
+| `run/tts-cache/<sha256>.pcm` | least-recently-used clips evicted until the directory fits the ceiling | `RELAY_TTS_CACHE_MAX_MB` (`512`, `0` = off) |
+
+Two properties matter more than the numbers:
+
+- **It is an allowlist, not a sweep.** Only the filename shapes above are ever
+  deleted, only at the top level of `run/`, and **never a directory**. Operator
+  material living in `run/` — `field-audio-demo/`, `voice-tuning-demo*/`,
+  `simulate-<id>/`, hand-made `live-test-*.mp4` recordings — is invisible to the
+  policy no matter how old or how large it gets. Deleting those stays a
+  deliberate human action.
+- **The starting match is exempt.** Its own state/control files survive
+  regardless of age, so a resumed relay never loses its progress.
+
+The sweep is best-effort: a missing `run/`, a missing `tts-cache/`, or an
+unlinkable file is logged-and-ignored rather than allowed to block a broadcast.
+It logs one line when it removed anything (`Säilytyskäytäntö: poistettu N …`).
+
+TTS-cache eviction is genuine LRU: `elevenLabsTts.ts` bumps a clip's mtime on
+every cache hit, so a phrase that recurs match after match outlives a one-off.
+Evicted clips are regenerable — the only cost of a wrong guess is re-spending
+ElevenLabs credits on that phrase once.
+
+Because everything else in `run/` is out of scope by design, periodically
+checking `du -sh apps/broadcast/run/*` and deleting reviewed demo/simulation
+output by hand is still part of operating the relay.
 
 ## Swapping Piper voices later
 
