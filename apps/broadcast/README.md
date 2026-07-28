@@ -199,6 +199,38 @@ short.
 All durations here are measured on a monotonic clock, so an NTP step can't
 turn a healthy session into a seconds-long "failure".
 
+#### Which end failed — source or target?
+
+A target that refuses our push produces **exactly the same session shape** as a
+dead phone: ffmpeg starts, dies in seconds, repeat. That matters more now that
+short runs accrue toward the give-up window — without help the relay shuts down
+blaming the source, and the operator goes to check the phone while the actual
+problem is the stream key (issue #51: in one match the phone was streaming with
+the wrong key and the whole narration was missing; the only way to tell was
+checking ffmpeg respawns and the RTMP connection by hand).
+
+The relay now keeps the tail of ffmpeg's stderr and reads which side it was
+complaining about (`ffmpegDiagnostics.ts`). When a short session ends it logs
+one extra line naming the suspect, and a target verdict is carried into the
+shutdown message.
+
+It only claims a side when **exactly one** side produced connection-level
+errors. Two deliberate silences:
+
+- `av_interleaved_write_frame(): Broken pipe` and friends are **not** a target
+  verdict on their own — ffmpeg says that whenever the output goes away,
+  including when it goes away because the input ended. Counting it would label
+  every dead phone a stream-key problem.
+- If both sides errored, cause and consequence are indistinguishable, so it
+  says so instead of guessing.
+
+This reads ffmpeg's error text; it does not query YouTube. Confirming that the
+target broadcast is actually bound and accepting still needs the YouTube Data
+API, which is not wired up — the rest of issue #51.
+
+The stream key is redacted (`<stream-key>`) from everything ffmpeg writes to the
+journal, since ffmpeg prints the full output URL in its own error lines.
+
 ### Preflight (run this before every match)
 
 ```bash

@@ -2,6 +2,14 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { log } from "./log.js";
 import { NarrationFifo } from "./narrationFifo.js";
 import { resolveSourceUrl, SourceNotLiveYetError } from "./ytdlpSource.js";
+import {
+  classifyFfmpegFailure,
+  createStderrTail,
+  describeFailureSide,
+  hasWeakTargetSignal,
+  redactStreamKey,
+  type FfmpegFailureSide,
+} from "./ffmpegDiagnostics.js";
 
 export interface FfmpegMixerOptions {
   youtubeUrl: string;
@@ -70,6 +78,12 @@ export interface FfmpegMixerOptions {
 interface SessionResult {
   /** Monotonic milliseconds from spawn to process exit. */
   ranMs: number;
+  /** Which side ffmpeg blamed, read off its stderr tail — null when the tail
+   *  doesn't say. Only used for wording; never for the give-up decision, which
+   *  stays purely about whether the run produced broadcast. */
+  failureSide: FfmpegFailureSide;
+  /** True when the tail held only ambiguous write-side noise. */
+  weakTarget: boolean;
   /** True when *we* ended the session on purpose (scheduled URL refresh), so
    *  its length says nothing about the source's health. */
   refreshKill: boolean;
@@ -342,12 +356,23 @@ export class FfmpegMixer {
     if (session.refreshKill) return;
     log(
       `ffmpeg kuoli alle ${Math.round(this.minProductiveRunMs / 1000)} s käynnistyksestä — ` +
-        "lasketaan epäonnistuneeksi yritykseksi (lähde ei tuota lähetystä)."
+        "lasketaan epäonnistuneeksi yritykseksi (ei tuota lähetystä)."
     );
+    // Which end to go and look at. Before this, a target that refused our push
+    // (wrong stream key, another encoder on the same key) produced exactly the
+    // same short sessions as a dead phone — and since the give-up window now
+    // counts those, the relay would shut down blaming the source. The verdict
+    // itself is unchanged; only the wording learns to name the other suspect.
+    const hint = describeFailureSide(session.failureSide, session.weakTarget);
+    if (hint) log(hint);
+    const sideNote =
+      session.failureSide === "target"
+        ? " (ffmpegin virheet viittasivat KOHTEESEEN, ei lähteeseen — tarkista stream key)"
+        : "";
     this.noteUnproductiveAttempt(
       (mins) =>
-        `Lähde on käynnistynyt mutta kuollut alle ${Math.round(this.minProductiveRunMs / 1000)} sekunnissa ` +
-        `${mins} minuutin ajan`
+        `Yritykset ovat kuolleet alle ${Math.round(this.minProductiveRunMs / 1000)} sekunnissa ` +
+        `${mins} minuutin ajan${sideNote}`
     );
   }
 
@@ -409,8 +434,17 @@ export class FfmpegMixer {
     this.child = this.opts.spawnMixerProcess
       ? this.opts.spawnMixerProcess(args)
       : spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
-    this.child.stdout?.on("data", (d: Buffer) => process.stdout.write(d));
-    this.child.stderr?.on("data", (d: Buffer) => process.stderr.write(d));
+    // Kept for the post-mortem below, and redacted on the way to the journal:
+    // ffmpeg prints the output URL — stream key included — in its own error
+    // lines (issue #51).
+    const stderrTail = createStderrTail();
+    const redact = (s: string) => redactStreamKey(s, this.opts.streamKey);
+    this.child.stdout?.on("data", (d: Buffer) => process.stdout.write(redact(d.toString())));
+    this.child.stderr?.on("data", (d: Buffer) => {
+      const text = d.toString();
+      stderrTail.push(text);
+      process.stderr.write(redact(text));
+    });
 
     // Covers both a normal exit and a failed spawn (bad binary/args): if
     // spawn() itself fails, Node emits "error" but never "exit", so without
@@ -464,9 +498,11 @@ export class FfmpegMixer {
     const detail = result.error ? result.error.message : `code=${result.code}, signal=${result.signal}`;
     log(`ffmpeg päättyi (${detail}), ajoaika ${Math.round(ranMs / 1000)}s`);
     this.opts.onSessionEnd?.(Date.now(), ranMs);
+    const failureSide = classifyFfmpegFailure(stderrTail.text());
+    const weakTarget = hasWeakTargetSignal(stderrTail.text());
     // The caller judges the run (noteSessionEnd): backoff and give-up window
     // both hang off whether this was real broadcast, not off the exit code.
-    return { ranMs, refreshKill: this.refreshKillRequested };
+    return { ranMs, refreshKill: this.refreshKillRequested, failureSide, weakTarget };
   }
 
   /** Waits for a natural gap in the narration before killing ffmpeg for a
