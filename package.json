@@ -26,7 +26,8 @@
     "broadcast:flap-test": "npm run flap-test -w @pesisselostaja/broadcast --",
     "broadcast:typecheck": "npm run typecheck -w @pesisselostaja/broadcast",
     "broadcast:lint": "npm run lint -w @pesisselostaja/broadcast",
-    "broadcast:preflight": "npm run preflight -w @pesisselostaja/broadcast --"
+    "broadcast:preflight": "npm run preflight -w @pesisselostaja/broadcast --",
+    "relay:deploy": "bash scripts/deploy-relay.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

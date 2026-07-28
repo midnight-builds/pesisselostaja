@@ -176,6 +176,18 @@ nukkuu ja tarkistaa tilanteen uudelleen vähän ennen ilmoitettua alkua
 ei kuluta luovutusikkunaa. Jos lähde ei koskaan ala, odotus katkeaa
 `SCHEDULED_WAIT_MAX_MS`:n jälkeen (`ffmpegMixer.ts`).
 
+**Deployaa ensin.** Palvelu ei aja työpuusta vaan pinnatusta ajokopiosta
+`~/relay-deploy`, joten työpuun muutokset — myös juuri mergatut — eivät ole
+lähetyksessä mukana ennen tätä:
+
+```bash
+npm run relay:deploy          # origin/main; tai: npm run relay:deploy -- <ref>
+```
+
+Skripti kieltäytyy, jos relay on jo ajossa. Se tulostaa lopuksi deployatun
+commitin — **kirjaa se ylös**, se on ainoa tapa tietää jälkikäteen mitä koodia
+lähetys ajoi.
+
 ```bash
 systemctl --user start pesisselostaja-relay.service
 journalctl --user -u pesisselostaja-relay -f
