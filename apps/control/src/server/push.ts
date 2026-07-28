@@ -12,6 +12,7 @@
  *  file browser when something is sideways. */
 
 import webpush from "web-push";
+import type { PushSendResult } from "../shared/types.js";
 import { createStore } from "./store.js";
 
 /** VAPID requires a contact `sub` claim (mailto: or https:) so a push service
@@ -42,12 +43,6 @@ interface StoredSubscription {
   /** Last successful delivery — the cheapest way to tell a live phone from a
    *  subscription that has been quietly dead since June. */
   lastOkAt: string | null;
-}
-
-export interface PushSendResult {
-  sent: number;
-  failed: number;
-  removed: number;
 }
 
 /** Keys are generated once and then MUST NOT change: every subscription a
