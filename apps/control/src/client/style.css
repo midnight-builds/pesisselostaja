@@ -671,7 +671,12 @@ body {
   gap: 6px;
 }
 .chip {
-  min-height: 38px;
+  /* 44×44 minimum: these are tapped one-handed, mid-match, without looking. */
+  min-height: var(--tap);
+  min-width: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 8px 14px;
   border-radius: 999px;
   border: 1px solid var(--line);
