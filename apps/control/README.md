@@ -41,6 +41,35 @@ kotivalikkoon eikä salli push-ilmoituksia.
 | `assets/` | Operaattorin brändimedia + PWA-kuvakkeet. **Ei gitissä** (repo on julkinen). |
 | `run/` | Ajonaikainen tila (työt, asetukset). Ei gitissä. |
 
+## Push-ilmoitukset
+
+Ilmoitukset lähetetään palvelimelta selaimen push-palvelun kautta (`web-push`,
+ainoa ajonaikainen riippuvuus — VAPID-JWT ja hyötykuorman salaus ovat kryptoa,
+jota ei kirjoiteta itse). Neljä laukaisijaa, kaikki kytkettävissä pois
+live-näkymän **Ilmoitukset**-kortista:
+
+| Laukaisija | Ehto |
+|-----------|------|
+| Lähetys rikki | `health` on ollut `fail` yhtäjaksoisesti 60 s |
+| Automaattinen korjaus | `notifyAutoFix()` — rajapinta valmiina, kutsuja tulee vaiheessa B |
+| Valmistelu ja käynnistys | relay siirtyi ajoon, tai preflightissä oli esteitä |
+| Lähetys päättyi | relay siirtyi pois ajosta kun työ oli aktiivinen |
+
+Ilmoitus lähtee vain **tilan muutoksesta**, ei joka pollilla, ja sama aihe
+enintään kerran 10 minuutissa (`src/server/notifications.ts`). Liika
+ilmoittelu tarkoittaa, että käyttäjä lakkaa lukemasta niitä.
+
+Tila levyllä: `run/vapid.json` (avainpari, luodaan kerran — **älä poista**, se
+mitätöi kaikki tilaukset), `run/push-subscriptions.json` (laitteet; vanhentuneet
+poistuvat itsestään kun push-palvelu vastaa 404/410) ja `run/push-prefs.json`.
+
+**iPhonella ilmoitukset toimivat vasta kun sovellus on lisätty
+kotivalikkoon** — se on iOS:n vaatimus, ei tämän sovelluksen. Jaa-painike →
+"Lisää koti­valikkoon", avaa kuvakkeesta, ja vasta sitten "Ota ilmoitukset
+käyttöön". Luvan kysely vaatii käyttäjän napautuksen. Testinappi lähettää
+oikean push-ilmoituksen, jotta ketjun voi todeta toimivaksi kentällä ennen
+ottelua.
+
 ## Suhde relayhin
 
 Ohjaamo **ei muuta relayn koodia**. Se kirjoittaa kaksi tiedostoa ja lukee

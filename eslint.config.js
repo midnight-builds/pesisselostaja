@@ -14,5 +14,14 @@ export default tseslint.config(
         { argsIgnorePattern: "^_" },
       ],
     },
+  },
+  {
+    // Service workers run in ServiceWorkerGlobalScope, where `self` — not
+    // `window` — is the global. Without this they read as undefined-variable
+    // errors even though the file is correct.
+    files: ["**/public/sw.js"],
+    languageOptions: {
+      globals: { self: "readonly", clients: "readonly", caches: "readonly" },
+    },
   }
 );
