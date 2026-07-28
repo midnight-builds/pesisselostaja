@@ -734,8 +734,18 @@ body {
   color: var(--faint);
   margin-bottom: 6px;
 }
+/* A text button on a caption row, so its BOX is grown to the 44×44 minimum
+   rather than its type: the padding does the work, and the label row simply
+   becomes as tall as the target it carries. No negative margins — they would
+   put the tap area on top of the input below, and a mistap there unmasks a
+   stream key instead of focusing the field. */
 .field__reveal {
   margin-left: auto;
+  min-height: var(--tap);
+  min-width: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   color: var(--primary);
@@ -744,7 +754,7 @@ body {
   font-weight: 800;
   text-transform: uppercase;
   cursor: pointer;
-  padding: 4px 6px;
+  padding: 4px 10px;
 }
 .field__input {
   width: 100%;
