@@ -8,8 +8,8 @@ import { join } from "node:path";
  *      pronunciation start breaking down at some point?
  *   2. Is the current per-line noise_w jitter (0.75/0.95/0.85) a clearly
  *      audible difference, or does the range need widening?
- *  Uses fictional names/teams (not the real match 143267 lines from the
- *  first demo) since this script is committed to a public repo.
+ *  Uses fictional names/teams since this script is committed to a public repo
+ *  (the first demo now does the same).
  *  Run: npx tsx apps/broadcast/experiments/voice-tuning-demo-2.ts */
 
 const VOICES_DIR = new URL("../voices/", import.meta.url).pathname;

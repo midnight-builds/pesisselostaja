@@ -2,8 +2,10 @@ import { execFile } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** One-off listening demo for tuning Piper's noise_w/length_scale, built from
- *  real narration lines out of match 143267 (Ikaalisten Tarmo - IPV). Not
+/** One-off listening demo for tuning Piper's noise_w/length_scale. The lines
+ *  keep the exact shape CommentaryLoop/relay:simulate really produces (that is
+ *  what makes the demo meaningful), but names and teams are fictional — this
+ *  script is committed to a public repo. Not
  *  wired into any npm script — run directly with:
  *    npx tsx apps/broadcast/experiments/voice-tuning-demo.ts
  *  See apps/broadcast/experiments/voice-tuning-demo.md for what to listen for. */
@@ -67,15 +69,17 @@ async function probeSampleRate(wavPath: string): Promise<number> {
   });
 }
 
-// Real lines from match 143267 (Ikaalisten Tarmo - IPV, D-tytöt), as spoken by
-// CommentaryLoop/relay:simulate in the earlier test run — not invented text.
-const LINE_RUN_1 = "4 A Tiainen löi juoksun, tuojana 1 A Hupli. 1, 0, IPV johtaa.";
-const LINE_RUN_2 = "6 J Puonti löi juoksun, tuojana 10 S Karjalainen. 3, 0, IPV johtaa.";
-const LINE_HOMERUN = "8 N Lappalainen löi kunnarin! 22, 2, IPV johtaa.";
-const LINE_MATCH_END = "Ottelu päättyi! IPV voitti, Tarmo 2, IPV 22.";
-const LINE_PALO_IPV = "Palo! IPV, ensimmäinen palo.";
-const LINE_PALO_TARMO = "Palo! Tarmo, ensimmäinen palo.";
-const LINE_BATTER = "Vuorossa 8 N Lappalainen.";
+// Phrasing and score shapes are exactly what the relay speaks; the names and
+// teams are fictional (same set as voice-tuning-demo-2.ts). What matters for
+// listening is the prosody of digits, exclamations and the closing line, not
+// whose names they are.
+const LINE_RUN_1 = "4 T Salonen löi juoksun, tuojana 1 M Virtanen. 1, 0, Kotikylä johtaa.";
+const LINE_RUN_2 = "6 A Koskinen löi juoksun, tuojana 10 P Laine. 3, 0, Kotikylä johtaa.";
+const LINE_HOMERUN = "8 K Nieminen löi kunnarin! 22, 2, Kotikylä johtaa.";
+const LINE_MATCH_END = "Ottelu päättyi! Kotikylä voitti, Pesäkylä 2, Kotikylä 22.";
+const LINE_PALO_HOME = "Palo! Kotikylä, ensimmäinen palo.";
+const LINE_PALO_AWAY = "Palo! Pesäkylä, ensimmäinen palo.";
+const LINE_BATTER = "Vuorossa 8 K Nieminen.";
 
 async function main(): Promise<void> {
   mkdirSync(CLIPS_DIR, { recursive: true });
@@ -123,11 +127,11 @@ async function main(): Promise<void> {
       "rivi riviltä ilman erillistä selitystä välissä."
   );
   pause();
-  await say(LINE_PALO_IPV, { noiseW: 0.75 });
+  await say(LINE_PALO_HOME, { noiseW: 0.75 });
   pause();
   await say(LINE_BATTER, { noiseW: 0.95 });
   pause();
-  await say(LINE_PALO_TARMO, { noiseW: 0.85 });
+  await say(LINE_PALO_AWAY, { noiseW: 0.85 });
 
   const listPath = join(OUT_DIR, "concat-list.txt");
   writeFileSync(listPath, timeline.map((p) => `file '${p}'`).join("\n"));
