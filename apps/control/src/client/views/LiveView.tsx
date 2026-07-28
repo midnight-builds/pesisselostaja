@@ -5,6 +5,7 @@ import { bytes, duration, since } from "../format";
 import { HealthBanner } from "../components/HealthBanner";
 import { LiveControls } from "../components/LiveControls";
 import { NarrationList } from "../components/NarrationList";
+import { PushCard } from "../components/PushCard";
 import { ScorePanel } from "../components/ScorePanel";
 import { StatusGrid } from "../components/StatusGrid";
 
@@ -141,6 +142,9 @@ export function LiveView({ live, connection, notify }: Props) {
           </div>
         </dl>
       </section>
+
+      {/* Last: set up once, then never touched during a match. */}
+      <PushCard notify={notify} />
     </div>
   );
 }
