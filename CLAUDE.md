@@ -52,6 +52,21 @@ safety net, not a substitute for a properly named branch.
 `apps/web/dist` — rebuild the web app for UI changes to show). The broadcast pipeline
 has its own unit, `pesisselostaja-relay.service` (see `/relay-ottelu`).
 
+**The relay does NOT run from this working copy.** It runs from a pinned, detached
+git worktree at `~/relay-deploy` (`WorkingDirectory` + `ExecStart` in the unit point
+there), because it used to run straight out of the development checkout — where a
+branch switch mid-broadcast could pull the source out from under a live stream
+(issue #59). Consequences worth knowing:
+
+- **Editing or switching branches here never affects a running broadcast.** That is
+  the whole point; you don't have to freeze the repo during a match.
+- **Code changes reach the relay only via `npm run relay:deploy`** (optionally
+  `-- <ref>`, default `origin/main`). Until then the relay keeps running the commit
+  it was deployed with. The script refuses to run while the service is active.
+- `voices/`, `run/` and `.env.relay` are **symlinked** from this checkout into the
+  deploy, not copied — the TTS cache, resume state and Piper models are shared on
+  purpose. Editing `.env.relay` here is what the relay reads.
+
 ## After completing a feature
 1. Workspace `src/` changes build and commit themselves (hook above) — verify build was clean.
 2. Commit other changes (tests, configs, docs) manually.
