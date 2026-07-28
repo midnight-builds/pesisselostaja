@@ -44,8 +44,21 @@ export const DEFAULT_HASHTAGS = ["#pesäpallo", "#pesäysit", "#live", "#livestr
  *  Runbook sallii pitkien seuranimien lyhentämisen nimenomaan otsikossa. */
 export const TITLE_MAX_LENGTH = 100;
 
-/** Runbookin esimerkit yleisesti tunnetuista lyhennyksistä. Käytetään VAIN jos
- *  otsikko uhkaa venyä yli rajan — normaalisti täysi nimi on parempi. */
+/** Thumbnailin otsikkorivin budjetti merkkeinä.
+ *
+ *  Renderöijä (tools/pesaysit-thumbnail-compose.py) piirtää otsikon 86 px
+ *  lihavoituna, korkeintaan kahdelle riville 1100 px leveään alueeseen, ja
+ *  **katkaisee ylimenevän kolmella pisteellä pudottaen loppuosan kokonaan**.
+ *  Livetestissä 74-merkkinen ottelupari näkyi muodossa
+ *  "Jyväskylän Kiri & / Kirittäret Juniorit Ra…" — vastustajan nimi katosi
+ *  kuvasta täysin. Kyse ei ole renderöijän viasta vaan liian pitkästä
+ *  syötteestä, joten lyhennys kuuluu tänne. ~21 merkkiä mahtuu riville,
+ *  kaksi riviä ≈ 42, josta on varattu marginaali rivityksen hukalle. */
+export const THUMBNAIL_HEADLINE_MAX_LENGTH = 38;
+
+/** Runbookin esimerkit yleisesti tunnetuista lyhennyksistä. Varatie niille
+ *  nimille, joille tulospalvelu ei anna shorthandia — käytetään vasta kun
+ *  täysi nimi ei mahdu. */
 export const TEAM_ABBREVIATIONS: Record<string, string> = {
   "Seinäjoen Maila-Jussit": "SMJ",
   "Hyvinkään Tahko": "Tahko",
