@@ -73,7 +73,9 @@ export async function readPushStatus(): Promise<PushStatus> {
   } catch {
     // Worker not ready yet — treat as "not subscribed" rather than an error.
   }
-  return Notification.permission === "granted" ? "off" : "off";
+  // Permission may already be "granted" while no subscription exists (app
+  // reinstalled, subscription expired) — the button still has work to do.
+  return "off";
 }
 
 /** VAPID public keys travel as URL-safe base64; PushManager wants raw bytes.
