@@ -618,7 +618,7 @@ export function buildAuthHealth(input: AuthHealthInput): AuthHealth {
     warnings.push(
       `Päivän YouTube-kiintiö (${quota.limit} yksikköä) on käytetty loppuun. Kiintiö nollautuu keskiyöllä Yhdysvaltain Tyynenmeren aikaa.`
     );
-    health = "fail";
+    health = worse(health, "fail");
     headline = "YouTube-kiintiö on lopussa — uusia lähetyksiä ei voi luoda tänään.";
   } else if (quota.remaining < QUOTA_COST.insert * 6) {
     // Yhden ottelun pari maksaa ~300 yksikköä; alle sen verran jäljellä on
