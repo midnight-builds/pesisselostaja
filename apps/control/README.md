@@ -61,7 +61,7 @@ Yksikkötestit (`test/`, vitest) ajetaan erikseen.
 |-------|--------|
 | `src/shared/` | Palvelimen ja clientin **sitova sopimus** (`types.ts`, `api.ts`). Muutos täällä rikkoo typecheckin molemmilla puolilla — se on tarkoitus. |
 | `src/server/` | node:http-palvelin, SSE, JSON-tallennus, relay-ohjaus, pesistulokset-haut |
-| `src/client/` | React + Vite -käyttöliittymä |
+| `src/client/` | React + Vite -käyttöliittymä. Kaikki neljä näkymää ovat **jatkuvasti mountattuina** (`App.tsx`, `TabPanel`); välilehti vain valitsee näytettävän. Näkymän oma tila (Ottelut-suodattimet ja rastit, lokitaso, valittu työ) säilyy siis välilehteä vaihtaessa. Testeissä tämä tarkoittaa, että useassa näkymässä esiintyvä teksti pitää rajata näkymään (`view(page, "job")`). |
 | `tools/` | `pesaysit-thumbnail-compose.py` — thumbnailin PIL-komposiitti |
 | `docs/` | Nykyisen YouTube-työnkulun kanoniset ohjeet ja templaatit |
 | `assets/` | Operaattorin brändimedia + PWA-kuvakkeet. **Ei gitissä** (repo on julkinen). |
