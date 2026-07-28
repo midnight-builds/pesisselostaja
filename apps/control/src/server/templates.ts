@@ -215,6 +215,11 @@ export interface MatchTemplateInput {
   matchId: number;
   home: string;
   away: string;
+  /** Tulospalvelun lyhyemmät muodot; käytetään vain jos täysi nimi ei mahdu. */
+  homeShort?: string | null;
+  awayShort?: string | null;
+  homeCode?: string | null;
+  awayCode?: string | null;
   /** Otsikon vasen puoli, esim. "Pesä Ysit E-tytöt kilpa". Oletuksena se
    *  joukkueista joka tunnistuu omaksi, muuten kotijoukkue. */
   teamLabel?: string | null;
