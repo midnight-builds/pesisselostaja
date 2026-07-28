@@ -25,3 +25,8 @@ apps/control/assets/
 apps/control/run/
 .incoming/
 pesis-ai-youtube-pack-*.zip
+
+# Playwright UI -testien artefaktit (kuvakaappaukset, raportit)
+apps/control/test-results/
+apps/control/playwright-report/
+apps/control/.playwright-tmp/

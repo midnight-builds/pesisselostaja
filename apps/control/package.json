@@ -10,7 +10,8 @@
     "start": "tsx src/server/index.ts",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "test:ui": "playwright test"
   },
   "dependencies": {
     "@pesisselostaja/core": "*",
@@ -19,7 +20,7 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "@playwright/test": "^1.57.0",
+    "@playwright/test": "1.57.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/web-push": "^3.6.4",

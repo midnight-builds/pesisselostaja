@@ -29,6 +29,32 @@ Unit-tiedosto on `ops/pesisselostaja-control.service` (kopioi
 HTTPS ei ole koristetta: ilman sitä iOS ei anna asentaa sovellusta
 kotivalikkoon eikä salli push-ilmoituksia.
 
+## Testit
+
+```bash
+npm run test:ui -w @pesisselostaja/control                      # WebKit + Chromium
+npm run test:ui -w @pesisselostaja/control -- --project=webkit  # vain Safarin moottori
+npm run test:ui -w @pesisselostaja/control -- --headed --project=webkit
+```
+
+Selain­testit (`test-ui/`, Playwright) ajetaan **WebKitillä ensisijaisesti** —
+kohde on iPhonen Safari, 393×853. Ne kattavat ulkoasun (ei vaakavieritystä,
+kosketuskohteiden koot, live-näkymän lukittu järjestys, kontrastit, pitkät
+joukkuenimet) ja toiminnan (välilehdet, ottelunvalinta, työn lomake,
+preflight-portti, kaksoisvahvistus, viivenapit, lokisuodatin, SSE-katko).
+
+Testit käynnistävät oman palvelimen porttiin **3099** ja ohjaavat kaikki
+kirjoitukset hakemistoon `.playwright-tmp/` (`CONTROL_STATE_DIR`,
+`CONTROL_RELAY_ENV`, `CONTROL_RELAY_RUN_DIR`, `CONTROL_RELAY_UNIT`,
+`CONTROL_DEPLOY_DIR`). **Ne eivät koske oikeaan `.env.relay`-tiedostoon eivätkä
+oikeaan relay-yksikköön** — annettua unit-nimeä ei ole olemassa. `/api/**` on
+mockattu ja `EventSource` korvattu testien ohjaamalla tuplalla; sivun tarjoaa
+silti oikea palvelin, koska juuri staattisen tarjoilun rikkoutuminen (tyhjä
+kuori) on tämän sovelluksen kertaalleen sattunut vika. Kuvakaappaukset:
+`test-results/screenshots/`.
+
+Yksikkötestit (`test/`, vitest) ajetaan erikseen.
+
 ## Rakenne
 
 | Polku | Vastuu |

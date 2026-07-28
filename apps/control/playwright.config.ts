@@ -11,7 +11,13 @@ import { join } from "node:path";
  *  start/stop/restart is a no-op error instead of a cut broadcast.
  *
  *  WebKit is the primary target: the operator uses this from an iPhone in
- *  Safari, standing on a field. Chromium runs second as a cross-check. */
+ *  Safari, standing on a field. Chromium runs second as a cross-check.
+ *
+ *  @playwright/test is pinned to an exact version in package.json on purpose:
+ *  the browsers already in ~/.cache/ms-playwright are that version's revisions
+ *  (chromium-1200, webkit-2227). A caret range would eventually ask for
+ *  revisions nobody has downloaded, and the suite would fail on a fresh
+ *  `npm install` rather than on a real defect. */
 
 const CONTROL_ROOT = fileURLToPath(new URL(".", import.meta.url));
 const SCRATCH = join(CONTROL_ROOT, ".playwright-tmp");

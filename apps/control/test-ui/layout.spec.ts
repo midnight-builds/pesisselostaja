@@ -60,10 +60,13 @@ test.describe("ulkoasu", () => {
   });
 
   test("kosketuskohteet ovat vähintään 44×44 px", async ({ page, openApp }, info) => {
-    /** Known-undersized controls, MEASURED not guessed. These are reported to
-     *  the operator as findings rather than silently fixed here; the point of
-     *  the allowlist is that anything NEW that drops below 44 px still fails. */
-    const KNOWN_UNDERSIZED = ["button.chip", "button.linkbtn", "button.field__reveal"];
+    /** Known-undersized controls, MEASURED not guessed:
+     *    button.chip          53×38  (pollausväli, lokin tasosuodatin)
+     *    button.field__reveal 55×22  ("Näytä" stream keyn vieressä)
+     *  Both are REPORTED as findings rather than fixed here. The point of the
+     *  allowlist is that anything NEW dropping below 44 px still fails — and
+     *  that these two show up in the attachment on every run. */
+    const KNOWN_UNDERSIZED = ["button.chip", "button.field__reveal"];
 
     await openApp();
     const undersizedEverywhere: string[] = [];
@@ -152,12 +155,17 @@ test.describe("ulkoasu", () => {
       const headlineRatio = await contrastRatio(headline);
       measured.push(`${variant.health}: iso tila ${wordRatio}:1, leipäteksti ${headlineRatio}:1`);
 
-      // Body text is held to the full WCAG AA 4.5:1.
+      // Body text is held to the full WCAG AA 4.5:1 (measured 11–15:1).
       expect(headlineRatio, `${variant.health}: leipätekstin kontrasti`).toBeGreaterThanOrEqual(4.5);
-      // The status word is 30 px / weight 900 = WCAG "large text", whose AA
-      // threshold is 3:1. It is checked separately (and reported) because the
-      // fail state's red-on-red tint does not reach 4.5:1 — see the report.
-      expect(wordRatio, `${variant.health}: ison terveystilan kontrasti`).toBeGreaterThanOrEqual(3);
+
+      // The big status word: 4.5:1 everywhere EXCEPT the fail state, which
+      // measures 4.18:1 — red text on the red tint the fail banner paints
+      // behind it. That is above WCAG's 3:1 for large text (30 px / weight
+      // 900), below the 4.5:1 this app wants for sunlight. REPORTED, not
+      // fixed: the floor here is set to the measured value so a further
+      // regression still fails the test.
+      const floor = variant.health === "fail" ? 4.0 : 4.5;
+      expect(wordRatio, `${variant.health}: ison terveystilan kontrasti`).toBeGreaterThanOrEqual(floor);
     }
 
     await info.attach("mitatut-kontrastit", { body: measured.join("\n"), contentType: "text/plain" });
