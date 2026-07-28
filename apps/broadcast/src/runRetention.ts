@@ -20,9 +20,16 @@ const TTS_CACHE_ENTRY = /^[0-9a-f]{64}\.pcm$/;
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 /** Conservative defaults: nothing the operator produced this month disappears,
- *  and the regenerable TTS cache gets a ceiling rather than a purge. */
+ *  and the regenerable TTS cache gets a ceiling rather than a purge.
+ *
+ *  1024 MB, not the original 512: the cache had already grown to 559 MB of
+ *  genuinely reused clips by the time the policy landed, so 512 would have
+ *  evicted ~47 MB on the very first relay start. Eviction is not free — a
+ *  dropped clip is re-synthesized on its next use and costs ElevenLabs
+ *  characters, and the quota is the scarcer resource of the two (disk had
+ *  36 Gt free at the time). */
 export const DEFAULT_RETENTION_DAYS = 30;
-export const DEFAULT_TTS_CACHE_MAX_MB = 512;
+export const DEFAULT_TTS_CACHE_MAX_MB = 1024;
 
 export interface RunRetentionOptions {
   /** Run artifacts older than this are removed. 0 disables age pruning. */
