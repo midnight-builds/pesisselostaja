@@ -65,12 +65,17 @@ export function indexedRecordPath(recordFile: string, index: number): string {
 
 /** Shared amix/limiter graph: original audio (input 0) + gained narration
  *  (input 1) -> [aout]. Used both by the live RTMP mixer and simulate.ts's
- *  offline replay, so the two stay acoustically identical. */
+ *  offline replay, so the two stay acoustically identical.
+ *
+ *  alimiter needs `level=disabled`: with ffmpeg's default `level=enabled` the
+ *  filter re-normalizes the limited signal back up, which measured +0.85 dBTP
+ *  over the limit in field-audio tests (issue #56) — i.e. the limiter defeated
+ *  its own purpose. */
 export function buildMixFilterComplex(narrationGain: number): string {
   return (
     `[0:a]aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo[orig];` +
     `[1:a]volume=${narrationGain}[narr];` +
-    `[orig][narr]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[aout]`
+    `[orig][narr]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95:level=disabled[aout]`
   );
 }
 
