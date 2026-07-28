@@ -88,8 +88,8 @@ stalls the poll loop or reorders clips.
 
 - **At startup:** `RELAY_NARRATION_DELAY_MS=5000` in `.env.relay`, or
   `--narration-delay-ms 5000`. Default `4000` — a value **calibrated live**
-  (match 146210; an earlier `2000` default had to be raised by hand in every
-  broadcast). It stays adjustable from the control file, so treat `4000` as the
+  (an earlier `2000` default had to be raised by hand in every broadcast). It
+  stays adjustable from the control file, so treat `4000` as the
   starting point, not a fixed truth.
 - **Live, without restarting:** the same control file, `narrationDelayMs` key:
   ```bash
@@ -129,7 +129,7 @@ match: the response is simply used as the full snapshot it already is, one
 request, and the log says so once per streak. The heartbeat's `reset N` counts
 them. Before this was understood (issue #46) each such poll also fired a second,
 redundant full fetch — two API requests per poll for the whole streak, which is
-what made the 4 s timeout bite in matches 144918 and 146210 (27.7.).
+what made the 4 s timeout bite in two live matches on 27.7.
 
 A reset whose instant our own `after` does **not** explain still counts toward a
 breaker: **5 in a row** turn delta off for the rest of the run with one
@@ -147,8 +147,8 @@ to the control file overrules the breaker and gives delta a fresh streak.
 
 Each API fetch is aborted after **10 s** (never less than the current poll
 interval). A full fetch returns the whole match history, which keeps growing, so
-the earlier 4 s cut healthy requests short late in a match — live 146210 logged
-12 aborts in two minutes, all at exactly 4.0 s. Polls are sequential, so the
+the earlier 4 s cut healthy requests short late in a match — one broadcast
+logged 12 aborts in two minutes, all at exactly 4.0 s. Polls are sequential, so the
 longer timeout cannot stack requests; a hung fetch only postpones the next poll.
 
 ### Starting before the source goes live
@@ -170,7 +170,7 @@ accrues toward the give-up window as before.
 
 Before this, a scheduled start looked identical to a dead source, which meant
 the relay had to be started in a narrow slot ~6 min before kickoff or it would
-give up before the match began (match 144918, 27.7.).
+give up before the match began (observed live 27.7.).
 
 ### Give-up window after the match ends
 
@@ -298,7 +298,7 @@ so the stream never goes silent. Details:
   correctly, so it gets the readable text as-is. The `.pronunciations.json`
   substitutions still apply on the Piper fallback path.
 - **Numbers are spelled out:** EL reads bare digits in short Finnish phrases
-  unclearly ("Tasan 4, 4" — live 144742), so the EL path converts them to
+  unclearly ("Tasan 4, 4", heard live), so the EL path converts them to
   Finnish words ("Tasan neljä, neljä") before synthesis (`spellOutNumbers` in
   `packages/core`). Logs and the Piper path keep the digits.
 - **Cache:** synthesized audio is cached as PCM in `apps/broadcast/run/tts-cache/`

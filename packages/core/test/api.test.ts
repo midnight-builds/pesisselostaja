@@ -70,7 +70,7 @@ describe("fetchLiveEvents delta options", () => {
   });
 
   it("normalizes a bare [] body (match never opened by the scorer) into an empty events list", async () => {
-    // Seen live 2026-07-17 (144743 pre-open): the endpoint answers `[]`
+    // Seen live 2026-07-17, before the match was opened: the endpoint answers `[]`
     // instead of {"events": [...]}, which used to crash the startup fetch.
     const fetchMock = vi.fn(async (_url: string | URL, _init?: RequestInit) => jsonResponse([]));
     vi.stubGlobal("fetch", fetchMock);

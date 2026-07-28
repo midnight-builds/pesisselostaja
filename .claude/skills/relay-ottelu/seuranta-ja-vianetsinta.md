@@ -79,7 +79,7 @@ Se tapahtuu näissä tilanteissa (`ffmpegMixer.ts`, `config.ts`):
 > korjausta luovutuslaskuri nollautui heti kun ffmpeg käynnistyi, joten kuollut
 > lähde jonka yt-dlp yhä resolvasi (ffmpeg käynnistyy, kuolee sekunneissa
 > `code=0`) sai relayn respawnaamaan ikuisesti ja operaattorin pysäyttämään
-> palvelun käsin (ottelu 146210, 27.7.2026). Nyt sarja lyhyitä ajoja kerryttää
+> palvelun käsin (havaittu livenä 27.7.2026). Nyt sarja lyhyitä ajoja kerryttää
 > ikkunaa normaalisti. Korjausta ei ole vielä koeteltu oikeassa lähetyksessä —
 > tunnusmerkit lokissa ovat samat: lyhenevät ajoajat, `code=0`, ei selostusta
 > ulos. Jos ajo jää siitä huolimatta pystyyn, pysäytä käsin.

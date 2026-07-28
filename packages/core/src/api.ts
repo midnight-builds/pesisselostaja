@@ -174,7 +174,7 @@ export async function fetchLiveEvents(
   }
   if (!res.ok) throw new Error(`Live events fetch failed: ${res.status}`);
   // A match the scorer has never opened returns a bare `[]` instead of the
-  // {"events": [...]} envelope (seen live 2026-07-17, match 144743 pre-open;
+  // {"events": [...]} envelope (seen live 2026-07-17 before a match opened;
   // spreading the array would leave `events` undefined and crash callers).
   const raw = (await res.json()) as LiveEventsResponse | LiveEventsResponse["events"] | null;
   const body: LiveEventsResponse = Array.isArray(raw) ? { events: raw } : (raw ?? { events: [] });

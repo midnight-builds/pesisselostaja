@@ -8,7 +8,7 @@ const MIN_FREE_GB = 2;
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
 
-/** Reproduces ottelu 144203's observed cadence: the frozen source resolves
+/** Reproduces the observed flapping cadence: the frozen source resolves
  *  fine and ffmpeg reads to a real EOF at ~33s every time (see
  *  apps/broadcast/HANDOFF.md "Lähteen flappaus"). One session is deliberately longer
  *  (90s) so, if narration only ever recovers on it, that isolates hypothesis

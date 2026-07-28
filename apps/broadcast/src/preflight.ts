@@ -20,7 +20,7 @@ const MARK: Record<CheckStatus, string> = { ok: "✓", warn: "⚠", fail: "✗" 
  *  than start anything that writes. */
 const DISK_MIN_BYTES = 2 * 1024 * 1024 * 1024;
 const DISK_MIN_FRACTION = 0.1;
-/** One full match cost 4780 ElevenLabs characters (144918, 27.7.). Warn below
+/** One full match cost 4780 ElevenLabs characters (measured 27.7.). Warn below
  *  roughly one-and-a-half of those, so a run can't run dry mid-broadcast
  *  without notice — Piper still covers it, but the voice changes audibly. */
 const ELEVENLABS_MIN_CHARS = 7000;

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { parseScheduledStart, SourceNotLiveYetError } from "../src/ytdlpSource.js";
 import { FfmpegMixer, SourceExhaustedError, scheduledRecheckDelayMs } from "../src/ffmpegMixer.js";
 
-/** Verbatim yt-dlp output from the match 144918 preparation, 27.7.2026. */
+/** Verbatim yt-dlp output captured while preparing a scheduled source, 27.7.2026. */
 const YTDLP_SCHEDULED = "ERROR: [youtube] 2u9riozcoRo: This live event will begin in 103 minutes.";
 const YTDLP_SOON = "ERROR: [youtube] 2u9riozcoRo: This live event will begin in 4 minutes.";
 const YTDLP_ENDED =

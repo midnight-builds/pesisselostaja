@@ -2,7 +2,7 @@
 
 DESIGN.md is explicit that the relay never needs a fake/local source path in
 production — it always pulls a real, already-published YouTube livestream via
-`resolveSourceUrl`/yt-dlp. But the 144203 incident (selostus katosi
+`resolveSourceUrl`/yt-dlp. But the flapping incident (selostus katosi
 flappauksen aikana — see HANDOFF.md) can only be investigated by reproducing
 many respawns with a *deterministic*, ~33s-EOF source, which a real HLS pull
 can't guarantee on demand.

@@ -249,7 +249,7 @@ kaikki kirjoittavat operaatiot heti (globaali sääntö).
 > käynnistyy onnistuneesti mutta kuolee heti `code=0` (issue #45 korjattu:
 > vain riittävän pitkä ajo kelpaa todisteeksi etenemisestä, ks.
 > `ffmpegMixer.ts`). Ennen korjausta relay respawnasi ikuisesti ja operaattori
-> joutui pysäyttämään palvelun käsin (ottelu 146210, 27.7.). Korjausta ei ole
+> joutui pysäyttämään palvelun käsin (havaittu livenä 27.7.). Korjausta ei ole
 > vielä koeteltu oikeassa lähetyksessä, joten pysäytä käsin jos ajo jää pystyyn.
 
 Ottelun ollessa kesken älä pysäytä: kuollut lähde voi palata, ja striimin uptime

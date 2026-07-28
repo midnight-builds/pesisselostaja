@@ -119,7 +119,7 @@ describe("eventFingerprint cross-turn palo collision — HANDOFF task 1", () => 
     expect(a).toBe(b);
   });
 
-  it("counts all three palot 1-2-3 across a turn even when their ids collide with a prior turn (relay palolaskuri, match 144197)", () => {
+  it("counts all three palot 1-2-3 across a turn even when their ids collide with a prior turn (relay palolaskuri, observed live)", () => {
     // Reproduces the live bug: event.id resets each turn, so turn B's palot
     // reuse ids 2 and 10 already seen in turn A. The old coordinate-free
     // fingerprint dropped the colliding palot, so the relay under-counted (only
