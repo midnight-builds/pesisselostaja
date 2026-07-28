@@ -34,15 +34,20 @@ export interface ControlConfig {
   assetsDir: string;
 }
 
+/** Every path/unit that a run of this server WRITES to or ACTS on can be
+ *  redirected by an env var. Defaults are the production ones — the overrides
+ *  exist so a test run (or a second instance on another port) can be pointed at
+ *  a scratch directory and a unit that does not exist, and thereby cannot touch
+ *  the live broadcast's `.env.relay`, control files or systemd service. */
 export const CONFIG: ControlConfig = {
   port: Number(process.env.CONTROL_PORT ?? 3001),
   host: process.env.CONTROL_HOST ?? "0.0.0.0",
   repoRoot: REPO_ROOT,
-  relayEnvPath: join(REPO_ROOT, "apps/broadcast/.env.relay"),
-  relayRunDir: join(REPO_ROOT, "apps/broadcast/run/"),
-  relayUnit: "pesisselostaja-relay.service",
+  relayEnvPath: process.env.CONTROL_RELAY_ENV ?? join(REPO_ROOT, "apps/broadcast/.env.relay"),
+  relayRunDir: process.env.CONTROL_RELAY_RUN_DIR ?? join(REPO_ROOT, "apps/broadcast/run/"),
+  relayUnit: process.env.CONTROL_RELAY_UNIT ?? "pesisselostaja-relay.service",
   deployDir: process.env.CONTROL_DEPLOY_DIR ?? join(homedir(), "relay-deploy"),
-  stateDir: join(CONTROL_ROOT, "run/"),
+  stateDir: process.env.CONTROL_STATE_DIR ?? join(CONTROL_ROOT, "run/"),
   clientDist: join(CONTROL_ROOT, "dist/client"),
   assetsDir: join(CONTROL_ROOT, "assets"),
 };
