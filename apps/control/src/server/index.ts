@@ -68,16 +68,20 @@ function resolveWithin(root: string, rel: string): string | null {
 }
 
 async function serveApp(pathname: string, res: ServerResponse): Promise<void> {
-  if (pathname.startsWith("/assets/")) {
-    const filePath = resolveWithin(CONFIG.assetsDir, pathname.slice("/assets/".length));
-    if (filePath && (await serveStatic(res, filePath))) return;
-    sendError(res, 404, "tiedostoa ei löydy");
-    return;
-  }
-
   const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+
+  // Client build first: vite emits its bundle under /assets/, which would
+  // otherwise be shadowed by the operator media directory below and leave the
+  // page loading a blank shell (caught by a screenshot check, not by tsc).
   const filePath = resolveWithin(CONFIG.clientDist, rel);
   if (filePath && (await serveStatic(res, filePath))) return;
+
+  // Operator media (brand background, PWA icons, manifest) is kept outside the
+  // build so it can stay out of a public git history — served as a fallback,
+  // both from /assets/ and from the root paths index.html references.
+  const mediaRel = rel.startsWith("assets/") ? rel.slice("assets/".length) : rel;
+  const mediaPath = resolveWithin(CONFIG.assetsDir, mediaRel);
+  if (mediaPath && (await serveStatic(res, mediaPath))) return;
 
   // SPA fallback: an unknown path (e.g. a deep link to a job) still renders
   // the app shell, which does its own client-side routing.
