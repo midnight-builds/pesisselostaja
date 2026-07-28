@@ -119,13 +119,14 @@ export function PushCard({ notify }: Props) {
             // enablePush must run inside this tap: iOS only grants the
             // permission prompt to a user gesture.
             void run(async () => {
+              const wasOn = status === "on";
               const next = await enablePush();
               setStatus(next);
-              notify("ok", "Ilmoitukset otettu käyttöön");
+              notify("ok", wasOn ? "Tilaus uusittu" : "Ilmoitukset otettu käyttöön");
             })
           }
         >
-          {status === "on" ? "Ilmoitukset käytössä" : "Ota ilmoitukset käyttöön"}
+          {status === "on" ? "Uusi tilaus tälle puhelimelle" : "Ota ilmoitukset käyttöön"}
         </button>
         <button
           type="button"
