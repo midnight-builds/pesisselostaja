@@ -81,7 +81,11 @@ export function PushCard({ notify }: Props) {
       setPrefs(await setPushPrefs(patch));
     });
 
-  const canEnable = status === "off";
+  // Re-subscribing while already "on" is deliberately allowed: the browser can
+  // hold a subscription the server has since lost (run/ wiped, VAPID key
+  // regenerated), and a disabled button would leave no way out of that —
+  // enablePush unsubscribes and re-subscribes, so it is safe to press twice.
+  const canEnable = status === "off" || status === "on";
   const installHint = status === "needs-install";
 
   return (

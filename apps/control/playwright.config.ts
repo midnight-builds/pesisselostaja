@@ -44,6 +44,10 @@ export default defineConfig({
     video: "off",
     locale: "fi-FI",
     timezoneId: "Europe/Helsinki",
+    // A registered service worker would serve requests outside the page's
+    // routing, which would make the API mocks unreliable — and cache a stale
+    // bundle between runs.
+    serviceWorkers: "block",
   },
 
   projects: [
