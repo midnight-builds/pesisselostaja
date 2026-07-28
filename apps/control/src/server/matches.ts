@@ -138,8 +138,34 @@ function resultStringOf(meta: MatchMetadata): string | null {
   return result?.result_string ?? null;
 }
 
-export async function getMatch(id: number): Promise<MatchOption> {
-  const meta = await fetchMatchMetadata(id);
+/** core's fetchMatchMetadata collapses every HTTP failure into one generic
+ *  Error whose message ends in the status ("Match metadata fetch failed:
+ *  404"), and the pesistulokset API answers an unknown id with exactly that
+ *  404. Only that one status means "no such match" — a timeout or a 5xx must
+ *  keep throwing, because "you typed the wrong number" and "the source is
+ *  down" call for opposite reactions from the operator. */
+function isNotFound(err: unknown): boolean {
+  return err instanceof Error && /failed:\s*404\b/.test(err.message);
+}
+
+/** null = the source has no match with that id (a mistyped or mispasted
+ *  number). Callers must decide what to say about it; this returns rather
+ *  than throws, so "not found" cannot be mistaken for a broken API. */
+export async function getMatch(id: number): Promise<MatchOption | null> {
+  if (!Number.isInteger(id) || id <= 0) return null;
+
+  let meta: MatchMetadata;
+  try {
+    meta = await fetchMatchMetadata(id);
+  } catch (err) {
+    if (isNotFound(err)) return null;
+    throw err;
+  }
+  // A 200 that carries no teams is not a match either (the API has answered
+  // with an error object under a 200 before) — treat it as not found rather
+  // than reading `undefined.name` and turning it into a 500.
+  if (meta?.home?.name == null || meta?.away?.name == null) return null;
+
   const resultString = resultStringOf(meta);
   return {
     id: meta.id,

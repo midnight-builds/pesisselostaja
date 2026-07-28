@@ -15,6 +15,21 @@ import { getMatch } from "./matches.js";
 
 const store = createStore<Job[]>("jobs.json", []);
 
+/** Thrown when a job is asked for a match the source doesn't have — nearly
+ *  always a hand-typed or mispasted id. Its own type (not a bare Error) so the
+ *  HTTP layer can answer 404 with this exact sentence instead of letting it
+ *  fall through to the generic 500 handler, which would put a raw English
+ *  fetch error in front of an operator standing in a field. */
+export class MatchNotFoundError extends Error {
+  readonly matchId: number;
+
+  constructor(matchId: number) {
+    super(`Ottelua ${matchId} ei löytynyt tulospalvelusta — tarkista ottelu-ID.`);
+    this.name = "MatchNotFoundError";
+    this.matchId = matchId;
+  }
+}
+
 /** "Blocking" = holds the one broadcast slot the whole queue exists to
  *  serialize (DESIGN.md: "Yksi lähetys kerrallaan + jono"). */
 function isBlocking(status: JobStatus): boolean {
@@ -67,7 +82,11 @@ export async function listJobs(): Promise<Job[]> {
 }
 
 export async function createJob(req: CreateJobRequest): Promise<Job> {
+  // The id can come straight from a pasted URL or be typed by hand, so an id
+  // the source has never heard of is an ordinary user mistake — check the
+  // lookup instead of reading team names off nothing.
   const match = await getMatch(req.matchId);
+  if (!match) throw new MatchNotFoundError(req.matchId);
   const now = new Date().toISOString();
   const job: Job = {
     id: randomUUID().slice(0, 8),
