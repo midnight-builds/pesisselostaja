@@ -37,8 +37,27 @@ import {
   thumbnailId,
   ThumbnailRenderError,
 } from "./thumbnail.js";
+import { getAuthHealth, GoogleAuthError, pollDeviceFlow, startDeviceFlow } from "./googleAuth.js";
+import {
+  addToPlaylist,
+  ConfirmationRequiredError,
+  createBroadcastPair,
+  deleteVideo,
+  listBroadcasts,
+  listPlaylists,
+  updateVideoMetadata,
+  YouTubeApiError,
+  type PrivacyStatus,
+  type VideoMetadataPatch,
+} from "./youtube.js";
+import {
+  buildBroadcastTexts,
+  templateInputFromMatch,
+  type BroadcastTexts,
+  type MatchTemplateInput,
+} from "./templates.js";
 import type { CreateJobRequest, PatchJobRequest, PatchKnobsRequest } from "../shared/api.js";
-import type { LiveState, NotificationPrefs } from "../shared/types.js";
+import type { Job, LiveState, NotificationPrefs } from "../shared/types.js";
 
 type LiveAggregator = {
   subscribe(fn: (state: LiveState) => void): () => void;
@@ -108,6 +127,49 @@ async function serveApp(pathname: string, res: ServerResponse): Promise<void> {
   // is the first thing a freshly cloned checkout hits.
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
   res.end("Käyttöliittymää ei ole rakennettu — aja: npm run build -w @pesisselostaja/control");
+}
+
+/** Yhteinen runko sekä esikatselulle että luonnille: ottelu voi tulla työn
+ *  kautta (jobId) tai suoraan ottelu-id:nä, ja käyttäjän omat lisätiedot
+ *  (tapahtuma, vaihe, lyhyt paikkamuoto) tulevat overrides-kentässä — niitä
+ *  ei ole pesistulokset-API:ssa lainkaan. */
+interface YoutubeCreateRequest {
+  jobId?: string;
+  matchId?: number;
+  overrides?: Partial<MatchTemplateInput>;
+  privacy?: PrivacyStatus;
+  playlistId?: string | null;
+  streamForNormal?: boolean;
+  normalAutoStart?: boolean;
+}
+
+type TemplateContext =
+  | { texts: BroadcastTexts; matchId: number; job: Job | null }
+  | { error: string; status: number };
+
+async function resolveTemplateContext(body: YoutubeCreateRequest): Promise<TemplateContext> {
+  let job: Job | null = null;
+  if (body.jobId) {
+    job = (await listJobs()).find((j) => j.id === body.jobId) ?? null;
+    if (!job) return { error: `Työtä ${body.jobId} ei löytynyt.`, status: 404 };
+  }
+  const matchId = job?.matchId ?? body.matchId;
+  if (matchId === undefined) return { error: "Anna joko jobId tai matchId.", status: 400 };
+
+  const match = await getMatch(matchId);
+  if (!match) return { error: `Ottelua ${matchId} ei löytynyt tulospalvelusta.`, status: 404 };
+
+  const input = templateInputFromMatch(
+    { ...match, startsAt: job?.startsAt ?? match.startsAt },
+    body.overrides ?? {}
+  );
+  try {
+    return { texts: buildBroadcastTexts(input), matchId, job };
+  } catch (err) {
+    // Käytännössä vain "alkuaika puuttuu" — ottelu on listalla ilman
+    // kellonaikaa, ja se on käyttäjän täydennettävä (overrides.localTime).
+    return { error: err instanceof Error ? err.message : "tekstien muodostus epäonnistui", status: 400 };
+  }
 }
 
 async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggregator): Promise<void> {
@@ -251,6 +313,113 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
     return;
   }
 
+  // --- YouTube-ketju. Kaikki kirjoittavat kutsut kulkevat youtube.ts:n läpi,
+  // joka kirjaa jokaisen luodun lähetyksen run/youtube-created.ndjson-lokiin.
+  // Tuhoavat reitit (näkyvyys, poisto) vaativat erillisen vahvistuksen.
+  if (pathname === "/api/youtube/health" && method === "GET") {
+    sendJson(res, 200, await getAuthHealth());
+    return;
+  }
+  if (pathname === "/api/youtube/auth/start" && method === "POST") {
+    // Client-tunnukset saa lähettää mukana: laitteella ei ole muuta reittiä
+    // syöttää niitä kuin puhelimen lomake (tai käsin run/google-client.json).
+    const body = await readJsonBody<{ clientId?: string; clientSecret?: string | null }>(req).catch(() => ({}));
+    sendJson(res, 200, await startDeviceFlow(body));
+    return;
+  }
+  if (pathname === "/api/youtube/auth/poll" && method === "POST") {
+    sendJson(res, 200, await pollDeviceFlow());
+    return;
+  }
+  if (pathname === "/api/youtube/broadcasts" && method === "GET") {
+    const statusRaw = query.get("status");
+    const status =
+      statusRaw === "upcoming" || statusRaw === "active" || statusRaw === "completed" || statusRaw === "all"
+        ? statusRaw
+        : undefined;
+    const limitRaw = Number(query.get("limit"));
+    sendJson(
+      res,
+      200,
+      await listBroadcasts({ status, maxResults: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined })
+    );
+    return;
+  }
+  if (pathname === "/api/youtube/broadcasts" && method === "POST") {
+    const body = await readJsonBody<YoutubeCreateRequest>(req);
+    const resolved = await resolveTemplateContext(body);
+    if ("error" in resolved) {
+      sendError(res, resolved.status, resolved.error);
+      return;
+    }
+    const { texts, job } = resolved;
+    const pair = await createBroadcastPair(
+      {
+        matchId: resolved.matchId,
+        jobId: job?.id ?? null,
+        localDate: texts.localDate,
+        localTime: texts.localTime,
+        venue: texts.venue,
+        privacy: body.privacy,
+        playlistId: body.playlistId === undefined ? texts.playlistId : body.playlistId,
+        sourceMatchUrl: texts.matchUrl,
+        streamForNormal: body.streamForNormal,
+        normalAutoStart: body.normalAutoStart,
+      },
+      texts
+    );
+    // Työ tietää nyt kohteensa: selostettu lähetys on relayn kohde, normaali
+    // on lähde jota puhelin työntää. Ilman tätä operaattori joutuisi
+    // kopioimaan samat arvot käsin takaisin työlle.
+    if (job) {
+      await patchJob(job.id, {
+        targetVideoId: pair.narrated.videoId,
+        targetStreamKey: pair.narrated.streamKey ?? undefined,
+        sourceUrl: pair.normal.watchUrl,
+      });
+    }
+    sendJson(res, 201, { ...pair, texts });
+    return;
+  }
+  if (pathname === "/api/youtube/playlists" && method === "GET") {
+    sendJson(res, 200, await listPlaylists());
+    return;
+  }
+  if (pathname === "/api/youtube/templates/preview" && method === "POST") {
+    // Puhtaasti tekstiä: ei yhtään YouTube-kutsua, ei mitään luotua.
+    const body = await readJsonBody<YoutubeCreateRequest>(req);
+    const resolved = await resolveTemplateContext(body);
+    if ("error" in resolved) {
+      sendError(res, resolved.status, resolved.error);
+      return;
+    }
+    sendJson(res, 200, {
+      matchId: resolved.matchId,
+      jobId: resolved.job?.id ?? null,
+      texts: resolved.texts,
+    });
+    return;
+  }
+  const youtubeVideoMatch = pathname.match(/^\/api\/youtube\/videos\/([^/]+)$/);
+  if (youtubeVideoMatch && method === "PATCH") {
+    const videoId = youtubeVideoMatch[1];
+    const body = await readJsonBody<VideoMetadataPatch & { confirm?: boolean; playlistId?: string }>(req);
+    const { confirm, playlistId, ...patch } = body;
+    const updated = await updateVideoMetadata(videoId, patch, { confirm });
+    const added = playlistId ? await addToPlaylist(playlistId, videoId) : null;
+    sendJson(res, 200, { ...updated, playlist: added });
+    return;
+  }
+  if (youtubeVideoMatch && method === "DELETE") {
+    const videoId = youtubeVideoMatch[1];
+    // Vahvistus saa tulla joko rungossa tai kyselyparametrina — DELETE-runko
+    // on monessa asiakkaassa hankala, eikä poisto saa kaatua siihen.
+    const body = await readJsonBody<{ confirm?: boolean }>(req).catch(() => ({}) as { confirm?: boolean });
+    const confirm = body.confirm === true || query.get("confirm") === "true";
+    sendJson(res, 200, await deleteVideo(videoId, { confirm }));
+    return;
+  }
+
   const relayActionMatch = pathname.match(/^\/api\/relay\/(start|stop|restart)$/);
   if (relayActionMatch && method === "POST") {
     const action = relayActionMatch[1];
@@ -376,7 +545,19 @@ async function main(): Promise<void> {
     route(req, res, live).catch((err) => {
       console.error("[control]", req.method, req.url, err);
       if (!res.headersSent) {
-        sendError(res, 500, "palvelinvirhe", err instanceof Error ? err.message : String(err));
+        // YouTube-ketjun virheillä on omat merkityksensä, jotka hukkuisivat
+        // geneeriseen 500:aan: puuttuva vahvistus on asiakkaan virhe (400),
+        // katkennut Google-yhteys vaatii kirjautumisen (409), ja YouTuben oma
+        // virhe on ylävirran vika (502) — ei tämän palvelimen.
+        if (err instanceof ConfirmationRequiredError) {
+          sendError(res, 400, err.message);
+        } else if (err instanceof GoogleAuthError) {
+          sendError(res, 409, err.message);
+        } else if (err instanceof YouTubeApiError) {
+          sendError(res, 502, "YouTube-kutsu epäonnistui", err.message);
+        } else {
+          sendError(res, 500, "palvelinvirhe", err instanceof Error ? err.message : String(err));
+        }
       } else {
         res.end();
       }
