@@ -21,8 +21,10 @@ import { runControlPreflight } from "./preflight.js";
 import { startLiveAggregator } from "./live.js";
 import { getDayMatches, getMatch } from "./matches.js";
 import { listJobs, createJob, patchJob, activateJob, getActiveJob } from "./jobs.js";
+import { addSubscription, getSubscriptionCount, getVapidPublicKey, sendPushDetailed } from "./push.js";
+import { getNotificationPrefs, observeLiveState, setNotificationPrefs } from "./notifications.js";
 import type { CreateJobRequest, PatchJobRequest, PatchKnobsRequest } from "../shared/api.js";
-import type { LiveState } from "../shared/types.js";
+import type { LiveState, NotificationPrefs } from "../shared/types.js";
 
 type LiveAggregator = {
   subscribe(fn: (state: LiveState) => void): () => void;
@@ -198,6 +200,54 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
     return;
   }
 
+  // --- Push-ilmoitukset. The public key is handed out rather than baked into
+  // the client bundle, because the pair is generated on first boot and lives
+  // in run/vapid.json — the client must ask, or a rebuilt bundle could be
+  // signed against a key this server never had.
+  if (pathname === "/api/push/key" && method === "GET") {
+    sendJson(res, 200, { publicKey: await getVapidPublicKey() });
+    return;
+  }
+  if (pathname === "/api/push/subscribe" && method === "POST") {
+    const body = await readJsonBody<unknown>(req);
+    try {
+      await addSubscription(body);
+    } catch (err) {
+      // A malformed subscription is the client's fault, not a server fault —
+      // 400 so the phone shows the reason instead of "palvelinvirhe".
+      sendError(res, 400, "tilaus hylättiin", err instanceof Error ? err.message : String(err));
+      return;
+    }
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+  if (pathname === "/api/push/test" && method === "POST") {
+    // Exists so the operator can prove the whole chain works while standing in
+    // the field BEFORE the match — an alert path you only discover is broken
+    // when it fails to alert you is worse than no alert path.
+    if ((await getSubscriptionCount()) === 0) {
+      sendError(res, 409, "Ei ilmoitustilauksia — ota ilmoitukset käyttöön ensin");
+      return;
+    }
+    const result = await sendPushDetailed(
+      "Testi-ilmoitus",
+      "Ilmoitukset toimivat. Näin näkyy myös oikea hälytys.",
+      { tag: "test" }
+    );
+    sendJson(res, 200, result);
+    return;
+  }
+  if (pathname === "/api/push/prefs" && method === "GET") {
+    sendJson(res, 200, await getNotificationPrefs());
+    return;
+  }
+  if (pathname === "/api/push/prefs" && method === "POST") {
+    const patch = await readJsonBody<Partial<NotificationPrefs>>(req);
+    sendJson(res, 200, await setNotificationPrefs(patch));
+    return;
+  }
+
   if (pathname === "/api/log" && method === "GET") {
     const limitRaw = query.get("limit");
     const limit = limitRaw ? Number(limitRaw) : undefined;
@@ -228,6 +278,12 @@ async function main(): Promise<void> {
   // know what to poll; the aggregator asks rather than the server pushing it
   // in, so a job activated after the aggregator started is picked up too.
   const live = startLiveAggregator({ getActiveJob });
+
+  // Push triggers ride along as an ordinary subscriber instead of being wired
+  // into the aggregator itself: notifications can then never alter, delay or
+  // break the state the phone renders — the worst a bug in there can do is
+  // fail to notify.
+  live.subscribe(observeLiveState);
 
   const server = createServer((req, res) => {
     // A single route's error must never take the whole server down — every
