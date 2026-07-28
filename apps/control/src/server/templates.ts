@@ -412,7 +412,11 @@ export function buildBroadcastSummary(input: BroadcastSummaryInput): string {
 export function buildBroadcastTexts(input: MatchTemplateInput): BroadcastTexts {
   const { date, time } = localPartsOf(input);
   const title = buildTitle(input);
-  const ageGroup = input.ageGroup ?? resolveAgeGroup(input.teamLabel, input.seriesName, input.home, input.away);
+  // Ikäluokka luetaan ensisijaisesti OMASTA joukkueesta: vastustajan nimessä
+  // voi olla oma kirjaimensa ("SuPo G mustat"), eikä video kuulu sen mukaan.
+  const ownFirst = isOwnTeam(input.away) && !isOwnTeam(input.home) ? [input.away, input.home] : [input.home, input.away];
+  const ageGroup =
+    input.ageGroup ?? resolveAgeGroup(input.teamLabel, ...ownFirst, input.seriesName);
   const playlist = playlistForAgeGroup(ageGroup);
   const matchUrl = matchUrlFor(input.matchId);
   const matchup = `${input.home} - ${input.away}`;
