@@ -76,6 +76,11 @@ export function PushCard({ notify }: Props) {
     }
   };
 
+  const savePref = (patch: Partial<NotificationPrefs>): Promise<void> =>
+    run(async () => {
+      setPrefs(await setPushPrefs(patch));
+    });
+
   const canEnable = status === "off";
   const installHint = status === "needs-install";
 
@@ -168,10 +173,4 @@ export function PushCard({ notify }: Props) {
       />
     </section>
   );
-
-  function savePref(patch: Partial<NotificationPrefs>): Promise<void> {
-    return run(async () => {
-      setPrefs(await setPushPrefs(patch));
-    });
-  }
 }
