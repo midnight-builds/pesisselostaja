@@ -216,8 +216,8 @@ tai vaihtaa kesken ajon samaan control-tiedostoon — viive koskee vain toistoa
 (kuvaan kohdistusta), ei muuta selostuslogiikkaa:
 
 ```bash
-# lisää 4 s selostusviive:
-echo '{"narrationDelayMs": 4000}' > apps/broadcast/run/.control-<ID>.json
+# lisää 5 s selostusviive (oletus on tätä pienempi — ks. config.ts):
+echo '{"narrationDelayMs": 5000}' > apps/broadcast/run/.control-<ID>.json
 # pois (takaisin ilman viivettä):
 echo '{"narrationDelayMs": 0}'    > apps/broadcast/run/.control-<ID>.json
 ```
@@ -244,7 +244,7 @@ katsojat ehtivät paikalle; 0 = pois) ja `RELAY_FINISHED_FAILURE_WINDOW_MS`
 ~2 min ennen itsesammutusta).
 
 Control-tiedostoon voi kirjoittaa useita avaimia yhtä aikaa
-(`{"announceBatterChanges": false, "narrationDelayMs": 4000, "deltaFetch": true, "pollIntervalMs": 3000}`);
+(`{"announceBatterChanges": false, "narrationDelayMs": 5000, "deltaFetch": true, "pollIntervalMs": 3000}`);
 jos kirjoitat vain osan avaimista, muut asetukset säilyvät ennallaan.
 
 **Seuranta.** `journalctl --user -u pesisselostaja-relay -f`:

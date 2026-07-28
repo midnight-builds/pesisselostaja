@@ -49,10 +49,19 @@ const SUMMARY_EVERY_N = 10;
 const IDLE_FILLER_MS = 90 * 1000;
 /** Pre-game: welcome-filler cadence while waiting for the match to start. */
 const WELCOME_FILLER_MS = 90 * 1000;
-/** API fetch timeout. The server response cache is ~5s (see HANDOFF.md 6b),
- *  so waiting longer than the poll interval for a hung request buys nothing —
- *  keep it short so a stuck fetch doesn't stall the fixed poll cadence. */
-const API_TIMEOUT_MS = 4000;
+/** Base API fetch timeout (see apiTimeoutMs() for the effective value).
+ *
+ *  10 s, not the earlier 4 s: a full events fetch returns the WHOLE match
+ *  history, which grows monotonically through the match, so a constant tuned on
+ *  an empty history stops fitting later on. Live match 146210 hit 12 aborted
+ *  fetches in two minutes, in streaks of 3–5, all cut at exactly 4.0 s — i.e.
+ *  the timeout, not the API, was the failure (issue #47). Polls are sequential
+ *  (each cycle awaits its fetch before the next is scheduled, see run()), so a
+ *  longer timeout can never pile requests on top of each other; it only delays
+ *  the next poll, and the no-overlap guard resumes the cadence from now. 10 s is
+ *  the ceiling proposed in #47 and still well under the failure windows that
+ *  decide whether the relay gives up. */
+const API_TIMEOUT_MS = 10_000;
 /** Delta polling (HANDOFF.md 15.7. kohta 6): events carry no per-event
  *  wall-clock field (verified against real data 2026-07-17 — only the
  *  match-epoch-relative `timestamp`), so the `after=` value is derived from
@@ -306,7 +315,7 @@ export class CommentaryLoop {
     const meta = await fetchMatchMetadata(this.config.matchId, {
       apiBase: this.config.apiBase,
       apiKey: this.config.apiKey,
-      timeoutMs: API_TIMEOUT_MS,
+      timeoutMs: this.apiTimeoutMs(),
     });
     const lookup = buildPlayerLookup(meta);
     log(`${meta.home.name} vs ${meta.away.name}`);
@@ -459,13 +468,21 @@ export class CommentaryLoop {
     this.consecutiveFetchFailures = 0;
   }
 
+  /** Effective API fetch timeout: API_TIMEOUT_MS, but never shorter than the
+   *  current poll interval (which the control file can raise past the base
+   *  value live). A timeout below the cadence would abort fetches the very
+   *  cadence expects to be slow — issue #47's acceptance criterion. */
+  private apiTimeoutMs(): number {
+    return Math.max(API_TIMEOUT_MS, this.pollIntervalMs);
+  }
+
   /** Full events fetch: replaces the local history and re-bases the delta
    *  cursor. Used at startup, when delta polling is off, for the periodic
    *  resync, and as the fallback whenever a delta looks untrustworthy. */
   private async fetchFullEvents(): Promise<LiveEventsResult> {
     const res = await fetchLiveEvents(this.config.matchId, {
       apiBase: this.config.apiBase,
-      timeoutMs: API_TIMEOUT_MS,
+      timeoutMs: this.apiTimeoutMs(),
       skipDelay: true,
     });
     this.history.replace(res.events);
@@ -504,7 +521,7 @@ export class CommentaryLoop {
       this.deltaCursor?.after ?? formatHelsinkiTimestamp(new Date(this.lastServerDateMs - AFTER_MARGIN_MS));
     const res = await fetchLiveEvents(this.config.matchId, {
       apiBase: this.config.apiBase,
-      timeoutMs: API_TIMEOUT_MS,
+      timeoutMs: this.apiTimeoutMs(),
       skipDelay: true,
       after,
       etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,
