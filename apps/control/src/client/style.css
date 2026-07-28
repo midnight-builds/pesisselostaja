@@ -181,7 +181,9 @@ body {
 }
 .health--fail {
   border-left-color: var(--fail);
-  background: linear-gradient(180deg, rgba(255, 90, 61, 0.24), rgba(255, 90, 61, 0.06));
+  /* The top stop is what the big word sits on, so it doubles as the ceiling on
+     that word's contrast — kept light enough for --fail-ink to clear 6:1. */
+  background: linear-gradient(180deg, rgba(255, 90, 61, 0.2), rgba(255, 90, 61, 0.06));
 }
 .health--idle {
   border-left-color: var(--idle);
