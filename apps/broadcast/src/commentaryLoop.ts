@@ -49,7 +49,7 @@ const SUMMARY_EVERY_N = 10;
 const IDLE_FILLER_MS = 90 * 1000;
 /** Pre-game: welcome-filler cadence while waiting for the match to start. */
 const WELCOME_FILLER_MS = 90 * 1000;
-/** Base API fetch timeout (see apiTimeoutMs() for the effective value).
+/** Full events fetch timeout (see apiTimeoutMs() for the effective value).
  *
  *  10 s, not the earlier 4 s: a full events fetch returns the WHOLE match
  *  history, which grows monotonically through the match, so a constant tuned on
@@ -61,7 +61,18 @@ const WELCOME_FILLER_MS = 90 * 1000;
  *  the next poll, and the no-overlap guard resumes the cadence from now. 10 s is
  *  the ceiling proposed in #47 and still well under the failure windows that
  *  decide whether the relay gives up. */
-const API_TIMEOUT_MS = 10_000;
+const FULL_FETCH_TIMEOUT_MS = 10_000;
+/** Timeout for the small responses: the delta poll and the one-off metadata
+ *  fetch (issue #81).
+ *
+ *  Deliberately the pre-#47 value, because #47's reasoning does not carry over:
+ *  a delta returns only the new events (a 304 not even that), so it has no
+ *  growing body to be patient about, and it is the fetch that runs EVERY poll —
+ *  i.e. the one that decides how fast a hung API is noticed at all. Inheriting
+ *  the full fetch's 10 s here would only delay detection (and recovery) by ~6 s
+ *  per poll. Aborting a delta costs nothing: the next poll retries immediately
+ *  and the 60 s resync closes any gap. */
+const SMALL_FETCH_TIMEOUT_MS = 4_000;
 /** Delta polling (HANDOFF.md 15.7. kohta 6): events carry no per-event
  *  wall-clock field (verified against real data 2026-07-17 — only the
  *  match-epoch-relative `timestamp`), so the `after=` value is derived from
@@ -330,7 +341,7 @@ export class CommentaryLoop {
     const meta = await fetchMatchMetadata(this.config.matchId, {
       apiBase: this.config.apiBase,
       apiKey: this.config.apiKey,
-      timeoutMs: this.apiTimeoutMs(),
+      timeoutMs: this.apiTimeoutMs("small"),
     });
     const lookup = buildPlayerLookup(meta);
     log(`${meta.home.name} vs ${meta.away.name}`);
@@ -483,12 +494,17 @@ export class CommentaryLoop {
     this.consecutiveFetchFailures = 0;
   }
 
-  /** Effective API fetch timeout: API_TIMEOUT_MS, but never shorter than the
-   *  current poll interval (which the control file can raise past the base
-   *  value live). A timeout below the cadence would abort fetches the very
-   *  cadence expects to be slow — issue #47's acceptance criterion. */
-  private apiTimeoutMs(): number {
-    return Math.max(API_TIMEOUT_MS, this.pollIntervalMs);
+  /** Effective API fetch timeout for a fetch of the given size: the matching
+   *  base constant, but never shorter than the current poll interval (which the
+   *  control file can raise past either base value live). A timeout below the
+   *  cadence would abort fetches the very cadence expects to be slow — issue
+   *  #47's acceptance criterion, which holds for both sizes.
+   *
+   *  "small" covers the delta poll and the startup metadata fetch; "full" the
+   *  whole-history fetch. Why they differ: SMALL_FETCH_TIMEOUT_MS (#81). */
+  private apiTimeoutMs(size: "small" | "full"): number {
+    const base = size === "full" ? FULL_FETCH_TIMEOUT_MS : SMALL_FETCH_TIMEOUT_MS;
+    return Math.max(base, this.pollIntervalMs);
   }
 
   /** Full events fetch: replaces the local history and re-bases the delta
@@ -497,7 +513,7 @@ export class CommentaryLoop {
   private async fetchFullEvents(): Promise<LiveEventsResult> {
     const res = await fetchLiveEvents(this.config.matchId, {
       apiBase: this.config.apiBase,
-      timeoutMs: this.apiTimeoutMs(),
+      timeoutMs: this.apiTimeoutMs("full"),
       skipDelay: true,
     });
     return this.adoptFullSnapshot(res);
@@ -600,7 +616,7 @@ export class CommentaryLoop {
     const after = this.deltaCursor?.after ?? formatHelsinkiTimestamp(new Date(afterMs));
     const res = await fetchLiveEvents(this.config.matchId, {
       apiBase: this.config.apiBase,
-      timeoutMs: this.apiTimeoutMs(),
+      timeoutMs: this.apiTimeoutMs("small"),
       skipDelay: true,
       after,
       etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,

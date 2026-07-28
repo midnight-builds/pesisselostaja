@@ -444,30 +444,69 @@ describe("CommentaryLoop runtime controls: deltaFetch + pollIntervalMs", () => {
 });
 
 /** Issue #47: the 4 s constant aborted healthy full fetches once the match
- *  history had grown (observed live: 12 aborts in 2 min, all cut at 4.0 s). */
+ *  history had grown (observed live: 12 aborts in 2 min, all cut at 4.0 s).
+ *  Issue #81: that patience belongs to the full fetch only — the delta poll
+ *  runs every cycle and is what decides how fast a hung API is noticed. */
 describe("API fetch timeout", () => {
   const timeoutOf = (call: number) => (fetchMock.mock.calls[call][1] as { timeoutMs?: number }).timeoutMs;
 
-  it("is 10 s by default, not the old 4 s", async () => {
-    const loop = makeLoop();
+  /** Seeds history + server date so the next poll actually goes delta. */
+  async function seeded(overrides: Partial<RelayConfig> = {}) {
+    const loop = makeLoop(overrides);
     fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
     await loop.fetchFullEvents();
+    return loop;
+  }
+
+  it("is 10 s for the full fetch, not the old 4 s", async () => {
+    await seeded();
     expect(timeoutOf(0)).toBe(10_000);
   });
 
-  it("applies to delta polls too", async () => {
-    const loop = makeLoop();
-    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
-    await loop.fetchFullEvents();
+  it("is a shorter 4 s for the delta poll — the two are not the same value", async () => {
+    const loop = await seeded();
     fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])], { serverDateMs: T0 + 3000 }));
     await loop.fetchEventsForPoll();
-    expect(timeoutOf(1)).toBe(10_000);
+    expect(timeoutOf(1)).toBe(4_000);
+    expect(timeoutOf(1)).not.toBe(timeoutOf(0));
   });
 
   it("is never shorter than the poll interval, however slow the cadence is set", async () => {
-    const loop = makeLoop({ pollInterval: 15000 });
-    fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
-    await loop.fetchFullEvents();
+    await seeded({ pollInterval: 15000 });
     expect(timeoutOf(0)).toBe(15000);
+  });
+
+  it("lifts the delta timeout with the cadence when the control file raises it live", async () => {
+    const controlFile = "/tmp/pesis-test-control-timeout.json";
+    try {
+      const loop = await seeded({ controlFile });
+      writeFileSync(controlFile, JSON.stringify({ pollIntervalMs: 6000 }));
+      await loop.refreshRuntimeControls();
+
+      fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])], { serverDateMs: T0 + 3000 }));
+      await loop.fetchEventsForPoll();
+      expect(timeoutOf(1)).toBe(6000); // floor wins over the 4 s base…
+
+      fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+      await loop.fetchFullEvents();
+      expect(timeoutOf(2)).toBe(10_000); // …but the full fetch is still longer
+    } finally {
+      rmSync(controlFile, { force: true });
+    }
+  });
+
+  it("gives the full-fetch value to a refetch forced by a shrinking reset answer", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const loop = await seeded();
+      fetchMock.mockResolvedValueOnce(result([], { reset: RESET_AT_ISO })); // fewer events than we hold
+      fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+      await loop.fetchEventsForPoll();
+
+      expect(timeoutOf(1)).toBe(4_000); // the delta that got the reset
+      expect(timeoutOf(2)).toBe(10_000); // the full refetch it forced
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });
