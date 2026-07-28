@@ -14,6 +14,11 @@
  *  POST /api/knobs                {Partial<ControlKnobs>} -> ControlKnobs
  *  POST /api/knobs/delay-nudge    {deltaMs: number}   -> ControlKnobs
  *  GET  /api/log?limit=&level=    -> LogLine[]
+ *  GET  /api/push/key             -> {publicKey}      (VAPID, generated on first boot)
+ *  POST /api/push/subscribe       {PushSubscription}  -> 204
+ *  POST /api/push/test            -> PushSendResult   (409 jos ei tilauksia)
+ *  GET  /api/push/prefs           -> NotificationPrefs
+ *  POST /api/push/prefs           {Partial<NotificationPrefs>} -> NotificationPrefs
  */
 
 import type { ControlKnobs, Job } from "./types.js";
