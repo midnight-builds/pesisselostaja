@@ -319,7 +319,7 @@ had grown to 1.4 G. On startup `index.ts` now applies a retention policy
 | What | Rule | Env var (default) |
 |------|------|-------------------|
 | `relay-<matchId>.pcm`, `.state-<matchId>.json`, `.control-<matchId>.json` | removed when older than N days | `RELAY_RUN_RETENTION_DAYS` (`30`, `0` = off) |
-| `run/tts-cache/<sha256>.pcm` | least-recently-used clips evicted until the directory fits the ceiling | `RELAY_TTS_CACHE_MAX_MB` (`512`, `0` = off) |
+| `run/tts-cache/<sha256>.pcm` | least-recently-used clips evicted until the directory fits the ceiling | `RELAY_TTS_CACHE_MAX_MB` (`1024`, `0` = off) |
 
 Two properties matter more than the numbers:
 
