@@ -100,6 +100,22 @@ export interface LiveState {
   log: LogLine[];
 }
 
+/** Which of the four push triggers the operator wants to be woken by.
+ *
+ *  Server-side state on purpose: the notifications are decided and sent by the
+ *  server, so a preference kept in one phone's localStorage could not silence
+ *  anything. One operator, one set of preferences. */
+export interface NotificationPrefs {
+  /** Lähetys rikki eikä korjaantunut — kriittinen. */
+  broken: boolean;
+  /** Automaattinen korjaus tehtiin (vaiheen B automatiikka). */
+  autoFix: boolean;
+  /** Valmistelu ja käynnistys: relay siirtyi ajoon, tai preflightissa esteitä. */
+  startup: boolean;
+  /** Lähetys päättyi. */
+  ended: boolean;
+}
+
 export type JobStatus =
   | "draft"
   | "scheduled"
