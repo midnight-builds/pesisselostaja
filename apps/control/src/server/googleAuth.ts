@@ -626,12 +626,12 @@ export function buildAuthHealth(input: AuthHealthInput): AuthHealth {
     warnings.push(
       `Kiintiöstä on jäljellä ${quota.remaining} yksikköä — yhden ottelun lähetyspari kuluttaa noin ${QUOTA_COST.insert * 6}.`
     );
-    if (health === "ok") health = "warn";
+    health = worse(health, "warn");
   }
 
   if (input.error) {
     warnings.push(input.error);
-    health = "fail";
+    health = worse(health, "fail");
     headline = `Google-yhteyden tarkistus epäonnistui: ${input.error}`;
   }
 
