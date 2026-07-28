@@ -292,8 +292,8 @@ käyttäjää säätämään puhelimen striimaussovelluksen GOP-asetusta.
 > hallusinointi — jos toistuu, harkitse lyhyiden muotojen poistoa kokonaan.
 
 **Havainto (käyttäjä kuuli livenä, klo 6:46:29 UTC):** kohteessa kuului
-"reewer lyömässä lappalainen" — mutta lokissa selostusteksti oli täysin
-normaali `Selostus: Lyömässä Lappalainen.` (16–20 merkin klippi). Ylimääräinen
+"reewer lyömässä <sukunimi>" — mutta lokissa selostusteksti oli täysin
+normaali `Selostus: Lyömässä <sukunimi>.` (16–20 merkin klippi). Ylimääräinen
 "reewer"-alku ei siis tullut meidän tekstistä vaan **ElevenLabs-synteesistä**.
 
 **Todennäköinen selitys:** ElevenLabsin tunnettu taipumus hallusinoida
@@ -303,7 +303,7 @@ ylimääräisiä äänteitä/sanoja hyvin lyhyiden syötteiden alkuun tai loppuu
 
 **Ei toteutettu — korjausideoita seuraavaan sessioon:**
 1. Pidennä lyhyimpiä fraaseja luonnollisella tavalla (esim. "Ja lyömässä nyt
-   Lappalainen.") — pidempi konteksti vähentää hallusinointia.
+   <sukunimi>.") — pidempi konteksti vähentää hallusinointia.
 2. Kokeile `previous_text`-parametria EL-pyyntöön (antaa mallille kontekstin
    ilman että sitä puhutaan ääneen) — voisi vakauttaa lyhyet klipit.
 3. Seuraa toistuuko: yksittäistapaus voi olla satunnainen; jos toistuu

@@ -2,8 +2,8 @@
 
 ## Mitä tehtiin
 
-Synteettinen ~99s äänidemo joka käyttää oikeita selostusrivejä ottelusta
-**143267** (Ikaalisten Tarmo - IPV, D-tytöt) ja demonstroi Piperin
+Synteettinen ~99s äänidemo joka käyttää relayn oikeaa selostusmuotoilua
+(nimet ja joukkueet keksittyjä) ja demonstroi Piperin
 `noise_w`- ja `length_scale`-parametrien vaikutusta **ilman mallin vaihtoa**
 (sama `fi_FI-harri-medium`). Ei liity videoon, pelkkä ääni.
 
@@ -17,10 +17,10 @@ Joka segmentissä puhuttu selitys (oletusarvoilla) ennen näytettä, lyhyt tauko
 sitten oikea selostusrivi säädetyillä arvoilla:
 
 1. Intro
-2. Oletusarvot (`noise_w=0.8, length_scale=1.0`) — "4 A Tiainen löi juoksun, tuojana 1 A Hupli. 1, 0, IPV johtaa."
-3. `noise_w=1.3` (enemmän tavunpituusvaihtelua) — "6 J Puonti löi juoksun..."
-4. `length_scale=0.85, noise_scale=0.8` (nopeutettu, kunnaria varten) — "8 N Lappalainen löi kunnarin! 22, 2, IPV johtaa."
-5. `length_scale=1.15` (hidastettu, painotusta ottelun lopetukseen) — "Ottelu päättyi! IPV voitti, Tarmo 2, IPV 22."
+2. Oletusarvot (`noise_w=0.8, length_scale=1.0`) — "4 T Salonen löi juoksun, tuojana 1 M Virtanen. 1, 0, Kotikylä johtaa."
+3. `noise_w=1.3` (enemmän tavunpituusvaihtelua) — "6 A Koskinen löi juoksun..."
+4. `length_scale=0.85, noise_scale=0.8` (nopeutettu, kunnaria varten) — "8 K Nieminen löi kunnarin! 22, 2, Kotikylä johtaa."
+5. `length_scale=1.15` (hidastettu, painotusta ottelun lopetukseen) — "Ottelu päättyi! Kotikylä voitti, Pesäkylä 2, Kotikylä 22."
 6. Kolme peräkkäistä ilmoitusta **ilman** välikommentteja, `noise_w` vaihtelee kevyesti (0.75 / 0.95 / 0.85) rivi riviltä — testaa kuulostaako pitkä ottelu vähemmän toistuvalta, kun peräkkäiset samantyyppiset rivit eivät ole akustisesti identtisiä.
 
 ## Skripti
