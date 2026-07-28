@@ -177,10 +177,38 @@ export interface MatchLike {
   id: number;
   home: string;
   away: string;
+  /** API:n `shorthand`, esim. "Joma Punainen". */
+  homeShort?: string | null;
+  awayShort?: string | null;
+  /** API:n `three_letters`, esim. "JOM". */
+  homeCode?: string | null;
+  awayCode?: string | null;
   /** ISO/UTC sellaisena kuin API sen antaa. */
   startsAt: string | null;
   seriesName: string | null;
   stadium: string | null;
+}
+
+/** Yhden joukkueen nimi kolmella tarkkuudella. Lyhennys tehdään aina
+ *  tulospalvelun omilla muodoilla ennen kuin turvaudutaan
+ *  TEAM_ABBREVIATIONS-taulukkoon — API tuntee joukkueiden vakiintuneet
+ *  lyhenteet paremmin kuin käsin ylläpidetty lista. */
+export interface TeamNames {
+  full: string;
+  short?: string | null;
+  code?: string | null;
+}
+
+/** Lyhennystasot: 0 = täysi nimi, 1 = shorthand, 2 = three_letters.
+ *  Otsikkoon pudotaan asteittain, kuvaukseen jäävät aina täydet nimet
+ *  (runbook: "Lyhennys tehdään ensisijaisesti otsikkoon"). */
+export type ShorteningLevel = 0 | 1 | 2;
+
+export function nameAtLevel(team: TeamNames, level: ShorteningLevel): string {
+  const alias = TEAM_ABBREVIATIONS[team.full] ?? null;
+  if (level === 0) return team.full;
+  if (level === 1) return team.short ?? alias ?? team.full;
+  return team.code ?? alias ?? team.short ?? team.full;
 }
 
 export interface MatchTemplateInput {
