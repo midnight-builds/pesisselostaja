@@ -20,7 +20,14 @@ import { readLog } from "./journal.js";
 import { runControlPreflight } from "./preflight.js";
 import { startLiveAggregator } from "./live.js";
 import { getDayMatches, getMatch } from "./matches.js";
-import { listJobs, createJob, patchJob, activateJob, getActiveJob } from "./jobs.js";
+import {
+  listJobs,
+  createJob,
+  patchJob,
+  activateJob,
+  getActiveJob,
+  MatchNotFoundError,
+} from "./jobs.js";
 import { addSubscription, getSubscriptionCount, getVapidPublicKey, sendPushDetailed } from "./push.js";
 import { getNotificationPrefs, observeLiveState, setNotificationPrefs } from "./notifications.js";
 import type { CreateJobRequest, PatchJobRequest, PatchKnobsRequest } from "../shared/api.js";
@@ -142,7 +149,18 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
   }
   if (pathname === "/api/jobs" && method === "POST") {
     const body = await readJsonBody<CreateJobRequest>(req);
-    sendJson(res, 201, await createJob(body));
+    try {
+      sendJson(res, 201, await createJob(body));
+    } catch (err) {
+      // A mistyped match id is the client's mistake, not a server fault: 404
+      // with the Finnish sentence the phone can show as-is, instead of a 500
+      // carrying a raw "Match metadata fetch failed: 404" behind it.
+      if (err instanceof MatchNotFoundError) {
+        sendError(res, 404, err.message);
+        return;
+      }
+      throw err;
+    }
     return;
   }
   const activateMatch = pathname.match(/^\/api\/jobs\/([^/]+)\/activate$/);
