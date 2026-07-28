@@ -96,12 +96,14 @@ function matchLabel(state: LiveState): string {
   return `${job.home} – ${job.away}`;
 }
 
-/** Called for every state the aggregator publishes. Deliberately synchronous
- *  from the caller's point of view — it schedules its own async work and
- *  swallows failures, because a push service outage must never propagate into
- *  the poller. */
-export function observeLiveState(state: LiveState): void {
-  void observe(state).catch((err) => {
+/** Called for every state the aggregator publishes.
+ *
+ *  The returned promise NEVER rejects — a push service outage must not
+ *  propagate into the poller — so the aggregator can treat this as a plain
+ *  void subscriber and ignore it. It is returned only so a test can await one
+ *  observation before asserting on the next. */
+export function observeLiveState(state: LiveState): Promise<void> {
+  return observe(state).catch((err) => {
     console.error("[control] ilmoituslogiikka kaatui:", err);
   });
 }
