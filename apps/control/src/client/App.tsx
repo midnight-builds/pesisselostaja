@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { LiveState } from "../shared/types";
 import { connectLive, type LiveConnectionStatus } from "./api";
 import { TabBar, type TabId } from "./components/TabBar";
@@ -98,7 +98,7 @@ function TabPanel({
 }: {
   id: TabId;
   active: boolean;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div className="tabpanel" data-view={id} hidden={!active}>
