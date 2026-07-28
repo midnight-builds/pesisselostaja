@@ -1,0 +1,19 @@
+[Unit]
+Description=Pesisselostaja Ohjaamo (broadcast control plane)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Ajaa TYÖPUUSTA, toisin kuin relay (joka ajaa pinnatusta ~/relay-deploy:sta).
+# Se on tarkoituksellista: ohjaussovelluksen uudelleenkäynnistys ei kosketa
+# käynnissä olevaa lähetystä, joten sitä saa päivittää myös ottelun aikana.
+WorkingDirectory=/home/codexuser/projects/pesistulokset-voice-watcher
+Environment=CONTROL_PORT=3001
+# Kuuntelee kaikkia rajapintoja, mutta pääsy tulee käytännössä vain
+# tailscale serven kautta (https://codexsrv.tail6875ae.ts.net/). Ei Funnelia.
+ExecStart=/home/codexuser/projects/pesistulokset-voice-watcher/node_modules/.bin/tsx apps/control/src/server/index.ts
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
