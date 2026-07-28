@@ -20,6 +20,12 @@
   --ok: #35C46F;
   --warn: #F0A62F;
   --fail: #FF5A3D;
+  /* Red TEXT sitting on the red tint the fail state paints behind it: --fail
+     itself only reaches 4.18:1 there, and the fail state is precisely the one
+     read in a panic, in sunlight. Lifted until it clears 4.5:1 with room to
+     spare (measured 6.0:1) while still reading as red. Surfaces that are not
+     text — border, dot, lamp — keep --fail. */
+  --fail-ink: #FF8A73;
   --idle: #7F9086;
   --batting: #E2952B;
 
