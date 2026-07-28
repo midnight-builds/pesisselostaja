@@ -134,14 +134,14 @@ async function observe(state: LiveState): Promise<void> {
   let announcedMidMatchStop = false;
   if (prefs.ended && wasActive === true && !isActive && state.job) {
     const midMatch = !state.match.finished;
-    announcedMidMatchStop = await notify(
+    const sent = await notify(
       "relay-ended",
       midMatch ? "Lähetys katkesi" : "Lähetys päättyi",
       midMatch
         ? `${matchLabel(state)} — relay ei ole enää ajossa, mutta ottelu on kesken.`
         : `${matchLabel(state)} — ottelu päättyi ja relay sammui.`
     );
-    if (!midMatch) announcedMidMatchStop = false;
+    announcedMidMatchStop = sent && midMatch;
   }
 
   // --- Lähetys rikki eikä korjaantunut.
