@@ -176,7 +176,73 @@ export const api = {
     if (level) q.set("level", level);
     return request<LogLine[]>(`/api/log?${q.toString()}`);
   },
+
+  // ── YouTube-ketju ───────────────────────────────────────────────────────
+  // Terveysreitti on ainoa joka vastaa 200 myös ilman Google-yhteyttä; kaikki
+  // muut vastaavat 409, ja se on UI:lle tila eikä vika (isAuthMissing).
+  youtubeHealth: () => request<AuthHealth>("/api/youtube/health"),
+  youtubeAuthStart: (payload: { clientId?: string; clientSecret?: string | null }) =>
+    postJson<DeviceFlowStart>("/api/youtube/auth/start", payload),
+  youtubeAuthPoll: () => postJson<DeviceFlowPoll>("/api/youtube/auth/poll"),
+  youtubeBroadcasts: (status: "upcoming" | "active" | "completed" | "all" = "all", limit = 25) =>
+    request<BroadcastRow[]>(`/api/youtube/broadcasts?status=${status}&limit=${limit}`),
+  youtubePlaylists: () => request<PlaylistSummary[]>("/api/youtube/playlists"),
+  templatesPreview: (payload: CreateBroadcastsBody) =>
+    postJson<TemplatePreview>("/api/youtube/templates/preview", payload),
+  /** PERUUTTAMATON ja ulospäin näkyvä: luo kanavalle kaksi lähetystä. Ainoa
+   *  kutsupaikka on vahvistuksen takana (BroadcastCreateCard). */
+  createBroadcasts: (payload: CreateBroadcastsBody) =>
+    postJson<CreatedBroadcastPair>("/api/youtube/broadcasts", payload),
+  /** Metatietojen muokkaus. `confirm` lähtee aina mukana, koska palvelin
+   *  vaatii sen näkyvyyden muutokseen ja UI kysyy sen erikseen. */
+  patchVideo: (videoId: string, payload: VideoPatchBody) =>
+    request<{ videoId: string; title: string; privacyStatus: string | null }>(
+      `/api/youtube/videos/${encodeURIComponent(videoId)}`,
+      { method: "PATCH", body: JSON.stringify({ ...payload, confirm: true }) },
+    ),
+  /** TUHOAVA. Kutsupaikka vaatii kirjoitetun vahvistussanan JA kaksi
+   *  napautusta — tämä funktio ei suojaa mitään, se vain lähettää. */
+  deleteVideo: (videoId: string) =>
+    request<{ videoId: string }>(`/api/youtube/videos/${encodeURIComponent(videoId)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ confirm: true }),
+    }),
+
+  /** PUUTTUVA REITTI: palvelimella ei ole vielä /api/elevenlabs/quota-reittiä.
+   *  UI käsittelee 404:n omana tilanaan (isRouteMissing) ja kertoo mitä
+   *  puuttuu, sen sijaan että näyttäisi "tuntematon reitti". */
+  elevenLabsQuota: () => request<ElevenLabsQuota>("/api/elevenlabs/quota"),
 };
+
+/** Thumbnail-esikatselu ei kulje request()-apurin läpi: reitti palauttaa
+ *  image/png-tavuja, ei JSONia. Virhevastaus on silti JSONia, joten se
+ *  puretaan samalla tavalla kuin muualla — muuten renderöijän puuttuva
+ *  Pillow-asennus näkyisi puhelimella tyhjänä kuvana. */
+export async function fetchThumbnailPreview(opts: ThumbnailRequest): Promise<Blob> {
+  let res: Response;
+  try {
+    res = await fetch("/api/thumbnail/preview", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(opts),
+    });
+  } catch {
+    throw new Error("Palvelimeen ei saada yhteyttä");
+  }
+  if (res.ok) return res.blob();
+
+  const text = await res.text();
+  let message = `Palvelinvirhe (HTTP ${res.status})`;
+  try {
+    const body = JSON.parse(text) as ApiError;
+    if (typeof body?.error === "string") {
+      message = body.detail ? `${body.error}: ${body.detail}` : body.error;
+    }
+  } catch {
+    // Ei JSONia — pidetään geneerinen viesti.
+  }
+  throw new ApiRequestError(message, res.status);
+}
 
 export type LiveConnectionStatus = "connecting" | "open" | "down";
 
