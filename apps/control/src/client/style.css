@@ -127,6 +127,15 @@ body {
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
 }
+/* Tab panels: every view stays mounted (App.tsx), so `display: contents` keeps
+   the shown one laying out as if the shell rendered it directly — no extra box
+   between .scroll and .view, which is what .view--log's height: 100% needs. */
+.tabpanel {
+  display: contents;
+}
+.tabpanel[hidden] {
+  display: none;
+}
 .view {
   display: flex;
   flex-direction: column;
