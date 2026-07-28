@@ -1,6 +1,7 @@
 import type { ControlKnobs, RelayProcess } from "../../shared/types";
 import { duration } from "../format";
 import { ConfirmButton } from "./ConfirmButton";
+import { ToggleRow } from "./ToggleRow";
 
 /** Everything that changes the running broadcast. Two rules shape the layout:
  *  stopping the relay is confirmed (uptime first), and the delay nudges are
@@ -121,37 +122,5 @@ export function LiveControls({ relay, knobs, busy, onRelay, onKnobs, onNudge }: 
         </div>
       </section>
     </>
-  );
-}
-
-function ToggleRow({
-  label,
-  hint,
-  on,
-  disabled,
-  onToggle,
-}: {
-  label: string;
-  hint: string;
-  on: boolean;
-  disabled: boolean;
-  onToggle: (value: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="knob knob--toggle"
-      disabled={disabled}
-      onClick={() => onToggle(!on)}
-      aria-pressed={on}
-    >
-      <span className="knob__text">
-        <span className="knob__label">{label}</span>
-        <span className="knob__hint">{hint}</span>
-      </span>
-      <span className={`switch ${on ? "switch--on" : ""}`}>
-        <span className="switch__knob" />
-      </span>
-    </button>
   );
 }
