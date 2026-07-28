@@ -9,7 +9,13 @@ import { FfmpegMixer, SourceExhaustedError } from "../src/ffmpegMixer.js";
  *  `lifetimeMs`, then exits with code 0. That is exactly the shape of the
  *  issue #45 incident: the spawn succeeds, ffmpeg dies cleanly seconds later. */
 function fakeFfmpeg(fifoPath: string, lifetimeMs: number): ChildProcess {
-  const script = `cat "$1" > /dev/null & reader=$!; sleep ${lifetimeMs / 1000}; kill $reader 2>/dev/null; exit 0`;
+  // Dies on SIGTERM too (that is how a scheduled URL refresh ends a session),
+  // taking the FIFO reader with it so no stray `cat` survives the test.
+  const script =
+    `cat "$1" > /dev/null & reader=$!; ` +
+    `trap 'kill $reader 2>/dev/null; exit 0' TERM; ` +
+    `sleep ${lifetimeMs / 1000} & sleeper=$!; wait $sleeper; ` +
+    `kill $reader 2>/dev/null; exit 0`;
   return spawn("sh", ["-c", script, "sh", fifoPath], { stdio: ["ignore", "ignore", "ignore"] });
 }
 
@@ -20,6 +26,7 @@ interface SessionMixerOpts {
   minProductiveRunMs: number;
   finishedFailureWindowMs: number;
   maxFailureWindowMs?: number;
+  urlRefreshMs?: number;
   sessions: number[];
 }
 
@@ -36,6 +43,7 @@ function sessionMixer(o: SessionMixerOpts): FfmpegMixer {
     finishedFailureWindowMs: o.finishedFailureWindowMs,
     maxFailureWindowMs: o.maxFailureWindowMs ?? 10 * 60 * 1000,
     minProductiveRunMs: o.minProductiveRunMs,
+    urlRefreshMs: o.urlRefreshMs ?? 15 * 60 * 1000,
     // Never actually read: the fake process ignores the argv it is handed.
     resolveTestSource: () => "/dev/null",
     spawnMixerProcess: () => {
@@ -49,14 +57,14 @@ function sessionMixer(o: SessionMixerOpts): FfmpegMixer {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  for (const p of ["a", "b", "c"]) {
+  for (const p of ["a", "b", "c", "d"]) {
     await unlink(`/tmp/pesis-test-short-session-${p}.pcm`).catch(() => undefined);
   }
 });
 
 describe("FfmpegMixer give-up window when ffmpeg starts but dies immediately (issue #45)", () => {
   it("gives up after repeated clean code=0 exits seconds after start-up", async () => {
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const sessions: number[] = [];
     const mixer = sessionMixer({
       fifoPath: "/tmp/pesis-test-short-session-a.pcm",
@@ -75,6 +83,15 @@ describe("FfmpegMixer give-up window when ffmpeg starts but dies immediately (is
     }
     expect(sessions.length).toBeGreaterThanOrEqual(2); // it really did run sessions
     expect(Math.max(...sessions)).toBeLessThan(10_000);
+    // The verdict must name the real reason. ffmpeg started every time, so
+    // neither the start-up-failure log line nor its "ei ole vastannut"
+    // wording may appear (they did while the give-up error leaked into
+    // start()'s own catch block).
+    await expect(sessionMixer({
+      fifoPath: "/tmp/pesis-test-short-session-a.pcm",
+      lifetimesMs: [200], minProductiveRunMs: 10_000, finishedFailureWindowMs: 50, sessions: [],
+    }).start()).rejects.toThrow(/kuollut alle 10 sekunnissa/);
+    expect(logSpy.mock.calls.map((c) => String(c[0])).join("\n")).not.toContain("ffmpeg-käynnistysvirhe");
   }, 20000);
 
   it("does NOT give up on a healthy run that crashes — it just respawns", async () => {
@@ -135,5 +152,42 @@ describe("FfmpegMixer give-up window when ffmpeg starts but dies immediately (is
     expect(outcome).toBe("still-running");
     expect(sessions.length).toBeGreaterThanOrEqual(4);
     expect(sessions.some((ms) => ms >= 300)).toBe(true); // the source did come back
+  }, 25000);
+
+  it("clears the window on a healthy session that ends in OUR OWN scheduled URL refresh", async () => {
+    // The production case: urlRefreshMs (15 min) > maxFailureWindowMs (12 min),
+    // so on a perfectly healthy source EVERY session ends in a refresh kill. If
+    // a refresh kill were treated as neutral before checking the run length, a
+    // failingSince set by one early blip would never be cleared again and the
+    // next brief blip — hours later, mid-match — would shut the relay down.
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const sessions: number[] = [];
+    const afterThirdSession = new Promise<void>((resolve) => {
+      const poll = setInterval(() => {
+        if (sessions.length >= 3) {
+          clearInterval(poll);
+          setTimeout(resolve, 300);
+        }
+      }, 50);
+    });
+    const mixer = sessionMixer({
+      fifoPath: "/tmp/pesis-test-short-session-d.pcm",
+      // blip → long healthy session (cut short only by the refresh) → blip.
+      // The 20 s lifetime is never reached: the refresh kills it at ~0.9 s
+      // (urlRefreshMs + the mixer's 500 ms drain grace).
+      lifetimesMs: [100, 20_000, 100],
+      urlRefreshMs: 400,
+      minProductiveRunMs: 500,
+      finishedFailureWindowMs: 1500,
+      sessions,
+    });
+    const outcome = await Promise.race([
+      mixer.start().then(() => "resolved", (e) => (e instanceof SourceExhaustedError ? "gave-up" : "other-error")),
+      afterThirdSession.then(() => "still-running"),
+    ]);
+    mixer.stop();
+    expect(outcome).toBe("still-running");
+    expect(sessions[1]).toBeGreaterThanOrEqual(500); // the refresh-killed run was healthy
+    expect(sessions[1]).toBeLessThan(20_000); // …and it really was the refresh that ended it
   }, 25000);
 });
