@@ -71,7 +71,7 @@ type ChainKey = ChainStatus["key"];
  *  relay row, and if they shared a key a later success would quietly erase an
  *  earlier failure — the exact "shows green while it's broken" bug this whole
  *  view exists to prevent. */
-type SourceKey = ChainKey | "job" | "knobs" | "log";
+type SourceKey = ChainKey | "job" | "knobs" | "log" | "narration";
 
 export interface LiveAggregator {
   subscribe(fn: (state: LiveState) => void): () => void;
@@ -225,7 +225,7 @@ function deriveHealth(snap: Snapshot): { health: Health; headline: string } {
     };
   }
 
-  // 3. No work at all. Checked before the "all good" rules so an idle box reads
+  // 4. No work at all. Checked before the "all good" rules so an idle box reads
   //    as idle instead of as a healthy broadcast.
   if (!job) {
     return relay.active
@@ -238,7 +238,7 @@ function deriveHealth(snap: Snapshot): { health: Health; headline: string } {
       : { health: "idle", headline: "Ei aktiivista lähetystä" };
   }
 
-  // 4. Flapping. The stream technically exists but viewers hear gaps, so this
+  // 5. Flapping. The stream technically exists but viewers hear gaps, so this
   //    is a warning the operator can act on (check the phone's uplink) rather
   //    than a failure we should escalate.
   if (respawns >= RESPAWN_WARN_COUNT) {
@@ -248,19 +248,19 @@ function deriveHealth(snap: Snapshot): { health: Health; headline: string } {
     };
   }
 
-  // 5. Relay up, match still going: the normal, boring, good case. The duration
+  // 6. Relay up, match still going: the normal, boring, good case. The duration
   //    is the detail the operator actually wants ("42 min").
   if (relay.active && !match.finished) {
     return { health: "ok", headline: `Lähetys kunnossa, ${minutes(relay.uptimeSec)}` };
   }
 
-  // 6. Match over but the unit still up — expected: the relay shuts itself down
+  // 7. Match over but the unit still up — expected: the relay shuts itself down
   //    once the source ends, and we never cut it short (uptime first).
   if (relay.active && match.finished) {
     return { health: "ok", headline: "Ottelu päättyi — relay sammuu itse kun lähde loppuu" };
   }
 
-  // 7. Job exists, relay down, but the job isn't claiming to be live: waiting
+  // 8. Job exists, relay down, but the job isn't claiming to be live: waiting
   //    for kickoff or already wrapped up.
   if (job.status === "finished" || job.status === "cancelled") {
     return { health: "idle", headline: "Työ on päättynyt" };
@@ -354,8 +354,12 @@ function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainStatus[] {
   }
 
   // --- API: pesistulokset, the source of everything we narrate.
-  if (errors.has("api")) {
-    rows.push(chainRow("api", "Tulospalvelu", "fail", errors.get("api") ?? "haku epäonnistui"));
+  // Both pesistulokset reads (scoreboard + narration source) report here, each
+  // under its own key — sharing one would let a success on either erase the
+  // other's failure.
+  const apiError = errors.get("api") ?? errors.get("narration");
+  if (apiError) {
+    rows.push(chainRow("api", "Tulospalvelu", "fail", apiError));
   } else if (!job) {
     rows.push(chainRow("api", "Tulospalvelu", "idle", "ei pollata ilman työtä"));
   } else if (match.eventCount === 0) {
@@ -590,7 +594,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       await track("api", () => getMatchState(matchId), (value) => {
         match = value;
       });
-      await track("api", () => pollNarration(matchId), () => undefined);
+      await track("narration", () => pollNarration(matchId), () => undefined);
       publish();
     } finally {
       matchBusy = false;

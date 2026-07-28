@@ -8,7 +8,7 @@ Wants=network-online.target
 # Se on tarkoituksellista: ohjaussovelluksen uudelleenkäynnistys ei kosketa
 # käynnissä olevaa lähetystä, joten sitä saa päivittää myös ottelun aikana.
 WorkingDirectory=/home/codexuser/projects/pesistulokset-voice-watcher
-Environment=CONTROL_PORT=3001
+Environment=CONTROL_PORT=3002
 # Kuuntelee kaikkia rajapintoja, mutta pääsy tulee käytännössä vain
 # tailscale serven kautta (https://codexsrv.tail6875ae.ts.net/). Ei Funnelia.
 ExecStart=/home/codexuser/projects/pesistulokset-voice-watcher/node_modules/.bin/tsx apps/control/src/server/index.ts
