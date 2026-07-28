@@ -15,6 +15,7 @@
 import { runPreflight, summarize, type Check } from "../../../broadcast/src/preflight.js";
 import type { PreflightCheck, PreflightResult } from "../shared/types.js";
 import { CONFIG } from "./config.js";
+import { notifyPreflightBlockers } from "./notifications.js";
 
 /** Check and PreflightCheck have the same shape today; the mapping is explicit
  *  so a future field on either side breaks the typecheck instead of leaking. */
@@ -40,11 +41,17 @@ export async function runControlPreflight(): Promise<PreflightResult> {
   // The same env file systemd hands the unit — see the runbook: preflight has
   // to check what the service would actually run, not what the UI thinks.
   const checks = await runPreflight(CONFIG.relayEnvPath);
-  return {
+  const result: PreflightResult = {
     ranAt: new Date().toISOString(),
     checks: checks.map(toWireCheck),
     blockers: checks.filter((c) => c.status === "fail").length,
     warnings: checks.filter((c) => c.status === "warn").length,
     summary: summaryLine(checks),
   };
+  // The push lives here rather than in the route so that EVERY preflight run
+  // is covered — including phase B's automatic arming, where a blocker is
+  // found with nobody looking at the screen. Fire-and-forget: a push service
+  // outage must not turn a successful preflight into an HTTP 500.
+  void notifyPreflightBlockers(result).catch(() => undefined);
+  return result;
 }
