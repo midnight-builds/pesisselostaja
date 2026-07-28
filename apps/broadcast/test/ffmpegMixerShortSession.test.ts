@@ -8,15 +8,22 @@ import { FfmpegMixer, SourceExhaustedError } from "../src/ffmpegMixer.js";
  *  handshake and makes the attempt count as "started" — stays up for
  *  `lifetimeMs`, then exits with code 0. That is exactly the shape of the
  *  issue #45 incident: the spawn succeeds, ffmpeg dies cleanly seconds later. */
-function fakeFfmpeg(fifoPath: string, lifetimeMs: number): ChildProcess {
+function fakeFfmpeg(fifoPath: string, lifetimeMs: number, stderrLine?: string): ChildProcess {
   // Dies on SIGTERM too (that is how a scheduled URL refresh ends a session),
   // taking the FIFO reader with it so no stray `cat` survives the test.
+  // `stderrLine` lets a test reproduce what ffmpeg prints when the TARGET
+  // refuses the push (issue #51); stderr is piped only then, so the other
+  // tests stay quiet.
+  const emit = stderrLine ? `printf '%s\\n' "$2" >&2; ` : "";
   const script =
+    emit +
     `cat "$1" > /dev/null & reader=$!; ` +
     `trap 'kill $reader 2>/dev/null; exit 0' TERM; ` +
     `sleep ${lifetimeMs / 1000} & sleeper=$!; wait $sleeper; ` +
     `kill $reader 2>/dev/null; exit 0`;
-  return spawn("sh", ["-c", script, "sh", fifoPath], { stdio: ["ignore", "ignore", "ignore"] });
+  return spawn("sh", ["-c", script, "sh", fifoPath, stderrLine ?? ""], {
+    stdio: ["ignore", "ignore", stderrLine ? "pipe" : "ignore"],
+  });
 }
 
 interface SessionMixerOpts {
@@ -27,6 +34,7 @@ interface SessionMixerOpts {
   finishedFailureWindowMs: number;
   maxFailureWindowMs?: number;
   urlRefreshMs?: number;
+  stderrLine?: string;
   sessions: number[];
 }
 
@@ -49,7 +57,7 @@ function sessionMixer(o: SessionMixerOpts): FfmpegMixer {
     spawnMixerProcess: () => {
       const lifetime = o.lifetimesMs[Math.min(index, o.lifetimesMs.length - 1)]!;
       index++;
-      return fakeFfmpeg(o.fifoPath, lifetime);
+      return fakeFfmpeg(o.fifoPath, lifetime, o.stderrLine);
     },
     onSessionEnd: (_at, ranMs) => o.sessions.push(ranMs),
   });
@@ -57,7 +65,7 @@ function sessionMixer(o: SessionMixerOpts): FfmpegMixer {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  for (const p of ["a", "b", "c", "d"]) {
+  for (const p of ["a", "b", "c", "d", "e"]) {
     await unlink(`/tmp/pesis-test-short-session-${p}.pcm`).catch(() => undefined);
   }
 });
@@ -90,7 +98,7 @@ describe("FfmpegMixer give-up window when ffmpeg starts but dies immediately (is
     await expect(sessionMixer({
       fifoPath: "/tmp/pesis-test-short-session-a.pcm",
       lifetimesMs: [200], minProductiveRunMs: 10_000, finishedFailureWindowMs: 50, sessions: [],
-    }).start()).rejects.toThrow(/kuollut alle 10 sekunnissa/);
+    }).start()).rejects.toThrow(/kuolleet alle 10 sekunnissa/);
     expect(logSpy.mock.calls.map((c) => String(c[0])).join("\n")).not.toContain("ffmpeg-käynnistysvirhe");
   }, 20000);
 
@@ -153,6 +161,33 @@ describe("FfmpegMixer give-up window when ffmpeg starts but dies immediately (is
     expect(sessions.length).toBeGreaterThanOrEqual(4);
     expect(sessions.some((ms) => ms >= 300)).toBe(true); // the source did come back
   }, 25000);
+
+  it("blames the TARGET, not the source, when ffmpeg's errors came from RTMP (issue #51)", async () => {
+    // The 145164 shape: the push is refused (wrong stream key / another encoder
+    // on the same key), so ffmpeg starts, errors and dies in seconds — exactly
+    // the same session shape a dead phone produces. Since issue #45's fix makes
+    // those short runs accrue toward the give-up window, the relay shuts down;
+    // without this classification it would shut down blaming the source and
+    // send the operator to check the phone.
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const err = await sessionMixer({
+        fifoPath: "/tmp/pesis-test-short-session-e.pcm",
+        lifetimesMs: [200],
+        minProductiveRunMs: 10_000,
+        finishedFailureWindowMs: 50,
+        stderrLine: "[rtmp @ 0x55f1a0] Server error: Authentication Failed.",
+        sessions: [],
+      }).start().then(() => null, (e) => e);
+
+      expect(err).toBeInstanceOf(SourceExhaustedError);
+      expect(String((err as Error).message)).toMatch(/KOHTEESEEN/);
+      const logged = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(logged).toMatch(/stream key/i);
+    } finally {
+      logSpy.mockRestore();
+    }
+  }, 20000);
 
   it("clears the window on a healthy session that ends in OUR OWN scheduled URL refresh", async () => {
     // The production case: urlRefreshMs (15 min) > maxFailureWindowMs (12 min),

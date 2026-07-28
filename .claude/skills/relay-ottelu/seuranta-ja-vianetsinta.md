@@ -90,6 +90,12 @@ Se tapahtuu näissä tilanteissa (`ffmpegMixer.ts`, `config.ts`):
 
 - **ffmpeg kaatuu heti FIFO-inputtiin** → pipe ei ehtinyt syntyä; itsekorjautuu
   seuraavassa respawn-syklissä.
+- **Lyheneviä ajoja + `code=0`, ei selostusta ulos** → relay kertoo nyt itse
+  kumman pään ffmpeg näki rikkinäisenä. Etsi lokista rivi joka alkaa
+  "ffmpegin virheet tulivat" — KOHTEEN puolelta = tarkista stream key ja ettei
+  toinen enkooderi työnnä samalla avaimella; LÄHTEEN puolelta = tarkista
+  puhelin. Jos rivi sanoo ettei kumpaakaan puolta voi päätellä, se on rehellinen
+  vastaus eikä arvausta kannata tehdä lokin perusteella.
 - **yt-dlp ei palauta URLia / 403** → alkuperäinen lähetys päättyi, on
   yksityinen, tai YouTube rate-limitoi; tarkista `yt-dlp --version` ja päivitä.
 - **Ei selostusta mutta ffmpeg terve** → tarkista `RELAY_NARRATION_GAIN` ≠ 0 ja
