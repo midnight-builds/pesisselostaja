@@ -30,6 +30,13 @@ import {
 } from "./jobs.js";
 import { addSubscription, getSubscriptionCount, getVapidPublicKey, sendPushDetailed } from "./push.js";
 import { getNotificationPrefs, observeLiveState, setNotificationPrefs } from "./notifications.js";
+import {
+  parseThumbnailRequest,
+  renderThumbnail,
+  thumbnailCachePath,
+  thumbnailId,
+  ThumbnailRenderError,
+} from "./thumbnail.js";
 import type { CreateJobRequest, PatchJobRequest, PatchKnobsRequest } from "../shared/api.js";
 import type { LiveState, NotificationPrefs } from "../shared/types.js";
 
@@ -182,6 +189,65 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
 
   if (pathname === "/api/preflight" && method === "POST") {
     sendJson(res, 200, await runControlPreflight());
+    return;
+  }
+
+  // Preview renders through the exact same function as the saved render
+  // (DESIGN.md: "esikatselu on totuus") — the only difference is that this
+  // route hands back the PNG bytes directly instead of a stored id, because a
+  // live preview has nothing to save yet.
+  if (pathname === "/api/thumbnail/preview" && method === "POST") {
+    const body = await readJsonBody<unknown>(req);
+    let opts;
+    try {
+      opts = parseThumbnailRequest(body);
+    } catch (err) {
+      sendError(res, 400, err instanceof Error ? err.message : "virheellinen pyyntö");
+      return;
+    }
+    try {
+      const png = await renderThumbnail(opts);
+      res.writeHead(200, {
+        "Content-Type": "image/png",
+        "Content-Length": png.length,
+        // Every keystroke can change the text, and the id below already
+        // gives the client a stable cache key if it wants one — the browser
+        // must not serve a stale preview for a URL it never saw before.
+        "Cache-Control": "no-store",
+      });
+      res.end(png);
+    } catch (err) {
+      if (err instanceof ThumbnailRenderError) {
+        sendError(res, 502, err.message);
+        return;
+      }
+      throw err;
+    }
+    return;
+  }
+  if (pathname === "/api/thumbnail/render" && method === "POST") {
+    const body = await readJsonBody<unknown>(req);
+    let opts;
+    try {
+      opts = parseThumbnailRequest(body);
+    } catch (err) {
+      sendError(res, 400, err instanceof Error ? err.message : "virheellinen pyyntö");
+      return;
+    }
+    try {
+      await renderThumbnail(opts);
+    } catch (err) {
+      if (err instanceof ThumbnailRenderError) {
+        sendError(res, 502, err.message);
+        return;
+      }
+      throw err;
+    }
+    // The id doubles as the cache key (thumbnail.ts) and as the handle a
+    // later YouTube-upload step asks for by name; path is handed back too so
+    // an operator can find the file from a shell without recomputing it.
+    const id = thumbnailId(opts);
+    sendJson(res, 200, { id, path: thumbnailCachePath(id) });
     return;
   }
 
