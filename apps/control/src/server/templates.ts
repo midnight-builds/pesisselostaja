@@ -261,6 +261,10 @@ export interface BroadcastTexts {
   matchup: string;
   /** videos.recordingDetails.locationDescription -kenttään. */
   venue: string;
+  /** Valmiit syötteet renderThumbnail({ headline, datetime, venue, narrated }):lle. */
+  thumbnailHeadline: string;
+  thumbnailDatetime: string;
+  thumbnailVenue: string;
 }
 
 // --- Apurit -----------------------------------------------------------------
@@ -510,7 +514,10 @@ export function buildBroadcastTexts(input: MatchTemplateInput): BroadcastTexts {
     input.ageGroup ?? resolveAgeGroup(input.teamLabel, ...ownFirst, input.seriesName);
   const playlist = playlistForAgeGroup(ageGroup);
   const matchUrl = matchUrlFor(input.matchId);
+  // Jaettavassa viestissä ottelupari on koti - vieras täysillä nimillä: siinä
+  // ei ole pituusrajaa, ja lukija tunnistaa seurat parhaiten kokonimestä.
   const matchup = `${input.home} - ${input.away}`;
+  const venue = [input.venue, input.city].filter((v): v is string => Boolean(v)).join(", ");
 
   return {
     title,
@@ -525,6 +532,11 @@ export function buildBroadcastTexts(input: MatchTemplateInput): BroadcastTexts {
     scheduledLocal: formatScheduledLocal(date, time),
     matchUrl,
     matchup,
-    venue: [input.venue, input.city].filter((v): v is string => Boolean(v)).join(", ") || (input.shortVenue ?? ""),
+    venue: venue || (input.shortVenue ?? ""),
+    thumbnailHeadline: buildThumbnailHeadline(input),
+    thumbnailDatetime: formatScheduledLocal(date, time),
+    // Thumbnailiin lyhyt paikkamuoto (runbook: "Leiripelit" — thumbnailissa
+    // riittää lyhyt tieto), tarkka kenttä jää kuvaukseen.
+    thumbnailVenue: input.shortVenue ?? input.city ?? venue,
   };
 }
