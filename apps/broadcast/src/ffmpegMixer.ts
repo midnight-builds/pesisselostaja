@@ -13,15 +13,21 @@ export interface FfmpegMixerOptions {
    *  rotated source URL gets picked up (default 15 min). */
   urlRefreshMs?: number;
   /** Give up and stop retrying after this many milliseconds of unbroken
-   *  start-up failures — protects against retrying forever once the source
-   *  broadcast has genuinely ended (default 5 min). */
+   *  unproductive attempts — a start-up failure, or a session that died in
+   *  under minProductiveRunMs — which protects against retrying forever once
+   *  the source broadcast has genuinely ended (default 5 min). */
   maxFailureWindowMs?: number;
   /** Shorter give-up window used in place of maxFailureWindowMs while
    *  isMatchFinished() reports true — after "Ottelu päättyi" a dead source
    *  won't come back, so waiting the full generous window only delays
-   *  cleanup (default 2 min). Applies to the same unbroken start-up-failure
-   *  accounting; clean ffmpeg exits (flapping source) still never accrue. */
+   *  cleanup (default 2 min). Applies to the same unproductive-attempt
+   *  accounting. */
   finishedFailureWindowMs?: number;
+  /** Shortest ffmpeg run that counts as the source actually producing
+   *  broadcast (default 60 s). A session that ends sooner is counted as a
+   *  failed attempt even when ffmpeg exited cleanly with code=0 — see
+   *  minProductiveRunMs below / issue #45. */
+  minProductiveRunMs?: number;
   /** Lets the supervisor know the match has ended (the commentary loop owns
    *  that state), for finishedFailureWindowMs. Absent → always false. */
   isMatchFinished?: () => boolean;
@@ -51,6 +57,22 @@ export interface FfmpegMixerOptions {
   onSessionStart?: (epochMs: number) => void;
   /** Test-only: fired once a session's ffmpeg process has exited. */
   onSessionEnd?: (epochMs: number, ranMs: number) => void;
+  /** Test-only: spawns the mixing process in place of ffmpeg, given the exact
+   *  argv the real ffmpeg would have received. Lets a test drive the whole
+   *  supervisor loop — FIFO handshake, session accounting, respawn, give-up —
+   *  with a stand-in process whose lifetime and exit code it controls, without
+   *  any ffmpeg binary or real broadcast. Never set in production; see
+   *  apps/broadcast/docs/adr/0002-ffmpeg-mixer-process-seam.md. */
+  spawnMixerProcess?: (args: string[]) => ChildProcess;
+}
+
+/** A finished ffmpeg session, as reported back to the supervisor loop. */
+interface SessionResult {
+  /** Monotonic milliseconds from spawn to process exit. */
+  ranMs: number;
+  /** True when *we* ended the session on purpose (scheduled URL refresh), so
+   *  its length says nothing about the source's health. */
+  refreshKill: boolean;
 }
 
 /** foo.mp4 -> foo.session3.mp4, so successive respawns never overwrite each
@@ -131,6 +153,16 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Monotonic milliseconds. Every *duration* the supervisor measures uses this
+ *  rather than Date.now(): an NTP step backwards would otherwise make a
+ *  healthy hour-long session look like a seconds-long failed one (→ false
+ *  self-shutdown), and a step forwards could blow through the give-up window
+ *  in one tick. Wall-clock time is kept only where an actual epoch is reported
+ *  outward (firstAttachedAt, onSessionStart/onSessionEnd). */
+function monoNow(): number {
+  return performance.now();
+}
+
 /** How often to emit a liveness line during an otherwise quiet healthy run,
  *  so a long eventless stretch is distinguishable from a hang in the logs. */
 const HEARTBEAT_MS = 2 * 60 * 1000;
@@ -174,10 +206,27 @@ export class FfmpegMixer {
   private stopped = false;
   private backoffMs = 1000;
   private refreshTimer: NodeJS.Timeout | null = null;
-  /** When the current unbroken run of start-up failures began, or null if
-   *  the last attempt succeeded. Used to give up after maxFailureWindowMs. */
+  /** When the current unbroken run of *unproductive* attempts began, or null
+   *  if the source has since produced a real run. Used to give up after
+   *  maxFailureWindowMs. An attempt is unproductive when it either never
+   *  started (yt-dlp/ffmpeg start-up failure) or started and then ended in
+   *  under minProductiveRunMs. A successful *start* on its own must never
+   *  clear this: when the source device dies mid-match (issue #45) yt-dlp
+   *  keeps handing out a valid URL, every spawn succeeds, and ffmpeg exits
+   *  cleanly (code=0) seconds later — an endless respawn loop in which the
+   *  old "reset on any successful spawn" rule meant the window never accrued
+   *  and the relay never shut itself down. */
   private failingSince: number | null = null;
   private readonly maxFailureWindowMs: number;
+  /** Shortest run that counts as the source actually producing broadcast.
+   *  Chosen well above a respawn's start-up cost but well below any believable
+   *  broadcast segment (the scheduled URL refresh runs every 15 min, and is
+   *  exempt from this accounting anyway), because a false give-up mid-match is
+   *  worse than a relay left standing. */
+  private readonly minProductiveRunMs: number;
+  /** Set while a kill we requested ourselves (URL refresh) is in flight, so
+   *  the resulting short session isn't mistaken for a dying source. */
+  private refreshKillRequested = false;
   /** Counts spawn attempts so recordFile can be indexed per session. */
   private sessionIndex = 0;
   /** True only while an ffmpeg session is attached as a FIFO reader (between a
@@ -195,6 +244,7 @@ export class FfmpegMixer {
   constructor(private opts: FfmpegMixerOptions) {
     this.fifo = new NarrationFifo(opts.fifoPath);
     this.maxFailureWindowMs = opts.maxFailureWindowMs ?? 5 * 60 * 1000;
+    this.minProductiveRunMs = opts.minProductiveRunMs ?? 60 * 1000;
   }
 
   enqueueNarration(pcm: Buffer): void {
@@ -226,17 +276,24 @@ export class FfmpegMixer {
     this.stopped = false;
     while (!this.stopped) {
       try {
-        await this.spawnOnce();
-        this.failingSince = null;
+        const session = await this.spawnOnce();
         this.scheduledSince = null;
+        if (this.stopped) break;
+        this.noteSessionEnd(session);
       } catch (err) {
+        // Our own give-up verdict (from noteSessionEnd above) passes straight
+        // through: it is not a start-up failure, and letting it fall into the
+        // handling below would log "ffmpeg-käynnistysvirhe" and replace the
+        // real reason with the misleading "Lähde ei ole vastannut" wording,
+        // even though ffmpeg started every single time.
+        if (err instanceof SourceExhaustedError) throw err;
         // A broadcast scheduled to start later is not a failure: YouTube is
         // confirming the source exists. Counting those answers toward the
         // give-up window is what forced starting the relay in a narrow slot
         // just before kickoff (match 144918, 27.7.) — wait instead.
         if (err instanceof SourceNotLiveYetError) {
-          if (this.scheduledSince === null) this.scheduledSince = Date.now();
-          if (Date.now() - this.scheduledSince > SCHEDULED_WAIT_MAX_MS) {
+          if (this.scheduledSince === null) this.scheduledSince = monoNow();
+          if (monoNow() - this.scheduledSince > SCHEDULED_WAIT_MAX_MS) {
             this.stopped = true;
             throw new SourceExhaustedError(
               `Lähde on ollut "alkaa pian" -tilassa yli ${Math.round(SCHEDULED_WAIT_MAX_MS / 3600000)} h ` +
@@ -253,21 +310,7 @@ export class FfmpegMixer {
         }
         this.scheduledSince = null;
         log(`ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
-        if (this.failingSince === null) this.failingSince = Date.now();
-        // A finished match's source won't come back — use the much shorter
-        // window then (HANDOFF.md 16.7. kohta 6.2). Only this start-up-failure
-        // accounting is affected; clean exits (flapping source) still reset
-        // failingSince above and never accrue toward giving up.
-        const windowMs = this.opts.isMatchFinished?.()
-          ? (this.opts.finishedFailureWindowMs ?? 2 * 60 * 1000)
-          : this.maxFailureWindowMs;
-        if (Date.now() - this.failingSince > windowMs) {
-          this.stopped = true;
-          throw new SourceExhaustedError(
-            `Lähde ei ole vastannut ${Math.round(windowMs / 60000)} minuuttiin` +
-              `${this.opts.isMatchFinished?.() ? " ja ottelu on päättynyt" : ""} — luovutetaan.`
-          );
-        }
+        this.noteUnproductiveAttempt((mins) => `Lähde ei ole vastannut ${mins} minuuttiin`);
       }
       if (this.stopped) break;
       log(`Uudelleenyritys ${this.backoffMs}ms kuluttua…`);
@@ -276,13 +319,64 @@ export class FfmpegMixer {
     }
   }
 
+  /** Judges a finished ffmpeg session: a run long enough to be real broadcast
+   *  clears the give-up window (and the backoff). A session that died right
+   *  after starting counts as a failed attempt no matter how cleanly ffmpeg
+   *  exited — that is exactly the shape of a source whose broadcast has ended
+   *  abnormally while yt-dlp still resolves a URL (issue #45).
+   *
+   *  Order matters: the productive-run check comes FIRST, so a healthy session
+   *  that happens to end in our own scheduled URL refresh still clears the
+   *  window. In production every healthy session ends that way (urlRefreshMs
+   *  15 min > maxFailureWindowMs 12 min), so treating a refresh kill as
+   *  neutral up front would mean a once-set failingSince never cleared again
+   *  and the next brief blip would shut a perfectly healthy relay down
+   *  mid-match. refreshKill only excuses a SHORT session: there the kill, not
+   *  the source, is why the run was short. */
+  private noteSessionEnd(session: SessionResult): void {
+    if (session.ranMs >= this.minProductiveRunMs) {
+      this.failingSince = null;
+      this.backoffMs = 1000; // fresh backoff after a healthy run
+      return;
+    }
+    if (session.refreshKill) return;
+    log(
+      `ffmpeg kuoli alle ${Math.round(this.minProductiveRunMs / 1000)} s käynnistyksestä — ` +
+        "lasketaan epäonnistuneeksi yritykseksi (lähde ei tuota lähetystä)."
+    );
+    this.noteUnproductiveAttempt(
+      (mins) =>
+        `Lähde on käynnistynyt mutta kuollut alle ${Math.round(this.minProductiveRunMs / 1000)} sekunnissa ` +
+        `${mins} minuutin ajan`
+    );
+  }
+
+  /** Records an attempt that produced no broadcast and gives up (throws
+   *  SourceExhaustedError, which the caller turns into a relay shutdown) once
+   *  the unbroken run of such attempts outlasts the give-up window. A finished
+   *  match's source won't come back, so it uses the much shorter window
+   *  (HANDOFF.md 16.7. kohta 6.2). */
+  private noteUnproductiveAttempt(describe: (windowMins: number) => string): void {
+    if (this.failingSince === null) this.failingSince = monoNow();
+    const finished = this.opts.isMatchFinished?.() ?? false;
+    const windowMs = finished
+      ? (this.opts.finishedFailureWindowMs ?? 2 * 60 * 1000)
+      : this.maxFailureWindowMs;
+    if (monoNow() - this.failingSince > windowMs) {
+      this.stopped = true;
+      throw new SourceExhaustedError(
+        `${describe(Math.round(windowMs / 60000))}${finished ? " ja ottelu on päättynyt" : ""} — luovutetaan.`
+      );
+    }
+  }
+
   /** Sleeps in short slices so a stop() during a multi-minute scheduled wait
    *  is still honoured within a second — the plain backoff delay is capped at
    *  30 s and can afford to block, this one can't. */
   private async interruptibleDelay(ms: number): Promise<void> {
-    const until = Date.now() + ms;
-    while (!this.stopped && Date.now() < until) {
-      await delay(Math.min(1000, until - Date.now()));
+    const until = monoNow() + ms;
+    while (!this.stopped && monoNow() < until) {
+      await delay(Math.min(1000, until - monoNow()));
     }
   }
 
@@ -294,7 +388,8 @@ export class FfmpegMixer {
     this.child?.kill("SIGTERM");
   }
 
-  private async spawnOnce(): Promise<void> {
+  private async spawnOnce(): Promise<SessionResult> {
+    this.refreshKillRequested = false;
     const sourceUrl = this.opts.resolveTestSource
       ? await this.opts.resolveTestSource()
       : await (async () => {
@@ -311,7 +406,9 @@ export class FfmpegMixer {
       ? indexedRecordPath(this.opts.recordFile, this.sessionIndex++)
       : undefined;
     const args = buildFfmpegArgs(sourceUrl, this.opts, recordFilePath, !!this.opts.resolveTestSource);
-    this.child = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+    this.child = this.opts.spawnMixerProcess
+      ? this.opts.spawnMixerProcess(args)
+      : spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
     this.child.stdout?.on("data", (d: Buffer) => process.stdout.write(d));
     this.child.stderr?.on("data", (d: Buffer) => process.stderr.write(d));
 
@@ -319,7 +416,7 @@ export class FfmpegMixer {
     // spawn() itself fails, Node emits "error" but never "exit", so without
     // this the supervisor would hang forever awaiting an exit that never
     // comes — no backoff, no log, stuck silently.
-    const startedAt = Date.now();
+    const startedAt = monoNow();
     const childDone = new Promise<{ code: number | null; signal: NodeJS.Signals | null; error?: Error }>((resolve) => {
       this.child!.once("error", (err) => resolve({ code: null, signal: null, error: err }));
       this.child!.once("exit", (code, signal) => resolve({ code, signal }));
@@ -353,7 +450,7 @@ export class FfmpegMixer {
     // minutes there is otherwise nothing in the log, so "still alive" and
     // "silently hung" look identical. Cleared on exit below.
     const heartbeat = setInterval(() => {
-      const up = Math.round((Date.now() - startedAt) / 1000);
+      const up = Math.round((monoNow() - startedAt) / 1000);
       const extra = this.opts.heartbeatExtra?.();
       log(`Sydänääni: relay käynnissä ${up}s, selostusjonossa ${this.fifo.pendingClips} klippiä${extra ? `, ${extra}` : ""}.`);
     }, HEARTBEAT_MS);
@@ -363,11 +460,13 @@ export class FfmpegMixer {
     clearInterval(heartbeat);
     this.fifo.closeIo();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
-    const ranMs = Date.now() - startedAt;
-    if (ranMs > 60000) this.backoffMs = 1000; // reset backoff after a healthy run
+    const ranMs = monoNow() - startedAt;
     const detail = result.error ? result.error.message : `code=${result.code}, signal=${result.signal}`;
     log(`ffmpeg päättyi (${detail}), ajoaika ${Math.round(ranMs / 1000)}s`);
     this.opts.onSessionEnd?.(Date.now(), ranMs);
+    // The caller judges the run (noteSessionEnd): backoff and give-up window
+    // both hang off whether this was real broadcast, not off the exit code.
+    return { ranMs, refreshKill: this.refreshKillRequested };
   }
 
   /** Waits for a natural gap in the narration before killing ffmpeg for a
@@ -378,9 +477,9 @@ export class FfmpegMixer {
   private async killForRefresh(childToKill: ChildProcess | null): Promise<void> {
     if (!childToKill || childToKill !== this.child) return;
     const pendingAtStart = this.fifo.pendingClips;
-    const waitStart = Date.now();
+    const waitStart = monoNow();
     const deadline = waitStart + 10000;
-    while (this.fifo.pendingClips > 0 && Date.now() < deadline && !this.stopped && this.child === childToKill) {
+    while (this.fifo.pendingClips > 0 && monoNow() < deadline && !this.stopped && this.child === childToKill) {
       await delay(200);
     }
     if (this.stopped || this.child !== childToKill) return;
@@ -388,7 +487,7 @@ export class FfmpegMixer {
     // pipe buffer before we pull it out from under it.
     await delay(500);
     if (this.stopped || this.child !== childToKill) return;
-    const waited = Date.now() - waitStart;
+    const waited = monoNow() - waitStart;
     const remaining = this.fifo.pendingClips;
     // Whether the queue actually drained is the evidence that the respawn
     // didn't sever a clip mid-word (apps/broadcast/HANDOFF.md fix #2): "tyhjeni" =
@@ -399,6 +498,7 @@ export class FfmpegMixer {
       `Määräaikainen URL-päivitys — käynnistetään ffmpeg uudelleen. ` +
         `Selostusjono ${drainStatus}; odotettiin ${waited}ms, jonossa ${pendingAtStart} klippiä respawnin alkaessa.`
     );
+    this.refreshKillRequested = true;
     childToKill.kill("SIGTERM");
   }
 }

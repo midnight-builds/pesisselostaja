@@ -178,8 +178,26 @@ While a match is running, a dead source is retried for the generous
 `RELAY_MAX_FAILURE_WINDOW_MS` (12 min) before the relay shuts itself down.
 Once the match has finished ("Ottelu päättyi" spoken), the source won't come
 back — the shorter `RELAY_FINISHED_FAILURE_WINDOW_MS` (default `120000`)
-applies instead. Clean ffmpeg exits (a flapping source) still never count
-toward giving up.
+applies instead.
+
+An attempt counts toward the window when it produces no broadcast: either
+ffmpeg never started (yt-dlp error, bad args), or it started and the session
+ended in under `minProductiveRunMs` (60 s). The exit code is deliberately
+ignored — when the source phone dies mid-match, yt-dlp keeps resolving a valid
+URL and ffmpeg reads the frozen DVR tail for a few seconds and exits `code=0`,
+so a "successful start" alone proves nothing (issue #45; before the fix that
+pattern respawned forever and the operator had to stop the service by hand).
+Only a run long enough to be real broadcast clears the window — whether it
+ended by itself or in the relay's own 15 min URL refresh. That last part
+matters: `urlRefreshMs` (15 min) is longer than `RELAY_MAX_FAILURE_WINDOW_MS`
+(12 min), so on a healthy source *every* session ends in a refresh kill, and
+excusing those from clearing the window would leave a `failingSince` set by
+one early blip standing for the rest of the match. A refresh kill only excuses
+a session from *accruing*: there the kill, not the source, is why the run was
+short.
+
+All durations here are measured on a monotonic clock, so an NTP step can't
+turn a healthy session into a seconds-long "failure".
 
 ### Preflight (run this before every match)
 
