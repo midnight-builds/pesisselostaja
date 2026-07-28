@@ -11,6 +11,9 @@
  *  POST /api/jobs/:id/activate    -> Job              (writes .env.relay for this job)
  *  POST /api/preflight            -> PreflightResult
  *  POST /api/relay/start|stop|restart  -> RelayProcess
+ *  GET  /api/scheduler            -> SchedulerState
+ *  POST /api/scheduler/enable     {enabled: boolean} -> SchedulerState
+ *                                  (ajastin on oletuksena POIS PÄÄLTÄ)
  *  POST /api/knobs                {Partial<ControlKnobs>} -> ControlKnobs
  *  POST /api/knobs/delay-nudge    {deltaMs: number}   -> ControlKnobs
  *  GET  /api/log?limit=&level=    -> LogLine[]
