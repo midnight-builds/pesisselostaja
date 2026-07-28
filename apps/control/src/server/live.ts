@@ -175,7 +175,7 @@ function parseQueueDepth(log: LogLine[]): { clips: number; at: number } | null {
 
 // --------------------------------------------------------- health & headline
 
-interface Snapshot {
+export interface Snapshot {
   now: number;
   job: Job | null;
   relay: RelayProcess;
