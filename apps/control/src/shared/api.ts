@@ -19,6 +19,22 @@
  *  POST /api/push/test            -> PushSendResult   (409 jos ei tilauksia)
  *  GET  /api/push/prefs           -> NotificationPrefs
  *  POST /api/push/prefs           {Partial<NotificationPrefs>} -> NotificationPrefs
+ *
+ *  Vaihe B — YouTube-ketju. Kirjoittavat reitit vaativat Google-yhteyden
+ *  (409 GoogleAuthError ilman sitä), tuhoavat lisäksi {confirm: true}.
+ *  GET  /api/youtube/health       -> valtuutettu kanava, scopet, tokenin ikä, kiintiö
+ *  POST /api/youtube/auth/start   {clientId?, clientSecret?} -> laitekoodi + osoite
+ *  POST /api/youtube/auth/poll    -> {status: "pending" | "connected"}
+ *  GET  /api/youtube/broadcasts   -> menneet ja tulevat lähetykset
+ *  POST /api/youtube/broadcasts   {jobId|matchId, overrides?, privacy?, playlistId?}
+ *                                  -> luo normaalin JA "Selostettu"-version
+ *  PATCH  /api/youtube/videos/:id {confirm} -> metatietojen muokkaus
+ *  DELETE /api/youtube/videos/:id {confirm} -> poisto (tuhoava)
+ *  GET  /api/youtube/playlists    -> soittolistat
+ *  POST /api/youtube/templates/preview -> otsikot, kuvaus ja jaettava viesti
+ *                                         luomatta mitään
+ *  POST /api/thumbnail/preview    {headline, datetime, venue, narrated} -> image/png
+ *  POST /api/thumbnail/render     sama, mutta tallentaa -> {id, path}
  */
 
 import type { ControlKnobs, Job } from "./types.js";
