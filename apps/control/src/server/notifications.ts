@@ -195,6 +195,28 @@ export async function notifyPreflightBlockers(result: PreflightResult): Promise<
   );
 }
 
+/** The scheduler acted (or refused to act) without anybody watching.
+ *
+ *  Additive on purpose: the scheduler could have called sendPush directly, but
+ *  then its messages would sit outside the repeat guard above and a job stuck
+ *  in "source live, preflight blocked" would buzz the phone every 30 seconds.
+ *  Routed through notify() they inherit the one-per-tag-per-window ceiling like
+ *  everything else.
+ *
+ *  Gated on `startup`, because every scheduler message is of that class —
+ *  valmistelu ja käynnistys (or the reason it did not happen). Callers pass a
+ *  tag that distinguishes the KIND of event and the job it concerns, so a
+ *  clash on job A does not suppress a preflight block on job B. */
+export async function notifySchedulerAction(
+  tag: string,
+  title: string,
+  body: string
+): Promise<boolean> {
+  const prefs = await getNotificationPrefs();
+  if (!prefs.startup) return false;
+  return notify(`scheduler:${tag}`, title, body);
+}
+
 /** An automatic repair was carried out.
  *
  *  Nothing calls this yet — automatic repair is phase B (DESIGN.md: "UI korjaa
