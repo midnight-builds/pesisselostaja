@@ -208,7 +208,7 @@ body {
   color: var(--warn);
 }
 .health--fail .health__word {
-  color: var(--fail);
+  color: var(--fail-ink);
 }
 .health--idle .health__word {
   color: var(--idle);
