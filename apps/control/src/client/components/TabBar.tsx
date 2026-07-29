@@ -1,12 +1,13 @@
 /** Bottom navigation. Fixed to the bottom edge with the home-indicator inset
  *  added as padding, and every target is at least 44 px tall. */
 
-export type TabId = "live" | "matches" | "job" | "log";
+export type TabId = "live" | "matches" | "job" | "youtube" | "log";
 
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
   { id: "live", label: "Live", icon: "●" },
   { id: "matches", label: "Ottelut", icon: "▦" },
   { id: "job", label: "Työ", icon: "▶" },
+  { id: "youtube", label: "YouTube", icon: "▷" },
   { id: "log", label: "Loki", icon: "≡" },
 ];
 
