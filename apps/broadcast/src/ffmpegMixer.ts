@@ -230,7 +230,16 @@ export function buildSlateVideoFilter(
 ): string {
   const line = (fontFile: string, textFile: string, style: SlateTextStyle): string =>
     `drawtext=fontfile=${escapeFilterPath(fontFile)}:textfile=${escapeFilterPath(textFile)}:reload=1:` +
-    `x=(w-text_w)/2:y=${style.y}:fontsize=${style.size}:fontcolor=${style.color}`;
+    // expansion=none: drawtextin oletus (`normal`) TULKITSEE tekstin, eikä
+    // tulosta sitä. Joukkueen nimessä oleva `%` tuottaa silloin "Stray %"
+    // -virheen JOKA KEHYKSELLÄ (~10 riviä/s journaldiin koko katkon ajan) ja
+    // pudottaa loput rivistä pois. Nimet tulevat tulospalvelusta eikä niitä
+    // validoi mikään, joten tämä ei ole teoreettinen.
+    `expansion=none:` +
+    // x ei saa mennä negatiiviseksi: ylileveä rivi leikkautuisi MOLEMMISTA
+    // reunoista, eli molemmista joukkueiden nimistä katoaisi merkkejä.
+    // NoSignalSlate katkaisee rivin mittaan, mutta tämä on halpa varmistus.
+    `x=max(0\\,(w-text_w)/2):y=${style.y}:fontsize=${style.size}:fontcolor=${style.color}`;
   return (
     `[0:v]${line(layout.fontBold, scoreTextPath, layout.score)},` +
     `${line(layout.fontRegular, statusTextPath, layout.status)}[vout]`
