@@ -84,6 +84,9 @@ export interface LiveAggregator {
  *  file on disk, and so index.ts can hand in the store it already imported. */
 export interface LiveAggregatorOptions {
   getActiveJob?: () => Promise<Job | null>;
+  /** Same reason as getActiveJob: a test drives the run-ended edge without a
+   *  job file on disk. */
+  closeRunningJob?: () => Promise<Job | null>;
 }
 
 // ------------------------------------------------------------ empty defaults
