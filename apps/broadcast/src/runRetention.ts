@@ -12,6 +12,12 @@ const RUN_ARTIFACT_PATTERNS: readonly RegExp[] = [
   /^relay-(\d+)\.pcm$/, // narration FIFO, one per match (0 bytes, but piles up)
   /^\.state-(\d+)\.json$/, // resume state
   /^\.control-(\d+)\.json$/, // live control file
+  // …and a control file whose rename never happened. The control app writes
+  // this one atomically through a uniquely-named temp file
+  // (apps/control/src/server/relay.ts), so a crash between writeFile and
+  // rename leaves `.control-<id>.json.tmp-<pid>-<n>` behind — every 30 s while
+  // the source-ingest poller runs. Same reason status-<id>.json.tmp is listed.
+  /^\.control-(\d+)\.json\.tmp-\d+-\d+$/,
   /^status-(\d+)\.json$/, // telemetry snapshot
   /^status-(\d+)\.json\.tmp$/, // …and a snapshot whose rename never happened
   /^timeline-(\d+)\.ndjson$/, // telemetry timeline
