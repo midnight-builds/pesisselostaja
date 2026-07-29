@@ -2,7 +2,7 @@
 // (run/.control-<matchId>.json, re-read by the live relay every poll — see
 // apps/control/src/server/relay.ts). CONFIG.relayRunDir is redirected to a
 // temp dir for every test, never the real apps/broadcast/run/.
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -11,6 +11,7 @@ import {
   controlFilePath,
   nudgeDelay,
   readKnobs,
+  readRunningMatchId,
   readSourceIngest,
   writeKnobs,
   writeSourceIngest,
@@ -181,6 +182,37 @@ describe("writeSourceIngest / readSourceIngest", () => {
     expect(await readSourceIngest(MATCH_ID)).toEqual(INGEST);
   });
 
+  // Relayn käynnistyskirjoitus ei ole atominen (commentaryLoop.ts kirjoittaa
+  // suoraan kohteeseen), joten pollerin luku voi osua katkaisun ja kirjoituksen
+  // väliin. Merge tyhjästä jättäisi tiedostoon PELKÄN sourceIngestin: readKnobs
+  // palauttaisi oletukset, UI näyttäisi väärät säätöarvot ja nudgeDelay laskisi
+  // väärästä perustasosta.
+  it("ei ylikirjoita rikkinäistä control-tiedostoa vaan kertoo syyn", async () => {
+    const puolikas = '{ "announceBatterChanges": false, "narrationDel';
+    writeFileSync(controlFilePath(MATCH_ID), puolikas);
+
+    await expect(writeSourceIngest(MATCH_ID, INGEST)).rejects.toThrow(/ei jäsenny/);
+    expect(readFileSync(controlFilePath(MATCH_ID), "utf8")).toBe(puolikas);
+  });
+
+  it("mutta rikkinäinen tiedosto ei estä operaattorin komentoa", async () => {
+    // writeKnobs on tahallinen komento kesken lähetyksen ("selostus pois").
+    // Sen on mentävä läpi, vaikka tiedoston entinen sisältö olisi lukukelvoton.
+    writeFileSync(controlFilePath(MATCH_ID), "{ katkennut");
+    await writeKnobs(MATCH_ID, { announceBatterChanges: false });
+    expect(readControlFile().announceBatterChanges).toBe(false);
+  });
+
+  it("yksi rikkinäinen kirjoitus ei riko sarjallistusketjua pysyvästi", async () => {
+    writeFileSync(controlFilePath(MATCH_ID), "{ katkennut");
+    await expect(writeSourceIngest(MATCH_ID, INGEST)).rejects.toThrow();
+
+    // Relay ehti kirjoittaa tiedoston loppuun: seuraava kierros onnistuu.
+    writeControlFile({ announceBatterChanges: true });
+    await writeSourceIngest(MATCH_ID, INGEST);
+    expect(readControlFile().sourceIngest).toEqual(INGEST);
+  });
+
   it("puuttuva, väärän tyyppinen tai rikkinäinen havainto on null, ei virhe", async () => {
     expect(await readSourceIngest(MATCH_ID)).toBeNull();
 
@@ -194,6 +226,11 @@ describe("writeSourceIngest / readSourceIngest", () => {
     // tuoreuttaa eikä kohdistaa oikeaan videoon.
     writeControlFile({ sourceIngest: { videoId: "SOURCEID123" } });
     expect(await readSourceIngest(MATCH_ID)).toBeNull();
+
+    // Aikaleima jota ei voi jäsentää ei kelpaa havainnoksi: tuoreutta ei voi
+    // arvioida, ja jäsentymätön arvo läpäisisi vertailut "ei vanha" -tulkinnalla.
+    writeControlFile({ sourceIngest: { ...INGEST, observedAt: "eilen joskus" } });
+    expect(await readSourceIngest(MATCH_ID)).toBeNull();
   });
 
   it("täydentää puuttuvat tilakentät nulliksi eikä keksi arvoja", async () => {
@@ -206,5 +243,48 @@ describe("writeSourceIngest / readSourceIngest", () => {
       healthStatus: null,
       error: null,
     });
+  });
+});
+
+// ------------------------------------------------ mitä relay ajaa (issue #104)
+//
+// systemd kertoo vain että JOKIN ajaa, ja .env.relay kertoo mitä relaylle on
+// tarkoitus antaa — se kirjoitetaan jo aktivoinnissa, ennen relayn
+// uudelleenkäynnistystä. Ainoa havainto siitä mitä relay oikeasti ajaa on sen
+// oma telemetria.
+describe("readRunningMatchId", () => {
+  const NOW = Date.parse("2026-07-29T15:00:00.000Z");
+
+  function statusFile(matchId: number, ageMs: number): void {
+    const path = join(tmpDir, `status-${matchId}.json`);
+    writeFileSync(path, JSON.stringify({ matchId }));
+    utimesSync(path, new Date(NOW - ageMs), new Date(NOW - ageMs));
+  }
+
+  it("palauttaa tuoreimman telemetriatiedoston ottelun", async () => {
+    statusFile(146210, 40_000);
+    statusFile(146211, 5_000);
+    expect(await readRunningMatchId(NOW)).toBe(146211);
+  });
+
+  it("ei näytä vanhaa telemetriaa ajossa olevana ottelluna", async () => {
+    // Edellisen ottelun jäljet run/-hakemistossa eivät saa kelvata todisteeksi:
+    // juuri niiden varassa polleri pollaisi väärää ottelua.
+    statusFile(146210, 61_000);
+    expect(await readRunningMatchId(NOW)).toBeNull();
+  });
+
+  it("kestää kellon siirtymisen: tulevaisuudessa oleva mtime on tuore", async () => {
+    statusFile(146210, -30_000);
+    expect(await readRunningMatchId(NOW)).toBe(146210);
+  });
+
+  it("ei osumaa eikä hakemistoa: null, ei poikkeusta", async () => {
+    expect(await readRunningMatchId(NOW)).toBeNull();
+    writeFileSync(join(tmpDir, ".state-146210.json"), "{}");
+    expect(await readRunningMatchId(NOW)).toBeNull();
+
+    CONFIG.relayRunDir = join(tmpDir, "ei-olemassa");
+    expect(await readRunningMatchId(NOW)).toBeNull();
   });
 });

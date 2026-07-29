@@ -421,25 +421,18 @@ export function clearAccessTokenCache(): void {
   cachedAccessToken = null;
 }
 
-/** Onko refresh token ylipäätään tallennettu. Halpa tiedostoluku, ei yhtään
- *  verkkokutsua.
- *
- *  Tämä on olemassa taustapollausta varten: ilman tarkistusta polleri kutsuisi
- *  getAccessTokenia 30 s välein tilassa, joka on tämän repon oletus (OAuth-
- *  clientia ei ole pakko olla), ja jokainen kutsu heittäisi — loki täyttyisi
- *  virheistä joita kukaan ei voi korjata muuten kuin kirjautumalla. */
-export async function hasStoredToken(): Promise<boolean> {
-  return (await tokenStore.read()) !== null;
-}
-
 /** Sormenjälki tallennetusta tokenista: `null` kun tokenia ei ole, muuten
- *  merkkijono joka MUUTTUU kun operaattori kirjautuu uudelleen.
+ *  merkkijono joka MUUTTUU kun operaattori kirjautuu uudelleen. Halpa
+ *  tiedostoluku, ei yhtään verkkokutsua.
  *
- *  `hasStoredToken` ei riitä taustapollaukselle: uusi laitevirtakirjautuminen
- *  ylikirjoittaa tiedoston käymättä nollan kautta, joten pelkkä olemassaolo ei
- *  erota korjattua yhteyttä kuolleesta. `obtainedAt` on juuri se leima jonka
- *  onnistunut kirjautuminen kirjoittaa uusiksi — access tokenin uusinta ei
- *  koske siihen. */
+ *  Kaksi tehtävää taustapollauksessa. `null` estää sen kutsumasta
+ *  getAccessTokenia 30 s välein tilassa joka on tämän repon oletus (OAuth-
+ *  clientia ei ole pakko olla) — jokainen kutsu heittäisi ja loki täyttyisi
+ *  virheistä joita kukaan ei voi korjata muuten kuin kirjautumalla. Ja koska
+ *  uusi laitevirtakirjautuminen ylikirjoittaa tiedoston käymättä nollan kautta,
+ *  pelkkä olemassaolo ei erottaisi korjattua yhteyttä kuolleesta: `obtainedAt`
+ *  on juuri se leima jonka onnistunut kirjautuminen kirjoittaa uusiksi —
+ *  access tokenin uusinta ei koske siihen. */
 export async function getTokenFingerprint(): Promise<string | null> {
   return (await tokenStore.read())?.obtainedAt ?? null;
 }

@@ -316,19 +316,21 @@ function applySourceIngest(
     if (health === "ok") health = "warn";
   };
 
-  const observedAt = ingest ? Date.parse(ingest.observedAt) : NaN;
+  const ageMs = ingest ? now - Date.parse(ingest.observedAt) : NaN;
+  // Ikä on oltava välillä [0, raja]. Negatiivinen ikä tarkoittaa aikaleimaa
+  // tulevaisuudessa (kello siirtynyt kirjoituksen jälkeen, käsin muokattu
+  // tiedosto) — ilman alarajaa sellainen havainto olisi IKUISESTI "tuore" ja
+  // ohjaisi tilariviä siitä eteenpäin.
   const fresh =
     ingest !== null &&
     ingest.error === null &&
-    Number.isFinite(observedAt) &&
-    now - observedAt <= SOURCE_INGEST_STALE_MS;
+    Number.isFinite(ageMs) &&
+    ageMs >= 0 &&
+    ageMs <= SOURCE_INGEST_STALE_MS;
 
   if (!fresh) {
     if (ingest !== null) {
       notes.push(ingest.error ? "YouTube: havaintoa ei saatu" : "YouTube: havainto vanhentunut");
-    } else if (snap.job && snap.sourceIngestReason) {
-      // Ilman työtä syy on aina "ei aktiivista työtä", jonka rivi sanoo jo itse.
-      notes.push(`YouTube: ${snap.sourceIngestReason}`);
     }
   } else if (ingest) {
     if (ingest.lifeCycleStatus === "complete") {
@@ -345,6 +347,22 @@ function applySourceIngest(
       notes.push(`YouTube: syöte ei virtaa (${ingest.streamStatus})`);
       doubt();
     }
+  }
+
+  // Pollerin syy näytetään AINA kun se on asetettu, myös silloin kun havainto
+  // on olemassa. Havainto muistissa ei tarkoita että se olisi julkaistu: kun
+  // kirjoitus control-tiedostoon epäonnistuu (levy täynnä, vain luku), polleri
+  // asettaa syyn mutta pitää havainnon — ja ilman tätä riviä operaattori lukisi
+  // "syöte aktiivinen" vihreänä tilanteessa jossa relay ei ole nähnyt yhtäkään
+  // havaintoa.
+  //
+  // Ilman työtä syy on aina "ei aktiivista työtä", jonka rivi sanoo jo itse.
+  if (snap.job && snap.sourceIngestReason) {
+    notes.push(`YouTube: ${snap.sourceIngestReason}`);
+    // Syy + olemassa oleva havainto = julkaisu on poikki (portin sulkeutuessa
+    // polleri nollaa havainnon). Se on tiedetty vika eikä tietämättömyys,
+    // joten se saa pudottaa rivin ok → warn.
+    if (ingest !== null) doubt();
   }
 
   return {

@@ -310,6 +310,35 @@ describe("buildChain: lähde-rivi ja YouTube-havainto", () => {
     expect(row.detail).toMatch(/havaintoa ei saatu/);
   });
 
+  // Tulevaisuuteen jäänyt aikaleima (kello siirtynyt kirjoituksen jälkeen,
+  // käsin muokattu tiedosto) olisi ilman alarajaa IKUISESTI "tuore" ja ohjaisi
+  // tilariviä siitä eteenpäin.
+  it("tulevaisuudessa oleva aikaleima ei ole tuore havainto", () => {
+    const now = Date.now();
+    const row = sourceRow({
+      now,
+      sourceIngest: ingest({
+        observedAt: new Date(now + 60_000).toISOString(),
+        streamStatus: "inactive",
+      }),
+    });
+    expect(row.health).toBe("ok");
+    expect(row.detail).not.toMatch(/syöte ei virtaa/);
+  });
+
+  // Havainto muistissa ei tarkoita että relay olisi nähnyt sen: jos kirjoitus
+  // control-tiedostoon epäonnistuu (levy täynnä, vain luku), polleri pitää
+  // havainnon mutta julkaisu on poikki. Ilman tätä rivi näyttäisi "syöte
+  // aktiivinen" vihreänä.
+  it("havainnon kirjoitusvirhe näkyy rivillä ja pudottaa ok → warn", () => {
+    const row = sourceRow({
+      sourceIngest: ingest(),
+      sourceIngestReason: "havainnon kirjoitus epäonnistui: levy täynnä",
+    });
+    expect(row.health).toBe("warn");
+    expect(row.detail).toMatch(/kirjoitus epäonnistui: levy täynnä/);
+  });
+
   it("ilman havaintoa pollerin syy näkyy detailissa", () => {
     const row = sourceRow({
       sourceIngest: null,

@@ -19,9 +19,9 @@
  *  lähetysten luonnilta. */
 
 import type { Job, SourceIngest } from "../shared/types.js";
-import { GoogleAuthError, hasStoredToken } from "./googleAuth.js";
+import { GoogleAuthError, getQuotaRemaining, getTokenFingerprint } from "./googleAuth.js";
 import { getActiveJob } from "./jobs.js";
-import { getRelayProcess, writeSourceIngest } from "./relay.js";
+import { getRelayProcess, readRunningMatchId, writeSourceIngest } from "./relay.js";
 import {
   getStreamStatus,
   listBroadcasts,
@@ -54,16 +54,38 @@ export const SOURCE_INGEST_STALE_MS = 120_000;
 const MAX_ERROR_LENGTH = 200;
 
 /** Kun token on vanhentunut (needsReauth), pollaus vaikenee kunnes tunnukset
- *  vaihtuvat. `hasToken()` ei erota kuollutta refresh tokenia tuoreesta —
- *  tiedosto on olemassa kummassakin tapauksessa — joten lukko avataan myös
- *  ajan kuluttua. Ilman sitä polleri jäisi pysyvästi sokeaksi uuden
- *  kirjautumisen jälkeenkin, koska uusi kirjautuminen ei käy nollan kautta. */
+ *  vaihtuvat. Lukko avataan heti kun tokenin sormenjälki muuttuu — uusi
+ *  kirjautuminen ylikirjoittaa tokenin käymättä nollan kautta, joten pelkkä
+ *  tiedoston olemassaolo ei kertoisi siitä mitään. Aikakatkaisu on varmistus
+ *  sen varalta ettei sormenjälki jostain syystä muutu (esim. sama tiedosto
+ *  palautettuna varmuuskopiosta): ilman sitä polleri voisi jäädä pysyvästi
+ *  sokeaksi. */
 const REAUTH_RETRY_MS = 15 * 60_000;
+
+/** Kiintiöyksiköt jotka jätetään koskemattomaksi lähetysten LUONNILLE.
+ *
+ *  Prioriteettijärjestys, tärkein ensin: 1) lähetysten luonti — ilman
+ *  lähetystä ei ole mitään selostettavaa, ja luonti epäonnistuu lopullisesti
+ *  kiintiön loputtua; 2) selostuksen jatkuminen — se ei kuluta kiintiötä
+ *  lainkaan eikä siis ole uhattuna; 3) tämä havainto, joka on vain lisätieto
+ *  tilariville. Yön yli päällä jäänyt relay polttaisi 16 tunnissa ~3840
+ *  yksikköä juuri ennen aamun lähetysten luontia (kiintiöpäivä vaihtuu
+ *  Tyynenmeren keskiyöllä = klo 10 Suomen aikaa), joten havainto väistää.
+ *
+ *  500 = yhden ottelun lähetyspari maksaa noin 300, ja pieni marginaali sen
+ *  päälle. */
+const QUOTA_RESERVE = 500;
 
 export interface SourceIngestPollerDeps {
   getActiveJob: () => Promise<Job | null>;
   isRelayActive: () => Promise<boolean>;
-  hasToken: () => Promise<boolean>;
+  /** Mitä ottelua relay itse kertoo ajavansa, tai null kun tuoretta
+   *  telemetriaa ei ole. */
+  getRunningMatchId: () => Promise<number | null>;
+  /** Tunnisteet tallennetulle tokenille: null = tokenia ei ole, muuten arvo
+   *  joka muuttuu uudelleenkirjautumisessa. */
+  getTokenFingerprint: () => Promise<string | null>;
+  getQuotaRemaining: () => Promise<number>;
   fetchBroadcast: (videoId: string) => Promise<BroadcastSummary | null>;
   fetchStream: (streamId: string) => Promise<StreamStatus | null>;
   writeIngest: (matchId: number, ingest: SourceIngest) => Promise<void>;
@@ -80,7 +102,9 @@ export interface SourceIngestPoller {
 const DEFAULT_DEPS: SourceIngestPollerDeps = {
   getActiveJob,
   isRelayActive: async () => (await getRelayProcess()).active,
-  hasToken: hasStoredToken,
+  getRunningMatchId: () => readRunningMatchId(),
+  getTokenFingerprint,
+  getQuotaRemaining: () => getQuotaRemaining(),
   // Tyhjä tulos id-haussa on normaali vastaus (video ei ole omalla kanavalla),
   // ei virhe — ks. listBroadcasts.
   fetchBroadcast: async (videoId) => (await listBroadcasts({ id: videoId }))[0] ?? null,
@@ -98,7 +122,7 @@ function truncate(text: string): string {
 }
 
 type Gate =
-  | { ok: true; job: Job; videoId: string }
+  | { ok: true; job: Job; videoId: string; fingerprint: string }
   | { ok: false; reason: string };
 
 /** Polleri. Kahva eikä moduulitason singleton: testit eivät saa jakaa tilaa
@@ -113,6 +137,11 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
   let intervalMs = BASE_INTERVAL_MS;
   /** Milloin needsReauth-virhe kirjattiin, tai null kun lukkoa ei ole. */
   let reauthLockedAt: number | null = null;
+  /** Tokenin sormenjälki lukon asettamishetkellä. Kun se muuttuu, operaattori
+   *  on kirjautunut uudelleen ja lukko on tarpeeton. */
+  let reauthLockFingerprint: string | null = null;
+  /** Montako peräkkäistä kierrosta on vastannut "lähetystä ei löytynyt". */
+  let notFoundStreak = 0;
 
   /** Portit. Yksikään näistä ei kutsu YouTubea, ja yksikään ei heitä:
    *  epäonnistunut porttitarkistus on "ei tietoa", ei kaatuminen. */
@@ -128,6 +157,25 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       }
       if (!(await d.isRelayActive())) return { ok: false, reason: "relay ei ole käynnissä" };
 
+      // Ajossa oleva relay ei riitä: sen on ajettava TÄTÄ ottelua. Kun ottelu A
+      // on yhä lähetyksessä (itsesammutus kesken) ja operaattori aktivoi
+      // ottelun B, getActiveJob palauttaa B:n mutta relay ajaa yhä A:ta —
+      // silloin pollattaisiin väärän ottelun lähdettä, kirjoitettaisiin
+      // .control-<B>.jsoniin jota kukaan ei lue, ja tilarivi liittäisi B:n
+      // havainnon A:n riville: "syöte ei virtaa" täysin terveestä lähetyksestä.
+      //
+      // Totuuden lähde on relay itse (CLAUDE.md, "yksi totuuslähde"): se
+      // kirjoittaa telemetriansa noin pollivälin tahdissa. `.env.relay` ei
+      // kelpaisi tähän — se kirjoitetaan jo aktivoinnissa, ennen relayn
+      // uudelleenkäynnistystä, joten se on ennuste eikä havainto.
+      const runningMatchId = await d.getRunningMatchId();
+      if (runningMatchId === null) {
+        return { ok: false, reason: "relaylta ei ole tuoretta telemetriaa" };
+      }
+      if (runningMatchId !== job.matchId) {
+        return { ok: false, reason: `relay ajaa toista ottelua (${runningMatchId})` };
+      }
+
       const videoId = parseYouTubeVideoId(job.sourceUrl);
       if (!videoId) return { ok: false, reason: "lähde-URLista ei saa videoId:tä" };
       // Lähteeksi on liitetty selostetun lähetyksen URL. Vaiheessa 2 tämä olisi
@@ -140,13 +188,25 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
         };
       }
 
-      if (!(await d.hasToken())) {
+      const fingerprint = await d.getTokenFingerprint();
+      if (fingerprint === null) {
         // Uusi kirjautuminen alkaa aina puhtaalta: kun tokenia ei ole
         // lainkaan, vanha reauth-lukko on merkityksetön.
         reauthLockedAt = null;
+        reauthLockFingerprint = null;
         return { ok: false, reason: "Google-tiliä ei ole yhdistetty" };
       }
-      return { ok: true, job, videoId };
+
+      // Kiintiöportti viimeisenä ja vasta tässä: se on laskurin luku levyltä,
+      // ja aiemmat portit ovat halvempia. Ks. QUOTA_RESERVE.
+      const remaining = await d.getQuotaRemaining();
+      if (remaining < QUOTA_RESERVE) {
+        return {
+          ok: false,
+          reason: `YouTube-kiintiöstä jäljellä vain ${remaining} yksikköä — havainto väistää lähetysten luonnin tieltä`,
+        };
+      }
+      return { ok: true, job, videoId, fingerprint };
     } catch (err) {
       return { ok: false, reason: truncate(`porttien tarkistus epäonnistui: ${messageOf(err)}`) };
     }
@@ -173,7 +233,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
     intervalMs = BACKOFF_STEPS.find((step) => step > intervalMs) ?? MAX_INTERVAL_MS;
   }
 
-  async function observe(job: Job, videoId: string): Promise<void> {
+  async function observe(job: Job, videoId: string, fingerprint: string): Promise<void> {
     const observedAt = new Date(d.now()).toISOString();
     /** Tila-kentät ovat aina null virhetilanteessa: vanhentunut "active" olisi
      *  vaiheessa 2 vaarallisempi kuin tietämättömyys. */
@@ -182,13 +242,20 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
     try {
       const broadcast = await d.fetchBroadcast(videoId);
       if (!broadcast) {
-        // Pysyvä tilanne, ei transientti: lähde ei ole omalla kanavalla eikä
-        // API näe sitä lainkaan (yt-dlp näkee — signaalit täydentävät
+        notFoundStreak += 1;
+        // Yleensä pysyvä tilanne, ei transientti: lähde ei ole omalla kanavalla
+        // eikä API näe sitä lainkaan (yt-dlp näkee — signaalit täydentävät
         // toisiaan). Ei ole mitään syytä hakata rajapintaa 30 s välein.
+        //
+        // Ensimmäinen tyhjä vastaus ei silti riitä todisteeksi: juuri luotu
+        // lähetys voi puuttua listauksesta hetken (eventual consistency).
+        // Yksi uusinta perusvälillä säästää 5 minuutin sokeuden heti ottelun
+        // alussa ja maksaa yhden kiintiöyksikön.
         await publish(job.matchId, { ...blank, error: "lähdelähetystä ei löytynyt tältä kanavalta" });
-        intervalMs = MAX_INTERVAL_MS;
+        intervalMs = notFoundStreak >= 2 ? MAX_INTERVAL_MS : BASE_INTERVAL_MS;
         return;
       }
+      notFoundStreak = 0;
 
       // Ilman boundStreamId:tä toista kutsua ei tehdä lainkaan — se säästäisi
       // yksikön eikä kertoisi mitään: sitomatonta striimiä ei voi kysyä.
@@ -209,6 +276,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
         // Backoff ei auta vanhentuneeseen tokeniin: se korjaantuu vain
         // kirjautumalla. Kirjataan kerran ja vaietaan.
         reauthLockedAt = d.now();
+        reauthLockFingerprint = fingerprint;
         await publish(job.matchId, {
           ...blank,
           error: `Google-yhteys vaatii uuden kirjautumisen: ${messageOf(err)}`,
@@ -241,21 +309,29 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       ingest = null;
       reason = gate.reason;
       intervalMs = BASE_INTERVAL_MS;
+      // Portti voi olla kiinni siksi että työ vaihtui; edellisen ottelun
+      // "ei löytynyt" -sarja ei kerro uudesta lähteestä mitään.
+      notFoundStreak = 0;
       return;
     }
 
     if (reauthLockedAt !== null) {
-      if (d.now() - reauthLockedAt < REAUTH_RETRY_MS) {
+      // Sormenjälki on vaihtunut = operaattori on kirjautunut uudelleen, ja
+      // lukko avataan heti eikä vasta aikakatkaisun jälkeen. Ilman tätä polleri
+      // olisi sokea 15 minuuttia vaikka yhteys korjattiin sekunneissa.
+      const reauthed = gate.fingerprint !== reauthLockFingerprint;
+      if (!reauthed && d.now() - reauthLockedAt < REAUTH_RETRY_MS) {
         ingest = null;
         reason = "Google-yhteys vaatii uuden kirjautumisen";
         intervalMs = MAX_INTERVAL_MS;
         return;
       }
       reauthLockedAt = null;
+      reauthLockFingerprint = null;
     }
 
     reason = null;
-    await observe(gate.job, gate.videoId);
+    await observe(gate.job, gate.videoId, gate.fingerprint);
   }
 
   const loop = async (): Promise<void> => {

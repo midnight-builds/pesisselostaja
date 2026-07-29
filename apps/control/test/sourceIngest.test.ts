@@ -22,6 +22,8 @@ const NOW = Date.parse("2026-07-29T15:00:00.000Z");
 const SOURCE_ID = "SOURCEID123";
 const TARGET_ID = "TARGETID456";
 const MATCH_ID = 146210;
+/** Tokenin sormenjälki = obtainedAt. Vaihtuu vain uudelleenkirjautumisessa. */
+const FINGERPRINT = "2026-07-20T08:00:00.000Z";
 
 const BASE_INTERVAL_MS = 30_000;
 const MAX_INTERVAL_MS = 300_000;
@@ -93,7 +95,10 @@ function harness(overrides: Partial<SourceIngestPollerDeps> = {}): Harness {
   const deps: SourceIngestPollerDeps = {
     getActiveJob: async () => job(),
     isRelayActive: async () => true,
-    hasToken: async () => true,
+    // Terve oletus: relayn oma telemetria kertoo sen ajavan juuri tätä ottelua.
+    getRunningMatchId: async () => MATCH_ID,
+    getTokenFingerprint: async () => FINGERPRINT,
+    getQuotaRemaining: async () => 10_000,
     fetchBroadcast,
     fetchStream,
     writeIngest,
@@ -146,6 +151,42 @@ describe("portit", () => {
     expect(h.poller.reason()).toMatch(/relay ei ole käynnissä/);
   });
 
+  // Ottelu A on yhä lähetyksessä (itsesammutus kesken) ja operaattori aktivoi
+  // ottelun B: relay-yksikkö on aktiivinen, mutta se ajaa yhä A:ta. Ilman
+  // ottelukohtaista porttia pollattaisiin B:n lähdettä, kirjoitettaisiin
+  // .control-<B>.jsoniin jota kukaan ei lue, ja tilarivi kertoisi A:n
+  // lähetyksestä "syöte ei virtaa".
+  it("relay ajaa toista ottelua: ei kutsuja ja syy kertoo mitä se ajaa", async () => {
+    const h = harness({ getRunningMatchId: async () => 999999 });
+    await settle();
+    expect(h.fetchBroadcast).not.toHaveBeenCalled();
+    expect(h.writes).toHaveLength(0);
+    expect(h.poller.reason()).toMatch(/relay ajaa toista ottelua \(999999\)/);
+  });
+
+  it("relaylta ei ole tuoretta telemetriaa: ei kutsuja", async () => {
+    const h = harness({ getRunningMatchId: async () => null });
+    await settle();
+    expect(h.fetchBroadcast).not.toHaveBeenCalled();
+    expect(h.poller.reason()).toMatch(/tuoretta telemetriaa/);
+  });
+
+  // Kiintiöpäivä vaihtuu Tyynenmeren keskiyöllä = klo 10 Suomen aikaa, eli
+  // juuri kun aamun lähetykset pitäisi luoda. Yön yli päällä jäänyt relay
+  // ehtisi syödä kiintiön havainnoilla ennen sitä.
+  it("kiintiö vähissä: ei kutsuja — lähetysten luonti menee havainnon edelle", async () => {
+    const h = harness({ getQuotaRemaining: async () => 499 });
+    await settle();
+    expect(h.fetchBroadcast).not.toHaveBeenCalled();
+    expect(h.poller.reason()).toMatch(/kiintiöstä jäljellä vain 499/i);
+  });
+
+  it("kiintiövarauksen yläpuolella pollataan normaalisti", async () => {
+    const h = harness({ getQuotaRemaining: async () => 500 });
+    await settle();
+    expect(h.fetchBroadcast).toHaveBeenCalledTimes(1);
+  });
+
   it("lähde-URLista ei saa videoId:tä: ei kutsuja", async () => {
     const h = harness({
       getActiveJob: async () => job({ sourceUrl: "https://www.youtube.com/@kanava/live" }),
@@ -166,7 +207,7 @@ describe("portit", () => {
   });
 
   it("Google-tiliä ei ole yhdistetty: ei kutsuja", async () => {
-    const h = harness({ hasToken: async () => false });
+    const h = harness({ getTokenFingerprint: async () => null });
     await settle();
     expect(h.fetchBroadcast).not.toHaveBeenCalled();
     expect(h.poller.reason()).toMatch(/Google-tiliä ei ole yhdistetty/);
@@ -231,18 +272,48 @@ describe("havainto", () => {
     expect(h.writes[2].ingest.observedAt).toBe(new Date(NOW + 2 * BASE_INTERVAL_MS).toISOString());
   });
 
-  it("lähetystä ei löydy: syy kirjataan ja väli nousee suoraan kattoon", async () => {
+  it("lähetystä ei löydy: yksi uusinta perusvälillä, vasta sitten katto", async () => {
     const h = harness({ fetchBroadcast: vi.fn(async () => null) });
     await settle();
 
     expect(h.writes[0].ingest.error).toMatch(/ei löytynyt/);
     expect(h.writes[0].ingest.lifeCycleStatus).toBeNull();
 
-    // Ei uutta kutsua ennen kattoa: tilanne ei korjaannu itsestään.
-    await vi.advanceTimersByTimeAsync(MAX_INTERVAL_MS - 1);
+    // Juuri luotu lähetys voi puuttua listauksesta ohimenevästi, joten
+    // ensimmäinen tyhjä vastaus ei vielä ole todiste: uusinta perusvälillä.
+    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS - 1);
     expect(h.fetchBroadcast).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(h.fetchBroadcast).toHaveBeenCalledTimes(2);
+
+    // Kaksi peräkkäistä tyhjää vastausta = pysyvä tilanne, ei syytä hakata
+    // rajapintaa.
+    await vi.advanceTimersByTimeAsync(MAX_INTERVAL_MS - 1);
+    expect(h.fetchBroadcast).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.fetchBroadcast).toHaveBeenCalledTimes(3);
+  });
+
+  it("lähetyksen ilmestyminen nollaa 'ei löytynyt' -laskurin", async () => {
+    let found = false;
+    const fetchBroadcast = vi.fn(async (): Promise<BroadcastSummary | null> =>
+      found ? broadcast() : null
+    );
+    const h = harness({ fetchBroadcast });
+    await settle();
+
+    // Toinen kierros perusvälillä, ja tällä kertaa lähetys löytyy.
+    found = true;
+    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS);
+    expect(h.writes[1].ingest.error).toBeNull();
+
+    // Jos lähetys katoaa myöhemmin uudelleen, uusintakierros on taas
+    // käytettävissä eikä väli hyppää suoraan kattoon.
+    found = false;
+    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS);
+    expect(fetchBroadcast).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS);
+    expect(fetchBroadcast).toHaveBeenCalledTimes(4);
   });
 });
 
@@ -302,29 +373,63 @@ describe("virheet", () => {
     expect(fetchBroadcast).toHaveBeenCalledTimes(2);
   });
 
-  it("needsReauth: yksi kirjoitus, ei uusia kutsuja ennen kuin token palaa", async () => {
-    let token = true;
+  it("needsReauth: yksi kirjoitus, ei uusia kutsuja ennen kuin token vaihtuu", async () => {
     const fetchBroadcast = vi.fn(async (): Promise<BroadcastSummary | null> => {
       throw new GoogleAuthError("Refresh token ei kelpaa enää", true);
     });
-    const h = harness({ fetchBroadcast, hasToken: async () => token });
+    const h = harness({ fetchBroadcast });
     await settle();
 
     expect(h.writes).toHaveLength(1);
     expect(h.writes[0].ingest.error).toMatch(/uuden kirjautumisen/);
 
-    // Token pois: kymmenen minuuttia hiljaisuutta, ei yhtään kutsua eikä
-    // toistuvaa kirjoitusta samasta asiasta.
-    token = false;
+    // Sama token yhä tallessa: kymmenen minuuttia hiljaisuutta, ei yhtään
+    // kutsua eikä toistuvaa kirjoitusta samasta asiasta.
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(fetchBroadcast).toHaveBeenCalledTimes(1);
     expect(h.writes).toHaveLength(1);
     expect(h.poller.current()).toBeNull();
+    expect(h.poller.reason()).toMatch(/uuden kirjautumisen/);
+  });
 
-    // Kirjautumisen jälkeen pollaus jatkuu.
-    token = true;
-    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS);
+  // Tuotannon palautumispolku: laitevirtakirjautuminen YLIKIRJOITTAA tokenin,
+  // eikä tiedosto käy koskaan nollassa. Pelkkä olemassaolotarkistus ei siis näe
+  // korjausta, ja polleri jäisi sokeaksi koko 15 minuutin varmistusajaksi.
+  it("uudelleenkirjautuminen avaa reauth-lukon heti, ilman aikakatkaisua", async () => {
+    let fingerprint = FINGERPRINT;
+    let broken = true;
+    const fetchBroadcast = vi.fn(async (): Promise<BroadcastSummary | null> => {
+      if (broken) throw new GoogleAuthError("Refresh token ei kelpaa enää", true);
+      return broadcast();
+    });
+    const h = harness({ fetchBroadcast, getTokenFingerprint: async () => fingerprint });
+    await settle();
+    expect(fetchBroadcast).toHaveBeenCalledTimes(1);
+
+    // Operaattori kirjautuu uudelleen minuutin kuluttua: uusi obtainedAt.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchBroadcast).toHaveBeenCalledTimes(1);
+    fingerprint = "2026-07-29T15:02:00.000Z";
+    broken = false;
+
+    // Seuraava kierros (kattoväli ensimmäisestä virheestä) pollaa jo — lukon
+    // 15 minuutin aikakatkaisua ei odoteta.
+    await vi.advanceTimersByTimeAsync(MAX_INTERVAL_MS - 60_000);
     expect(fetchBroadcast).toHaveBeenCalledTimes(2);
+    expect(h.poller.current()?.streamStatus).toBe("active");
+    expect(h.poller.reason()).toBeNull();
+  });
+
+  it("lukko avautuu myös pelkän aikakatkaisun jälkeen kun sormenjälki ei muutu", async () => {
+    const fetchBroadcast = vi.fn(async (): Promise<BroadcastSummary | null> => {
+      throw new GoogleAuthError("Refresh token ei kelpaa enää", true);
+    });
+    const h = harness({ fetchBroadcast });
+    await settle();
+
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(fetchBroadcast.mock.calls.length).toBeGreaterThan(1);
+    expect(h.writes.length).toBeGreaterThan(1);
   });
 
   it("katkaisee error-merkkijonon noin 200 merkkiin", async () => {

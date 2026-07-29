@@ -121,6 +121,15 @@ describe("kiintiölaskuri", () => {
     expect(state.units).toBe(51);
     expect((await auth.getQuota(now)).units).toBe(51);
   });
+
+  // Taustapollerin kiintiöportti lukee tämän: se on paikallinen tiedostoluku,
+  // ei verkkokutsu, joten sitä voi kysyä joka kierroksella.
+  it("kertoo jäljellä olevat yksiköt eikä koskaan mene pakkaselle", async () => {
+    const now = Date.parse("2026-07-16T12:00:00Z");
+    expect(await auth.getQuotaRemaining(now)).toBe(auth.DEFAULT_QUOTA_LIMIT);
+    await auth.recordQuota("insert", now);
+    expect(await auth.getQuotaRemaining(now)).toBe(auth.DEFAULT_QUOTA_LIMIT - 50);
+  });
 });
 
 describe("terveysraportin varoitukset", () => {
@@ -253,13 +262,40 @@ describe("terveysraportin varoitukset", () => {
       };
     }
 
-    it("on fail 7 vrk:n kohdalla vaikka päivitys onnistui tunti sitten", () => {
+    it("on warn — ei fail — 7 vrk:n kohdalla vaikka päivitys onnistui tunti sitten", () => {
       const result = health({ token: agedToken(7.4) });
-      expect(result.health).toBe("fail");
+      // Ikä yksin ei ole todiste katkeamisesta: 7 vrk:n vanheneminen koskee
+      // vain Testing-tilaa, ja julkaistulla sovelluksella token ei vanhene
+      // iän takia lainkaan. Failinä tämä jäisi päivästä 7 eteenpäin pysyvästi
+      // punaiseksi ja peittäisi alleen oikean vian.
+      expect(result.health).toBe("warn");
       expect(result.tokenAgeDays).toBe(7.4);
       // daysSinceSuccess ei kerro tästä mitään — juuri se on regressio.
       expect(result.daysSinceSuccess).toBeLessThan(1);
       expect(result.warnings.join(" ")).toMatch(/myöntämisestä/i);
+      // Ehdollinen sanamuoto: "jos sovellus on yhä Testing-tilassa".
+      expect(result.warnings.join(" ")).toMatch(/Jos OAuth-sovellus on yhä Testing-tilassa/);
+    });
+
+    it("pysyy warnina vaikka token olisi kuukausia vanha", () => {
+      // Julkaistu sovellus: refresh token ei vanhene, mutta tokenAgeDays
+      // kasvaa loputtomiin.
+      const result = health({ token: agedToken(120) });
+      expect(result.health).toBe("warn");
+    });
+
+    it("aidosti katkennut yhteys on yhä fail — daysSinceSuccess hoitaa sen", () => {
+      // Refresh lakkasi onnistumasta 8 vrk sitten, joten lastRefreshAt on
+      // jäänyt paikalleen. Tämä polku on se joka saa olla punainen.
+      const result = health({
+        token: {
+          refreshToken: "rt",
+          scope: auth.SCOPES.join(" "),
+          obtainedAt: new Date(now - 30 * 86_400_000).toISOString(),
+          lastRefreshAt: new Date(now - 8 * 86_400_000).toISOString(),
+        },
+      });
+      expect(result.health).toBe("fail");
       expect(result.headline).toMatch(/vanhentunut/i);
     });
 
@@ -277,17 +313,23 @@ describe("terveysraportin varoitukset", () => {
       expect(result.warnings).toEqual([]);
     });
 
+    // Laitevirta kirjoittaa lastRefreshAt:in ja obtainedAt:in SAMALLA
+    // hetkellä, joten juuri tuo muoto — ei koskaan lastRefreshAt: null — on
+    // se jonka tuotanto tuottaa kun päivityksiä ei ole vielä ollut.
     it("ei toista samaa syytä kahdesti kun päivityksiä ei ole vielä ollut", () => {
+      const obtained = new Date(now - 6.2 * 86_400_000).toISOString();
       const result = health({
         token: {
           refreshToken: "rt",
           scope: auth.SCOPES.join(" "),
-          obtainedAt: new Date(now - 6.2 * 86_400_000).toISOString(),
-          lastRefreshAt: null,
+          obtainedAt: obtained,
+          lastRefreshAt: obtained,
         },
       });
       expect(result.health).toBe("warn");
       expect(result.warnings).toHaveLength(1);
+      // Yllä oleva daysSinceSuccess-sääntö sanoo asian; ikäsääntö vaikenee.
+      expect(result.warnings[0]).not.toMatch(/myöntämisestä/i);
     });
 
     it("ei ylikirjoita ankarampaa löydöstä otsikosta", () => {
@@ -424,6 +466,51 @@ describe("laitevirta", () => {
     expect(health.channel?.title).toBe("Talonkuningas");
     expect(health.missingScopes).toEqual([]);
     expect(health.health).toBe("ok");
+  });
+
+  // Taustapolleri lukitsee itsensä kun refresh token kuolee, ja avaa lukon
+  // vasta kun tunnukset vaihtuvat. Uudelleenkirjautuminen YLIKIRJOITTAA
+  // tokenin — tiedosto ei käy koskaan nollassa — joten pelkkä olemassaolo ei
+  // kelpaa signaaliksi, mutta sormenjäljen on vaihduttava.
+  it("sormenjälki vaihtuu uudelleenkirjautumisessa ilman että token käy nollassa", async () => {
+    const connected = {
+      deviceCode: () =>
+        jsonResponse(200, {
+          device_code: "DC-1",
+          user_code: "ABCD-EFGH",
+          verification_url: "https://www.google.com/device",
+          expires_in: 900,
+          interval: 5,
+        }),
+      token: () =>
+        jsonResponse(200, {
+          access_token: "at-1",
+          refresh_token: "rt-1",
+          expires_in: 3600,
+          scope: auth.SCOPES.join(" "),
+        }),
+    };
+    vi.useFakeTimers();
+    try {
+      expect(await auth.getTokenFingerprint()).toBeNull();
+
+      vi.setSystemTime(Date.parse("2026-07-29T15:00:00.000Z"));
+      mockFetch(connected);
+      await auth.startDeviceFlow();
+      await auth.pollDeviceFlow();
+      const first = await auth.getTokenFingerprint();
+      expect(first).not.toBeNull();
+
+      // Sama tilanne kuin kentällä: operaattori kirjautuu uudelleen ilman että
+      // vanhaa tokenia poistetaan välissä.
+      vi.setSystemTime(Date.parse("2026-07-29T15:20:00.000Z"));
+      mockFetch(connected);
+      await auth.startDeviceFlow();
+      await auth.pollDeviceFlow();
+      expect(await auth.getTokenFingerprint()).not.toBe(first);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("kääntää invalid_grantin suomenkieliseksi uudelleenkirjautumisohjeeksi", async () => {
