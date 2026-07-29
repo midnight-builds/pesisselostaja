@@ -24,6 +24,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # apps/control renderöi thumbnailit Python-skriptillä (Pillow), koska
+      # PIL tekee tekstin ja taustakuvan latauksen ilman natiiviriippuvuutta
+      # Nodessa. Ilman tätä thumbnail-testit kaatuvat CI:ssä vaikka ne menevät
+      # läpi kehityskoneella — ja ne on parempi ASENTAA kuin ohittaa: skripti
+      # on ainoa asia joka tuottaa julkaistavan kuvan.
+      - name: Install Pillow (thumbnail renderer)
+        run: sudo apt-get install -y --no-install-recommends python3-pil
+
       - name: Lint
         run: npm run lint
 
