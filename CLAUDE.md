@@ -25,6 +25,33 @@ not runs. Periods come from `event.period`: 0 = 1. jakso, 1 = 2. jakso, 2 = supe
 **reset to zero each period / each turn change**; they are announced with a Finnish
 ordinal ("kolmas palo").
 
+**Who scores a run.** Confirmed by the user 29.7.2026 after a wrong guess was
+nearly acted on — do not re-derive this from general baseball intuition:
+
+- *"Vesterinen löi juoksun, tuojana Hupli"* is CORRECT. **Vesterinen was the
+  batter (lyöjä).** After the hit, runners advance 1. pesä → 2. pesä → 3. pesä
+  → kotipesä.
+- The **tuoja** is the runner who gets from **3. pesä to kotipesä** before the
+  ball reaches the lukkari at home. So the verb "löi" belongs to the batter,
+  never to the runner.
+- *"Juoksun löi Lappalainen, tuojana Vesterinen"* therefore means: Vesterinen
+  had advanced around the field, Lappalainen hit the ball, and Vesterinen made
+  it home from 3. pesä.
+- **Harhaheitto** (`wtscore` in the API): the fielding side had the ball but it
+  got away while being thrown between players, and a runner made it home from
+  3. pesä in the meantime. No batter is credited — the API sends the phrase
+  *"toi juoksun harhaheitolla"* ready-made.
+
+**"Vuorossa" and "lyömässä" mean the same thing** — both refer to the player
+now batting. The speech variants may use either freely.
+
+**One marking can bring more than one run** (`oscscore` > 1), though it is rare.
+`runValueOfSubEvent` already returns the count; speech that says "a run" in the
+singular is therefore not always accurate.
+
+When a pesäpallo detail is not written down here, **ask the user** rather than
+inferring it. Getting this wrong ships to every broadcast.
+
 ## TTS pronunciation
 Speech is read aloud by browser TTS or Piper, which mispronounce some terms.
 This is **not** a blanket spell-out rule — most abbreviations (e.g. `IPV`) read fine.
