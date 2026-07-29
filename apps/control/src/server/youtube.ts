@@ -128,7 +128,9 @@ interface LiveStreamResource {
       streamName?: string;
     };
   };
-  status?: { streamStatus?: string };
+  // healthStatus on sisäkkäinen objekti, ei merkkijono — YouTube palauttaa
+  // sen muodossa { status: "good" | "ok" | "bad" | "noData", ... }.
+  status?: { streamStatus?: string; healthStatus?: { status?: string } };
 }
 
 interface ListResponse<T> {
