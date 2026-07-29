@@ -36,28 +36,68 @@ function isBlocking(status: JobStatus): boolean {
   return status === "arming" || status === "live";
 }
 
-function clashError(clashing: Job): Error {
-  const verb = clashing.status === "live" ? "lähetyksessä" : "valmistelussa";
-  return new Error(
-    `${clashing.home} vastaan ${clashing.away} on jo ${verb} — lopeta se ensin, ennen kuin tämä työ voi käynnistyä.`
-  );
+/** Thrown when activating a job would put a second one in the broadcast slot.
+ *
+ *  Its own type, and it carries the offending job, because this is a STATE
+ *  conflict, not a server fault: the HTTP layer answers 409 and the UI offers
+ *  "lopeta edellinen ja aktivoi tämä". As a bare Error it fell through to the
+ *  generic 500 handler, and the operator's only way out was a hand-written
+ *  PATCH — at the exact moment the next match had already started (#101). */
+export class JobClashError extends Error {
+  readonly clashing: Job;
+
+  constructor(clashing: Job) {
+    const verb = clashing.status === "live" ? "lähetyksessä" : "valmistelussa";
+    super(
+      `${clashing.home} vastaan ${clashing.away} on jo ${verb} — lopeta se ensin, ennen kuin tämä työ voi käynnistyä.`
+    );
+    this.name = "JobClashError";
+    this.clashing = clashing;
+  }
+}
+
+/** How a run that is over should be recorded. A job that never got as far as
+ *  starting the relay was cancelled, not finished — "finished" on a broadcast
+ *  that never happened would put a phantom run in the post-match reports. */
+function closedStatus(job: Job): JobStatus {
+  return job.startedAt ? "finished" : "cancelled";
+}
+
+function closeJob(job: Job, at: string): Job {
+  return { ...job, status: closedStatus(job), endedAt: job.endedAt ?? at };
 }
 
 /** Applies a patch to one job inside the full list, enforcing the
  *  single-active-job invariant whenever the patch would newly put a job into
  *  "arming"/"live". Centralized so patchJob, activateJob and setJobStatus —
- *  the three paths that can change `status` — can't disagree on the rule. */
-function applyPatch(jobs: Job[], id: string, patch: Partial<Job>): { jobs: Job[]; job: Job } {
+ *  the three paths that can change `status` — can't disagree on the rule.
+ *
+ *  `force` closes the clashing job instead of refusing. It is only ever set by
+ *  an explicit operator action ("lopeta edellinen ja aktivoi tämä"); nothing
+ *  automatic may use it, because a running broadcast is never cut on its own
+ *  (DESIGN.md: uptime first). */
+function applyPatch(
+  jobs: Job[],
+  id: string,
+  patch: Partial<Job>,
+  opts: { force?: boolean } = {}
+): { jobs: Job[]; job: Job } {
   const idx = jobs.findIndex((j) => j.id === id);
   if (idx === -1) throw new Error(`Työtä ${id} ei löytynyt.`);
   const current = jobs[idx];
   const nextStatus = patch.status ?? current.status;
+  let nextJobs = jobs.slice();
   if (isBlocking(nextStatus) && nextStatus !== current.status) {
-    const clashing = jobs.find((j) => j.id !== id && isBlocking(j.status));
-    if (clashing) throw clashError(clashing);
+    const clashingIdx = nextJobs.findIndex((j) => j.id !== id && isBlocking(j.status));
+    if (clashingIdx !== -1) {
+      if (!opts.force) throw new JobClashError(nextJobs[clashingIdx]);
+      // Same array, same write: the slot is never momentarily held by two jobs
+      // and never momentarily held by none.
+      nextJobs[clashingIdx] = closeJob(nextJobs[clashingIdx], new Date().toISOString());
+    }
   }
   const job: Job = { ...current, ...patch };
-  const nextJobs = jobs.slice();
+  nextJobs = nextJobs.slice();
   nextJobs[idx] = job;
   return { jobs: nextJobs, job };
 }
