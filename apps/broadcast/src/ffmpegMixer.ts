@@ -118,6 +118,19 @@ export interface FfmpegMixerOptions {
    *  any ffmpeg binary or real broadcast. Never set in production; see
    *  apps/broadcast/docs/adr/0002-ffmpeg-mixer-process-seam.md. */
   spawnMixerProcess?: (args: string[]) => ChildProcess;
+  /** Katvekuva ("EI SIGNAALIA", issue #104): kun lähdettä ei saada kiinni,
+   *  RTMP-työntöä jatketaan still-kuvalla ja selostus jatkuu sen päällä.
+   *  Absent/null — tai `available === false` — = katvetila pois, eli
+   *  TÄSMÄLLEEN nykyinen käytös. Oletuksena pois (RELAY_NO_SIGNAL_SLATE):
+   *  tämä on uusi ffmpeg-polku joka ajaa nimenomaan silloin kun lähetys on jo
+   *  vaikeuksissa, eikä sitä ole koeteltu livenä. */
+  slate?: NoSignalSlate | null;
+  /** Kynnysaika ennen katvekuvan käynnistystä (oletus DEFAULT_SLATE_AFTER_MS). */
+  slateAfterMs?: number;
+  /** Ohjaamon havainto lähteen syötteestä (control-tiedoston `sourceIngest`).
+   *  Vapaaehtoinen tulo: absent/null = ei tietoa = nykyinen käytös. Ks.
+   *  freshSourceIngest siitä, miksi tämä ei koskaan laukaise katvetilaa. */
+  sourceIngest?: () => SourceIngestObservation | null;
 }
 
 /** A finished ffmpeg session, as reported back to the supervisor loop. */
