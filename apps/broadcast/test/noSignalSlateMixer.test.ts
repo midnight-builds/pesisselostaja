@@ -22,8 +22,8 @@ const LAYOUT: SlateLayout = {
   barsHeight: 626,
   fontBold: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
   fontRegular: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-  score: { y: 812, size: 58, color: "white" },
-  status: { y: 892, size: 42, color: "0xB0B0B0" },
+  score: { y: 812, size: 58, color: "white", maxWidth: 1690 },
+  status: { y: 892, size: 42, color: "0xB0B0B0", maxWidth: 1690 },
 };
 
 /** Sama ffmpeg-sijainen kuin ffmpegMixerShortSession.test.ts:ssä (ks.

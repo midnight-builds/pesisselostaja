@@ -182,7 +182,22 @@ export function parseRelayConfig(): RelayConfig {
   // ensimmäisen kokeilun on oltava tietoinen valinta. Kaikki muu koodi on
   // valmiina ja testattuna.
   const noSignalSlate = process.env.RELAY_NO_SIGNAL_SLATE === "true";
-  const noSignalSlateAfterMs = nonNegativeNumber(process.env.RELAY_NO_SIGNAL_SLATE_AFTER_MS, 8000);
+  // Kynnyksellä on LATTIA, ei pelkkä oletus: 0 tekisi jokaisesta respawnista
+  // katvekuvan välähdyksen, mikä on täsmälleen se mitä issue kieltää
+  // ("hetkellinen sekunnin blippi ei saa vilkuttaa katvekuvaa").
+  const noSignalSlateAfterMs = Math.max(
+    2000,
+    nonNegativeNumber(process.env.RELAY_NO_SIGNAL_SLATE_AFTER_MS, 8000)
+  );
+  // Katvekuvan geometria. Oletus 1920x1080, mutta se kannattaa asettaa LÄHTEEN
+  // resoluutioon: katvesessio työntää samaan RTMP-avaimeen kuin lähdesessio,
+  // ja jos ne eroavat, YouTuben transkooderi käynnistyy uudelleen molemmissa
+  // vaihdoissa — eli katsoja saa kaksi ylimääräistä katkoa per katkos, juuri
+  // sitä mitä ominaisuuden on tarkoitus poistaa. Lähteen resoluutiota ei saa
+  // ilmaiseksi (yt-dlp -g ei kerro sitä), joten tämä on operaattorin tieto.
+  const slateSize = /^(\d{3,4})x(\d{3,4})$/.exec(process.env.RELAY_NO_SIGNAL_SLATE_SIZE ?? "");
+  const noSignalSlateWidth = slateSize ? Number(slateSize[1]) : 1920;
+  const noSignalSlateHeight = slateSize ? Number(slateSize[2]) : 1080;
   // Delta polling on by default (user decision); env or the control file's
   // deltaFetch key turns it off without a restart.
   const deltaFetch = process.env.RELAY_DELTA_FETCH !== "false";

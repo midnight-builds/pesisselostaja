@@ -28,6 +28,10 @@ export interface SlateTextStyle {
   size: number;
   /** ffmpeg-yhteensopiva väri, esim. `white` tai `0xB0B0B0`. */
   color: string;
+  /** Suurin sallittu rivin leveys pikseleinä (generaattorin marginaalit).
+   *  Generaattori kutistaa liian leveän rivin itse; drawtext ei osaa, joten
+   *  meidän on katkaistava teksti mittaan. `0` = ei rajaa tiedossa. */
+  maxWidth: number;
 }
 
 /** Generaattorin stdoutiin tulostama yhden rivin JSON. Sopimus toisen agentin
@@ -84,7 +88,27 @@ function parseTextStyle(raw: unknown): SlateTextStyle | null {
   if (typeof rec.y !== "number" || !Number.isFinite(rec.y)) return null;
   if (!isPositiveNumber(rec.size)) return null;
   if (typeof rec.color !== "string" || rec.color === "") return null;
-  return { y: rec.y, size: rec.size, color: rec.color };
+  // maxWidth on generaattorin lisä eikä pakollinen: vanhempi generaattori ei
+  // tunne sitä, ja 0 = "ei rajaa tiedossa" (silloin ei katkaista).
+  const maxWidth = isPositiveNumber(rec.maxWidth) ? rec.maxWidth : 0;
+  return { y: rec.y, size: rec.size, color: rec.color, maxWidth };
+}
+
+/** DejaVu Sansin keskimääräinen merkin leveys suhteessa kirjasinkokoon.
+ *  Arvio, ei mittaus — mutta drawtext ei osaa kutistaa tekstiä eikä fontsize
+ *  voi riippua text_w:stä (se lasketaan ennen tekstin mittaamista), joten
+ *  ainoa tapa pitää rivi mitoissaan ilman respawnia on katkaista MERKKEINÄ.
+ *  Yliarvio on turvallisempi kuin aliarvio: liian varovainen katkaisu näkyy
+ *  lyhempänä nimenä, liian rohkea leikkautuu ruudun reunasta. */
+const AVG_GLYPH_ADVANCE = 0.62;
+
+/** Katkaisee rivin niin että se mahtuu annettuun leveyteen. Ellipsi kertoo
+ *  katsojalle että nimi on lyhennetty eikä kirjoitettu väärin. */
+export function fitSlateLine(text: string, style: SlateTextStyle): string {
+  if (!style.maxWidth || text === "") return text;
+  const maxChars = Math.floor(style.maxWidth / (style.size * AVG_GLYPH_ADVANCE));
+  if (maxChars <= 1 || text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
 }
 
 /** Jäsentää generaattorin stdoutin. Viimeinen ei-tyhjä rivi luetaan, jotta
@@ -227,12 +251,18 @@ export class NoSignalSlate {
    *  aina atomisesti (tmp + rename): ffmpeg lukee tiedostoja `reload`illa joka
    *  kehyksellä, joten puoliksi kirjoitettu tiedosto näkyisi ruudulla. */
   update(text: SlateText): void {
-    if (!this.layoutValue) return;
-    if (text.score !== this.lastText.score) {
-      if (this.writeAtomic(this.scoreTextPath, text.score)) this.lastText = { ...this.lastText, score: text.score };
+    const layout = this.layoutValue;
+    if (!layout) return;
+    // Katkaisu tehdään TÄSSÄ eikä argumenttien rakennuksessa: fontsize on
+    // baked ffmpegin filtteriin eikä voi muuttua ilman respawnia, joten rivin
+    // mittaan sovittaminen on kirjoittavan pään tehtävä.
+    const score = fitSlateLine(text.score, layout.score);
+    const status = fitSlateLine(text.status, layout.status);
+    if (score !== this.lastText.score) {
+      if (this.writeAtomic(this.scoreTextPath, score)) this.lastText = { ...this.lastText, score };
     }
-    if (text.status !== this.lastText.status) {
-      if (this.writeAtomic(this.statusTextPath, text.status)) this.lastText = { ...this.lastText, status: text.status };
+    if (status !== this.lastText.status) {
+      if (this.writeAtomic(this.statusTextPath, status)) this.lastText = { ...this.lastText, status };
     }
   }
 
