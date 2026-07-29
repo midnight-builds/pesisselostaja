@@ -18,7 +18,7 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { DEFAULT_NARRATION_DELAY_MS } from "../../../broadcast/src/config.js";
-import type { ControlKnobs, Job, RelayProcess } from "../shared/types.js";
+import type { ControlKnobs, Job, RelayProcess, SourceIngest } from "../shared/types.js";
 import { CONFIG } from "./config.js";
 
 // execFile, never exec: every argument below is fixed, but matchIds and paths
@@ -139,11 +139,17 @@ export async function restartRelay(): Promise<RelayProcess> {
 
 // ------------------------------------------------------------------ env file
 
+/** Kasvava juokseva numero tmp-tiedostojen nimiin. Pelkkä pid ei riitä: saman
+ *  prosessin kaksi rinnakkaista kirjoitusta (operaattorin klikkaus ja lähteen
+ *  tilan polleri) osuisivat samaan tmp-nimeen, jolloin toinen kirjoittaisi
+ *  toisen puskurin päälle ennen renamea. */
+let tmpCounter = 0;
+
 /** Writes a file by rename, so a reader (systemd's EnvironmentFile=, the
  *  relay's own control-file read) never sees a half-written file. The temp file
  *  is created next to the target so the rename stays on one filesystem. */
 async function writeFileAtomic(path: string, data: string, mode: number): Promise<void> {
-  const tmp = `${path}.tmp-${process.pid}`;
+  const tmp = `${path}.tmp-${process.pid}-${++tmpCounter}`;
   await writeFile(tmp, data, { mode });
   await rename(tmp, path);
 }
@@ -215,6 +221,30 @@ async function readControlFile(matchId: number): Promise<Record<string, unknown>
   }
 }
 
+/** Sarjallistaa KAIKKI control-tiedoston lue-muokkaa-kirjoita-operaatiot yhden
+ *  ketjun läpi, samalla kuviolla kuin store.ts:n update().
+ *
+ *  Mitä tämä estää: kaksi rinnakkaista kirjoitusta lukevat molemmat saman
+ *  vanhan tiedoston, kumpikin liittää siihen oman avaimensa ja kirjoittaa koko
+ *  objektin — jälkimmäinen rename pyyhkii ensimmäisen muutoksen. Ennen tätä
+ *  vaihetta kirjoittajia oli käytännössä vain yksi (operaattorin klikkaus),
+ *  mutta 30 s välein kirjoittava lähteen tilan polleri tekee törmäyksestä
+ *  rutiinin: hukattu päivitys olisi joko kadonnut säätö tai kadonnut
+ *  sourceIngest.
+ *
+ *  Globaali eikä per matchId: kirjoituksia on muutama minuutissa, joten
+ *  ottelukohtainen ketju olisi pelkkää kirjanpitoa ilman mitattavaa hyötyä. */
+let controlChain: Promise<unknown> = Promise.resolve();
+
+function serializeControlWrite<T>(fn: () => Promise<T>): Promise<T> {
+  const next = controlChain.then(fn);
+  // Ketju itse ei saa koskaan jäädä hylätyksi, tai jokainen sen jälkeen
+  // jonoon tullut kirjoitus perisi saman virheen ikuisesti. Kutsuja näkee
+  // oman virheensä palautetusta promisesta.
+  controlChain = next.catch(() => undefined);
+  return next;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
@@ -246,7 +276,14 @@ export async function readKnobs(matchId: number): Promise<ControlKnobs> {
  *  from stale UI state would silently revert someone's other change), and phase
  *  B adds keys (mute, volume) that this build knows nothing about and must not
  *  drop. */
-export async function writeKnobs(
+export function writeKnobs(matchId: number, patch: Partial<ControlKnobs>): Promise<ControlKnobs> {
+  return serializeControlWrite(() => writeKnobsUnlocked(matchId, patch));
+}
+
+/** Itse lue-muokkaa-kirjoita, ILMAN lukitusta. Erillään siksi, että
+ *  nudgeDelay tarvitsee luvun ja kirjoituksen saman lukituksen sisällä — jos se
+ *  kutsuisi lukitsevaa writeKnobsia, se jäisi odottamaan omaa ketjuvuoroaan. */
+async function writeKnobsUnlocked(
   matchId: number,
   patch: Partial<ControlKnobs>
 ): Promise<ControlKnobs> {
@@ -280,12 +317,56 @@ export async function writeKnobs(
 /** The ±500 ms buttons. Relative, not absolute, because calibration happens by
  *  ear mid-broadcast ("speech is ahead of the picture → nudge up") and the
  *  operator should never have to know the current number to make it better. */
-export async function nudgeDelay(matchId: number, deltaMs: number): Promise<ControlKnobs> {
-  const current = await readKnobs(matchId);
-  const next = clamp(
-    current.narrationDelayMs + deltaMs,
-    MIN_NARRATION_DELAY_MS,
-    MAX_NARRATION_DELAY_MS
-  );
-  return writeKnobs(matchId, { narrationDelayMs: next });
+export function nudgeDelay(matchId: number, deltaMs: number): Promise<ControlKnobs> {
+  // Luku ja kirjoitus saman lukituksen sisällä: muuten kaksi peräkkäistä
+  // +500-painallusta voisivat lukea saman lähtöarvon ja tuottaa yhden askeleen
+  // kahden sijaan.
+  return serializeControlWrite(async () => {
+    const current = knobsFromRaw(await readControlFile(matchId));
+    const next = clamp(
+      current.narrationDelayMs + deltaMs,
+      MIN_NARRATION_DELAY_MS,
+      MAX_NARRATION_DELAY_MS
+    );
+    return writeKnobsUnlocked(matchId, { narrationDelayMs: next });
+  });
+}
+
+// ------------------------------------------------------- lähteen tila (#104)
+
+/** Julkaisee ohjaamon YouTube-havainnon lähteestä samaan control-tiedostoon
+ *  kuin säädöt. Merge-kirjoitus kuten writeKnobs: tiedosto on relayn oma, ja
+ *  koko objektin korvaaminen pudottaisi säätöavaimet.
+ *
+ *  Vaiheessa 1 tällä ei ole kuluttajaa — relay ohittaa tuntemattoman avaimen
+ *  sellaisenaan, joten julkaisu on turvallista ottaa käyttöön ennen kuin
+ *  mikseri osaa lukea sen. */
+export function writeSourceIngest(matchId: number, ingest: SourceIngest): Promise<void> {
+  return serializeControlWrite(async () => {
+    const raw = await readControlFile(matchId);
+    const merged: Record<string, unknown> = { ...raw, sourceIngest: ingest };
+    await writeFileAtomic(controlFilePath(matchId), `${JSON.stringify(merged, null, 2)}\n`, 0o644);
+  });
+}
+
+/** Sopimuksen lukupää. Ohjaamon oma tilarivi ei tarvitse tätä (polleri pitää
+ *  havainnon muistissa), mutta testit ja levyltä debuggaus tarvitsevat — ja
+ *  kirjoitettu jäsennin dokumentoi mitä vaiheen 2 relayn on kestettävä:
+ *  puuttuva avain, väärä tyyppi ja rikkinäinen JSON ovat kaikki `null`, eivät
+ *  virheitä. */
+export async function readSourceIngest(matchId: number): Promise<SourceIngest | null> {
+  const raw = (await readControlFile(matchId)).sourceIngest;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  if (typeof value.observedAt !== "string" || typeof value.videoId !== "string") return null;
+  const optional = (key: string): string | null =>
+    typeof value[key] === "string" ? (value[key] as string) : null;
+  return {
+    observedAt: value.observedAt,
+    videoId: value.videoId,
+    lifeCycleStatus: optional("lifeCycleStatus"),
+    streamStatus: optional("streamStatus"),
+    healthStatus: optional("healthStatus"),
+    error: optional("error"),
+  };
 }
