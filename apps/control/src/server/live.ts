@@ -584,7 +584,21 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
   let state: LiveState = assemble();
 
   function assemble(): LiveState {
-    const snap: Snapshot = { now: Date.now(), job, relay, match, system, log, errors };
+    // Havainto luetaan pollerin muistista joka kokoamisella: se on synkroninen
+    // ja ilmainen, eikä aggregaattorin tikkien tarvitse tietää pollerin omasta
+    // 30 s rytmistä.
+    const source = opts.getSourceIngest?.() ?? { ingest: null, reason: null };
+    const snap: Snapshot = {
+      now: Date.now(),
+      job,
+      relay,
+      match,
+      system,
+      log,
+      errors,
+      sourceIngest: source.ingest,
+      sourceIngestReason: source.reason,
+    };
     const { health, headline } = deriveHealth(snap);
     return {
       // Server time: the phone's clock can be off, and "N s sitten" computed
