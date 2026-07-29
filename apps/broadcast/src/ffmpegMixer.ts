@@ -440,6 +440,30 @@ export class FfmpegMixer {
   private respawns = 0;
   private sourceStateValue: "live" | "scheduled" | "resolving" | "failed" | "unknown" = "unknown";
   private sourceDetailValue: string | null = null;
+  /** True only while a katve (no-signal slate) ffmpeg session is pushing.
+   *  Kept separate from sourceStateValue so telemetry can show the katve
+   *  WITHOUT hiding why the source is missing — issuen rajaus "ei saa peittää
+   *  ongelmaa operaattorilta". */
+  private slateActive = false;
+  /** Kertakytkin: katve on epäonnistunut kerran, eikä sitä yritetä enää tässä
+   *  ajossa. Uusi ffmpeg-polku, joka ajaa nimenomaan silloin kun lähetys on jo
+   *  vaikeuksissa, ei saa jäädä silmukkaan yrittämään itseään uudelleen. */
+  private slateDisabled = false;
+  /** Monotoninen hetki jolloin lähde viimeksi lakkasi olemasta kiinni; null
+   *  kun ffmpeg on juuri nyt kiinni lähteessä. Katvetilan kynnys mitataan
+   *  tästä — relayn OMASTA paikallisesta havainnosta, ei ohjaamon
+   *  signaalista. */
+  private sourceMissingSince: number | null = null;
+  /** Onko lähde koskaan saatu kiinni tässä ajossa. Erottaa tilannerivin
+   *  sanamuodot "kuvayhteys katkesi" ja "kuvayhteyttä odotetaan". */
+  private hasHadSource = false;
+  /** Tosi kun lähdeosoitetta juuri nyt selvitetään (yt-dlp käynnissä), eli
+   *  katsojalle "yhdistetään uudelleen". */
+  private probingSource = false;
+  /** Selostussilmukan työntämät valmiit tekstirivit; tyhjät ennen kuin loop on
+   *  antanut mitään (silloin kuvassa on pelkkä "EI SIGNAALIA" + alatunniste,
+   *  mikä on kelvollinen lopputulos). */
+  private slateSituation: SlateSituation = { score: "", situation: "" };
   /** Wall clock of the FIRST completed FIFO handshake ever, never reset —
    *  the commentary loop's first-speech grace period (RELAY_FIRST_SPEECH_DELAY_MS)
    *  is measured from this, so respawns don't restart the wait. */
