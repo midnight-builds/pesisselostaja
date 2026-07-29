@@ -55,6 +55,36 @@ describe("pruneRunDir (issue #39)", () => {
       expect(existsSync(join(runDir, ".state-143277.json"))).toBe(false);
     });
 
+    /** Telemetry writes one snapshot and one growing timeline per match. They
+     *  are the relay's own artifacts, so the allowlist has to include them —
+     *  otherwise a season of `timeline-*.ndjson` accumulates untouched on a
+     *  30 GB disk, and the retention sweep silently stops covering everything
+     *  the relay produces. */
+    it("sweeps stale telemetry files too", async () => {
+      file("status-143277.json", 800, daysAgo(40));
+      file("status-143277.json.tmp", 400, daysAgo(40));
+      file("timeline-143277.ndjson", 2000, daysAgo(40));
+
+      const result = await pruneRunDir(runDir, { maxAgeMs: 30 * DAY_MS, ttsCacheMaxBytes: 0, now: NOW });
+
+      expect(result.removed).toHaveLength(3);
+      expect(existsSync(join(runDir, "timeline-143277.ndjson"))).toBe(false);
+      expect(existsSync(join(runDir, "status-143277.json.tmp"))).toBe(false);
+    });
+
+    it("never sweeps the running match's telemetry, however long the match", async () => {
+      file("status-146210.json", 800, daysAgo(400));
+      file("timeline-146210.ndjson", 5000, daysAgo(400));
+      const result = await pruneRunDir(runDir, {
+        maxAgeMs: 30 * DAY_MS,
+        ttsCacheMaxBytes: 0,
+        keepMatchIds: [146210],
+        now: NOW,
+      });
+      expect(result.removed).toEqual([]);
+      expect(existsSync(join(runDir, "timeline-146210.ndjson"))).toBe(true);
+    });
+
     it("keeps artifacts inside the retention window", async () => {
       file("relay-146210.pcm", 0, daysAgo(3));
       const result = await pruneRunDir(runDir, { maxAgeMs: 30 * DAY_MS, ttsCacheMaxBytes: 0, now: NOW });

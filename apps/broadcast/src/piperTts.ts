@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { log } from "./log.js";
+import { logError } from "./log.js";
 
 const VOICE_FILES: Record<string, string> = {
   "harri-medium": "fi_FI-harri-medium.onnx",
@@ -59,7 +59,7 @@ export class PiperTts {
       const pcm = await execFileP("ffmpeg", ["-y", "-i", wavPath, "-ar", "48000", "-ac", "2", "-f", "s16le", "pipe:1"]);
       return pcm;
     } catch (err) {
-      log(`Piper-synteesivirhe: ${err instanceof Error ? err.message : err}`);
+      logError("tts.piper_failed", `Piper-synteesivirhe: ${err instanceof Error ? err.message : err}`);
       throw err;
     } finally {
       await rm(dir, { recursive: true, force: true });

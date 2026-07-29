@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { log } from "./log.js";
+import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import { NarrationFifo } from "./narrationFifo.js";
 import { resolveSourceUrl, SourceNotLiveYetError } from "./ytdlpSource.js";
 import {
@@ -269,6 +269,13 @@ export class FfmpegMixer {
   /** True only while an ffmpeg session is attached as a FIFO reader (between a
    *  completed handshake and the process exiting). */
   private sessionActive = false;
+  /** ffmpeg starts beyond the first one this run. A respawn is normal (URL
+   *  rotation) but a climbing count is the clearest single number for "the
+   *  picture is stuttering", which is otherwise only visible by reading the
+   *  log. */
+  private respawns = 0;
+  private sourceStateValue: "live" | "scheduled" | "resolving" | "failed" | "unknown" = "unknown";
+  private sourceDetailValue: string | null = null;
   /** Wall clock of the FIRST completed FIFO handshake ever, never reset —
    *  the commentary loop's first-speech grace period (RELAY_FIRST_SPEECH_DELAY_MS)
    *  is measured from this, so respawns don't restart the wait. */
@@ -299,6 +306,20 @@ export class FfmpegMixer {
    *  synthesizing pre-game filler nobody would hear yet — otherwise those
    *  welcome clips pile up in the FIFO before ffmpeg attaches and all play
    *  back-to-back on connect (HANDOFF.md 7). */
+  /** Telemetry accessors. Read-only views of state the supervisor already
+   *  keeps — nothing here changes a decision. */
+  get respawnCount(): number {
+    return this.respawns;
+  }
+
+  get sourceState(): "live" | "scheduled" | "resolving" | "failed" | "unknown" {
+    return this.sourceStateValue;
+  }
+
+  get sourceDetail(): string | null {
+    return this.sourceDetailValue;
+  }
+
   get isReaderAttached(): boolean {
     return this.sessionActive;
   }
@@ -356,17 +377,23 @@ export class FfmpegMixer {
             this.imminentSince === null ? 0 : monoNow() - this.imminentSince
           );
           const eta = err.startsInMs === null ? "" : ` — alkaa noin ${formatEta(err.startsInMs)} kuluttua`;
-          log(`Lähde ei ole vielä livenä${eta}. Tarkistetaan uudelleen ${Math.round(waitMs / 1000)} s kuluttua.`);
+          this.sourceStateValue = "scheduled";
+          this.sourceDetailValue = err.startsInMs === null
+            ? "alkaa hetkenä minä hyvänsä"
+            : `alkaa noin ${formatEta(err.startsInMs)} kuluttua`;
+          logInfo("source.not_live", `Lähde ei ole vielä livenä${eta}. Tarkistetaan uudelleen ${Math.round(waitMs / 1000)} s kuluttua.`);
           await this.interruptibleDelay(waitMs);
           continue;
         }
         this.scheduledSince = null;
         this.imminentSince = null;
-        log(`ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
+        this.sourceStateValue = "failed";
+        this.sourceDetailValue = err instanceof Error ? err.message : String(err);
+        logError("ffmpeg.start_failed", `ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
         this.noteUnproductiveAttempt((mins) => `Lähde ei ole vastannut ${mins} minuuttiin`);
       }
       if (this.stopped) break;
-      log(`Uudelleenyritys ${this.backoffMs}ms kuluttua…`);
+      logInfo("ffmpeg.respawn", `Uudelleenyritys ${this.backoffMs}ms kuluttua…`);
       await delay(this.backoffMs);
       this.backoffMs = Math.min(this.backoffMs * 2, 30000);
     }
@@ -393,7 +420,8 @@ export class FfmpegMixer {
       return;
     }
     if (session.refreshKill) return;
-    log(
+    logWarn(
+      "ffmpeg.unproductive",
       `ffmpeg kuoli alle ${Math.round(this.minProductiveRunMs / 1000)} s käynnistyksestä — ` +
         "lasketaan epäonnistuneeksi yritykseksi (ei tuota lähetystä)."
     );
@@ -403,7 +431,7 @@ export class FfmpegMixer {
     // counts those, the relay would shut down blaming the source. The verdict
     // itself is unchanged; only the wording learns to name the other suspect.
     const hint = describeFailureSide(session.failureSide, session.weakTarget);
-    if (hint) log(hint);
+    if (hint) logWarn("ffmpeg.failure_side", hint);
     const sideNote =
       session.failureSide === "target"
         ? " (ffmpegin virheet viittasivat KOHTEESEEN, ei lähteeseen — tarkista stream key)"
@@ -457,7 +485,8 @@ export class FfmpegMixer {
     const sourceUrl = this.opts.resolveTestSource
       ? await this.opts.resolveTestSource()
       : await (async () => {
-          log("Haetaan lähdeosoite yt-dlp:llä…");
+          logInfo("source.resolving", "Haetaan lähdeosoite yt-dlp:llä…");
+          this.sourceStateValue = "resolving";
           return resolveSourceUrl(this.opts.youtubeUrl);
         })();
 
@@ -465,7 +494,10 @@ export class FfmpegMixer {
     // blocks until ffmpeg attaches as a reader) — see narrationFifo.ts.
     await this.fifo.prepare();
 
-    log("Käynnistetään ffmpeg…");
+    if (this.sessionIndex > 0 || this.respawns > 0 || this.sourceStateValue === "live") this.respawns++;
+    this.sourceStateValue = "live";
+    this.sourceDetailValue = "ffmpeg käynnissä";
+    logInfo("ffmpeg.starting", "Käynnistetään ffmpeg…");
     const recordFilePath = this.opts.recordFile
       ? indexedRecordPath(this.opts.recordFile, this.sessionIndex++)
       : undefined;
@@ -525,7 +557,7 @@ export class FfmpegMixer {
     const heartbeat = setInterval(() => {
       const up = Math.round((monoNow() - startedAt) / 1000);
       const extra = this.opts.heartbeatExtra?.();
-      log(`Sydänääni: relay käynnissä ${up}s, selostusjonossa ${this.fifo.pendingClips} klippiä${extra ? `, ${extra}` : ""}.`);
+      logDebug("ffmpeg.heartbeat", `Sydänääni: relay käynnissä ${up}s, selostusjonossa ${this.fifo.pendingClips} klippiä${extra ? `, ${extra}` : ""}.`);
     }, HEARTBEAT_MS);
 
     const result = await childDone;
@@ -535,7 +567,7 @@ export class FfmpegMixer {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     const ranMs = monoNow() - startedAt;
     const detail = result.error ? result.error.message : `code=${result.code}, signal=${result.signal}`;
-    log(`ffmpeg päättyi (${detail}), ajoaika ${Math.round(ranMs / 1000)}s`);
+    logInfo("ffmpeg.exit", `ffmpeg päättyi (${detail}), ajoaika ${Math.round(ranMs / 1000)}s`);
     this.opts.onSessionEnd?.(Date.now(), ranMs);
     const failureSide = classifyFfmpegFailure(stderrTail.text());
     const weakTarget = hasWeakTargetSignal(stderrTail.text());
@@ -569,7 +601,8 @@ export class FfmpegMixer {
     // clean gap, "EI tyhjentynyt" = the 10s bound cut it off anyway.
     const drainStatus =
       remaining === 0 ? "tyhjeni" : `EI tyhjentynyt (${remaining} klippiä jäljellä, 10s katkaisu)`;
-    log(
+    logInfo(
+      "ffmpeg.respawn",
       `Määräaikainen URL-päivitys — käynnistetään ffmpeg uudelleen. ` +
         `Selostusjono ${drainStatus}; odotettiin ${waited}ms, jonossa ${pendingAtStart} klippiä respawnin alkaessa.`
     );

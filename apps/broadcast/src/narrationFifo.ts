@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createWriteStream, type WriteStream } from "node:fs";
 import { unlink } from "node:fs/promises";
-import { log } from "./log.js";
+import { logError, logWarn } from "./log.js";
 
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
@@ -106,7 +106,7 @@ export class NarrationFifo {
       this.stream!.once("open", () => resolve());
       this.stream!.once("error", reject);
     });
-    this.stream.on("error", (err) => log(`FIFO-kirjoitusvirhe: ${err.message}`));
+    this.stream.on("error", (err) => logError("fifo.write_failed", `FIFO-kirjoitusvirhe: ${err.message}`));
 
     this.stopped = false;
     this.tickCount = 0;
@@ -157,7 +157,7 @@ export class NarrationFifo {
 
     const frame = this.queue.nextFrame();
     this.stream.write(frame, (err) => {
-      if (err) log(`FIFO-tick-virhe: ${err.message}`);
+      if (err) logWarn("fifo.tick_failed", `FIFO-tick-virhe: ${err.message}`);
     });
 
     this.scheduleNextTick();

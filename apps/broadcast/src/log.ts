@@ -22,6 +22,8 @@
  *  `log()` without a code still works and still means info. It is kept for the
  *  handful of one-off lines where a code would be noise, not for new code. */
 
+import { fstatSync } from "node:fs";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 /** Stable machine identifiers for log lines. Adding one here is deliberate:
@@ -95,12 +97,40 @@ const PRIORITY: Record<LogLevel, number> = {
   error: 3,
 };
 
-/** systemd sets JOURNAL_STREAM for services whose output it captures. Its
- *  presence is the one reliable "am I being read by journald" signal, and it
- *  is what decides whether the `<N>` prefix would be interpreted or would just
- *  litter an operator's terminal. */
+/** Whether OUR stdout is the journald stream, which decides whether the `<N>`
+ *  prefix gets interpreted or just litters an operator's terminal.
+ *
+ *  Presence of JOURNAL_STREAM alone is not enough, and assuming it was is a
+ *  real bug: the variable is inherited by every child process, so a relay
+ *  started by hand from a shell that itself runs under a systemd unit would
+ *  print `<6>` on every line. systemd documents the variable as
+ *  `device:inode` OF the stream it handed over, precisely so a process can
+ *  check identity rather than presence — so compare it against fstat of fd 1.
+ *
+ *  Computed once: fd 1 does not change under us, and this runs on every
+ *  single log line. */
+function detectJournald(): boolean {
+  const raw = process.env.JOURNAL_STREAM;
+  if (!raw) return false;
+  const [dev, ino] = raw.split(":");
+  try {
+    const st = fstatSync(1);
+    return String(st.dev) === dev && String(st.ino) === ino;
+  } catch {
+    return false;
+  }
+}
+
+let journaldCache: boolean | null = null;
+
 function underJournald(): boolean {
-  return process.env.JOURNAL_STREAM !== undefined;
+  if (journaldCache === null) journaldCache = detectJournald();
+  return journaldCache;
+}
+
+/** Tests only: forget the cached stdout check after changing JOURNAL_STREAM. */
+export function resetJournaldDetection(): void {
+  journaldCache = null;
 }
 
 /** Receives every line as structured data. Set by telemetry.ts at startup;

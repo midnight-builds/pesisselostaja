@@ -1,12 +1,13 @@
 import { loadRelayEnv } from "./relayEnv.js";
 import { mkdirSync } from "node:fs";
 import { parseRelayConfig } from "./config.js";
-import { log } from "./log.js";
+import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import { CommentaryLoop } from "./commentaryLoop.js";
 import { PiperTts } from "./piperTts.js";
 import { ElevenLabsTts } from "./elevenLabsTts.js";
 import { FfmpegMixer, SourceExhaustedError } from "./ffmpegMixer.js";
 import { pruneRunDir, DAY_MS } from "./runRetention.js";
+import { Telemetry } from "./telemetry.js";
 
 // Before any config is parsed: same .env.relay systemd's EnvironmentFile
 // provides, so a manual dry-run and the live service read identical settings.
@@ -16,13 +17,18 @@ async function main(): Promise<void> {
   const config = parseRelayConfig();
   mkdirSync(config.runDir, { recursive: true });
 
-  log("Pesisselostaja Relay");
-  log(`Ottelu ID: ${config.matchId}`);
-  log(`YouTube-lähde: ${config.youtubeUrl}`);
-  log(`Ääni: ${config.elevenLabsApiKey ? `ElevenLabs ${config.elevenLabsVoiceId} (${config.elevenLabsModelId}), fallback Piper ${config.voice}` : `Piper ${config.voice}`}`);
-  log(`Dry run: ${config.dryRun}`);
-  if (!config.dryRun) log(`Lähteen antelias aikaikkuna ennen luovutusta: ${Math.round(config.maxFailureWindowMs / 60000)} min`);
-  if (config.recordFile) log(`Tallennetaan paikalliseen tiedostoon: ${config.recordFile}`);
+  // Attached before the first line so the timeline holds the whole run,
+  // including the config lines that explain how it was started.
+  const telemetry = new Telemetry({ runDir: config.runDir, matchId: config.matchId });
+  telemetry.attachToLog();
+
+  logInfo("relay.start", "Pesisselostaja Relay");
+  logInfo("relay.config", `Ottelu ID: ${config.matchId}`);
+  logInfo("relay.config", `YouTube-lähde: ${config.youtubeUrl}`);
+  logInfo("relay.config", `Ääni: ${config.elevenLabsApiKey ? `ElevenLabs ${config.elevenLabsVoiceId} (${config.elevenLabsModelId}), fallback Piper ${config.voice}` : `Piper ${config.voice}`}`);
+  logInfo("relay.config", `Dry run: ${config.dryRun}`);
+  if (!config.dryRun) logInfo("relay.config", `Lähteen antelias aikaikkuna ennen luovutusta: ${Math.round(config.maxFailureWindowMs / 60000)} min`);
+  if (config.recordFile) logInfo("relay.config", `Tallennetaan paikalliseen tiedostoon: ${config.recordFile}`);
 
   // run/ retention (issue #39) — before synthesis starts, so the TTS cache has
   // room. Only the relay's own artifacts are in scope; operator material in
@@ -33,7 +39,8 @@ async function main(): Promise<void> {
     keepMatchIds: [config.matchId],
   });
   if (pruned.removed.length > 0) {
-    log(
+    logInfo(
+      "relay.config",
       `Säilytyskäytäntö: poistettu ${pruned.removed.length} vanhaa ajotiedostoa ` +
         `(${(pruned.freedBytes / (1024 * 1024)).toFixed(1)} MiB vapautui).`
     );
@@ -56,21 +63,28 @@ async function main(): Promise<void> {
     config,
     async (spoken, readable) => {
       if (config.dryRun || !mixer) {
-        log(`[DRY-RUN synteesi] ${readable}`);
+        logDebug("speech.dry_run", `[DRY-RUN synteesi] ${readable}`);
         return;
       }
       let pcm: Buffer;
+      let engine = elevenLabs ? "elevenlabs" : "piper";
+      const startedAt = Date.now();
       if (elevenLabs) {
         try {
           // ElevenLabs reads abbreviations correctly → readable text, no substitutions.
           pcm = await elevenLabs.synthesize(readable);
         } catch (err) {
-          log(`ElevenLabs epäonnistui (${err instanceof Error ? err.message : err}) — Piper-fallback`);
+          logWarn("tts.elevenlabs_failed", `ElevenLabs epäonnistui (${err instanceof Error ? err.message : err}) — Piper-fallback`);
           pcm = await piper.synthesize(spoken);
+          engine = "piper-fallback";
         }
       } else {
         pcm = await piper.synthesize(spoken);
       }
+      // The id the loop assigned is not threaded through SpeechSink (it is a
+      // two-argument port shared with the dry-run path), so the synthesis
+      // record is keyed by text. Detected/spoken still carry the id.
+      telemetry.narrationSynthesized({ id: "", text: readable }, engine, Date.now() - startedAt);
       mixer.enqueueNarration(pcm);
     },
     {
@@ -83,6 +97,10 @@ async function main(): Promise<void> {
       // Dry-run reports epoch 0 = "attached long ago", so the first-speech
       // grace never delays dry-run logging.
       firstAttachedAt: () => (config.dryRun ? 0 : (mixer?.firstAttachedAt ?? null)),
+    },
+    {
+      detected: (clip) => telemetry.narrationDetected(clip),
+      spoken: (clip, muted) => telemetry.narrationSpoken(clip, muted),
     }
   );
 
@@ -90,14 +108,33 @@ async function main(): Promise<void> {
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    log("Sammutetaan…");
-    if (elevenLabs) log(`ElevenLabs-merkkejä käytetty tässä ajossa: ${elevenLabs.totalCharsUsed}`);
+    logInfo("relay.shutdown", "Sammutetaan…");
+    if (elevenLabs) logInfo("relay.tts_usage", `ElevenLabs-merkkejä käytetty tässä ajossa: ${elevenLabs.totalCharsUsed}`);
     loop.stop();
     mixer?.stop();
     setTimeout(() => process.exit(0), 500);
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+
+  // status-<ID>.json is rewritten on the poll cadence rather than on every
+  // event: the control app polls it, and a snapshot that is at most one poll
+  // stale is exactly as fresh as the data behind it.
+  const statusTimer = setInterval(() => {
+    telemetry.writeStatus({
+      readerAttached: config.dryRun || (mixer?.isReaderAttached ?? false),
+      pendingClips: mixer?.pendingClips ?? 0,
+      respawns: mixer?.respawnCount ?? 0,
+      sourceState: mixer?.sourceState ?? (config.dryRun ? "unknown" : "resolving"),
+      sourceDetail: mixer?.sourceDetail ?? null,
+      matchFinished: loop.matchFinished,
+      eventCount: loop.eventCount,
+      lastEventAt: loop.lastEventAt,
+      ttsEngine: elevenLabs ? "elevenlabs" : "piper",
+      elevenLabsCharsUsed: elevenLabs?.totalCharsUsed ?? 0,
+    });
+  }, config.pollInterval);
+  statusTimer.unref();
 
   if (!config.dryRun) {
     const fifoPath = `${config.runDir}relay-${config.matchId}.pcm`;
@@ -117,14 +154,14 @@ async function main(): Promise<void> {
       recordFile: config.recordFile,
     });
     mixer.start().catch((err) => {
-      log(`ffmpeg-valvoja päättyi virheeseen: ${err instanceof Error ? err.message : err}`);
+      logError("ffmpeg.supervisor_failed", `ffmpeg-valvoja päättyi virheeseen: ${err instanceof Error ? err.message : err}`);
       if (err instanceof SourceExhaustedError) {
-        log("Alkuperäinen lähde ei palautunut — sammutetaan koko relay.");
+        logError("relay.source_gone", "Alkuperäinen lähde ei palautunut — sammutetaan koko relay.");
         shutdown();
       }
     });
   } else {
-    log("Dry-run: ffmpegiä/RTMP:ää ei käynnistetä, selostus vain lokitetaan.");
+    logInfo("relay.dry_run", "Dry-run: ffmpegiä/RTMP:ää ei käynnistetä, selostus vain lokitetaan.");
   }
 
   await loop.run();

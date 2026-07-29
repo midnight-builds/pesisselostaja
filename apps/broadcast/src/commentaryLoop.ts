@@ -39,7 +39,7 @@ import {
 import type { LiveEvent, MatchMetadata } from "@pesisselostaja/core";
 import { writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { log } from "./log.js";
+import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import type { RelayConfig } from "./config.js";
 
 const SUMMARY_EVERY_N = 10;
@@ -129,6 +129,21 @@ export interface NarrationStatus {
    *  or null before any attach. The first-speech grace period
    *  (RELAY_FIRST_SPEECH_DELAY_MS) is measured from this. */
   firstAttachedAt(): number | null;
+}
+
+/** Observes a narration clip through its stages, for telemetry. Optional and
+ *  fire-and-forget: the loop never reads anything back and never awaits it, so
+ *  an observer cannot change what gets said or when.
+ *
+ *  `muted` is the field that pays for this whole port. A clip decided before
+ *  ffmpeg attached is fully accounted for — dedupe, scoring and turn state all
+ *  ran — but nobody heard it, and the old log recorded that as an ordinary
+ *  line. In match 145889 on 29.7.2026 that hid five minutes of lost narration
+ *  including two runs. Counting muted separately makes it visible on the
+ *  operator's phone while it is still happening. */
+export interface NarrationObserver {
+  detected(clip: { id: string; text: string }): void;
+  spoken(clip: { id: string; text: string }, muted: boolean): void;
 }
 
 /** Standalone ~6s poll loop that reproduces WatcherController's announcement
@@ -221,11 +236,19 @@ export class CommentaryLoop {
   /** Set when the breaker turned delta off by itself, so the reset log line
    *  stays silent afterwards and a manual re-enable can tell the two apart. */
   private deltaBreakerTripped = false;
+  /** Monotonic per-run counter behind each clip's telemetry id. */
+  private clipSeq = 0;
+  /** Wall clock of the last time a NEW event appeared. The events themselves
+   *  carry only a match-relative `timestamp`, so this is our own observation
+   *  instant — which is the useful one anyway: it answers "is the scorer still
+   *  entering results", not "how far into the match are we". */
+  private lastEventSeenAt: string | null = null;
 
   constructor(
     private config: RelayConfig,
     private sink: SpeechSink,
-    private narrationStatus?: NarrationStatus
+    private narrationStatus?: NarrationStatus,
+    private observer?: NarrationObserver
   ) {
     this.state = loadState(config.stateFile);
     this.pronunciations = loadPronunciations(config.pronunciationsFile);
@@ -235,6 +258,18 @@ export class CommentaryLoop {
     this.deltaFetch = config.deltaFetch;
     // No status port = nothing to wait for: latch immediately (old behavior).
     this.narrationEverReady = !narrationStatus;
+  }
+
+  /** Telemetry: how many events the local mirror holds, and when the newest
+   *  one happened. A stalled lastEventAt with a healthy relay is the signature
+   *  of a scorer who stopped entering results — invisible in the relay's own
+   *  health, and the operator's problem to chase. */
+  get eventCount(): number {
+    return this.history.size;
+  }
+
+  get lastEventAt(): string | null {
+    return this.lastEventSeenAt;
   }
 
   /** Whether the match has ended ("Ottelu päättyi" seen, not reopened) — read
@@ -274,7 +309,7 @@ export class CommentaryLoop {
         ) + "\n"
       );
     } catch (err) {
-      log(`Control-tiedoston kirjoitus epäonnistui: ${err instanceof Error ? err.message : err}`);
+      logWarn("control.write_failed", `Control-tiedoston kirjoitus epäonnistui: ${err instanceof Error ? err.message : err}`);
     }
   }
 
@@ -292,7 +327,7 @@ export class CommentaryLoop {
     }
     if (typeof parsed.announceBatterChanges === "boolean" && parsed.announceBatterChanges !== this.announceBatterChanges) {
       this.announceBatterChanges = parsed.announceBatterChanges;
-      log(`Pelaajanvaihtojen selostus vaihdettu ajon aikana: ${this.announceBatterChanges ? "PÄÄLLÄ" : "POIS"} (control-tiedostosta).`);
+      logInfo("control.batter_changes", `Pelaajanvaihtojen selostus vaihdettu ajon aikana: ${this.announceBatterChanges ? "PÄÄLLÄ" : "POIS"} (control-tiedostosta).`);
     }
     // Runtime narration-delay override: the control-file value wins over the
     // env/CLI seed once set. Ignore invalid/negative values so a half-written
@@ -301,7 +336,7 @@ export class CommentaryLoop {
       const next = Math.max(0, Math.round(parsed.narrationDelayMs));
       if (next !== this.narrationDelayMs) {
         this.narrationDelayMs = next;
-        log(`Selostusviive vaihdettu ajon aikana: ${next} ms (control-tiedostosta).`);
+        logInfo("control.narration_delay", `Selostusviive vaihdettu ajon aikana: ${next} ms (control-tiedostosta).`);
       }
     }
     // Delta polling on/off live — false reverts to plain full fetches on the
@@ -315,14 +350,14 @@ export class CommentaryLoop {
         this.consecutiveUnexplainedResets = 0;
         this.deltaBreakerTripped = false;
       }
-      log(`Delta-haku vaihdettu ajon aikana: ${this.deltaFetch ? "PÄÄLLÄ" : "POIS (täyshaut)"} (control-tiedostosta).`);
+      logInfo("control.delta_fetch", `Delta-haku vaihdettu ajon aikana: ${this.deltaFetch ? "PÄÄLLÄ" : "POIS (täyshaut)"} (control-tiedostosta).`);
     }
     // Poll cadence live; clamped to the floor so a typo can't hammer the API.
     if (typeof parsed.pollIntervalMs === "number" && Number.isFinite(parsed.pollIntervalMs)) {
       const next = Math.max(MIN_POLL_INTERVAL_MS, Math.round(parsed.pollIntervalMs));
       if (next !== this.pollIntervalMs) {
         this.pollIntervalMs = next;
-        log(`Pollausväli vaihdettu ajon aikana: ${next} ms (control-tiedostosta).`);
+        logInfo("control.poll_interval", `Pollausväli vaihdettu ajon aikana: ${next} ms (control-tiedostosta).`);
       }
     }
   }
@@ -332,21 +367,22 @@ export class CommentaryLoop {
     const signal = this.abort.signal;
 
     this.writeControlFile();
-    log(
+    logInfo(
+      "control.batter_changes",
       `Pelaajanvaihtojen selostus: ${this.announceBatterChanges ? "PÄÄLLÄ" : "POIS"} ` +
         `(vaihda ajon aikana: ${this.config.controlFile})`
     );
 
-    log(`Haetaan ottelutietoja (ID: ${this.config.matchId})…`);
+    logInfo("api.fetching_meta", `Haetaan ottelutietoja (ID: ${this.config.matchId})…`);
     const meta = await fetchMatchMetadata(this.config.matchId, {
       apiBase: this.config.apiBase,
       apiKey: this.config.apiKey,
       timeoutMs: this.apiTimeoutMs("small"),
     });
     const lookup = buildPlayerLookup(meta);
-    log(`${meta.home.name} vs ${meta.away.name}`);
+    logInfo("api.match", `${meta.home.name} vs ${meta.away.name}`);
 
-    log("Ohitetaan historialliset tapahtumat…");
+    logInfo("api.skip_history", "Ohitetaan historialliset tapahtumat…");
     // Full fetch — also seeds the local history + delta cursor (see
     // fetchEventsForPoll).
     const initial = await this.fetchFullEvents();
@@ -373,10 +409,10 @@ export class CommentaryLoop {
     this.state.announcedTurnKey =
       `${this.state.currentPeriod}:${this.state.currentInning}:${this.state.currentBatTurn}:${this.state.currentBatTeamId}`;
     await saveState(this.config.stateFile, this.state);
-    log(`Ohitettu ${initial.events.length} tapahtumaa`);
+    logInfo("api.skipped", `Ohitettu ${initial.events.length} tapahtumaa`);
 
     if (!meta.live && meta.started) {
-      log("Ottelu on jo päättynyt.");
+      logInfo("api.match_finished", "Ottelu on jo päättynyt.");
       return;
     }
 
@@ -401,7 +437,7 @@ export class CommentaryLoop {
     this.state.lastSummaryTime = Date.now();
     this.lastSummaryCount = this.state.announcementCount;
 
-    log(`Selostussilmukka käynnissä… (polli ${this.pollIntervalMs} ms, delta-haku ${this.deltaFetch ? "PÄÄLLÄ" : "POIS"})`);
+    logInfo("api.loop_start", `Selostussilmukka käynnissä… (polli ${this.pollIntervalMs} ms, delta-haku ${this.deltaFetch ? "PÄÄLLÄ" : "POIS"})`);
     // Fixed poll cadence, independent of how long a cycle's fetch/processing
     // takes — synthesis no longer blocks this loop (see speak()/synthQueue),
     // so cycles should normally be fast, but a slow fetch must not add to the
@@ -481,7 +517,7 @@ export class CommentaryLoop {
     const streak = ++this.consecutiveFetchFailures;
     const seconds = ((Date.now() - cycleStartedAt) / 1000).toFixed(1);
     const label = streak >= FETCH_FAILURE_ALARM_STREAK ? "HUOM, hakuvirhesarja" : "Hakuvirhe";
-    log(`${label} (kesto ${seconds} s, ${streak}. peräkkäinen): ${err instanceof Error ? err.message : err}`);
+    logWarn("api.fetch_failed", `${label} (kesto ${seconds} s, ${streak}. peräkkäinen): ${err instanceof Error ? err.message : err}`);
   }
 
   /** Closes an alarming failure streak with an explicit all-clear line, so a
@@ -489,7 +525,7 @@ export class CommentaryLoop {
    *  the absence of errors. */
   private recordPollSuccess(): void {
     if (this.consecutiveFetchFailures >= FETCH_FAILURE_ALARM_STREAK) {
-      log(`Haku onnistui jälleen — ${this.consecutiveFetchFailures} peräkkäistä hakuvirhettä takana.`);
+      logInfo("api.fetch_recovered", `Haku onnistui jälleen — ${this.consecutiveFetchFailures} peräkkäistä hakuvirhettä takana.`);
     }
     this.consecutiveFetchFailures = 0;
   }
@@ -566,7 +602,8 @@ export class CommentaryLoop {
     if (this.consecutiveUnexplainedResets >= DELTA_RESET_BREAKER_STREAK && this.deltaFetch) {
       this.deltaFetch = false;
       this.deltaBreakerTripped = true;
-      log(
+      logWarn(
+        "api.delta_inconsistent",
         `HUOM: delta-haku vastasi selittämättömällä reset-leimalla ${this.consecutiveUnexplainedResets} kertaa peräkkäin ` +
           "— kytketään delta pois tältä ajolta ja jatketaan täyshauilla. " +
           "Takaisin päälle control-tiedostosta: {\"deltaFetch\": true}."
@@ -577,7 +614,7 @@ export class CommentaryLoop {
       const why = explained
         ? `haettu after ${after} on vanhempi kuin ottelun datan reset-hetki`
         : "syy tuntematon";
-      log(`Delta-vastaus sisälsi reset-leiman ${String(res.reset)} (${why}) → vastaus on koko historia, käytetään sellaisenaan.`);
+      logDebug("api.delta_reset", `Delta-vastaus sisälsi reset-leiman ${String(res.reset)} (${why}) → vastaus on koko historia, käytetään sellaisenaan.`);
     }
 
     // Trust, but verify: an authoritative snapshot can only be shorter than
@@ -629,13 +666,13 @@ export class CommentaryLoop {
     if (res.reset) return this.handleResetResponse(res, after, afterMs);
     const merge = this.history.merge(res.events);
     if (merge.inconsistent) {
-      log("Delta-epäkonsistenssi (tapahtuman alitapahtumalista kutistui) → täyshaku.");
+      logWarn("api.delta_inconsistent", "Delta-epäkonsistenssi (tapahtuman alitapahtumalista kutistui) → täyshaku.");
       return this.fetchFullEvents();
     }
     this.clearResetStreak();
     this.pollStats.deltaMerges++;
     if (merge.added > 0 || merge.updated > 0) {
-      log(`Delta-haku: ${merge.added} uutta, ${merge.updated} päivittynyttä tapahtumaa (historiassa ${this.history.size}).`);
+      logDebug("api.delta_fetch", `Delta-haku: ${merge.added} uutta, ${merge.updated} päivittynyttä tapahtumaa (historiassa ${this.history.size}).`);
       // Advance the cursor only now: the new base's URL changes, so its ETag
       // starts fresh on the next poll's 200.
       if (res.serverDateMs) {
@@ -720,7 +757,8 @@ export class CommentaryLoop {
         this.matchEpochMs =
           this.matchEpochMs === null ? candidateEpochMs : Math.min(this.matchEpochMs, candidateEpochMs);
         const deltaS = Math.round((Date.now() - (this.matchEpochMs + event.timestamp * 1000)) / 1000);
-        log(`first-seen: id=${event.id} ts=${event.timestamp} delta=${deltaS}s`);
+        this.lastEventSeenAt = new Date().toISOString();
+        logDebug("api.first_seen", `first-seen: id=${event.id} ts=${event.timestamp} delta=${deltaS}s`);
       }
 
       for (let i = 0; i < event.events.length; i++) {
@@ -734,7 +772,7 @@ export class CommentaryLoop {
         // narration wakes back up here.
         if (state.finished && isRunScoringSubEvent(sub)) {
           state.finished = false;
-          log("Pistetilanne muuttui ottelun päättymisen jälkeen — selostus jatkuu.");
+          logWarn("match.score_after_finish", "Pistetilanne muuttui ottelun päättymisen jälkeen — selostus jatkuu.");
         }
 
         if (isMatchEndSubEvent(sub)) state.finished = true;
@@ -742,7 +780,7 @@ export class CommentaryLoop {
         if (isRunScoringSubEvent(sub) && event.team !== null) {
           addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
           const s = getPeriodScore(state, event.period);
-          log(`Pisteet (${periodName(event.period)}): ${meta.home.shorthand} ${s.home}-${s.away} ${meta.away.shorthand}`);
+          logInfo("match.score", `Pisteet (${periodName(event.period)}): ${meta.home.shorthand} ${s.home}-${s.away} ${meta.away.shorthand}`);
         }
 
         // For an out, the spoken ordinal must come from the turn-key recompute
@@ -752,14 +790,14 @@ export class CommentaryLoop {
         if (isOutSubEvent(sub) && event.team !== null) {
           ctx.currentOuts = outsThroughSubEvent(events, ei, i);
           const team = event.team === meta.home.id ? meta.home.shorthand : meta.away.shorthand;
-          log(`Palo: ${team} ${ctx.currentOuts}`);
+          logInfo("match.palo", `Palo: ${team} ${ctx.currentOuts}`);
         }
 
         // The relay has no feed; its log is the written mirror of the source, so
         // the lineup list the narration leaves out (issue #48) is logged here
         // instead of vanishing (issue #74). Logged even when nothing is spoken.
         const feedDetail = subEventFeedDetail(sub, lookup);
-        if (feedDetail) log(`Tapahtuma: ${feedDetail}`);
+        if (feedDetail) logDebug("match.event", `Tapahtuma: ${feedDetail}`);
 
         const speech = subEventToSpeech(event, sub, meta, lookup, this.announceBatterChanges, ctx);
         if (!speech) continue;
@@ -899,12 +937,18 @@ export class CommentaryLoop {
     // synthesizing now would only stack stale clips in the FIFO to burst out
     // on connect. The latch moment speaks one fresh recap instead (see
     // maybeLatchNarrationReady). Never reverts after the first attach.
+    // One id follows this clip through detected -> synthesized -> spoken, so a
+    // reader of the timeline can pair the three records rather than matching on
+    // text (which repeats: "Toinen palo" happens many times a match).
+    const clip = { id: `c${++this.clipSeq}`, text };
+    this.observer?.detected(clip);
     if (!this.narrationEverReady) {
       this.suppressedBeforeAttach = true;
-      log(`Selostus (vaimennettu — ffmpeg ei vielä kytkeytynyt): ${text}`);
+      logWarn("speech.muted", `Selostus (vaimennettu — ffmpeg ei vielä kytkeytynyt): ${text}`);
+      this.observer?.spoken(clip, true);
       return;
     }
-    log(`Selostus: ${text}`);
+    logInfo("speech.spoken", `Selostus: ${text}`);
     // Artificial playback delay (RELAY_NARRATION_DELAY_MS / control file,
     // HANDOFF.md 8): captured at decision time and applied ONLY to the sink
     // handoff below — all dedupe/state bookkeeping above already ran
@@ -921,9 +965,10 @@ export class CommentaryLoop {
         const wait = decidedAt + delayMs - Date.now();
         if (wait > 0) await this.sleep(wait);
         await this.sink(spoken, text);
+        this.observer?.spoken(clip, false);
       })
       .catch((err) => {
-        log(`Selostusvirhe: ${err instanceof Error ? err.message : err}`);
+        logError("speech.failed", `Selostusvirhe: ${err instanceof Error ? err.message : err}`);
       });
   }
 
@@ -957,7 +1002,7 @@ export class CommentaryLoop {
     this.suppressedBeforeAttach = false;
     const ctx = this.buildContext();
     const recap = this.state.finished ? formatMatchEnd(meta, ctx) : formatSituationSummary(meta, ctx);
-    log("ffmpeg kytkeytyi — puhutaan tuore tilannekooste vaimennettujen selostusten sijaan.");
+    logInfo("speech.resumed", "ffmpeg kytkeytyi — puhutaan tuore tilannekooste vaimennettujen selostusten sijaan.");
     this.speak(recap, false, `latch-recap:${recap}`);
   }
 
