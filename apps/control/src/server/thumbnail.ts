@@ -35,9 +35,21 @@ const COMPOSE_SCRIPT = fileURLToPath(
   new URL("../../tools/pesaysit-thumbnail-compose.py", import.meta.url)
 );
 
+const BACKGROUND_FILE = "pesaysit-bg-raw-001.png";
+
 /** The one canonical background (CLAUDE.md/runbook: never edited, never
- *  swapped for an older one with baked-in text from a previous match). */
-const BACKGROUND_PATH = join(CONFIG.assetsDir, "pesaysit-bg-raw-001.png");
+ *  swapped for an older one with baked-in text from a previous match).
+ *
+ *  Read live from CONFIG.assetsDir for the same reason as cacheDir() below,
+ *  plus one of its own: the image itself is NOT in git (2 MB brand asset,
+ *  public repo), so CI has no copy of it. A test that hard-codes the real
+ *  file can only pass on a machine that happens to have it — which is how
+ *  five thumbnail tests turned green locally and red on the runner. Pointing
+ *  assetsDir at a generated stand-in lets the tests exercise the actual PIL
+ *  composition everywhere. */
+function backgroundPath(): string {
+  return join(CONFIG.assetsDir, BACKGROUND_FILE);
+}
 
 /** Runbook's "Thumbnail-saannot" > Selostus-versio: exact required wording. */
 const NARRATED_BADGE_TEXT = "Selostettu tekoälyllä";
@@ -163,7 +175,7 @@ export async function renderThumbnail(opts: ThumbnailOptions): Promise<Buffer> {
   const args = [
     COMPOSE_SCRIPT,
     "--bg",
-    BACKGROUND_PATH,
+    backgroundPath(),
     "--out",
     tmpOut,
     "--headline",

@@ -9,7 +9,8 @@
 // see docs/youtube-runbook.md) rather than mocking child_process: the whole
 // point of this module is "does the real render work", and a mock would only
 // prove the mock works.
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -25,17 +26,37 @@ import {
 
 let tmpDir: string;
 let originalStateDir: string;
+let originalAssetsDir: string;
 let originalPath: string | undefined;
+
+/** The canonical background is a 2 MB brand asset that is deliberately NOT in
+ *  git (public repo), so no CI runner has it. These tests are about the
+ *  composition — sizes, text, badge, caching — not about that one image, so
+ *  they render onto a generated stand-in of the same dimensions. Without this
+ *  the suite could only pass on a machine that already had the real file,
+ *  which is exactly how it went green locally and red on the runner. */
+function writeStandInBackground(dir: string): void {
+  mkdirSync(dir, { recursive: true });
+  execFileSync("python3", [
+    "-c",
+    "import sys; from PIL import Image; Image.new('RGB', (1920, 1080), (18, 74, 44)).save(sys.argv[1])",
+    join(dir, "pesaysit-bg-raw-001.png"),
+  ]);
+}
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "pesis-control-thumbnail-"));
   originalStateDir = CONFIG.stateDir;
+  originalAssetsDir = CONFIG.assetsDir;
   originalPath = process.env.PATH;
   CONFIG.stateDir = tmpDir;
+  CONFIG.assetsDir = join(tmpDir, "assets");
+  writeStandInBackground(CONFIG.assetsDir);
 });
 
 afterEach(() => {
   CONFIG.stateDir = originalStateDir;
+  CONFIG.assetsDir = originalAssetsDir;
   process.env.PATH = originalPath;
   rmSync(tmpDir, { recursive: true, force: true });
 });
