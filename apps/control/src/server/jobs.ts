@@ -160,9 +160,31 @@ export async function patchJob(id: string, patch: PatchJobRequest): Promise<Job>
 
 /** Marks a job as the one about to go live. Deliberately does not touch
  *  .env.relay — DESIGN.md's routing splits that out to relay.ts's
- *  writeRelayEnv, called by the HTTP route once activation here succeeds. */
-export async function activateJob(id: string): Promise<Job> {
-  return updateJob(id, { status: "arming" });
+ *  writeRelayEnv, called by the HTTP route once activation here succeeds.
+ *
+ *  `force` = the operator answered "lopeta edellinen ja aktivoi tämä". */
+export async function activateJob(id: string, opts: { force?: boolean } = {}): Promise<Job> {
+  return updateJob(id, { status: "arming" }, opts);
+}
+
+/** Closes whichever job holds the broadcast slot, and returns it — or null if
+ *  the slot was already free.
+ *
+ *  Called when the relay is no longer running: an operator's stop, or the
+ *  relay's own shutdown once the source ended. Without this the job stays
+ *  "arming" forever and the NEXT match cannot be activated at all, which is
+ *  exactly the moment nobody has time to debug it (#101). */
+export async function closeRunningJob(): Promise<Job | null> {
+  let closed: Job | null = null;
+  await store.update((jobs) => {
+    const idx = jobs.findIndex((j) => isBlocking(j.status));
+    if (idx === -1) return jobs;
+    const next = jobs.slice();
+    next[idx] = closeJob(jobs[idx], new Date().toISOString());
+    closed = next[idx];
+    return next;
+  });
+  return closed;
 }
 
 export async function getActiveJob(): Promise<Job | null> {
