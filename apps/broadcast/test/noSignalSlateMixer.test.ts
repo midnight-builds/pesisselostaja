@@ -304,6 +304,28 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
     expect(logged()).toContain("Katvekuva pois käytöstä tältä ajolta");
   }, 25000);
 
+  /** Turvallisuusvaatimus 2 yleisessä muodossa: MIKÄ TAHANSA katveketjun vika
+   *  johtaa nykyiseen käytökseen, ei valvojan kaatumiseen. Tässä spawn itse
+   *  heittää (esim. rikkinäinen ffmpeg-polku). */
+  it("never lets a throwing slate spawn take the supervisor down", async () => {
+    const spawns: string[][] = [];
+    const mixer = harness({
+      slate: await preparedSlate(),
+      slateAfterMs: 0,
+      resolveTestSource: noSource,
+      spawns,
+      spawnFor: (args) => {
+        if (isSlateSpawn(args)) throw new Error("spawn ffmpeg ENOENT");
+        return fakeFfmpeg(fifoPath);
+      },
+    });
+    // Ei heittoa ulos: silmukka jatkaa lähteen yrittämistä kuten ennenkin.
+    const outcome = await runUntil(mixer, () => spawns.filter(isSlateSpawn).length > 1, 5000);
+    expect(outcome).toBe("timeout");
+    expect(spawns.filter(isSlateSpawn)).toHaveLength(1);
+    expect(logged()).toContain("Katvekuva pois käytöstä tältä ajolta");
+  }, 25000);
+
   describe("sourceIngest — ohjaamon havainto on vapaaehtoinen tulo", () => {
     const ingest = (over: Partial<SourceIngestObservation> = {}): SourceIngestObservation => ({
       observedAt: new Date().toISOString(),
