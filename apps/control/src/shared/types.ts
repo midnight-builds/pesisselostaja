@@ -121,6 +121,11 @@ export interface LiveState {
   match: MatchState;
   system: SystemState;
   knobs: ControlKnobs | null;
+  /** Ohjaamon viimeisin YouTube-havainto lähteestä, tai null kun sitä ei
+   *  juuri nyt pollata. Valinnainen tarkoituksella: kenttä lisättiin
+   *  olemassa olevaan sopimukseen, eivätkä testien fixtuurit (test-ui/support/
+   *  state.ts) saa rikkoutua siitä että ohjaamo alkoi julkaista sen. */
+  sourceIngest?: SourceIngest | null;
   job: Job | null;
   narration: NarrationLine[];
   log: LogLine[];
