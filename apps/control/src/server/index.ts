@@ -548,9 +548,6 @@ async function main(): Promise<void> {
   // boot rather than on every write.
   await mkdir(CONFIG.stateDir, { recursive: true });
 
-  // The live view needs to know which job is currently the relay's job to
-  // know what to poll; the aggregator asks rather than the server pushing it
-  // in, so a job activated after the aggregator started is picked up too.
   // Lähteen tilan polleri käynnistyy ennen aggregaattoria, jotta ensimmäinen
   // koottu tila voi jo sisältää havainnon. Se on porttien takana: ilman
   // aktiivista työtä, ajossa olevaa relayta ja Google-tunnuksia se ei kutsu
