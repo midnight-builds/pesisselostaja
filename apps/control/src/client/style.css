@@ -1102,6 +1102,9 @@ select.field__input {
 .tabbar__label {
   font-size: 12px;
   font-weight: 700;
+  /* Five tabs share 393 px on the target phone, so a label must never wrap —
+     wrapping would push the row past its 54 px and shift the whole bar. */
+  white-space: nowrap;
 }
 .tabbar__pip {
   position: absolute;
