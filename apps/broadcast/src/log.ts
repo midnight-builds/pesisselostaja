@@ -64,6 +64,11 @@ export type EventCode =
   | "api.delta_inconsistent"
   | "api.delta_fetch"
   | "api.first_seen"
+  // Kokoonpanon elinkaari (#90): puuttuu → muuttui → vakiintui.
+  | "api.roster_missing"
+  | "api.roster_refresh_failed"
+  | "api.roster_changed"
+  | "api.roster_settled"
   // match events worth seeing in the log
   | "match.score"
   | "match.palo"
