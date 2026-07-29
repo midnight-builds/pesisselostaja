@@ -9,7 +9,17 @@
  *  `relay:dev` in a terminal reads `<4>` on every line. */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { formatLine, log, logDebug, logError, logInfo, logWarn, setLogSink } from "../src/log.js";
+import {
+  formatLine,
+  log,
+  logDebug,
+  logError,
+  logInfo,
+  logWarn,
+  resetJournaldDetection,
+  setLogSink,
+} from "../src/log.js";
+import { fstatSync } from "node:fs";
 
 const TS = "12.30.45";
 let originalJournalStream: string | undefined;
@@ -22,12 +32,17 @@ afterEach(() => {
   if (originalJournalStream === undefined) delete process.env.JOURNAL_STREAM;
   else process.env.JOURNAL_STREAM = originalJournalStream;
   setLogSink(null);
+  resetJournaldDetection();
   vi.restoreAllMocks();
 });
 
 describe("under systemd (JOURNAL_STREAM set)", () => {
   beforeEach(() => {
-    process.env.JOURNAL_STREAM = "8:12345";
+    // Must identify OUR stdout, not merely be present: the detection compares
+    // the variable against fstat(1) exactly as systemd documents it.
+    const st = fstatSync(1);
+    process.env.JOURNAL_STREAM = `${st.dev}:${st.ino}`;
+    resetJournaldDetection();
   });
 
   it("prefixes the syslog priority systemd expects", () => {
@@ -58,6 +73,7 @@ describe("under systemd (JOURNAL_STREAM set)", () => {
 describe("in a terminal (no JOURNAL_STREAM)", () => {
   beforeEach(() => {
     delete process.env.JOURNAL_STREAM;
+    resetJournaldDetection();
   });
 
   it("prints a clean line with no priority marker", () => {
@@ -70,6 +86,26 @@ describe("in a terminal (no JOURNAL_STREAM)", () => {
     expect(formatLine("info", null, "Pesisselostaja Relay", TS)).toBe(
       "[12.30.45] Pesisselostaja Relay"
     );
+  });
+});
+
+/** The bug this guards: JOURNAL_STREAM is inherited by every child process, so
+ *  a relay started by hand from a shell that itself runs under a systemd unit
+ *  used to print "<6>" on every line. Presence is not identity. */
+describe("inherited JOURNAL_STREAM from a parent unit", () => {
+  it("does not claim journald when the variable points at someone else's stream", () => {
+    process.env.JOURNAL_STREAM = "8:999999999";
+    resetJournaldDetection();
+    expect(formatLine("warn", "ffmpeg.respawn", "uudelleen", TS)).toBe(
+      "[12.30.45] ffmpeg.respawn: uudelleen"
+    );
+  });
+
+  it("ignores a malformed value instead of crashing a log call", () => {
+    process.env.JOURNAL_STREAM = "roskaa";
+    resetJournaldDetection();
+    expect(() => formatLine("info", null, "x", TS)).not.toThrow();
+    expect(formatLine("info", null, "x", TS)).toBe("[12.30.45] x");
   });
 });
 

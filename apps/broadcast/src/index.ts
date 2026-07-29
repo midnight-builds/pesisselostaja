@@ -104,23 +104,10 @@ async function main(): Promise<void> {
     }
   );
 
-  let shuttingDown = false;
-  const shutdown = () => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    logInfo("relay.shutdown", "Sammutetaan…");
-    if (elevenLabs) logInfo("relay.tts_usage", `ElevenLabs-merkkejä käytetty tässä ajossa: ${elevenLabs.totalCharsUsed}`);
-    loop.stop();
-    mixer?.stop();
-    setTimeout(() => process.exit(0), 500);
-  };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
-
   // status-<ID>.json is rewritten on the poll cadence rather than on every
   // event: the control app polls it, and a snapshot that is at most one poll
   // stale is exactly as fresh as the data behind it.
-  const statusTimer = setInterval(() => {
+  const writeStatus = () =>
     telemetry.writeStatus({
       readerAttached: config.dryRun || (mixer?.isReaderAttached ?? false),
       pendingClips: mixer?.pendingClips ?? 0,
@@ -133,7 +120,28 @@ async function main(): Promise<void> {
       ttsEngine: elevenLabs ? "elevenlabs" : "piper",
       elevenLabsCharsUsed: elevenLabs?.totalCharsUsed ?? 0,
     });
-  }, config.pollInterval);
+
+  let shuttingDown = false;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logInfo("relay.shutdown", "Sammutetaan…");
+    // Final snapshot, so the file left in run/ describes how the run ENDED
+    // rather than where it happened to be one poll before.
+    writeStatus();
+    if (elevenLabs) logInfo("relay.tts_usage", `ElevenLabs-merkkejä käytetty tässä ajossa: ${elevenLabs.totalCharsUsed}`);
+    loop.stop();
+    mixer?.stop();
+    setTimeout(() => process.exit(0), 500);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  // Once immediately: the control app should find a snapshot the moment the
+  // unit reports active, not one poll later — and a relay that dies during
+  // startup would otherwise leave no trace of having started at all.
+  writeStatus();
+  const statusTimer = setInterval(writeStatus, config.pollInterval);
   statusTimer.unref();
 
   if (!config.dryRun) {
