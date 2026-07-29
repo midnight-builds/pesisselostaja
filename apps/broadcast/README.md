@@ -145,11 +145,17 @@ to the control file overrules the breaker and gives delta a fresh streak.
   echo '{"pollIntervalMs": 5000}' > apps/broadcast/run/.control-143280.json  # slower poll
   ```
 
-Each API fetch is aborted after **10 s** (never less than the current poll
-interval). A full fetch returns the whole match history, which keeps growing, so
-the earlier 4 s cut healthy requests short late in a match — one broadcast
-logged 12 aborts in two minutes, all at exactly 4.0 s. Polls are sequential, so the
-longer timeout cannot stack requests; a hung fetch only postpones the next poll.
+Fetches are aborted on **two different timeouts**, neither ever shorter than the
+current poll interval:
+
+| Fetch | Timeout | Why |
+|---|---|---|
+| Full history (startup, 60 s resync, delta fallbacks) | **10 s** | The response holds the whole match history and keeps growing, so the earlier 4 s cut healthy requests short late in a match — one broadcast logged 12 aborts in two minutes, all at exactly 4.0 s. |
+| Delta poll + startup metadata | **4 s** | Small responses (a 304 smaller still), and the delta runs *every* poll, so it is what decides how fast a hung API is noticed. Giving it the full fetch's patience would only delay detection and recovery by ~6 s per poll; an aborted delta loses nothing, since the next poll retries at once and the resync closes any gap. |
+
+Polls are sequential, so neither timeout can stack requests; a hung fetch only
+postpones the next poll. A control file that raises `pollIntervalMs` above a base
+value raises that timeout with it.
 
 ### Starting before the source goes live
 
