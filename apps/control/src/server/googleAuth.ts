@@ -623,6 +623,37 @@ export function buildAuthHealth(input: AuthHealthInput): AuthHealth {
     headline = `Google-yhteys vanhenemassa: ${round1(daysSinceSuccess)} vrk ilman onnistunutta päivitystä.`;
   }
 
+  // Tokenin IKÄ myöntämisestä, ei viimeisestä käytöstä. Tämä tarkistus on
+  // pakollinen siitä hetkestä kun ohjaamo alkoi pollata lähteen tilaa
+  // taustalla: pollaus uusii access tokenin noin tunnin välein, jolloin
+  // daysSinceSuccess ei enää koskaan kasva — mutta Testing-tilan refresh token
+  // kuolee silti 7 vrk myöntämisestä. Ilman tätä terveysnäkymä olisi vihreä
+  // siihen asti kunnes yhteys katkeaa kesken ottelun.
+  //
+  // Kun päivityksiä ei ole vielä ollut, daysSinceSuccess on täsmälleen sama
+  // luku samasta hetkestä — silloin yllä oleva varoitus riittää eikä samaa
+  // asiaa sanota kahdesti.
+  const ageAlreadyReported = input.token.lastRefreshAt === null;
+  if (!ageAlreadyReported && tokenAgeDays !== null && tokenAgeDays >= TOKEN_FAIL_AGE_DAYS) {
+    warnings.push(
+      `Tokenin myöntämisestä on ${round1(tokenAgeDays)} vrk. Testing-tilassa refresh token vanhenee 7 vuorokautta MYÖNTÄMISESTÄ, ei viimeisestä käytöstä — taustapollaus pitää access tokenin tuoreena, mutta se ei pidennä refresh tokenin ikää. Kirjaudu uudelleen laitevirralla tai julkaise sovellus (Publishing status: In production).`
+    );
+    // Otsikon saa vaihtaa vain ankarin löydös; jos jokin aiempi sääntö on jo
+    // nostanut tilan failiin, sen otsikko jää voimaan.
+    if (HEALTH_RANK.fail > HEALTH_RANK[health]) {
+      headline = `Google-yhteys todennäköisesti vanhentunut (token myönnetty ${round1(tokenAgeDays)} vrk sitten).`;
+    }
+    health = worse(health, "fail");
+  } else if (!ageAlreadyReported && tokenAgeDays !== null && tokenAgeDays >= TOKEN_WARN_AGE_DAYS) {
+    warnings.push(
+      `Tokenin myöntämisestä on ${round1(tokenAgeDays)} vrk. Testing-tilassa refresh token vanhenee 7 vuorokautta myöntämisestä, ei viimeisestä käytöstä — uusi yhteys nyt, älä kesken lähetyksen.`
+    );
+    if (HEALTH_RANK.warn > HEALTH_RANK[health]) {
+      headline = `Google-yhteys vanhenemassa: token myönnetty ${round1(tokenAgeDays)} vrk sitten.`;
+    }
+    health = worse(health, "warn");
+  }
+
   if (quota.remaining <= 0) {
     warnings.push(
       `Päivän YouTube-kiintiö (${quota.limit} yksikköä) on käytetty loppuun. Kiintiö nollautuu keskiyöllä Yhdysvaltain Tyynenmeren aikaa.`
