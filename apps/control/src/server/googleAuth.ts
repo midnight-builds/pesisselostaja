@@ -657,29 +657,35 @@ export function buildAuthHealth(input: AuthHealthInput): AuthHealth {
   // pakollinen siitä hetkestä kun ohjaamo alkoi pollata lähteen tilaa
   // taustalla: pollaus uusii access tokenin noin tunnin välein, jolloin
   // daysSinceSuccess ei enää koskaan kasva — mutta Testing-tilan refresh token
-  // kuolee silti 7 vrk myöntämisestä. Ilman tätä terveysnäkymä olisi vihreä
-  // siihen asti kunnes yhteys katkeaa kesken ottelun.
+  // kuolee silti 7 vrk myöntämisestä.
   //
-  // Kun päivityksiä ei ole vielä ollut, daysSinceSuccess on täsmälleen sama
-  // luku samasta hetkestä — silloin yllä oleva varoitus riittää eikä samaa
-  // asiaa sanota kahdesti.
-  const ageAlreadyReported = input.token.lastRefreshAt === null;
-  if (!ageAlreadyReported && tokenAgeDays !== null && tokenAgeDays >= TOKEN_FAIL_AGE_DAYS) {
+  // Sääntö on tarkoituksella ENINTÄÄN warn, ei koskaan fail. 7 vrk:n
+  // vanheneminen koskee vain Testing-tilaa; kun sovellus julkaistaan — juuri
+  // mitä tämä varoitus neuvoo tekemään — refresh token ei enää vanhene, mutta
+  // tokenAgeDays kasvaa loputtomiin. Failinä terveysnäkymä olisi päivästä 7
+  // eteenpäin pysyvästi punainen, ja aina päällä oleva punainen peittää
+  // alleen oikean vian. Aito katkeaminen näkyy yhä failina yllä olevan
+  // daysSinceSuccess-säännön kautta: kun refresh lakkaa onnistumasta,
+  // lastRefreshAt lakkaa päivittymästä.
+  //
+  // Ikävaroitus jätetään pois kun tokenAgeDays ja daysSinceSuccess ovat
+  // käytännössä sama luku (laitevirta kirjoittaa molemmat leimat samalla
+  // hetkellä): silloin yllä oleva sääntö on jo sanonut saman asian.
+  const ageSaysTheSameThing =
+    tokenAgeDays !== null && daysSinceSuccess !== null && Math.abs(tokenAgeDays - daysSinceSuccess) < 0.1;
+  if (!ageSaysTheSameThing && tokenAgeDays !== null && tokenAgeDays >= TOKEN_WARN_AGE_DAYS) {
+    const pastTestingLimit = tokenAgeDays >= TOKEN_FAIL_AGE_DAYS;
     warnings.push(
-      `Tokenin myöntämisestä on ${round1(tokenAgeDays)} vrk. Testing-tilassa refresh token vanhenee 7 vuorokautta MYÖNTÄMISESTÄ, ei viimeisestä käytöstä — taustapollaus pitää access tokenin tuoreena, mutta se ei pidennä refresh tokenin ikää. Kirjaudu uudelleen laitevirralla tai julkaise sovellus (Publishing status: In production).`
+      pastTestingLimit
+        ? `Tokenin myöntämisestä on ${round1(tokenAgeDays)} vrk. Jos OAuth-sovellus on yhä Testing-tilassa, refresh token on jo vanhentunut — julkaise sovellus (Publishing status: In production) tai kirjaudu uudelleen laitevirralla. Julkaistulla sovelluksella pelkkä ikä ei vanhenna tokenia, joten tämä on varoitus eikä vika.`
+        : `Tokenin myöntämisestä on ${round1(tokenAgeDays)} vrk. Jos OAuth-sovellus on yhä Testing-tilassa, refresh token vanhenee 7 vuorokautta myöntämisestä, ei viimeisestä käytöstä — uusi yhteys nyt, älä kesken lähetyksen.`
     );
     // Otsikon saa vaihtaa vain ankarin löydös; jos jokin aiempi sääntö on jo
     // nostanut tilan failiin, sen otsikko jää voimaan.
-    if (HEALTH_RANK.fail > HEALTH_RANK[health]) {
-      headline = `Google-yhteys todennäköisesti vanhentunut (token myönnetty ${round1(tokenAgeDays)} vrk sitten).`;
-    }
-    health = worse(health, "fail");
-  } else if (!ageAlreadyReported && tokenAgeDays !== null && tokenAgeDays >= TOKEN_WARN_AGE_DAYS) {
-    warnings.push(
-      `Tokenin myöntämisestä on ${round1(tokenAgeDays)} vrk. Testing-tilassa refresh token vanhenee 7 vuorokautta myöntämisestä, ei viimeisestä käytöstä — uusi yhteys nyt, älä kesken lähetyksen.`
-    );
     if (HEALTH_RANK.warn > HEALTH_RANK[health]) {
-      headline = `Google-yhteys vanhenemassa: token myönnetty ${round1(tokenAgeDays)} vrk sitten.`;
+      headline = pastTestingLimit
+        ? `Google-yhteys voi olla vanhentunut: token myönnetty ${round1(tokenAgeDays)} vrk sitten.`
+        : `Google-yhteys vanhenemassa: token myönnetty ${round1(tokenAgeDays)} vrk sitten.`;
     }
     health = worse(health, "warn");
   }
