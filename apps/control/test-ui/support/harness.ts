@@ -44,6 +44,8 @@ export class ApiMock {
   /** Google-yhteyden tila. Ilman yhteyttä palvelin vastaa 409:llä jokaiseen
    *  muuhun YouTube-reittiin kuin terveyteen, ja UI näyttää AuthMissingNoticen
    *  — sen takia tämä yksi kenttä ohjaa koko välilehden käytöksen. */
+  /** Ajastimen tila. Oletus pois päältä, kuten palvelimellakin. */
+  scheduler = fixture.schedulerState();
   authHealth = fixture.authHealth();
   broadcasts: unknown[] = [];
   playlists: unknown[] = [];
@@ -236,6 +238,19 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
       return void (await send({ broken: true, autoFix: true, startup: true, ended: true }));
     }
     if (path.startsWith("/api/push/")) return void (await send({}));
+
+    // ── Ajastin ──────────────────────────────────────────────────────────
+    if (path === "/api/scheduler" && method === "GET") return void (await send(api.scheduler));
+    if (path === "/api/scheduler/enable" && method === "POST") {
+      const { enabled } = (body ?? {}) as { enabled?: unknown };
+      // Sama tiukkuus kuin palvelimella: truthy merkkijono ei saa virittää
+      // automaattikäynnistystä.
+      if (typeof enabled !== "boolean") {
+        return void (await send({ error: "enabled puuttuu tai ei ole tosi/epätosi" }, 400));
+      }
+      api.scheduler = { ...api.scheduler, enabled };
+      return void (await send(api.scheduler));
+    }
 
     // ── YouTube ──────────────────────────────────────────────────────────
     // Health answers 200 in every state; everything else is 409 until a

@@ -20,10 +20,39 @@ import type {
   NarrationLine,
   PreflightResult,
   RelayProcess,
+  SchedulerState,
   SystemState,
 } from "../../src/shared/types";
 
 export const NOW = "2026-07-29T05:30:00.000Z"; // 08:30 Suomen aikaa
+
+/** Ajastimen tila. `enabled: false` on oletus tässäkin — testi joka haluaa
+ *  päällä olevan ajastimen sanoo sen ääneen. */
+export function schedulerState(p: Partial<SchedulerState> = {}): SchedulerState {
+  return {
+    enabled: false,
+    lastCheckAt: NOW,
+    nextJob: {
+      id: "job-1",
+      home: "Kuusikon Kipinä",
+      away: "Rantalan Rasti",
+      startsAt: "2026-07-29T06:30:00.000Z",
+      sourceUrl: "https://www.youtube.com/watch?v=testivirta",
+      sourceState: "scheduled",
+      sourceDetail: "ajastettu, alkaa noin 12 min kuluttua",
+    },
+    lastAction: null,
+    wouldHaveDone: {
+      at: NOW,
+      decision: "waiting",
+      jobId: "job-1",
+      reason: "Lähde ei ole vielä livenä.",
+      applied: false,
+    },
+    nextCheckInMs: 30_000,
+    ...p,
+  };
+}
 
 /** Google-yhteyden terveys. Oletus on TARKOITUKSELLA "ei yhdistetty": se on
  *  tila jossa ohjaamo oikeasti on niin kauan kuin tunnuksia ei ole kopioitu

@@ -61,7 +61,7 @@ Yksikkötestit (`test/`, vitest) ajetaan erikseen.
 |-------|--------|
 | `src/shared/` | Palvelimen ja clientin **sitova sopimus** (`types.ts`, `api.ts`). Muutos täällä rikkoo typecheckin molemmilla puolilla — se on tarkoitus. |
 | `src/server/` | node:http-palvelin, SSE, JSON-tallennus, relay-ohjaus, pesistulokset-haut |
-| `src/client/` | React + Vite -käyttöliittymä. Kaikki neljä näkymää ovat **jatkuvasti mountattuina** (`App.tsx`, `TabPanel`); välilehti vain valitsee näytettävän. Näkymän oma tila (Ottelut-suodattimet ja rastit, lokitaso, valittu työ) säilyy siis välilehteä vaihtaessa. Testeissä tämä tarkoittaa, että useassa näkymässä esiintyvä teksti pitää rajata näkymään (`view(page, "job")`). |
+| `src/client/` | React + Vite -käyttöliittymä. Kaikki viisi näkymää ovat **jatkuvasti mountattuina** (`App.tsx`, `TabPanel`); välilehti vain valitsee näytettävän. Näkymän oma tila (Ottelut-suodattimet ja rastit, lokitaso, valittu työ) säilyy siis välilehteä vaihtaessa. Testeissä tämä tarkoittaa, että useassa näkymässä esiintyvä teksti pitää rajata näkymään (`view(page, "job")`). |
 | `tools/` | `pesaysit-thumbnail-compose.py` — thumbnailin PIL-komposiitti |
 | `docs/` | Nykyisen YouTube-työnkulun kanoniset ohjeet ja templaatit |
 | `assets/` | Operaattorin brändimedia + PWA-kuvakkeet. **Ei gitissä** (repo on julkinen). |
@@ -115,10 +115,17 @@ tiedostot jotka ajossa oleva relay kirjoittaa.
 käynnistys/pysäytys/uudelleenkäynnistys, live-näkymä ilman relay-muutoksia,
 ajonaikaiset ohjaimet nykyisillä control-avaimilla.
 
-**Vaihe B:** relayn telemetria (`run/status-<ID>.json` + `timeline-<ID>.ndjson`),
-lokitasot ja pysyvät tapahtumakoodit, kaksivaiheinen selostuslista, uudet
-control-avaimet (mykistys, äänenvoimakkuus, oma selostus), Google-auth ja koko
-YouTube-osio, thumbnailit, ajastus ja jono, jälkityöt.
+**Vaihe B, tehty 29.7.:** Google-auth ja YouTube-osio omalla välilehdellään
+(yhteys, lähetysparin luonti, menneet videot), thumbnailit, sekä ajastimen
+kortti Työ-välilehdellä. Ajastin pysyy **oletuksena pois päältä**: kortti
+näyttää `wouldHaveDone`-kuivaharjoituksen, ja päälle kytkeminen vaatii
+vahvistuksen. YouTube-osiota ei ole vielä ajettu oikeita tunnuksia vasten —
+Google Cloud -projekti ja OAuth-client puuttuvat.
+
+**Vaihe B, yhä tekemättä:** relayn telemetria (`run/status-<ID>.json` +
+`timeline-<ID>.ndjson`), lokitasot ja pysyvät tapahtumakoodit, kaksivaiheinen
+selostuslista, uudet control-avaimet (mykistys, äänenvoimakkuus, oma
+selostus), jono, jälkityöt, ElevenLabs-osio ja passkey-suojaus.
 
 Vaiheen B relay-muutokset vaativat `npm run relay:deploy` — ja se kieltäytyy
 ajamasta lähetyksen aikana. Se on tarkoituksellinen este, ei vika.
