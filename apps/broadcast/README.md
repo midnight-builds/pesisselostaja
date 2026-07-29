@@ -170,13 +170,28 @@ moves). The log says:
 Lähde ei ole vielä livenä — alkaa noin 103 min kuluttua. Tarkistetaan uudelleen 300 s kuluttua.
 ```
 
+Shortly before the stream actually starts, yt-dlp stops naming a time and says
+`will begin in a few moments` instead. That wording is the **tightest** signal
+there is, so the relay switches to a 20 s cadence:
+
+```
+Lähde ei ole vielä livenä. Tarkistetaan uudelleen 20 s kuluttua.
+```
+
+If "a few moments" outlasts **20 min** the broadcast has really been postponed,
+and the cadence relaxes back to 5 min rather than polling hard for hours.
+
 A source that stays in that state for over **3 hours** is treated as cancelled
 and the relay shuts down. Any *other* yt-dlp error is a genuine failure and
 accrues toward the give-up window as before.
 
 Before this, a scheduled start looked identical to a dead source, which meant
 the relay had to be started in a narrow slot ~6 min before kickoff or it would
-give up before the match began (observed live 27.7.).
+give up before the match began (observed live 27.7.). The withheld-time branch
+then had the opposite bug: it slept the full 5 min cap exactly when the stream
+was about to go live. In match 145889 on 29.7. the countdown vanished at 08:28
+and ffmpeg attached only at 08:33, so the match start, IPV's first palo and both
+first-period runs were narrated into a FIFO nobody was reading.
 
 ### Give-up window after the match ends
 
