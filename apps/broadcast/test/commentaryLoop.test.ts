@@ -423,13 +423,14 @@ function slateInternals(loop: CommentaryLoop): SlateInternals {
 }
 
 describe("CommentaryLoop slate rows (issue #104)", () => {
-  function loopWithSituation(period: number, outs: number) {
+  function loopWithSituation(period: number, outs: number, runs?: { home: number; away: number }) {
     const loop = new CommentaryLoop(makeConfig(), recordingSink());
     const inner = slateInternals(loop);
     inner.meta = META;
     inner.matchStarted = true;
     inner.state.currentPeriod = period;
     inner.state.currentOuts = outs;
+    if (runs) inner.state.periodRuns[period] = { ...runs };
     return loop;
   }
 
@@ -446,9 +447,26 @@ describe("CommentaryLoop slate rows (issue #104)", () => {
 
   it("formats a display-style score row and situation row", () => {
     const s = loopWithSituation(0, 2).slateSituation;
-    expect(s.score).toBe("Testilä Tähdet 0 - 0 Esimerkki Eagles");
+    expect(s.score).toBe("Testilä Tähdet 0 – Esimerkki Eagles 0");
     // Näyttömuoto, ei puhemuoto: kuvassa "1. jakso", ei "ensimmäinen jakso".
     expect(s.situation).toBe("1. jakso, 2 paloa");
+  });
+
+  it("keeps each score NEXT TO its own team — 'koti 12 - 1 vieras' luetaan väärin", () => {
+    // Epäsymmetrinen lukema on ainoa joka erottaa parimuodon siitä muodosta
+    // jossa vieraan luku on nimien välissä: siinä "1 Esimerkki Eagles" luettiin
+    // joukkueen nimeksi. Tämä testi on olemassa juuri sen takia.
+    const s = loopWithSituation(0, 2, { home: 12, away: 1 }).slateSituation;
+    expect(s.score).toBe("Testilä Tähdet 12 – Esimerkki Eagles 1");
+  });
+
+  it("shows the CURRENT PERIOD's runs, not the match total", () => {
+    // Pesäpallossa jaksot pisteytetään erikseen; tilannerivi kertoo minkä
+    // jakson lukema kuvassa on (CLAUDE.md, "Scoring").
+    const loop = loopWithSituation(1, 0, { home: 4, away: 2 });
+    slateInternals(loop).state.periodRuns[0] = { home: 9, away: 9 };
+    expect(loop.slateSituation.score).toBe("Testilä Tähdet 4 – Esimerkki Eagles 2");
+    expect(loop.slateSituation.situation).toContain("2. jakso");
   });
 
   it("inflects a single palo correctly", () => {

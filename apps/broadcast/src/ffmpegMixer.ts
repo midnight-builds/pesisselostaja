@@ -52,6 +52,12 @@ export const SLATE_REASON_RECONNECTING = "yhdistetään uudelleen — selostus j
  *  vasta esimerkiksi 5-10 s katko laukaisee sen." */
 const DEFAULT_SLATE_AFTER_MS = 8000;
 
+/** Paljonko katvesession ffmpegille annetaan aikaa kuolla, ensin SIGTERMistä ja
+ *  sitten SIGKILListä. Kumpikin odotus on pakko olla rajattu — mutta yhtä
+ *  tärkeää on ettei purku palaa kuolemattoman prosessin päälle: seuraava
+ *  lähdesessio työntää samaan RTMP-avaimeen. Ks. endSlateSession. */
+const SLATE_KILL_GRACE_MS = 5000;
+
 /** Kuinka vanha ohjaamon `sourceIngest`-havainto saa olla. Signaali saapuu jopa
  *  30 s myöhässä, joten raja on reilusti sen yli mutta silti niin tiukka ettei
  *  ottelun alussa nähty "live" jää selittämään ottelun loppua. */
@@ -1132,7 +1138,33 @@ export class FfmpegMixer {
         );
       }
       child.kill("SIGTERM");
-      await Promise.race([childDone, delay(5000)]);
+      // Katvesession on oltava VARMASTI kuollut ennen kuin tästä palataan:
+      // seuraava vaihe spawnaa lähdesession samaan RTMP-avaimeen, ja kaksi
+      // työntäjää yhtä aikaa katkaisee lähetyksen YouTuben päässä. Lähdepolku
+      // ei tarvitse tätä, koska spawnOnce odottaa childDonea ennen paluuta —
+      // katvepolku on ainoa joka lopettaa session itse valitsemallaan
+      // hetkellä, joten eskalointi kuuluu tähän.
+      const diedOnTerm = await Promise.race([
+        childDone.then(() => true),
+        delay(SLATE_KILL_GRACE_MS).then(() => false),
+      ]);
+      if (!diedOnTerm) {
+        logWarn(
+          "ffmpeg.slate_end",
+          `Katvetilan ffmpeg ei kuollut ${SLATE_KILL_GRACE_MS} ms:ssa SIGTERMistä — SIGKILL, jottei kaksi työntäjää päädy samaan RTMP-avaimeen.`
+        );
+        child.kill("SIGKILL");
+        const diedOnKill = await Promise.race([
+          childDone.then(() => true),
+          delay(SLATE_KILL_GRACE_MS).then(() => false),
+        ]);
+        if (!diedOnKill) {
+          // SIGKILLin selvinnyt prosessi on ytimen tason poikkeama
+          // (keskeytymätön uni). Katve pois lopullisesti: emme voi taata
+          // ettei se yhä työnnä, joten sitä ei ainakaan yritetä uudelleen.
+          this.disableSlate("katvetilan ffmpeg ei kuollut edes SIGKILListä");
+        }
+      }
     }
     this.slateActive = false;
     this.sessionActive = false;
