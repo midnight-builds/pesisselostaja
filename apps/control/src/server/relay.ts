@@ -422,7 +422,17 @@ export function nudgeDelay(matchId: number, deltaMs: number): Promise<ControlKno
  *  mikseri osaa lukea sen. */
 export function writeSourceIngest(matchId: number, ingest: SourceIngest): Promise<void> {
   return serializeControlWrite(async () => {
-    const raw = await readControlFile(matchId);
+    const current = await readControlFileState(matchId);
+    if (current.state === "corrupt") {
+      // Emme korvaa tiedostoa jota emme ymmärrä. Relayn käynnistyskirjoitus ei
+      // ole atominen, joten jäsentymätön sisältö on lähes aina kesken oleva
+      // kirjoitus — merge tyhjästä jättäisi tiedostoon PELKÄN sourceIngestin,
+      // jolloin readKnobs palauttaisi oletukset, UI näyttäisi väärät säätöarvot
+      // ja nudgeDelay laskisi väärästä perustasosta. Havainto ei ole sen
+      // arvoinen: polleri yrittää uudelleen 30 s päästä.
+      throw new Error(`control-tiedosto ei jäsenny (${current.message}) — havaintoa ei kirjoitettu`);
+    }
+    const raw = current.state === "ok" ? current.raw : {};
     const merged: Record<string, unknown> = { ...raw, sourceIngest: ingest };
     await writeFileAtomic(controlFilePath(matchId), `${JSON.stringify(merged, null, 2)}\n`, 0o644);
   });
