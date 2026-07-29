@@ -432,6 +432,25 @@ export async function hasStoredToken(): Promise<boolean> {
   return (await tokenStore.read()) !== null;
 }
 
+/** Sormenjälki tallennetusta tokenista: `null` kun tokenia ei ole, muuten
+ *  merkkijono joka MUUTTUU kun operaattori kirjautuu uudelleen.
+ *
+ *  `hasStoredToken` ei riitä taustapollaukselle: uusi laitevirtakirjautuminen
+ *  ylikirjoittaa tiedoston käymättä nollan kautta, joten pelkkä olemassaolo ei
+ *  erota korjattua yhteyttä kuolleesta. `obtainedAt` on juuri se leima jonka
+ *  onnistunut kirjautuminen kirjoittaa uusiksi — access tokenin uusinta ei
+ *  koske siihen. */
+export async function getTokenFingerprint(): Promise<string | null> {
+  return (await tokenStore.read())?.obtainedAt ?? null;
+}
+
+/** Kiintiöstä jäljellä olevat yksiköt ohjaamon OMAN laskurin mukaan (YouTube ei
+ *  kerro tätä missään). Paikallinen tiedostoluku, ei verkkokutsua — halpa myös
+ *  taustasilmukasta. */
+export async function getQuotaRemaining(nowMs: number = Date.now()): Promise<number> {
+  return Math.max(0, quotaLimit() - (await getQuota(nowMs)).units);
+}
+
 /** Voimassa oleva access token, tarvittaessa refresh_tokenilla uusittuna.
  *  Onnistunut uusinta päivittää `lastRefreshAt`in — se on terveysraportin
  *  tärkein yksittäinen tieto. */
