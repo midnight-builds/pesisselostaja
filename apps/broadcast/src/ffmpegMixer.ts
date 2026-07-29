@@ -345,7 +345,15 @@ export class FfmpegMixer {
           }
           this.failingSince = null;
           this.backoffMs = 1000; // fresh backoff for when it does go live
-          const waitMs = scheduledRecheckDelayMs(err.startsInMs);
+          if (err.startsInMs === null) {
+            if (this.imminentSince === null) this.imminentSince = monoNow();
+          } else {
+            this.imminentSince = null;
+          }
+          const waitMs = scheduledRecheckDelayMs(
+            err.startsInMs,
+            this.imminentSince === null ? 0 : monoNow() - this.imminentSince
+          );
           const eta = err.startsInMs === null ? "" : ` — alkaa noin ${formatEta(err.startsInMs)} kuluttua`;
           log(`Lähde ei ole vielä livenä${eta}. Tarkistetaan uudelleen ${Math.round(waitMs / 1000)} s kuluttua.`);
           await this.interruptibleDelay(waitMs);
