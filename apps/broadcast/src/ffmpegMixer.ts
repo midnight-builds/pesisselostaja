@@ -973,7 +973,12 @@ export class FfmpegMixer {
   private async runSlateSession(initialWaitMs: number): Promise<string | null> {
     const slate = this.opts.slate;
     const layout = slate?.layout;
-    if (!slate || !layout) return null;
+    if (!slate || !layout) {
+      // Ei pitäisi tapahtua (slateWarranted tarkisti tämän), mutta paluu ilman
+      // odotusta tekisi respawn-silmukasta tiukan CPU-silmukan.
+      await this.interruptibleDelay(initialWaitMs);
+      return null;
+    }
 
     this.refreshSlateText();
     const recordFilePath = this.opts.recordFile

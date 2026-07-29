@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { rmSync, writeFileSync } from "node:fs";
 import { CommentaryLoop, type NarrationStatus, type SpeechSink } from "../src/commentaryLoop.js";
 import type { RelayConfig } from "../src/config.js";
 import type { MatchMetadata } from "@pesisselostaja/core";
@@ -28,6 +29,8 @@ function makeConfig(overrides: Partial<RelayConfig> = {}): RelayConfig {
     narrationDelayMs: 0,
     firstSpeechDelayMs: 0, // most tests exercise gating/latching without the start-up grace
     urlRefreshMs: 900000,
+    noSignalSlate: false,
+    noSignalSlateAfterMs: 8000,
     maxFailureWindowMs: 720000,
     finishedFailureWindowMs: 120000,
     deltaFetch: true,
@@ -400,5 +403,113 @@ describe("CommentaryLoop narration delay (HANDOFF.md 8)", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(sink.calls).toHaveLength(1);
     expect(sink.calls[0].at).toBe(0);
+  });
+});
+
+/** Katvekuvan tekstirivit ja ohjaamon havainnon välitys (issue #104 vaihe 2).
+ *  Loop on ainoa joka tietää pisteet ja pelitilanteen, ja ainoa joka lukee
+ *  control-tiedostoa — mikseri saa molemmat valmiina eikä joudu tuntemaan
+ *  pesäpallon sääntöjä. */
+interface SlateInternals {
+  meta: MatchMetadata | null;
+  matchStarted: boolean;
+  state: { currentPeriod: number; currentOuts: number; periodRuns: Record<string, unknown> };
+  sourceIngestValue: unknown;
+  refreshRuntimeControls(): Promise<void>;
+}
+
+function slateInternals(loop: CommentaryLoop): SlateInternals {
+  return loop as unknown as SlateInternals;
+}
+
+describe("CommentaryLoop slate rows (issue #104)", () => {
+  function loopWithSituation(period: number, outs: number) {
+    const loop = new CommentaryLoop(makeConfig(), recordingSink());
+    const inner = slateInternals(loop);
+    inner.meta = META;
+    inner.matchStarted = true;
+    inner.state.currentPeriod = period;
+    inner.state.currentOuts = outs;
+    return loop;
+  }
+
+  it("is empty before the match has produced any event — plain EI SIGNAALIA is a valid result", () => {
+    const loop = new CommentaryLoop(makeConfig(), recordingSink());
+    expect(loop.slateSituation).toEqual({ score: "", situation: "" });
+  });
+
+  it("stays empty while metadata has not been fetched yet", () => {
+    const loop = new CommentaryLoop(makeConfig(), recordingSink());
+    slateInternals(loop).matchStarted = true;
+    expect(loop.slateSituation).toEqual({ score: "", situation: "" });
+  });
+
+  it("formats a display-style score row and situation row", () => {
+    const s = loopWithSituation(0, 2).slateSituation;
+    expect(s.score).toBe("Testilä Tähdet 0 - 0 Esimerkki Eagles");
+    // Näyttömuoto, ei puhemuoto: kuvassa "1. jakso", ei "ensimmäinen jakso".
+    expect(s.situation).toBe("1. jakso, 2 paloa");
+  });
+
+  it("inflects a single palo correctly", () => {
+    expect(loopWithSituation(1, 1).slateSituation.situation).toBe("2. jakso, 1 palo");
+    expect(loopWithSituation(1, 0).slateSituation.situation).toBe("2. jakso, 0 paloa");
+  });
+
+  it("names supervuoro and kotiutuslyöntikilpailu, not 'jakso 3'", () => {
+    expect(loopWithSituation(2, 0).slateSituation.situation).toContain("supervuoro");
+    expect(loopWithSituation(3, 0).slateSituation.situation).toContain("kotiutuslyöntikilpailu");
+  });
+});
+
+describe("CommentaryLoop sourceIngest passthrough (#104 vaihe 1 -> 2)", () => {
+  const controlFile = "/tmp/pesis-test-control-slate.json";
+
+  function loopReadingControl(contents: unknown) {
+    writeFileSync(controlFile, JSON.stringify(contents));
+    return new CommentaryLoop(makeConfig({ controlFile }), recordingSink());
+  }
+
+  afterEach(() => {
+    rmSync(controlFile, { force: true });
+  });
+
+  it("is null until the control app publishes an observation", async () => {
+    const loop = loopReadingControl({ announceBatterChanges: true });
+    await slateInternals(loop).refreshRuntimeControls();
+    expect(loop.sourceIngest).toBeNull();
+  });
+
+  it("passes a complete observation through verbatim — the mixer decides, not the loop", async () => {
+    const observedAt = new Date().toISOString();
+    const loop = loopReadingControl({
+      sourceIngest: {
+        observedAt,
+        videoId: "abc123",
+        lifeCycleStatus: "live",
+        streamStatus: "inactive",
+        healthStatus: "noData",
+        error: null,
+      },
+    });
+    await slateInternals(loop).refreshRuntimeControls();
+    expect(loop.sourceIngest).toEqual({
+      observedAt,
+      videoId: "abc123",
+      lifeCycleStatus: "live",
+      streamStatus: "inactive",
+      healthStatus: "noData",
+      error: null,
+    });
+  });
+
+  /** Rikkinäinen havainto on "ei tietoa", ei "lähde poikki" — lähetyksen
+   *  käytös ei saa riippua ohjaamon Google-yhteydestä. */
+  it("treats a malformed observation as no information at all", async () => {
+    for (const bad of [null, 42, "live", { videoId: "x" }, { observedAt: "eilen", videoId: "x" }]) {
+      const loop = loopReadingControl({ sourceIngest: bad });
+      await slateInternals(loop).refreshRuntimeControls();
+      expect(loop.sourceIngest).toBeNull();
+    }
   });
 });

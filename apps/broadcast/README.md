@@ -294,6 +294,82 @@ API, which is not wired up — the rest of issue #51.
 The stream key is redacted (`<stream-key>`) from everything ffmpeg writes to the
 journal, since ffmpeg prints the full output URL in its own error lines.
 
+### No-signal slate ("EI SIGNAALIA") — off by default
+
+When the source drops, ffmpeg exits and the respawn loop leaves the RTMP push
+*paused*, so the viewer sees a frozen picture or "stream offline". With the
+slate enabled the relay instead keeps pushing: a still image (colour bars,
+"EI SIGNAALIA", the score and a status line) with the narration mixed on top,
+until the source comes back.
+
+**The narration keeps running over it.** Commentary comes from the results
+service, not from the video, so it works even when the picture is gone — the
+viewer still gets the runs, the palot and the batters. That is why every
+wording on the status line ends in *"selostus jatkuu"*: it tells the viewer not
+to close the stream.
+
+| Situation | Status line |
+|---|---|
+| Source dropped mid-broadcast | `kuvayhteys katkesi, selostus jatkuu` |
+| Source has not started yet | `kuvayhteyttä odotetaan — selostus jatkuu` |
+| A reconnect attempt is running | `yhdistetään uudelleen — selostus jatkuu` |
+
+The current period and palot are prefixed when known (`1. jakso, 2 paloa — …`),
+and the score row above shows `koti X - Y vieras`. Both rows are supplied
+ready-made by the commentary loop; the mixer only displays them. Before the
+match has produced any event both rows are empty and the picture is just
+"EI SIGNAALIA" plus the footer — that is a valid result.
+
+**Turning it on**
+
+```
+RELAY_NO_SIGNAL_SLATE=true          # default false
+RELAY_NO_SIGNAL_SLATE_AFTER_MS=8000 # how long the source must be gone first
+```
+
+The threshold exists so a one-second respawn blip does not flash the slate; the
+issue asks for a 5–10 s outage before it engages. The background is rendered
+once per run by `tools/no-signal-slate.py` into `run/slate-<matchId>.png`; the
+score and status rows live in `run/slate-score-<matchId>.txt` and
+`run/slate-status-<matchId>.txt` and are read by ffmpeg's `drawtext ... reload`,
+so they update **without a respawn**. All of these are covered by the `run/`
+retention sweep.
+
+**Why it defaults to off.** This is a new ffmpeg path that runs precisely when
+the broadcast is already in trouble, and it has not been exercised live. The
+first attempt has to be a deliberate choice, not something that happens by
+itself the first time a camera falls over mid-match.
+
+**What it will never do**
+
+- It never keeps the relay alive. The give-up window
+  (`RELAY_MAX_FAILURE_WINDOW_MS` / `RELAY_FINISHED_FAILURE_WINDOW_MS`) runs
+  unchanged while the slate is up: each source probe during the slate goes
+  through the same accounting as a normal respawn, so `SourceExhaustedError`
+  arrives at exactly the same moment it would without the slate. Pushing colour
+  bars is not "productive broadcast" and never resets anything.
+- It never starts once the match has finished, or when the control app's
+  `sourceIngest` observation says the source broadcast is `complete` — a source
+  that ended in an orderly way means the broadcast ends, not that we stand
+  there pushing bars into an empty stream.
+- Any failure in the chain (missing `python3`/PIL, a failed render, ffmpeg
+  dying in slate mode, a failed write) skips the slate for the rest of the run
+  with **one** warning line, and the respawn loop behaves exactly as it does
+  today.
+
+The state is visible to the control app: `status-<ID>.json` reports
+`source.state = "no_signal"` while the slate is up (with `source.detail` still
+naming the underlying reason), and the log carries `ffmpeg.slate_start` /
+`ffmpeg.slate_end`. A broadcast that *looks* smooth must not hide a camera that
+has fallen over.
+
+The `sourceIngest` key is an optional input only. It is used for the two things
+above (ending cleanly, and sharpening the wording) and never as the trigger:
+the trigger is always the relay's own local observation, because that signal
+arrives up to 30 s late and depends on the control app and on Google. Missing,
+stale (>120 s) or malformed means *no information* — never *the source is
+down*.
+
 ### Preflight (run this before every match)
 
 ```bash
@@ -414,6 +490,8 @@ had grown to 1.4 G. On startup `index.ts` now applies a retention policy
 | What | Rule | Env var (default) |
 |------|------|-------------------|
 | `relay-<matchId>.pcm`, `.state-<matchId>.json`, `.control-<matchId>.json` | removed when older than N days | `RELAY_RUN_RETENTION_DAYS` (`30`, `0` = off) |
+| `status-<matchId>.json`, `timeline-<matchId>.ndjson` | same | same |
+| `slate-<matchId>.png`, `slate-score-<matchId>.txt`, `slate-status-<matchId>.txt` (+ their `.tmp`) | same | same |
 | `run/tts-cache/<sha256>.pcm` | least-recently-used clips evicted until the directory fits the ceiling | `RELAY_TTS_CACHE_MAX_MB` (`1024`, `0` = off) |
 
 Two properties matter more than the numbers:

@@ -3,7 +3,13 @@ import { parseRelayConfig, DEFAULT_NARRATION_DELAY_MS } from "../src/config.js";
 
 /** Env keys parseRelayConfig reads that must not leak in from the shell — the
  *  point of these tests is the built-in default, not the machine's .env. */
-const ENV_KEYS = ["RELAY_NARRATION_DELAY_MS", "RELAY_POLL_INTERVAL", "RELAY_DRY_RUN"];
+const ENV_KEYS = [
+  "RELAY_NARRATION_DELAY_MS",
+  "RELAY_POLL_INTERVAL",
+  "RELAY_DRY_RUN",
+  "RELAY_NO_SIGNAL_SLATE",
+  "RELAY_NO_SIGNAL_SLATE_AFTER_MS",
+];
 
 const originalArgv = process.argv;
 const savedEnv: Record<string, string | undefined> = {};
@@ -48,5 +54,34 @@ describe("narration delay default (issue #53)", () => {
   it("still lets env/CLI override the default", () => {
     process.env.RELAY_NARRATION_DELAY_MS = "5000";
     expect(parseRelayConfig().narrationDelayMs).toBe(5000);
+  });
+});
+
+describe("no-signal slate (issue #104)", () => {
+  /** Oletus on POIS, ja se on tarkoituksellinen: katve on uusi ffmpeg-polku
+   *  joka ajaa nimenomaan silloin kun lähetys on jo vaikeuksissa, eikä sitä
+   *  ole koeteltu livenä. Ensimmäisen kokeilun on oltava tietoinen valinta. */
+  it("is OFF unless RELAY_NO_SIGNAL_SLATE is exactly 'true'", () => {
+    expect(parseRelayConfig().noSignalSlate).toBe(false);
+    process.env.RELAY_NO_SIGNAL_SLATE = "1";
+    expect(parseRelayConfig().noSignalSlate).toBe(false);
+    process.env.RELAY_NO_SIGNAL_SLATE = "kylla";
+    expect(parseRelayConfig().noSignalSlate).toBe(false);
+  });
+
+  it("turns on with RELAY_NO_SIGNAL_SLATE=true", () => {
+    process.env.RELAY_NO_SIGNAL_SLATE = "true";
+    expect(parseRelayConfig().noSignalSlate).toBe(true);
+  });
+
+  it("uses an 8 s threshold by default — a one-second blip must not flash the slate", () => {
+    expect(parseRelayConfig().noSignalSlateAfterMs).toBe(8000);
+  });
+
+  it("lets the threshold be tuned, and ignores garbage", () => {
+    process.env.RELAY_NO_SIGNAL_SLATE_AFTER_MS = "5000";
+    expect(parseRelayConfig().noSignalSlateAfterMs).toBe(5000);
+    process.env.RELAY_NO_SIGNAL_SLATE_AFTER_MS = "pian";
+    expect(parseRelayConfig().noSignalSlateAfterMs).toBe(8000);
   });
 });
