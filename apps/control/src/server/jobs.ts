@@ -167,6 +167,34 @@ export async function activateJob(id: string, opts: { force?: boolean } = {}): P
   return updateJob(id, { status: "arming" }, opts);
 }
 
+/** Stamps the armed job as actually running, and returns it — or null if there
+ *  was nothing waiting to start.
+ *
+ *  The relay can be started from the UI, from the scheduler, or by hand with
+ *  systemctl, and only the first two ever told the job store about it. So a job
+ *  could sit in "arming" through a whole broadcast, `startedAt` stayed null,
+ *  and the run had no start time at all in the post-match report. The observer
+ *  that watches the unit does this instead, so every route is covered by one
+ *  rule. */
+export async function markRunStarted(): Promise<Job | null> {
+  let started: Job | null = null;
+  await store.update((jobs) => {
+    const idx = jobs.findIndex((j) => j.status === "arming");
+    if (idx === -1) return jobs;
+    const next = jobs.slice();
+    next[idx] = {
+      ...jobs[idx],
+      status: "live",
+      // Kept if already set: a relay that flaps must not keep resetting the
+      // run's start time.
+      startedAt: jobs[idx].startedAt ?? new Date().toISOString(),
+    };
+    started = next[idx];
+    return next;
+  });
+  return started;
+}
+
 /** Closes whichever job holds the broadcast slot, and returns it — or null if
  *  the slot was already free.
  *
