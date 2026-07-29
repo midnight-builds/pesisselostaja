@@ -448,6 +448,9 @@ export async function readSourceIngest(matchId: number): Promise<SourceIngest | 
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const value = raw as Record<string, unknown>;
   if (typeof value.observedAt !== "string" || typeof value.videoId !== "string") return null;
+  // Aikaleima jota ei voi jäsentää ei ole havainto: tuoreutta ei voi arvioida,
+  // ja jäsentymätön arvo läpäisisi kaikki vertailut "ei vanha" -tulkinnalla.
+  if (!Number.isFinite(Date.parse(value.observedAt))) return null;
   const optional = (key: string): string | null =>
     typeof value[key] === "string" ? (value[key] as string) : null;
   return {
