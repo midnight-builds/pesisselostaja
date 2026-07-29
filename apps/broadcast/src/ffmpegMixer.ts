@@ -626,7 +626,18 @@ export class FfmpegMixer {
       await this.interruptibleDelay(waitMs);
       return undefined;
     }
-    return (await this.runSlateSession(waitMs)) ?? undefined;
+    try {
+      return (await this.runSlateSession(waitMs)) ?? undefined;
+    } catch (err) {
+      // Luovutus on relayn oma tuomio ja menee läpi sellaisenaan. Kaikki MUU
+      // katveketjun vika (FIFO, spawn, siivous) johtaa nykyiseen käytökseen:
+      // katve pois, yksi varoitusrivi, respawn-silmukka jatkaa. Valvoja ei saa
+      // kaatua siihen että katvekuva epäonnistui.
+      if (err instanceof SourceExhaustedError) throw err;
+      this.disableSlate(err instanceof Error ? err.message : String(err));
+      await this.interruptibleDelay(waitMs);
+      return undefined;
+    }
   }
 
   /** Judges a finished ffmpeg session: a run long enough to be real broadcast

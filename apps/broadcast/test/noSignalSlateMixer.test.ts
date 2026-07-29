@@ -271,6 +271,22 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
     expect(spawns).toHaveLength(0);
   }, 20000);
 
+  it("disables the slate for the rest of the run — once — if its ffmpeg dies mid-session", async () => {
+    const spawns: string[][] = [];
+    const mixer = harness({
+      slate: await preparedSlate(),
+      slateAfterMs: 0,
+      resolveTestSource: noSource,
+      spawns,
+      // Kättely onnistuu, mutta prosessi kuolee alta sekunnin päästä.
+      spawnFor: (args) => fakeFfmpeg(fifoPath, isSlateSpawn(args) ? 700 : 600_000),
+    });
+    const outcome = await runUntil(mixer, () => spawns.filter(isSlateSpawn).length > 1, 8000);
+    expect(outcome).toBe("timeout");
+    expect(spawns.filter(isSlateSpawn)).toHaveLength(1);
+    expect(logged()).toContain("kuoli kesken session");
+  }, 25000);
+
   it("disables the slate for the rest of the run — once — if its ffmpeg dies", async () => {
     const spawns: string[][] = [];
     const mixer = harness({
