@@ -361,6 +361,7 @@ export class FfmpegMixer {
           continue;
         }
         this.scheduledSince = null;
+        this.imminentSince = null;
         log(`ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
         this.noteUnproductiveAttempt((mins) => `Lähde ei ole vastannut ${mins} minuuttiin`);
       }
