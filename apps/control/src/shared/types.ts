@@ -82,6 +82,32 @@ export interface ControlKnobs {
   pollIntervalMs: number;
 }
 
+/** Ohjaamon YouTube-API-havainto LÄHTEEN sisääntulosta. Ohjaamo on ainoa jolla
+ *  on Google-tunnukset, joten se katsoo ja relay lukee — relay ei koskaan kysy
+ *  Googlelta itse (yksi refresh_tokenin omistaja, eikä lähetyksen jatkuminen
+ *  saa riippua Google-yhteydestä). Vaihe 1 vain julkaisee; kuluttajaa ei vielä
+ *  ole. */
+export interface SourceIngest {
+  /** Havaintohetki, ISO. Kuluttajan ON kohdeltava vanhentunutta tietoa
+   *  tietämättömyytenä — ei "syöte poikki" -päätöksenä. */
+  observedAt: string;
+  /** Mitä videota katsottiin. Kuluttaja voi ristiintarkistaa tämän omaa
+   *  RELAY_YOUTUBE_URLiaan vasten; ilman sitä lähde ja kohde voivat sekaantua. */
+  videoId: string;
+  /** liveBroadcasts.list, raaka arvo: created|ready|testing|live|complete|revoked. */
+  lifeCycleStatus: string | null;
+  /** liveStreams.list, raaka arvo: created|ready|active|inactive|error.
+   *  VAIN "active" tarkoittaa että dataa virtaa sisään — kaikki muu on
+   *  "ei virtaa", ja null on "ei tietoa". */
+  streamStatus: string | null;
+  /** healthStatus.status: good|ok|bad|noData. */
+  healthStatus: string | null;
+  /** Lyhyt suomenkielinen syy kun havaintoa ei saatu; muuten null. Tila-kentät
+   *  ovat silloin null — vanhaa arvoa ei jätetä paikoilleen, koska vanhentunut
+   *  "active" on vaarallisempi kuin tietämättömyys. */
+  error: string | null;
+}
+
 /** Everything the live view needs, in one payload, pushed over SSE. */
 export interface LiveState {
   /** Server time, so the client can render "N s sitten" without trusting the

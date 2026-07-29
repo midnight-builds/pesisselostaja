@@ -160,12 +160,15 @@ describe("terveysraportin varoitukset", () => {
     expect(result.headline).toMatch(/ei ole yhdistetty/i);
   });
 
+  // obtainedAt on tarkoituksella lähellä lastRefreshAt:ia: tokenin IKÄ on oma
+  // sääntönsä (ks. "tokenin ikä myöntämisestä" alla), joten 10 vrk vanha token
+  // olisi fail riippumatta siitä milloin sitä viimeksi päivitettiin.
   it("varoittaa 6 vrk:n kohdalla Testing-tilan 7 vrk:n vanhenemisesta", () => {
     const result = health({
       token: {
         refreshToken: "rt",
         scope: auth.SCOPES.join(" "),
-        obtainedAt: new Date(now - 10 * 86_400_000).toISOString(),
+        obtainedAt: new Date(now - 6.6 * 86_400_000).toISOString(),
         lastRefreshAt: new Date(now - 6.5 * 86_400_000).toISOString(),
       },
     });
@@ -232,6 +235,71 @@ describe("terveysraportin varoitukset", () => {
     const result = health({ quota: { day: auth.pacificDayKey(now), units: 9_900, byOp: {} } });
     expect(result.health).toBe("warn");
     expect(result.quota.remaining).toBe(100);
+  });
+
+  // Vaiheen 1 taustapollaus uusii access tokenin noin tunnin välein, jolloin
+  // lastRefreshAt on aina tuore eikä daysSinceSuccess kasva koskaan. Testing-
+  // tilan refresh token kuolee silti 7 vrk myöntämisestä — ilman tokenin iän
+  // tarkistusta terveysnäkymä olisi vihreä siihen asti kunnes yhteys katkeaa
+  // kesken ottelun.
+  describe("tokenin ikä myöntämisestä", () => {
+    function agedToken(ageDays: number) {
+      return {
+        refreshToken: "rt",
+        scope: auth.SCOPES.join(" "),
+        obtainedAt: new Date(now - ageDays * 86_400_000).toISOString(),
+        // Juuri päivitetty: taustapollaus on käynyt tunti sitten.
+        lastRefreshAt: new Date(now - 3_600_000).toISOString(),
+      };
+    }
+
+    it("on fail 7 vrk:n kohdalla vaikka päivitys onnistui tunti sitten", () => {
+      const result = health({ token: agedToken(7.4) });
+      expect(result.health).toBe("fail");
+      expect(result.tokenAgeDays).toBe(7.4);
+      // daysSinceSuccess ei kerro tästä mitään — juuri se on regressio.
+      expect(result.daysSinceSuccess).toBeLessThan(1);
+      expect(result.warnings.join(" ")).toMatch(/myöntämisestä/i);
+      expect(result.headline).toMatch(/vanhentunut/i);
+    });
+
+    it("on warn 6 vrk:n kohdalla vaikka päivitys onnistui tunti sitten", () => {
+      const result = health({ token: agedToken(6.2) });
+      expect(result.health).toBe("warn");
+      expect(result.tokenAgeDays).toBe(6.2);
+      expect(result.warnings.join(" ")).toMatch(/myöntämisestä/i);
+      expect(result.headline).toMatch(/vanhenemassa/i);
+    });
+
+    it("tuore token pysyy ok:na", () => {
+      const result = health({ token: agedToken(5.9) });
+      expect(result.health).toBe("ok");
+      expect(result.warnings).toEqual([]);
+    });
+
+    it("ei toista samaa syytä kahdesti kun päivityksiä ei ole vielä ollut", () => {
+      const result = health({
+        token: {
+          refreshToken: "rt",
+          scope: auth.SCOPES.join(" "),
+          obtainedAt: new Date(now - 6.2 * 86_400_000).toISOString(),
+          lastRefreshAt: null,
+        },
+      });
+      expect(result.health).toBe("warn");
+      expect(result.warnings).toHaveLength(1);
+    });
+
+    it("ei ylikirjoita ankarampaa löydöstä otsikosta", () => {
+      const result = health({
+        token: agedToken(6.2),
+        quota: { day: auth.pacificDayKey(now), units: 10_000, byOp: {} },
+      });
+      expect(result.health).toBe("fail");
+      expect(result.headline).toMatch(/kiintiö/i);
+      // Varoitus on silti tallella, vaikka otsikko kertoo kiintiöstä.
+      expect(result.warnings.join(" ")).toMatch(/myöntämisestä/i);
+    });
   });
 
   it("ei siivoa aiempaa vikaa varoitukseksi vaikka myöhempi sääntö osuisi", () => {
