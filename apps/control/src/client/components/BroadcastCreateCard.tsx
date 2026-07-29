@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { CreatedBroadcastPair, PrivacyStatus, TemplatePreview } from "../api";
+import type { CreatedBroadcastPair, PrivacyStatus, TemplatePreview, TitleOverrides } from "../api";
 import { api, isAuthMissing } from "../api";
 import type { Job } from "../../shared/types";
 import { fiTime } from "../format";
@@ -45,6 +45,12 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken }:
   const [jobId, setJobId] = useState<string>("");
   const [privacy, setPrivacy] = useState<PrivacyStatus>("unlisted");
   const [playlistOverride, setPlaylistOverride] = useState("");
+  /** Otsikon tiedot joita tulospalvelu ei tunne. Ilman näitä ensimmäinen
+   *  UI:sta luotu lähetys sai otsikon "Pesä Ysit, Lappeenranta - Espoon Pesis,
+   *  29.7.2026 04 - Liperin kirkonkylän kenttä 4| LEIRITUOTANTO" (#95). */
+  const [teamLabel, setTeamLabel] = useState("");
+  const [opponent, setOpponent] = useState("");
+  const [shortVenue, setShortVenue] = useState("");
   const [preview, setPreview] = useState<TemplatePreview | null>(null);
   const [created, setCreated] = useState<CreatedBroadcastPair | null>(null);
   const [checked, setChecked] = useState(false);
@@ -74,14 +80,29 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken }:
     setChecked(false);
   }, [jobId]);
 
+  // Editing a title field after previewing would leave the checked-and-read
+  // texts describing something else than what gets created — so the preview
+  // (and the tick) go with it.
+  useEffect(() => {
+    setPreview(null);
+    setChecked(false);
+  }, [teamLabel, opponent, shortVenue]);
+
   const job = jobs.find((j) => j.id === jobId) ?? null;
+
+  /** Tyhjä kenttä = ei ohitusta; palvelin päättelee nimen itse. */
+  const overrides = (): TitleOverrides => ({
+    ...(teamLabel.trim() ? { teamLabel: teamLabel.trim() } : {}),
+    ...(opponent.trim() ? { opponent: opponent.trim() } : {}),
+    ...(shortVenue.trim() ? { shortVenue: shortVenue.trim() } : {}),
+  });
 
   const runPreview = async () => {
     if (!job) return;
     setBusy(true);
     setAuthError(null);
     try {
-      const result = await api.templatesPreview({ jobId: job.id });
+      const result = await api.templatesPreview({ jobId: job.id, overrides: overrides() });
       setPreview(result);
       setChecked(false);
     } catch (err) {
@@ -101,6 +122,7 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken }:
       const result = await api.createBroadcasts({
         jobId: job.id,
         privacy,
+        overrides: overrides(),
         ...(playlistOverride.trim() ? { playlistId: playlistOverride.trim() } : {}),
       });
       setCreated(result);
@@ -142,6 +164,31 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken }:
             {[job.seriesName, job.stadium].filter(Boolean).join(" · ") || "—"} · ottelu {job.matchId}
           </p>
         )}
+
+        {/* Kolme kenttää joita pesistulokset ei tiedä. Ne muuttavat otsikkoa,
+            thumbnailia JA jaettavaa viestiä, joten ne kysytään ennen
+            esikatselua — esikatselu näyttää tuloksen. */}
+        <Field
+          label="Oma joukkue otsikossa (valinnainen)"
+          value={teamLabel}
+          placeholder={job ? job.home : "Pesä Ysit F-pojat"}
+          hint="Vakiintunut muoto, esim. Pesä Ysit F-pojat. Tyhjänä käytetään tulospalvelun nimeä."
+          onChange={setTeamLabel}
+        />
+        <Field
+          label="Vastustaja otsikossa (valinnainen)"
+          value={opponent}
+          placeholder={job ? job.away : "IPV"}
+          hint="Lyhenne, esim. IPV."
+          onChange={setOpponent}
+        />
+        <Field
+          label="Lyhyt paikka (valinnainen)"
+          value={shortVenue}
+          placeholder="Naperoleiri Liperi"
+          hint="Otsikkoon ja thumbnailiin. Tyhjänä käytetään kentän koko nimeä."
+          onChange={setShortVenue}
+        />
 
         <button
           type="button"

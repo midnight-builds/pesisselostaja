@@ -339,3 +339,57 @@ export function preflightWithBlockers(): PreflightResult {
     summary: "2 estettä — älä käynnistä relayta.",
   });
 }
+
+/** Tekstipaketti jonka esikatselureitti palauttaa. `matchup` heijastaa
+ *  otsikko-ohitukset, jotta selaintesti näkee menivätkö ne palvelimelle. */
+export function broadcastTexts(p: { teamLabel?: string; opponent?: string; shortVenue?: string } = {}) {
+  const own = p.teamLabel ?? "Kuvitteellisen Kylän Veikot";
+  const opponent = p.opponent ?? "Lapinlahden Peikot";
+  const place = p.shortVenue ?? "Testikenttä 1";
+  const matchup = `${own} - ${opponent}`;
+  return {
+    title: `${matchup}, 29.7.2026 ${place}`,
+    narratedTitle: `Selostettu ${matchup}, 29.7.2026 ${place}`,
+    description: `Ottelu: ${matchup}\nPäivä: 29.7.2026 klo 8:30`,
+    shareMessage: [
+      `Seuraava live on klo 8:30: ${matchup}. Alla linkit:`,
+      "YouTube: <youtube-linkki>",
+      "YouTube selostettu: <selostettu-youtube-linkki>",
+      "Tulospalvelu: https://www.pesistulokset.fi/ottelut/999001",
+    ].join("\n"),
+    playlistId: "PLtesti",
+    playlistName: "Pesä Ysit F 2026",
+    ageGroup: "F" as const,
+    localDate: "29.7.2026",
+    localTime: "8:30",
+    scheduledLocal: "29.7.2026 klo 8:30",
+    matchUrl: "https://www.pesistulokset.fi/ottelut/999001",
+    matchup,
+    venue: place,
+    thumbnailHeadline: matchup,
+    thumbnailDatetime: "29.7.2026 klo 8:30",
+    thumbnailVenue: place,
+  };
+}
+
+/** Luotu lähetyspari — jaettavassa viestissä oikeat linkit paikkamerkkien
+ *  tilalla, aivan kuten oikealla palvelimella. */
+export function createdPair(texts = broadcastTexts()) {
+  const shareMessage = texts.shareMessage
+    .replace("<youtube-linkki>", "https://www.youtube.com/watch?v=NORMAALI")
+    .replace("<selostettu-youtube-linkki>", "https://www.youtube.com/watch?v=SELOSTETTU");
+  return {
+    normal: { watchUrl: "https://www.youtube.com/watch?v=NORMAALI", videoId: "NORMAALI", title: texts.title, rtmpUrl: null, backupUrl: null, streamKey: null },
+    narrated: {
+      watchUrl: "https://www.youtube.com/watch?v=SELOSTETTU",
+      videoId: "SELOSTETTU",
+      title: texts.narratedTitle,
+      rtmpUrl: "rtmp://a.rtmp.youtube.com/live2",
+      backupUrl: "rtmp://b.rtmp.youtube.com/live2?backup=1",
+      streamKey: "cccc-dddd-eeee-ffff",
+    },
+    shareMessage,
+    broadcastSummary: `Normaali: https://www.youtube.com/watch?v=NORMAALI\nStream Key: cccc-dddd-eeee-ffff`,
+    texts,
+  };
+}

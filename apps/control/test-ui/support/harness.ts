@@ -266,6 +266,22 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
         return void (await send(api.broadcasts));
       }
       if (path === "/api/youtube/playlists") return void (await send(api.playlists));
+      if (path === "/api/youtube/templates/preview" && method === "POST") {
+        const payload = (body ?? {}) as { jobId?: string; overrides?: Record<string, string> };
+        return void (await send({
+          matchId: 999001,
+          jobId: payload.jobId ?? null,
+          texts: fixture.broadcastTexts(payload.overrides ?? {}),
+        }));
+      }
+      if (path === "/api/youtube/broadcasts" && method === "POST") {
+        const payload = (body ?? {}) as { overrides?: Record<string, string> };
+        return void (await send(fixture.createdPair(fixture.broadcastTexts(payload.overrides ?? {}))));
+      }
+      // Thumbnailin esikatselu palauttaa kuvatavuja, ei JSONia.
+      if (path === "/api/thumbnail/preview" && method === "POST") {
+        return void (await route.fulfill({ status: 200, contentType: "image/png", body: PNG_1PX }));
+      }
     }
 
     if (path === "/api/log") {
@@ -278,6 +294,13 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
     await send({ error: `mockkaamaton reitti: ${method} ${path}` }, 501);
   });
 }
+
+/** Pienin mahdollinen kelvollinen PNG: thumbnail-esikatselu palauttaa oikeita
+ *  kuvatavuja, ja komponentti tekee niistä object-URLin. */
+const PNG_1PX = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64"
+);
 
 /** Google Fonts must not decide whether a test passes: fulfil them locally so
  *  the "no failed requests" assertions describe OUR app, not the network. */

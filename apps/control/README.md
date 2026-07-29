@@ -109,6 +109,20 @@ kolmea lähdettä:
 `run/` on symlinkattu ajokopiosta työpuuhun, joten ohjaamo näkee samat
 tiedostot jotka ajossa oleva relay kirjoittaa.
 
+## Jaettava viesti
+
+Jaettava viesti (WhatsApp-ryhmiin) muodostuu `run/share-template.json`ista.
+Tiedosto kirjoitetaan oletuksineen käynnistyksessä, ja se luetaan **joka
+pyynnöllä** — muokkaus näkyy seuraavassa esikatselussa ilman
+uudelleenkäynnistystä. Paikkamerkit: `{time}`, `{matchup}`, `{watchUrl}`,
+`{narratedWatchUrl}`, `{matchUrl}`. Tuntematon paikkamerkki jää näkyviin, jotta
+kirjoitusvirhe huomataan esikatselusta eikä lähetetystä viestistä.
+
+Ottelupari on **sama kuin otsikossa**: kun luontikortissa on annettu oma
+joukkue ja vastustaja ("Pesä Ysit F-pojat", "IPV"), viesti käyttää niitä eikä
+tulospalvelun raakoja nimiä. Tulospalvelun osoite on monikkomuodossa
+(`/ottelut/<id>`), kuten palvelu itse sen kirjoittaa.
+
 ## Vaiheet
 
 **Vaihe A (tehty ensin):** ottelun valinta, `.env.relay`, preflight, relayn
