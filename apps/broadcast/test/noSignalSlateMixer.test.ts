@@ -183,6 +183,13 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
     expect(filter).toContain(escapeFilterPath(slate.scoreTextPath));
     expect(filter).toContain(escapeFilterPath(slate.statusTextPath));
     expect(filter.match(/reload=1/g)).toHaveLength(2);
+    // expansion=none: oletus (`normal`) TULKITSEE tekstin, jolloin joukkueen
+    // nimessä oleva % tuottaa "Stray %" -virheen joka kehyksellä ja pudottaa
+    // loput rivistä. Nimet tulevat tulospalvelusta eikä niitä validoi mikään.
+    expect(filter.match(/expansion=none/g)).toHaveLength(2);
+    // x ei saa mennä negatiiviseksi — ylileveä rivi leikkautuisi molemmista
+    // reunoista, eli molemmista joukkueiden nimistä katoaisi merkkejä.
+    expect(filter.match(/x=max\(0\\,\(w-text_w\)\/2\)/g)).toHaveLength(2);
     // Sama RTMP-kohde kuin lähdeversiolla.
     expect(args.slice(-2)).toEqual(["flv", "rtmp://example.invalid/live/avain"]);
     expect(logged()).toContain("ffmpeg.slate_start");

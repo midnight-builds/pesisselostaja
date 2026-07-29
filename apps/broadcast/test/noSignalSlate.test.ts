@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NoSignalSlate, parseSlateLayout } from "../src/noSignalSlate.js";
+import { NoSignalSlate, fitSlateLine, parseSlateLayout } from "../src/noSignalSlate.js";
 
 /** Sama yhden rivin JSON jonka `tools/no-signal-slate.py` tulostaa — sopimus
  *  generaattorin ja tämän moduulin välillä. */
@@ -12,8 +12,37 @@ const LAYOUT_JSON = JSON.stringify({
   barsHeight: 626,
   fontBold: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
   fontRegular: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-  score: { y: 812, size: 58, color: "white" },
-  status: { y: 892, size: 42, color: "0xB0B0B0" },
+  score: { y: 812, size: 58, color: "white", maxWidth: 1690 },
+  status: { y: 892, size: 42, color: "0xB0B0B0", maxWidth: 1690 },
+});
+
+describe("fitSlateLine", () => {
+  const score = { y: 812, size: 58, color: "white", maxWidth: 1690 };
+
+  it("leaves a normal score row alone", () => {
+    expect(fitSlateLine("Testilä Tähdet 12 – Esimerkki Eagles 1", score)).toBe(
+      "Testilä Tähdet 12 – Esimerkki Eagles 1"
+    );
+  });
+
+  it("truncates a row too wide for the frame, with an ellipsis", () => {
+    // drawtext ei osaa kutistaa tekstiä eikä fontsize voi riippua text_w:stä,
+    // joten ylileveä rivi leikkautuisi MOLEMMISTA reunoista — eli molemmista
+    // joukkueiden nimistä katoaisi merkkejä keskeltä ulospäin.
+    const wide = "Kotipesän Urheilijat Reippailijat 12 – Lyöntilän Palloseura Nuoret 11";
+    const fitted = fitSlateLine(wide, score);
+    expect(fitted.length).toBeLessThan(wide.length);
+    expect(fitted.endsWith("…")).toBe(true);
+  });
+
+  it("does nothing when the generator reported no width limit", () => {
+    const wide = "x".repeat(500);
+    expect(fitSlateLine(wide, { ...score, maxWidth: 0 })).toBe(wide);
+  });
+
+  it("leaves an empty row empty — no lone ellipsis before the match starts", () => {
+    expect(fitSlateLine("", score)).toBe("");
+  });
 });
 
 describe("parseSlateLayout", () => {
@@ -22,7 +51,7 @@ describe("parseSlateLayout", () => {
     expect(layout).not.toBeNull();
     expect(layout!.width).toBe(1920);
     expect(layout!.barsHeight).toBe(626);
-    expect(layout!.score).toEqual({ y: 812, size: 58, color: "white" });
+    expect(layout!.score).toEqual({ y: 812, size: 58, color: "white", maxWidth: 1690 });
     expect(layout!.status.color).toBe("0xB0B0B0");
   });
 

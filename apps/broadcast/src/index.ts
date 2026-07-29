@@ -161,12 +161,21 @@ async function main(): Promise<void> {
     // vain että katvetila ohitetaan ja respawn-silmukka toimii kuten ennen.
     let slate: NoSignalSlate | null = null;
     if (config.noSignalSlate) {
-      slate = new NoSignalSlate({ matchId: config.matchId, runDir: config.runDir });
+      slate = new NoSignalSlate({
+        matchId: config.matchId,
+        runDir: config.runDir,
+        width: config.noSignalSlateWidth,
+        height: config.noSignalSlateHeight,
+      });
       await slate.prepare();
       logInfo(
         "relay.config",
         `Katvekuva: ${slate.available ? "PÄÄLLÄ" : "PÄÄLLÄ mutta ei käytettävissä"} ` +
-          `(kynnys ${Math.round(config.noSignalSlateAfterMs / 1000)} s)`
+          `(kynnys ${Math.round(config.noSignalSlateAfterMs / 1000)} s, ` +
+          // Resoluutio lokiin, koska sen EROAMINEN lähteestä on se asia joka
+          // aiheuttaa ylimääräisen katkon vaihdossa — ja se on ainoa tapa
+          // huomata se jälkikäteen lokista.
+          `${config.noSignalSlateWidth}x${config.noSignalSlateHeight})`
       );
     }
     mixer = new FfmpegMixer({

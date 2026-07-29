@@ -39,6 +39,8 @@ export interface RelayConfig {
   /** Kuinka kauan lähteen on oltava poissa ennen kuin katvekuva menee päälle.
    *  Issuen vaatimus: sekunnin blippi ei saa vilkuttaa kuvaa. */
   noSignalSlateAfterMs: number;
+  noSignalSlateWidth: number;
+  noSignalSlateHeight: number;
   /** Delta polling (after= + ETag) on by default; RELAY_DELTA_FETCH=false or
    *  the control file's deltaFetch key flips back to full fetches live. */
   deltaFetch: boolean;
@@ -244,6 +246,8 @@ export function parseRelayConfig(): RelayConfig {
     finishedFailureWindowMs,
     noSignalSlate,
     noSignalSlateAfterMs,
+    noSignalSlateWidth,
+    noSignalSlateHeight,
     deltaFetch,
     announceBatterChanges,
     dryRun,

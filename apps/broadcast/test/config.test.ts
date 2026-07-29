@@ -9,6 +9,7 @@ const ENV_KEYS = [
   "RELAY_DRY_RUN",
   "RELAY_NO_SIGNAL_SLATE",
   "RELAY_NO_SIGNAL_SLATE_AFTER_MS",
+  "RELAY_NO_SIGNAL_SLATE_SIZE",
 ];
 
 const originalArgv = process.argv;
@@ -83,5 +84,26 @@ describe("no-signal slate (issue #104)", () => {
     expect(parseRelayConfig().noSignalSlateAfterMs).toBe(5000);
     process.env.RELAY_NO_SIGNAL_SLATE_AFTER_MS = "pian";
     expect(parseRelayConfig().noSignalSlateAfterMs).toBe(8000);
+  });
+
+  it("floors the threshold at 2 s — 0 would flash the slate on every respawn", () => {
+    process.env.RELAY_NO_SIGNAL_SLATE_AFTER_MS = "0";
+    expect(parseRelayConfig().noSignalSlateAfterMs).toBe(2000);
+    process.env.RELAY_NO_SIGNAL_SLATE_AFTER_MS = "500";
+    expect(parseRelayConfig().noSignalSlateAfterMs).toBe(2000);
+  });
+
+  it("defaults the slate to 1080p but lets it match the source resolution", () => {
+    // Eri resoluutio kuin lähteellä = YouTuben transkooderi käynnistyy
+    // uudelleen molemmissa vaihdoissa, eli kaksi ylimääräistä katkoa per
+    // katkos. Lähteen resoluutiota ei saa ilmaiseksi, joten tämä on
+    // operaattorin tieto.
+    expect(parseRelayConfig().noSignalSlateWidth).toBe(1920);
+    expect(parseRelayConfig().noSignalSlateHeight).toBe(1080);
+    process.env.RELAY_NO_SIGNAL_SLATE_SIZE = "1280x720";
+    expect(parseRelayConfig().noSignalSlateWidth).toBe(1280);
+    expect(parseRelayConfig().noSignalSlateHeight).toBe(720);
+    process.env.RELAY_NO_SIGNAL_SLATE_SIZE = "iso";
+    expect(parseRelayConfig().noSignalSlateWidth).toBe(1920);
   });
 });

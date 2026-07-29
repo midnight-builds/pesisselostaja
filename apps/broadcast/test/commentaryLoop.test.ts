@@ -31,6 +31,8 @@ function makeConfig(overrides: Partial<RelayConfig> = {}): RelayConfig {
     urlRefreshMs: 900000,
     noSignalSlate: false,
     noSignalSlateAfterMs: 8000,
+    noSignalSlateWidth: 1920,
+    noSignalSlateHeight: 1080,
     maxFailureWindowMs: 720000,
     finishedFailureWindowMs: 120000,
     deltaFetch: true,

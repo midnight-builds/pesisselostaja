@@ -315,20 +315,34 @@ to close the stream.
 | A reconnect attempt is running | `yhdistetään uudelleen — selostus jatkuu` |
 
 The current period and palot are prefixed when known (`1. jakso, 2 paloa — …`),
-and the score row above shows `koti X - Y vieras`. Both rows are supplied
-ready-made by the commentary loop; the mixer only displays them. Before the
-match has produced any event both rows are empty and the picture is just
-"EI SIGNAALIA" plus the footer — that is a valid result.
+and the score row above shows `<home> 12 – <away> 1` — each score next to its
+own team, because with the numbers between the names ("koti 12 - 1 vieras") the
+first person to read a preview read "1 vieras" as the team name. A row too wide
+for the frame is truncated with an ellipsis: `drawtext` cannot shrink text and
+its font size cannot depend on the measured width, so the writing side has to
+fit it. Both rows are supplied ready-made by the commentary loop; the mixer only
+displays them. Before the match has produced any event both rows are empty and
+the picture is just "EI SIGNAALIA" plus the footer — that is a valid result.
 
 **Turning it on**
 
 ```
-RELAY_NO_SIGNAL_SLATE=true          # default false
-RELAY_NO_SIGNAL_SLATE_AFTER_MS=8000 # how long the source must be gone first
+RELAY_NO_SIGNAL_SLATE=true            # default false
+RELAY_NO_SIGNAL_SLATE_AFTER_MS=8000   # how long the source must be gone first (floor 2000)
+RELAY_NO_SIGNAL_SLATE_SIZE=1280x720   # default 1920x1080 — set it to the SOURCE's resolution
 ```
 
+**Set the size to match the source.** The slate pushes to the same RTMP key as
+the source session, so if their resolution or frame rate differ, YouTube's
+transcoder restarts on the way in *and* on the way back — two extra viewer-side
+blips per outage, which is the very thing this feature exists to remove. The
+source's resolution is not available for free (`yt-dlp -g` does not report it),
+so it is the operator's job to say. A handheld phone stream is often 720p; the
+startup log prints the slate's size so a mismatch is visible afterwards.
+
 The threshold exists so a one-second respawn blip does not flash the slate; the
-issue asks for a 5–10 s outage before it engages. The background is rendered
+issue asks for a 5–10 s outage before it engages. It is floored at 2000 ms — `0`
+would flash the slate on every scheduled URL refresh. The background is rendered
 once per run by `tools/no-signal-slate.py` into `run/slate-<matchId>.png`; the
 score and status rows live in `run/slate-score-<matchId>.txt` and
 `run/slate-status-<matchId>.txt` and are read by ffmpeg's `drawtext ... reload`,
