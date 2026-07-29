@@ -611,6 +611,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       match,
       system,
       knobs,
+      sourceIngest: source.ingest,
       job,
       narration: narration.lines,
       log,
