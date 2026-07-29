@@ -66,7 +66,7 @@ Tunnukset ovat toisella koneella polussa `/root/clawd/integrations/youtube/`.
 ```
 google-client.json  {"clientId":"<GOOGLE_CLIENT_ID>","clientSecret":"<tai null>"}
 google-token.json   {"refreshToken":"<token.json: refresh_token>",
-                     "scope":"https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube.force-ssl",
+                     "scope":"https://www.googleapis.com/auth/youtube",
                      "obtainedAt":"2026-07-28T00:00:00.000Z","lastRefreshAt":null}
 ```
 
