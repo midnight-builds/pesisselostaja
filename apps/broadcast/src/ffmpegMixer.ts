@@ -277,6 +277,12 @@ export class FfmpegMixer {
    *  or null if the source has since responded some other way. Bounds the wait
    *  via SCHEDULED_WAIT_MAX_MS. */
   private scheduledSince: number | null = null;
+  /** When yt-dlp last started withholding a start time, or null while it is
+   *  still naming one. Bounds the imminent cadence via IMMINENT_CADENCE_MAX_MS.
+   *  Separate from scheduledSince: a countdown that reappears is genuine new
+   *  information from YouTube and earns a fresh imminent budget, without
+   *  resetting the overall give-up window. */
+  private imminentSince: number | null = null;
 
   constructor(private opts: FfmpegMixerOptions) {
     this.fifo = new NarrationFifo(opts.fifoPath);
