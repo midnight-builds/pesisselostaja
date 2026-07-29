@@ -210,6 +210,49 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
     expect(logged()).toContain("Katvekuva pois: lähde palasi");
   }, 25000);
 
+  /** Kaksi ffmpegiä samaan RTMP-avaimeen katkaisee lähetyksen YouTuben päässä.
+   *  Lähdepolku ei voi joutua tähän (spawnOnce odottaa childDonea), mutta
+   *  katvepolku lopettaa sessionsa itse valitsemallaan hetkellä — ennen
+   *  eskalointia purku palasi 5 s kuluttua riippumatta siitä kuoliko prosessi. */
+  it("never spawns the source session while the slate ffmpeg is still alive", async () => {
+    const spawns: string[][] = [];
+    let slateChild: ChildProcess | null = null;
+    let aliveAtSourceSpawn: boolean | null = null;
+    let attempts = 0;
+
+    const mixer = harness({
+      slate: await preparedSlate(),
+      slateAfterMs: 0,
+      resolveTestSource: () => {
+        attempts++;
+        if (attempts <= 1) throw new Error("ei vielä lähdettä");
+        return "/dev/null";
+      },
+      spawns,
+      spawnFor: (args) => {
+        if (isSlateSpawn(args)) {
+          // Katveprosessi joka EI kuole SIGTERMistä — vain SIGKILL tehoaa.
+          // Pitää FIFOn auki, jotta kättely valmistuu kuten oikealla ffmpegillä.
+          slateChild = spawn(
+            "sh",
+            ["-c", `cat "$1" > /dev/null & trap '' TERM; sleep 30 & wait`, "sh", fifoPath],
+            { stdio: ["ignore", "ignore", "ignore"] }
+          );
+          return slateChild;
+        }
+        // Lähdesession spawn-hetkellä katveprosessin ON oltava jo kuollut.
+        aliveAtSourceSpawn = slateChild !== null && slateChild.exitCode === null && slateChild.signalCode === null;
+        return fakeFfmpeg(fifoPath);
+      },
+    });
+
+    const outcome = await runUntil(mixer, () => spawns.some((a) => !isSlateSpawn(a)), 20000);
+    expect(outcome).toBe("condition");
+    expect(aliveAtSourceSpawn).toBe(false);
+    expect(slateChild!.signalCode).toBe("SIGKILL");
+    expect(logged()).toContain("SIGKILL");
+  }, 40000);
+
   /** TÄRKEIN TESTI. Katvekuvan työntäminen ei saa nollata luovutusikkunaa
    *  eikä laskea tuottavaksi ajoksi — muuten relay jäisi työntämään
    *  väripalkkeja tyhjään lähetykseen ikuisesti. */
