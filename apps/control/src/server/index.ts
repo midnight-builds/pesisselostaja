@@ -609,6 +609,10 @@ async function main(): Promise<void> {
     // Stopping the scheduler stops it from acting; it never stops a broadcast
     // that is already on air (uptime first — that is systemd's business).
     scheduler.stop();
+    // Polleri pysäytetään erikseen: sen ajastin on aggregaattorista
+    // riippumaton, eikä kesken oleva YouTube-kutsu saa pitää prosessia
+    // pystyssä sammutuksen jälkeen.
+    sourceIngest.stop();
     live.stop();
     server.close(() => process.exit(0));
   };
