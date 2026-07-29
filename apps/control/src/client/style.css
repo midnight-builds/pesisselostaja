@@ -479,6 +479,14 @@ body {
 .narration__row--queued {
   color: var(--faint);
 }
+/* Muted = the relay said it while ffmpeg was not attached. Nobody heard it, so
+   it must not look like the spoken lines around it. */
+.narration__row--muted {
+  color: var(--ink);
+  background: rgba(214, 69, 69, 0.12);
+  text-decoration: line-through;
+  text-decoration-color: rgba(214, 69, 69, 0.6);
+}
 .narration__time {
   flex: none;
   font-size: 12px;
