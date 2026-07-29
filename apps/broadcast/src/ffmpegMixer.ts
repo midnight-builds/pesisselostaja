@@ -321,6 +321,7 @@ export class FfmpegMixer {
       try {
         const session = await this.spawnOnce();
         this.scheduledSince = null;
+        this.imminentSince = null;
         if (this.stopped) break;
         this.noteSessionEnd(session);
       } catch (err) {
