@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import { NarrationFifo } from "./narrationFifo.js";
 import { resolveSourceUrl, SourceNotLiveYetError } from "./ytdlpSource.js";
+import type { NoSignalSlate, SlateLayout, SlateTextStyle } from "./noSignalSlate.js";
 import {
   classifyFfmpegFailure,
   createStderrTail,
@@ -10,6 +11,51 @@ import {
   redactStreamKey,
   type FfmpegFailureSide,
 } from "./ffmpegDiagnostics.js";
+
+/** Ohjaamon (apps/control) YouTube-API-havainto LÄHTEEN syötteestä, julkaistuna
+ *  control-tiedoston `sourceIngest`-avaimeen (PR #112). Kentät ovat raakoja
+ *  API-arvoja: päätös kuuluu relaylle, ei ohjaamolle. */
+export interface SourceIngestObservation {
+  /** Havaintohetki, ISO. */
+  observedAt: string;
+  videoId: string;
+  /** liveBroadcasts.list: created|ready|testing|live|complete|revoked. */
+  lifeCycleStatus: string | null;
+  /** liveStreams.list: created|ready|active|inactive|error. VAIN "active"
+   *  tarkoittaa että dataa virtaa sisään; null on "ei tietoa". */
+  streamStatus: string | null;
+  healthStatus: string | null;
+  error: string | null;
+}
+
+/** Katvekuvan tekstisisältö sellaisena kuin selostussilmukka sen antaa:
+ *  molemmat rivit VALMIIKSI muotoiltuina. Mikseri ei tunne pesäpallon
+ *  sääntöjä — se vain näyttää nämä ja lisää tilanneriville sen teknisen
+ *  puolen (miksi kuva puuttuu), jota selostussilmukka puolestaan ei voi
+ *  tietää. Tyhjä merkkijono = riviä ei näytetä. */
+export interface SlateSituation {
+  /** Esim. "Pesä Ysit 12 - 1 Espoon Pesis". */
+  score: string;
+  /** Esim. "1. jakso, 2 paloa". */
+  situation: string;
+}
+
+/** Kolme sanamuotoa tilannerivin tekniselle puolelle (issue #104:n kommentti).
+ *  "selostus jatkuu" on koko kuvan tärkein teksti: se kertoo katsojalle ettei
+ *  lähetystä kannata sulkea. Älä pudota sitä pois. */
+export const SLATE_REASON_LOST = "kuvayhteys katkesi, selostus jatkuu";
+export const SLATE_REASON_WAITING = "kuvayhteyttä odotetaan — selostus jatkuu";
+export const SLATE_REASON_RECONNECTING = "yhdistetään uudelleen — selostus jatkuu";
+
+/** Kuinka kauan lähteen on oltava poissa ennen kuin katvekuva menee päälle.
+ *  Issuen vaatimus: "hetkellinen sekunnin blippi ei saa vilkuttaa katvekuvaa,
+ *  vasta esimerkiksi 5-10 s katko laukaisee sen." */
+const DEFAULT_SLATE_AFTER_MS = 8000;
+
+/** Kuinka vanha ohjaamon `sourceIngest`-havainto saa olla. Signaali saapuu jopa
+ *  30 s myöhässä, joten raja on reilusti sen yli mutta silti niin tiukka ettei
+ *  ottelun alussa nähty "live" jää selittämään ottelun loppua. */
+const SOURCE_INGEST_MAX_AGE_MS = 120_000;
 
 export interface FfmpegMixerOptions {
   youtubeUrl: string;
