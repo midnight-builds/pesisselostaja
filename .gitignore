@@ -21,7 +21,8 @@ apps/broadcast/voices/
 
 # Ohjaussovelluksen operaattorimedia ja ajonaikainen tila (ei gitiin:
 # brändikuvat ovat käyttäjän omaa aineistoa ja repo on julkinen)
-apps/control/assets/
+apps/control/assets/*
+!apps/control/assets/pesaysit-bg-raw-001.png
 apps/control/run/
 .incoming/
 pesis-ai-youtube-pack-*.zip
