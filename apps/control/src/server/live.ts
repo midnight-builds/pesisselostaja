@@ -33,7 +33,7 @@ import type {
   RelayProcess,
   SystemState,
 } from "../shared/types.js";
-import { getActiveJob } from "./jobs.js";
+import { closeRunningJob, getActiveJob } from "./jobs.js";
 import { readLog } from "./journal.js";
 import { getMatchState } from "./matches.js";
 import { getRelayProcess, readKnobs } from "./relay.js";
@@ -491,6 +491,7 @@ function buildNarrationLines(
 
 export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggregator {
   const readActiveJob = opts.getActiveJob ?? getActiveJob;
+  const closeRunningJobFn = opts.closeRunningJob ?? closeRunningJob;
   const subscribers = new Set<(state: LiveState) => void>();
   const errors = new Map<SourceKey, string>();
   let narration = newNarrationCache(-1);
@@ -548,6 +549,30 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     }
   }
 
+  /** The relay shuts ITSELF down when the source ends — we never cut it short
+   *  (uptime first), so a broadcast routinely finishes with nobody calling
+   *  /api/relay/stop. This poller is the only always-on observer of that
+   *  moment, so it is the one that lets go of the broadcast slot.
+   *
+   *  Falling edge only. "Relay is inactive" on its own is the normal state of a
+   *  job that has been armed but not started yet, and closing that would cancel
+   *  the next broadcast before it began (#101). */
+  let relayWasActive = false;
+  async function closeJobIfRunEnded(): Promise<void> {
+    const wasActive = relayWasActive;
+    relayWasActive = relay.active;
+    if (!wasActive || relay.active) return;
+    if (job?.status !== "arming" && job?.status !== "live") return;
+    try {
+      const closed = await closeRunningJobFn();
+      if (closed) job = closed;
+    } catch (err) {
+      // Surfaced on the relay row rather than swallowed: a job stuck in
+      // "arming" blocks the next match, and the operator has to know now.
+      errors.set("job", err instanceof Error ? err.message : String(err));
+    }
+  }
+
   let fastBusy = false;
   async function tickFast(): Promise<void> {
     if (stopped || fastBusy) return; // a slow systemctl must not stack up calls
@@ -567,6 +592,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       await track("job", readActiveJob, (value) => {
         job = value;
       });
+      await closeJobIfRunEnded();
       if (job) {
         const matchId = job.matchId;
         await track("knobs", () => readKnobs(matchId), (value) => {
