@@ -5,8 +5,16 @@
 // etc. deriveHealth and its Snapshot type are marked `export` in live.ts
 // purely so this file can call them directly; no logic was touched.
 import { describe, expect, it } from "vitest";
-import { deriveHealth, type Snapshot } from "../src/server/live.js";
-import type { Job, LogLine, MatchState, RelayProcess, SystemState } from "../src/shared/types.js";
+import { buildChain, deriveHealth, type Snapshot } from "../src/server/live.js";
+import { SOURCE_INGEST_STALE_MS } from "../src/server/sourceIngest.js";
+import type {
+  Job,
+  LogLine,
+  MatchState,
+  RelayProcess,
+  SourceIngest,
+  SystemState,
+} from "../src/shared/types.js";
 
 function baseRelay(overrides: Partial<RelayProcess> = {}): RelayProcess {
   return {
@@ -201,5 +209,118 @@ describe("deriveHealth", () => {
     );
     expect(health).toBe("ok");
     expect(headline).toMatch(/sammuu itse/);
+  });
+});
+
+// --------------------------------------------------------- Lähde-rivi + #104
+//
+// Sääntö jota nämä vartioivat: ohjaamon YouTube-havainto voi vain LISÄTÄ
+// epäilystä, ei koskaan tuottaa vihreää. Kaksi mielipidettä samasta rivistä on
+// juuri se ongelma jonka issue #97 poistaa — relayn oma havainto päättää
+// lähtötason, ja API-havainto saa korkeintaan pudottaa sen.
+describe("buildChain: lähde-rivi ja YouTube-havainto", () => {
+  /** Lokitilanne jossa lokipohjainen logiikka antaa "ok": ffmpeg kiinni
+   *  lähteessä ja relay ajossa. */
+  function ffmpegRunning(now: number): LogLine[] {
+    return [
+      { ts: new Date(now - 60_000).toISOString(), level: "info", code: null, msg: "Käynnistetään ffmpeg" },
+    ];
+  }
+
+  function ingest(overrides: Partial<SourceIngest> = {}): SourceIngest {
+    return {
+      observedAt: new Date().toISOString(),
+      videoId: "SOURCEID123",
+      lifeCycleStatus: "live",
+      streamStatus: "active",
+      healthStatus: "good",
+      error: null,
+      ...overrides,
+    };
+  }
+
+  function sourceRow(overrides: Partial<Snapshot> = {}) {
+    const now = Date.now();
+    const snap = snapshot({ now, log: ffmpegRunning(now), ...overrides });
+    const row = buildChain(snap, null).find((r) => r.key === "source");
+    if (!row) throw new Error("lähde-riviä ei löytynyt");
+    return row;
+  }
+
+  it("aktiivinen syöte säilyttää terveyden ja mainitaan detailissa", () => {
+    const row = sourceRow({ sourceIngest: ingest() });
+    expect(row.health).toBe("ok");
+    expect(row.detail).toMatch(/syöte aktiivinen/);
+  });
+
+  it("ei-aktiivinen syöte pudottaa ok → warn ja näyttää raa'an arvon", () => {
+    const row = sourceRow({ sourceIngest: ingest({ streamStatus: "inactive" }) });
+    expect(row.health).toBe("warn");
+    expect(row.detail).toMatch(/syöte ei virtaa \(inactive\)/);
+  });
+
+  it("päättynyt lähde relayn yhä ajaessa on warn, ei fail — vaiheessa 1 kukaan ei toimi tämän varassa", () => {
+    const row = sourceRow({
+      sourceIngest: ingest({ lifeCycleStatus: "complete", streamStatus: "inactive" }),
+    });
+    expect(row.health).toBe("warn");
+    expect(row.detail).toMatch(/lähde on päättynyt/);
+  });
+
+  it("havainto ei koskaan nosta riviä vihreäksi", () => {
+    // Lokissa ei ole havaintoa lähteestä -> "warn". Täydellinen API-havainto ei
+    // saa korjata sitä vihreäksi.
+    const row = sourceRow({ log: [], sourceIngest: ingest() });
+    expect(row.health).toBe("warn");
+    expect(row.detail).toMatch(/ei havaintoa lähteestä lokissa/);
+  });
+
+  it("idle-rivi pysyy idlenä vaikka syöte ei virtaisi — relay ei edes lue lähdettä", () => {
+    const row = sourceRow({
+      relay: baseRelay({ active: false, activeState: "inactive" }),
+      job: baseJob({ status: "scheduled" }),
+      sourceIngest: ingest({ streamStatus: "inactive" }),
+    });
+    expect(row.health).toBe("idle");
+  });
+
+  it("vanhentunut havainto ei muuta terveyttä", () => {
+    const now = Date.now();
+    const row = sourceRow({
+      now,
+      sourceIngest: ingest({
+        observedAt: new Date(now - SOURCE_INGEST_STALE_MS - 1).toISOString(),
+        streamStatus: "inactive",
+      }),
+    });
+    expect(row.health).toBe("ok");
+    expect(row.detail).toMatch(/vanhentunut/);
+  });
+
+  it("virheellinen havainto ei muuta terveyttä", () => {
+    const row = sourceRow({
+      sourceIngest: ingest({
+        lifeCycleStatus: null,
+        streamStatus: null,
+        healthStatus: null,
+        error: "lähdelähetystä ei löytynyt tältä kanavalta",
+      }),
+    });
+    expect(row.health).toBe("ok");
+    expect(row.detail).toMatch(/havaintoa ei saatu/);
+  });
+
+  it("ilman havaintoa pollerin syy näkyy detailissa", () => {
+    const row = sourceRow({
+      sourceIngest: null,
+      sourceIngestReason: "lähde-URL osoittaa selostettuun lähetykseen — korjaa työn lähde-URL",
+    });
+    expect(row.health).toBe("ok");
+    expect(row.detail).toMatch(/selostettuun lähetykseen/);
+  });
+
+  it("ilman työtä pollerin syytä ei toisteta riville", () => {
+    const row = sourceRow({ job: null, sourceIngest: null, sourceIngestReason: "ei aktiivista työtä" });
+    expect(row.detail).toBe("ei aktiivista työtä");
   });
 });

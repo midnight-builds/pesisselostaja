@@ -7,7 +7,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CONFIG } from "../src/server/config.js";
-import { controlFilePath, nudgeDelay, readKnobs, writeKnobs } from "../src/server/relay.js";
+import {
+  controlFilePath,
+  nudgeDelay,
+  readKnobs,
+  readSourceIngest,
+  writeKnobs,
+  writeSourceIngest,
+} from "../src/server/relay.js";
 import { DEFAULT_NARRATION_DELAY_MS } from "../../broadcast/src/config.js";
 
 const MATCH_ID = 12345;
@@ -114,5 +121,90 @@ describe("nudgeDelay", () => {
   it("starts from the default delay when nudging with no control file yet", async () => {
     const result = await nudgeDelay(MATCH_ID, 500);
     expect(result.narrationDelayMs).toBe(DEFAULT_NARRATION_DELAY_MS + 500);
+  });
+});
+
+// --------------------------------------------------- lähteen tila (issue #104)
+//
+// Sama tiedosto, kaksi kirjoittajaa: operaattorin klikkaus (writeKnobs) ja
+// ohjaamon 30 s välein kirjoittava lähteen tilan polleri (writeSourceIngest).
+// Molempien on säilytettävä toisen avaimet — myös silloin kun kirjoitukset
+// lähtevät samalla hetkellä.
+describe("writeSourceIngest / readSourceIngest", () => {
+  const INGEST = {
+    observedAt: "2026-07-29T15:00:00.000Z",
+    videoId: "SOURCEID123",
+    lifeCycleStatus: "live",
+    streamStatus: "active",
+    healthStatus: "good",
+    error: null,
+  };
+
+  it("säilyttää säätöavaimet ja relayn omat tuntemattomat avaimet", async () => {
+    writeControlFile({ announceBatterChanges: false, narrationDelayMs: 4000, mute: true });
+    await writeSourceIngest(MATCH_ID, INGEST);
+    const raw = readControlFile();
+    expect(raw.announceBatterChanges).toBe(false);
+    expect(raw.narrationDelayMs).toBe(4000);
+    expect(raw.mute).toBe(true);
+    expect(raw.sourceIngest).toEqual(INGEST);
+  });
+
+  it("writeKnobs ei pudota sourceIngestiä", async () => {
+    await writeSourceIngest(MATCH_ID, INGEST);
+    await writeKnobs(MATCH_ID, { pollIntervalMs: 5000 });
+    const raw = readControlFile();
+    expect(raw.sourceIngest).toEqual(INGEST);
+    expect(raw.pollIntervalMs).toBe(5000);
+  });
+
+  it("rinnakkaiset kirjoitukset eivät hukkaa päivitystä", async () => {
+    // Ilman sarjallistusta molemmat lukisivat saman tyhjän tiedoston ja
+    // jälkimmäinen rename pyyhkisi ensimmäisen avaimen kokonaan.
+    await Promise.all([
+      writeKnobs(MATCH_ID, { narrationDelayMs: 4500 }),
+      writeSourceIngest(MATCH_ID, INGEST),
+    ]);
+    const raw = readControlFile();
+    expect(raw.narrationDelayMs).toBe(4500);
+    expect(raw.sourceIngest).toEqual(INGEST);
+  });
+
+  it("rinnakkaiset nudget lasketaan yhteen eikä lähtöarvoa lueta kahdesti", async () => {
+    await writeKnobs(MATCH_ID, { narrationDelayMs: 4000 });
+    await Promise.all([nudgeDelay(MATCH_ID, 500), nudgeDelay(MATCH_ID, 500)]);
+    expect((await readKnobs(MATCH_ID)).narrationDelayMs).toBe(5000);
+  });
+
+  it("lukee kirjoitetun havainnon takaisin", async () => {
+    await writeSourceIngest(MATCH_ID, INGEST);
+    expect(await readSourceIngest(MATCH_ID)).toEqual(INGEST);
+  });
+
+  it("puuttuva, väärän tyyppinen tai rikkinäinen havainto on null, ei virhe", async () => {
+    expect(await readSourceIngest(MATCH_ID)).toBeNull();
+
+    writeControlFile({ announceBatterChanges: true });
+    expect(await readSourceIngest(MATCH_ID)).toBeNull();
+
+    writeControlFile({ sourceIngest: "ei objekti" });
+    expect(await readSourceIngest(MATCH_ID)).toBeNull();
+
+    // observedAt/videoId ovat pakolliset; ilman niitä havaintoa ei voi
+    // tuoreuttaa eikä kohdistaa oikeaan videoon.
+    writeControlFile({ sourceIngest: { videoId: "SOURCEID123" } });
+    expect(await readSourceIngest(MATCH_ID)).toBeNull();
+  });
+
+  it("täydentää puuttuvat tilakentät nulliksi eikä keksi arvoja", async () => {
+    writeControlFile({ sourceIngest: { observedAt: INGEST.observedAt, videoId: INGEST.videoId } });
+    expect(await readSourceIngest(MATCH_ID)).toEqual({
+      observedAt: INGEST.observedAt,
+      videoId: INGEST.videoId,
+      lifeCycleStatus: null,
+      streamStatus: null,
+      healthStatus: null,
+      error: null,
+    });
   });
 });
