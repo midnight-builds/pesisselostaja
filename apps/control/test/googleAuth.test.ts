@@ -201,11 +201,18 @@ describe("terveysraportin varoitukset", () => {
     expect(result.health).toBe("warn");
   });
 
-  it("varoittaa puuttuvasta force-ssl-oikeudesta (thumbnail ja poisto eivät toimi)", () => {
+  /** Pelkkä youtube-oikeus on TÄYSI oikeus tälle sovellukselle: laitevirta ei
+   *  hyväksy force-ssl:ää, eikä mikään sovelluksen kutsu tarvitse sitä. */
+  it("pitää pelkkää youtube-oikeutta riittävänä", () => {
     const result = health({ scopes: ["https://www.googleapis.com/auth/youtube"] });
+    expect(result.missingScopes).toEqual([]);
+    expect(result.warnings.join(" ")).not.toMatch(/oikeudet/i);
+  });
+
+  it("varoittaa jos youtube-oikeus puuttuu kokonaan", () => {
+    const result = health({ scopes: ["https://www.googleapis.com/auth/youtube.readonly"] });
     expect(result.health).toBe("warn");
-    expect(result.missingScopes).toEqual(["https://www.googleapis.com/auth/youtube.force-ssl"]);
-    expect(result.warnings.join(" ")).toMatch(/force-ssl/);
+    expect(result.missingScopes).toEqual(["https://www.googleapis.com/auth/youtube"]);
   });
 
   it("varoittaa jos kanavaa ei saatu varmistettua — väärä tili on kallis virhe", () => {
@@ -257,10 +264,12 @@ describe("laitevirta", () => {
     expect(started.userCode).toBe("ABCD-EFGH");
     expect(started.verificationUrl).toBe("https://www.google.com/device");
     expect(started.instructions).toContain("ABCD-EFGH");
-    // Molemmat scopet pyydetään kerralla: force-ssl:n lisääminen jälkikäteen
-    // vaatisi uuden kirjautumisen.
-    const body = String((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body);
-    expect(decodeURIComponent(body)).toContain("youtube.force-ssl");
+    // Regressio, 29.7.2026: force-ssl listalla Google vastasi
+    // "Invalid device flow scope" eikä kirjautumista voinut edes aloittaa.
+    // Laitevirta tukee vain osaa scopeista, ja force-ssl on niiden ulkopuolella.
+    const body = decodeURIComponent(String((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body));
+    expect(body).toContain("https://www.googleapis.com/auth/youtube");
+    expect(body).not.toContain("force-ssl");
   });
 
   it("käsittelee authorization_pendingin normaalina kulkuna, ei virheenä", async () => {

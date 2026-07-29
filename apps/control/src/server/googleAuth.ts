@@ -24,13 +24,22 @@ const TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo";
 const CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels";
 const DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 
-/** `youtube` riittäisi lähetysten luontiin, mutta thumbnailin asettaminen ja
- *  videon poisto vaativat `youtube.force-ssl`. Molemmat pyydetään kerralla,
- *  koska scopen lisääminen jälkikäteen tarkoittaisi uutta kirjautumista. */
-export const SCOPES = [
-  "https://www.googleapis.com/auth/youtube",
-  "https://www.googleapis.com/auth/youtube.force-ssl",
-];
+/** Oikeudet, jotka laitevirralla pyydetään.
+ *
+ *  **Vain `youtube`, eikä `youtube.force-ssl`** — ja tämä ei ole tyylivalinta:
+ *  Googlen laitevirta HYLKÄÄ force-ssl:n. Koodipyyntö vastaa suoraan
+ *  `Invalid device flow scope: …/youtube.force-ssl`, eli kirjautumista ei voi
+ *  edes aloittaa niin kauan kuin se on listalla. Laitevirta tukee vain osaa
+ *  Googlen scopeista, ja tämä on niiden ulkopuolella.
+ *
+ *  Aiempi kommentti tässä väitti, että thumbnailin asetus ja videon poisto
+ *  vaativat force-ssl:n. Se oli väärin: YouTube Data API v3 hyväksyy
+ *  `thumbnails.set`-, `videos.update`- ja `videos.delete`-kutsuihin myös pelkän
+ *  `youtube`-oikeuden. force-ssl on tarpeen kommenteille, tekstityksille ja
+ *  arvosteluille — joihin tämä sovellus ei koske.
+ *
+ *  Löytyi 29.7.2026 ensimmäisellä oikealla kirjautumisyrityksellä. */
+export const SCOPES = ["https://www.googleapis.com/auth/youtube"];
 
 /** YouTube Data API:n kiintiöhinnasto niiltä osin kuin tämä sovellus kutsuu.
  *  list = 1, kirjoittavat = 50. Nämä ovat Googlen dokumentoituja hintoja, ei
@@ -595,7 +604,7 @@ export function buildAuthHealth(input: AuthHealthInput): AuthHealth {
 
   if (input.scopes.length > 0 && missingScopes.length > 0) {
     warnings.push(
-      `Puuttuvat oikeudet: ${missingScopes.join(", ")}. Thumbnailin asetus ja videon poisto eivät toimi ilman youtube.force-ssl-oikeutta — kirjaudu uudelleen.`
+      `Puuttuvat oikeudet: ${missingScopes.join(", ")}. Lähetysten luonti ja hallinta eivät toimi ilman niitä — kirjaudu uudelleen.`
     );
     health = worse(health, "warn");
   }

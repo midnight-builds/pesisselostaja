@@ -535,7 +535,7 @@ const IMAGE_MIME: Record<string, string> = {
   ".jpeg": "image/jpeg",
 };
 
-/** Thumbnailin lataus. Vaatii youtube.force-ssl-oikeuden. Kuva luetaan
+/** Thumbnailin lataus. Riittää youtube-oikeus (ks. SCOPES). Kuva luetaan
  *  levyltä (thumbnail.ts renderöi sen) tai annetaan valmiina puskurina. */
 export async function setThumbnail(
   videoId: string,
