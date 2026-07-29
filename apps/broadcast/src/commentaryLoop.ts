@@ -333,13 +333,23 @@ export class CommentaryLoop {
    *  SIGNAALIA" + alatunniste; se on kelvollinen lopputulos.
    *
    *  Näyttömuoto, ei puhemuoto: `periodName` tuottaa selostukseen sopivan
-   *  "ensimmäinen jakso", kun kuvassa lukee lyhyempi "1. jakso". */
+   *  "ensimmäinen jakso", kun kuvassa lukee lyhyempi "1. jakso".
+   *
+   *  Muoto on **nimi–pisteet-pareina** ("Kotipesä 12 – Lyöntilä 1"), ei
+   *  issuen sommittelussa ehdotettu "koti 12 - 1 vieras". Syy on luettavuus:
+   *  keskitetyllä tekstirivillä ilman värilaatikoita vierasjoukkueen luku
+   *  tarttuu visuaalisesti sen nimeen, ja ensimmäinen ihminen joka näki
+   *  esikatselukuvan luki "1 Lyöntilä" joukkueen nimenä. Pari kerrallaan
+   *  lukutapa on yksikäsitteinen.
+   *
+   *  Pisteet ovat KULUVAN JAKSON pisteet, eivät ottelun yhteispisteitä — se on
+   *  pesäpallon oikea lukema, ja tilannerivi kertoo minkä jakson (CLAUDE.md). */
   get slateSituation(): SlateSituation {
     if (!this.meta || !this.matchStarted) return { score: "", situation: "" };
     const cur = getPeriodScore(this.state, this.state.currentPeriod);
     const outs = this.state.currentOuts;
     return {
-      score: `${this.meta.home.name} ${cur.home} - ${cur.away} ${this.meta.away.name}`,
+      score: `${this.meta.home.name} ${cur.home} – ${this.meta.away.name} ${cur.away}`,
       situation: `${slatePeriodName(this.state.currentPeriod)}, ${outs === 1 ? "1 palo" : `${outs} paloa`}`,
     };
   }
