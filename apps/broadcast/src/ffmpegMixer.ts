@@ -1048,7 +1048,14 @@ export class FfmpegMixer {
     try {
       while (!this.stopped && childAlive) {
         await this.sleepWhileSlateAlive(waitMs, () => childAlive);
-        if (this.stopped || !childAlive) break;
+        if (this.stopped) break;
+        if (!childAlive) {
+          // Katvetilan ffmpeg kuoli itsestään. Kertakytkin pois, jottei tästä
+          // tule kaatumissilmukkaa juuri kun lähetys on jo vaikeuksissa.
+          this.disableSlate("katvetilan ffmpeg kuoli kesken session");
+          endReason = "ffmpeg kuoli katvetilassa";
+          break;
+        }
         // Katvetilan ehdot voivat muuttua kesken session: ottelu päättyy tai
         // ohjaamo kertoo lähetyksen olevan `complete`. Silloin katve puretaan
         // heti, jotta luovutus/sammutus etenee normaalisti.
