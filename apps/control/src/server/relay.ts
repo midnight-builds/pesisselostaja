@@ -256,18 +256,42 @@ export function controlFilePath(matchId: number): string {
   return join(CONFIG.relayRunDir, `.control-${matchId}.json`);
 }
 
-async function readControlFile(matchId: number): Promise<Record<string, unknown>> {
+/** Kolme eri asiaa, jotka aiemmin olivat kaikki `{}`: tiedostoa ei ole,
+ *  tiedosto on mutta ei jäsenny, tiedosto on ja jäsentyy.
+ *
+ *  Ero on merkityksellinen vain kirjoittajille. Relayn käynnistyskirjoitus ei
+ *  ole atominen (commentaryLoop.ts kirjoittaa suoraan kohteeseen), joten
+ *  "ei jäsenny" on käytännössä aina kesken oleva kirjoitus — ja siitä
+ *  tilanteesta merge tyhjästä pyyhkisi juuri kirjoitetut säätöavaimet. */
+type ControlRead =
+  | { state: "ok"; raw: Record<string, unknown> }
+  | { state: "missing" }
+  | { state: "corrupt"; message: string };
+
+async function readControlFileState(matchId: number): Promise<ControlRead> {
+  let text: string;
   try {
-    const parsed: unknown = JSON.parse(await readFile(controlFilePath(matchId), "utf8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
+    text = await readFile(controlFilePath(matchId), "utf8");
   } catch {
-    // Missing file = the relay hasn't started for this match yet; a half-written
-    // one = we caught someone else's edit. Both mean "fall back to defaults",
-    // never "throw" — the live view must keep rendering.
-    return {};
+    // Ei tiedostoa = relay ei ole vielä käynnistynyt tälle ottelulle.
+    return { state: "missing" };
   }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { state: "corrupt", message: "sisältö ei ole objekti" };
+    }
+    return { state: "ok", raw: parsed as Record<string, unknown> };
+  } catch (err) {
+    return { state: "corrupt", message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Lukupää niille joille rikkinäinen tiedosto tarkoittaa samaa kuin puuttuva:
+ *  oletusarvot, ei koskaan poikkeusta — tilanäkymän on jatkettava piirtämistä. */
+async function readControlFile(matchId: number): Promise<Record<string, unknown>> {
+  const current = await readControlFileState(matchId);
+  return current.state === "ok" ? current.raw : {};
 }
 
 /** Sarjallistaa KAIKKI control-tiedoston lue-muokkaa-kirjoita-operaatiot yhden
