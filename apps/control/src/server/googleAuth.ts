@@ -421,6 +421,17 @@ export function clearAccessTokenCache(): void {
   cachedAccessToken = null;
 }
 
+/** Onko refresh token ylipäätään tallennettu. Halpa tiedostoluku, ei yhtään
+ *  verkkokutsua.
+ *
+ *  Tämä on olemassa taustapollausta varten: ilman tarkistusta polleri kutsuisi
+ *  getAccessTokenia 30 s välein tilassa, joka on tämän repon oletus (OAuth-
+ *  clientia ei ole pakko olla), ja jokainen kutsu heittäisi — loki täyttyisi
+ *  virheistä joita kukaan ei voi korjata muuten kuin kirjautumalla. */
+export async function hasStoredToken(): Promise<boolean> {
+  return (await tokenStore.read()) !== null;
+}
+
 /** Voimassa oleva access token, tarvittaessa refresh_tokenilla uusittuna.
  *  Onnistunut uusinta päivittää `lastRefreshAt`in — se on terveysraportin
  *  tärkein yksittäinen tieto. */
