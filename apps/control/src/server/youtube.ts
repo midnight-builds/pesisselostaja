@@ -408,18 +408,32 @@ export interface BroadcastSummary {
 }
 
 /** Kanavan omat lähetykset. `status` = YouTuben broadcastStatus
- *  (upcoming/active/completed/all). */
+ *  (upcoming/active/completed/all).
+ *
+ *  `id` hakee yhden tunnetun videon. Se on **eri suodatin** kuin
+ *  broadcastStatus, eikä niitä saa lähettää samassa pyynnössä: YouTube Data
+ *  API:ssa `id` ja `mine`/`broadcastStatus` sulkevat toisensa pois, ja
+ *  `broadcastType` on dokumentoitu käytettäväksi vain `mine`/`broadcastStatus`
+ *  -pyynnöissä. Tyhjä tulos id-haussa on **normaali** vastaus — video ei
+ *  yksinkertaisesti ole omalla kanavalla — ei virhe. */
 export async function listBroadcasts(
-  opts: { status?: "upcoming" | "active" | "completed" | "all"; maxResults?: number } = {}
+  opts: { id?: string; status?: "upcoming" | "active" | "completed" | "all"; maxResults?: number } = {}
 ): Promise<BroadcastSummary[]> {
+  const filter: Params = opts.id
+    ? { id: opts.id }
+    : {
+        broadcastStatus: opts.status ?? "all",
+        broadcastType: "all",
+        maxResults: Math.min(Math.max(opts.maxResults ?? 25, 1), 50),
+      };
   const response = await ytRequest<ListResponse<LiveBroadcastResource>>(
     "GET",
     "liveBroadcasts",
     {
+      // Sama part molemmissa haussa, jotta boundStreamId ja lifeCycleStatus
+      // tulevat mukana myös id-haussa.
       part: "id,snippet,status,contentDetails",
-      broadcastStatus: opts.status ?? "all",
-      broadcastType: "all",
-      maxResults: Math.min(Math.max(opts.maxResults ?? 25, 1), 50),
+      ...filter,
     },
     null,
     "list"
