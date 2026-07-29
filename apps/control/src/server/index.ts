@@ -56,7 +56,9 @@ import {
   templateInputFromMatch,
   type BroadcastTexts,
   type MatchTemplateInput,
+  type ShareTemplate,
 } from "./templates.js";
+import { ensureShareTemplateFile, readShareTemplate } from "./shareTemplate.js";
 import type { CreateJobRequest, PatchJobRequest, PatchKnobsRequest } from "../shared/api.js";
 import type { Job, LiveState, NotificationPrefs } from "../shared/types.js";
 
@@ -145,10 +147,13 @@ interface YoutubeCreateRequest {
 }
 
 type TemplateContext =
-  | { texts: BroadcastTexts; matchId: number; job: Job | null }
+  | { texts: BroadcastTexts; matchId: number; job: Job | null; shareTemplate: ShareTemplate }
   | { error: string; status: number };
 
 async function resolveTemplateContext(body: YoutubeCreateRequest): Promise<TemplateContext> {
+  // Luetaan joka pyynnöllä: operaattorin muokkaus run/share-template.jsoniin
+  // näkyy seuraavassa esikatselussa ilman uudelleenkäynnistystä (#95).
+  const shareTemplate = await readShareTemplate();
   let job: Job | null = null;
   if (body.jobId) {
     job = (await listJobs()).find((j) => j.id === body.jobId) ?? null;
@@ -165,7 +170,7 @@ async function resolveTemplateContext(body: YoutubeCreateRequest): Promise<Templ
     body.overrides ?? {}
   );
   try {
-    return { texts: buildBroadcastTexts(input), matchId, job };
+    return { texts: buildBroadcastTexts(input, shareTemplate), matchId, job, shareTemplate };
   } catch (err) {
     // Käytännössä vain "alkuaika puuttuu" — ottelu on listalla ilman
     // kellonaikaa, ja se on käyttäjän täydennettävä (overrides.localTime).
@@ -386,7 +391,8 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
         streamForNormal: body.streamForNormal,
         normalAutoStart: body.normalAutoStart,
       },
-      texts
+      texts,
+      resolved.shareTemplate
     );
     // Työ tietää nyt kohteensa: selostettu lähetys on relayn kohde, normaali
     // on lähde jota puhelin työntää. Ilman tätä operaattori joutuisi
@@ -546,6 +552,11 @@ async function main(): Promise<void> {
   // else guarantees it exists before the first request — create it once at
   // boot rather than on every write.
   await mkdir(CONFIG.stateDir, { recursive: true });
+  // Materializes run/share-template.json with its defaults, so the operator can
+  // find and edit the share message's wording without being told it exists
+  // (#95). Failing to write it must not stop the server: the defaults are
+  // compiled in and the messages come out the same.
+  await ensureShareTemplateFile().catch(() => undefined);
 
   // The live view needs to know which job is currently the relay's job to
   // know what to poll; the aggregator asks rather than the server pushing it
