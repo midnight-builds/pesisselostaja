@@ -348,7 +348,13 @@ export async function readKnobs(matchId: number): Promise<ControlKnobs> {
  *  ignores absent keys and keeps its current value for them (so a full rewrite
  *  from stale UI state would silently revert someone's other change), and phase
  *  B adds keys (mute, volume) that this build knows nothing about and must not
- *  drop. */
+ *  drop.
+ *
+ *  Rikkinäinen tiedosto EI estä tätä kirjoitusta, toisin kuin
+ *  writeSourceIngestiä: tämä on operaattorin tahallinen komento kesken
+ *  lähetyksen ("selostus pois"), ja sen on mentävä läpi vaikka tiedoston
+ *  entinen sisältö olisi lukukelvoton. Havainnon julkaisu taas voi odottaa
+ *  seuraavan kierroksen. */
 export function writeKnobs(matchId: number, patch: Partial<ControlKnobs>): Promise<ControlKnobs> {
   return serializeControlWrite(() => writeKnobsUnlocked(matchId, patch));
 }
