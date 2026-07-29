@@ -141,7 +141,8 @@ YouTube-lähetyksillä** (Google-automaatio ei ole aamun polulla).
    päättyi)
 
 **Vaihe B — aamun lähetyksen jälkeen.** Relay-telemetria ja lokikoodit,
-kaksivaiheinen selostuslista, uudet control-avaimet, Google-auth + koko
+kaksivaiheinen selostuslista (tehty 29.7., #97: lista luetaan relayn
+aikajanasta eikä rakenneta tulospalvelun syötteestä), uudet control-avaimet, Google-auth + koko
 YouTube-osio, thumbnailit, ajastus ja jono, jälkityöt, ElevenLabs-osio
 (kiintiömittari + kulutus per lähetys), passkey-suojaus, menneiden videoiden
 hallinta.
