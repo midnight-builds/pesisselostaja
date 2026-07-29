@@ -174,6 +174,111 @@ export function buildMixFilterComplex(narrationGain: number): string {
   );
 }
 
+/** Katvetilan äänigraafi: pelkkä selostus, koska lähdeääntä (`[0:a]`) ei ole.
+ *
+ *  Sama gain ja sama `alimiter=limit=0.95:level=disabled` kuin
+ *  buildMixFilterComplexissa, jotta äänenvoimakkuus ei hyppää siirtymässä
+ *  lähteestä katteeseen ja takaisin. `level=disabled` samasta syystä kuin
+ *  siellä (issue #56). */
+export function buildSlateMixFilterComplex(narrationGain: number): string {
+  return `[1:a]volume=${narrationGain},alimiter=limit=0.95:level=disabled[aout]`;
+}
+
+/** Escapeus filtterigraafin arvokenttään menevälle polulle (kuva, fontit,
+ *  tekstitiedostot).
+ *
+ *  Merkeillä `: , ; [ ] \` ja `'` on merkitys -filter_complexin sisällä, ja
+ *  merkkijono kulkee KAHDEN jäsentimen läpi (graafitaso ja filtterin
+ *  optiotaso). Siitä syntyy epäintuitiivinen sääntö, joka on todennettu
+ *  kokeellisesti tämän koneen ffmpeg 6.1:llä: kolme kenoviivaa erikoismerkin
+ *  edessä kelpaa kaikille näistä, ja kenoviiva itse tarvitsee neljä. Yksi
+ *  kenoviiva riittäisi vain graafitason merkeille (`, ; [ ]`) eikä kelpaisi
+ *  kaksoispisteelle lainkaan. Shell-tasoa ei ole: argumentit menevät
+ *  spawn()ille taulukkona, ei komentorivinä.
+ *
+ *  Tekstien sisältöä ei tarvitse escapeta: ne tulevat tiedostosta
+ *  (`textfile` + `reload`), eivät filtterimerkkijonosta. */
+export function escapeFilterPath(path: string): string {
+  let out = path.replace(/\\/g, "\\\\\\\\");
+  for (const ch of [":", ",", ";", "[", "]", "'"]) {
+    out = out.split(ch).join("\\\\\\" + ch);
+  }
+  return out;
+}
+
+/** Ruutunopeus katvekuvalle. Still-kuva ei tarvitse enempää, ja matala arvo
+ *  pitää enkoodauskuorman olemattomana juuri silloin kun kone hoitaa myös
+ *  syntetisointia. */
+const SLATE_FRAMERATE = 10;
+/** Avainkuva ~2 s välein annetulla ruutunopeudella. */
+const SLATE_GOP_FRAMES = SLATE_FRAMERATE * 2;
+
+/** Kaksi drawtextiä (pisterivi, tilannerivi) tekstitiedostoista `reload`illa,
+ *  jotta sisältö päivittyy ILMAN respawnia — `-loop 1 -i kuva.png` -syötteen
+ *  vaihtaminen vaatisi ffmpegin uudelleenkäynnistyksen, eli näkyvän katkon
+ *  jokaisesta pistemuutoksesta. */
+export function buildSlateVideoFilter(
+  layout: SlateLayout,
+  scoreTextPath: string,
+  statusTextPath: string
+): string {
+  const line = (fontFile: string, textFile: string, style: SlateTextStyle): string =>
+    `drawtext=fontfile=${escapeFilterPath(fontFile)}:textfile=${escapeFilterPath(textFile)}:reload=1:` +
+    `x=(w-text_w)/2:y=${style.y}:fontsize=${style.size}:fontcolor=${style.color}`;
+  return (
+    `[0:v]${line(layout.fontBold, scoreTextPath, layout.score)},` +
+    `${line(layout.fontRegular, statusTextPath, layout.status)}[vout]`
+  );
+}
+
+/** Paths + layout the slate arg builder needs. Otetaan erillisenä oliona
+ *  eikä NoSignalSlate-instanssina, jotta argumenttien rakentaminen on
+ *  testattavissa ilman generaattoria. */
+export interface SlateInputs {
+  imagePath: string;
+  scoreTextPath: string;
+  statusTextPath: string;
+  layout: SlateLayout;
+}
+
+/** Katvetilan ffmpeg-argumentit. Sama RTMP-kohde / tallennustiedosto ja sama
+ *  FIFO-syöte kuin lähdeversiolla; erot ovat still-kuvasyötteessä,
+ *  äänigraafissa ja siinä että video on pakko ENKOODATA. */
+export function buildSlateFfmpegArgs(
+  slate: SlateInputs,
+  opts: FfmpegMixerOptions,
+  recordFilePath: string | undefined
+): string[] {
+  const args = [
+    "-nostdin", "-y", "-loglevel", "warning", "-thread_queue_size", "4096",
+    // -re on pakollinen: ilman sitä ffmpeg tuottaisi still-kuvasta kehyksiä
+    // niin nopeasti kuin ehtii ja juoksisi FIFOn reaaliaikaisen
+    // selostuskellon ohi sekunneissa.
+    "-loop", "1", "-framerate", String(SLATE_FRAMERATE), "-re",
+    "-i", slate.imagePath,
+    "-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "4096",
+    "-i", opts.fifoPath,
+    "-filter_complex",
+    `${buildSlateVideoFilter(slate.layout, slate.scoreTextPath, slate.statusTextPath)};` +
+      buildSlateMixFilterComplex(opts.narrationGain),
+    "-map", "[vout]", "-map", "[aout]",
+    // `-c:v copy` EI toimi still-kuvalle — se on pakko enkoodata. stillimage-
+    // tune ja veryfast pitävät kuorman pienenä, eikä liikkumattomaan kuvaan
+    // kannata tuhlata bitrateä.
+    "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage",
+    "-pix_fmt", "yuv420p", "-g", String(SLATE_GOP_FRAMES),
+    "-b:v", "1200k", "-maxrate", "1500k", "-bufsize", "2400k",
+    "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
+  ];
+  if (recordFilePath) {
+    args.push("-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", recordFilePath);
+  } else {
+    const rtmpDest = `${opts.rtmpUrl.replace(/\/$/, "")}/${opts.streamKey}`;
+    args.push("-f", "flv", rtmpDest);
+  }
+  return args;
+}
+
 function buildFfmpegArgs(
   sourceUrl: string,
   opts: FfmpegMixerOptions,
