@@ -41,6 +41,12 @@ export class ApiMock {
   preflight: PreflightResult = fixture.preflightResult();
   log: LogLine[] = fixture.logLines();
   day: (date: string) => DayMatches = (date) => fixture.dayMatches(date);
+  /** Google-yhteyden tila. Ilman yhteyttä palvelin vastaa 409:llä jokaiseen
+   *  muuhun YouTube-reittiin kuin terveyteen, ja UI näyttää AuthMissingNoticen
+   *  — sen takia tämä yksi kenttä ohjaa koko välilehden käytöksen. */
+  authHealth = fixture.authHealth();
+  broadcasts: unknown[] = [];
+  playlists: unknown[] = [];
   /** Routes to answer with an error, e.g. { "POST /api/relay/start": "..." }.
    *  A bare string is a 500; give `{ status, error }` when the status itself
    *  is part of what's under test (404 for an unknown match id). */
@@ -231,6 +237,22 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
     }
     if (path.startsWith("/api/push/")) return void (await send({}));
 
+    // ── YouTube ──────────────────────────────────────────────────────────
+    // Health answers 200 in every state; everything else is 409 until a
+    // connection exists, which is exactly how the real server behaves and what
+    // makes AuthMissingNotice appear. Mirroring that here means the tab is
+    // tested in the state it actually ships in today: no credentials on the box.
+    if (path === "/api/youtube/health") return void (await send(api.authHealth));
+    if (path.startsWith("/api/youtube/") || path.startsWith("/api/thumbnail/")) {
+      if (!api.authHealth.connected) {
+        return void (await send({ error: "Google-tiliä ei ole yhdistetty." }, 409));
+      }
+      if (path === "/api/youtube/broadcasts" && method === "GET") {
+        return void (await send(api.broadcasts));
+      }
+      if (path === "/api/youtube/playlists") return void (await send(api.playlists));
+    }
+
     if (path === "/api/log") {
       const level = url.searchParams.get("level");
       const rank: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
@@ -312,7 +334,7 @@ export const test = base.extend<Fixtures>({
 
 export { expect };
 
-/** One tab's panel. Every view stays mounted (App.tsx renders all four and
+/** One tab's panel. Every view stays mounted (App.tsx renders all five and
  *  hides the inactive ones), so a text that occurs in more than one view — the
  *  same match named both in the Ottelut list and in the job card — has to be
  *  scoped to the view under test instead of being looked up page-wide. */

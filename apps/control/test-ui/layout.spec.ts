@@ -6,7 +6,7 @@
 import { expect, test, shot, horizontalOverflow, tapTargets, contrastRatio } from "./support/harness";
 import { HEALTH_CASES, liveState, matchState, job, relayProcess } from "./support/state";
 
-const TABS = ["Live", "Ottelut", "Työ", "Loki"] as const;
+const TABS = ["Live", "Ottelut", "Työ", "YouTube", "Loki"] as const;
 
 test.describe("ulkoasu", () => {
   test("mikään välilehti ei tuota vaakavieritystä 393×853-näkymässä", async ({ page, openApp }) => {

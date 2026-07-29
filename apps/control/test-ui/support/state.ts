@@ -6,6 +6,7 @@
  *  breaks these builders (typecheck) instead of silently rendering "undefined"
  *  in a test that still passes. */
 
+import type { AuthHealth } from "../../src/server/googleAuth";
 import type {
   ChainStatus,
   ControlKnobs,
@@ -23,6 +24,52 @@ import type {
 } from "../../src/shared/types";
 
 export const NOW = "2026-07-29T05:30:00.000Z"; // 08:30 Suomen aikaa
+
+/** Google-yhteyden terveys. Oletus on TARKOITUKSELLA "ei yhdistetty": se on
+ *  tila jossa ohjaamo oikeasti on niin kauan kuin tunnuksia ei ole kopioitu
+ *  koneelle, ja se on ainoa tila jonka YouTube-välilehti osaa näyttää ilman
+ *  että yksikään kirjoittava Google-kutsu lähtee liikkeelle. */
+export function authHealth(p: Partial<AuthHealth> = {}): AuthHealth {
+  return {
+    connected: false,
+    health: "idle",
+    headline: "Google-tiliä ei ole yhdistetty.",
+    channel: null,
+    scopes: [],
+    missingScopes: [
+      "https://www.googleapis.com/auth/youtube",
+      "https://www.googleapis.com/auth/youtube.force-ssl",
+    ],
+    tokenObtainedAt: null,
+    lastRefreshAt: null,
+    daysSinceSuccess: null,
+    tokenAgeDays: null,
+    warnings: [],
+    quota: { day: "2026-07-28", used: 0, limit: 10000, remaining: 10000 },
+    pending: null,
+    ...p,
+  };
+}
+
+/** Yhdistetty tila oikealle kanavalle (runbook: Talonkuningas). */
+export function authHealthConnected(p: Partial<AuthHealth> = {}): AuthHealth {
+  return authHealth({
+    connected: true,
+    health: "ok",
+    headline: "Yhteys kanavaan Talonkuningas.",
+    channel: { id: "UC4oXm9z5eNyh1snqGsRqcnw", title: "Talonkuningas" },
+    scopes: [
+      "https://www.googleapis.com/auth/youtube",
+      "https://www.googleapis.com/auth/youtube.force-ssl",
+    ],
+    missingScopes: [],
+    tokenObtainedAt: "2026-07-28T06:00:00.000Z",
+    lastRefreshAt: "2026-07-29T05:00:00.000Z",
+    daysSinceSuccess: 0,
+    tokenAgeDays: 1,
+    ...p,
+  });
+}
 
 export function relayProcess(p: Partial<RelayProcess> = {}): RelayProcess {
   return {
