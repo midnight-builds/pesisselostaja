@@ -20,6 +20,7 @@ import type {
   NarrationLine,
   PreflightResult,
   RelayProcess,
+  RelayTelemetry,
   SchedulerState,
   SystemState,
 } from "../../src/shared/types";
@@ -193,14 +194,48 @@ export function job(p: Partial<Job> = {}): Job {
 
 export function narration(): NarrationLine[] {
   return [
-    { id: "n1", detectedAt: "2026-07-29T05:29:10.000Z", spokenAt: null, text: "Toinen palo Peikoille." },
     {
-      id: "n2",
+      id: "1:c1",
+      detectedAt: "2026-07-29T05:29:10.000Z",
+      spokenAt: null,
+      muted: false,
+      text: "Toinen palo Peikoille.",
+    },
+    {
+      id: "2:c2",
       detectedAt: "2026-07-29T05:29:30.000Z",
       spokenAt: "2026-07-29T05:29:34.000Z",
+      muted: false,
       text: "Kotiutus! Veikot johtaa 5–3.",
     },
+    // The line nobody heard: spoken as far as the relay's bookkeeping goes,
+    // dropped because ffmpeg was not attached.
+    {
+      id: "3:c3",
+      detectedAt: "2026-07-29T05:29:40.000Z",
+      spokenAt: "2026-07-29T05:29:40.000Z",
+      muted: true,
+      text: "Kolmas palo Peikoille.",
+    },
   ];
+}
+
+export function telemetry(p: Partial<RelayTelemetry> = {}): RelayTelemetry {
+  return {
+    at: NOW,
+    matchId: 999001,
+    startedAt: "2026-07-29T05:29:00.000Z",
+    uptimeSec: 2520,
+    readerAttached: true,
+    pendingClips: 1,
+    respawns: 0,
+    source: { state: "live", detail: "ffmpeg käynnissä" },
+    match: { finished: false, eventCount: 412, lastEventAt: "2026-07-29T05:29:40.000Z" },
+    narration: { detected: 3, spoken: 2, muted: 1, queued: 1 },
+    tts: { engine: "piper", elevenLabsCharsUsed: 0 },
+    lastProblem: null,
+    ...p,
+  };
 }
 
 export function logLines(): LogLine[] {
@@ -223,6 +258,7 @@ export function liveState(p: Partial<LiveState> = {}): LiveState {
     system: systemState(),
     knobs: knobs(),
     job: job(),
+    telemetry: telemetry(),
     narration: narration(),
     log: logLines(),
     ...p,
