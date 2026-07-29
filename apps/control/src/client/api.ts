@@ -14,6 +14,7 @@ import type {
   MatchOption,
   PreflightResult,
   RelayProcess,
+  SchedulerState,
 } from "../shared/types";
 /** The YouTube chain's response shapes are the server module's own exported
  *  types, imported TYPE-ONLY: `import type` is erased before the bundle is
@@ -171,6 +172,15 @@ export const api = {
   relay: (action: "start" | "stop" | "restart") => postJson<RelayProcess>(`/api/relay/${action}`),
   knobs: (payload: PatchKnobsRequest) => postJson<ControlKnobs>("/api/knobs", payload),
   delayNudge: (deltaMs: number) => postJson<ControlKnobs>("/api/knobs/delay-nudge", { deltaMs }),
+  // ── Ajastin ─────────────────────────────────────────────────────────────
+  // Kaksi reittiä, ei kolmatta: tila ulos ja kytkin sisään. Käynnistystä ei
+  // voi pyytää ajastimelta — se päättää itse, ja käsikäynnistys on relay().
+  scheduler: () => request<SchedulerState>("/api/scheduler"),
+  /** Palvelin vaatii tiukan boolean-arvon: tämä kytkin päättää saako kone
+   *  aloittaa lähetyksen omin päin. */
+  schedulerEnable: (enabled: boolean) =>
+    postJson<SchedulerState>("/api/scheduler/enable", { enabled }),
+
   log: (limit: number, level?: LogLine["level"]) => {
     const q = new URLSearchParams({ limit: String(limit) });
     if (level) q.set("level", level);

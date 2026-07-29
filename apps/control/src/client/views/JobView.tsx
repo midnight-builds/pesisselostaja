@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Job, LiveState, PreflightResult } from "../../shared/types";
 import { DEFAULT_RTMP_URL, api } from "../api";
 import { Field } from "../components/Field";
+import { SchedulerCard } from "../components/SchedulerCard";
 import { fiDate, fiTime } from "../format";
 
 /** The job form: which match, which source, which target. Getting source and
@@ -97,6 +98,10 @@ export function JobView({ live, notify, reloadToken }: Props) {
           <h2 className="card__title">Ei työtä</h2>
           <p className="muted">Valitse ottelu Ottelut-välilehdeltä ja luo työ.</p>
         </section>
+        {/* Näkyy myös ilman työtä: silloin se kertoo juuri sen — ettei ole
+            mitään odotettavaa — mikä on eri asia kuin että ajastin olisi
+            rikki. */}
+        <SchedulerCard notify={notify} />
       </div>
     );
   }
@@ -253,6 +258,11 @@ export function JobView({ live, notify, reloadToken }: Props) {
         {blockers > 0 && <p className="field__hint is-fail">Preflightin esteet estävät käynnistyksen.</p>}
         {live?.relay.active && <p className="field__hint">Relay on jo ajossa.</p>}
       </section>
+
+      {/* Ajastin on käsikäynnistyksen alla, ei sen yllä: käsin painettu nappi
+          on edelleen ensisijainen tapa, ja ajastin on se jonka operaattori
+          ottaa käyttöön vasta kun on katsonut sen kuivaharjoitusta. */}
+      <SchedulerCard notify={notify} />
     </div>
   );
 }

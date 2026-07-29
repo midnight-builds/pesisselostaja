@@ -804,6 +804,33 @@ select.field__input {
   letter-spacing: 0.04em;
 }
 
+/* Ajastimen päällä/pois-rivi. Päällä oleva ajastin saa käynnistää lähetyksen
+   itse, joten se on väritetty huomiovärillä eikä onnistumisen vihreällä: se on
+   tila josta operaattorin kuuluu olla tietoinen, ei saavutus. */
+.statusline {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-radius: 12px;
+  padding: 11px 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+}
+.statusline strong {
+  letter-spacing: 0.06em;
+  font-size: 14px;
+}
+.statusline--on {
+  border-color: rgba(240, 166, 47, 0.5);
+  background: rgba(240, 166, 47, 0.12);
+}
+.statusline--on strong {
+  color: var(--warn);
+}
+.statusline--off strong {
+  color: var(--muted);
+}
+
 .job__teams {
   font-family: "Archivo", sans-serif;
   font-size: 20px;
