@@ -72,6 +72,32 @@ describe("pruneRunDir (issue #39)", () => {
       expect(existsSync(join(runDir, "status-143277.json.tmp"))).toBe(false);
     });
 
+    /** The control app writes `.control-<id>.json` atomically through a
+     *  uniquely-named temp file, so a crash between writeFile and rename leaves
+     *  one behind — and the source-ingest poller repeats that write every 30 s,
+     *  which makes the leftover a recurring possibility rather than a freak
+     *  event. Same reason status-<id>.json.tmp is on the allowlist. */
+    it("sweeps a control file whose atomic rename never happened", async () => {
+      file(".control-143277.json.tmp-12345-7", 300, daysAgo(40));
+
+      const result = await pruneRunDir(runDir, { maxAgeMs: 30 * DAY_MS, ttsCacheMaxBytes: 0, now: NOW });
+
+      expect(result.removed).toHaveLength(1);
+      expect(existsSync(join(runDir, ".control-143277.json.tmp-12345-7"))).toBe(false);
+    });
+
+    it("never sweeps the running match's leftover temp file either", async () => {
+      // keepMatchIds must still win: the id is parsed out of the temp name.
+      file(".control-146210.json.tmp-12345-7", 300, daysAgo(400));
+      const result = await pruneRunDir(runDir, {
+        maxAgeMs: 30 * DAY_MS,
+        ttsCacheMaxBytes: 0,
+        keepMatchIds: [146210],
+        now: NOW,
+      });
+      expect(result.removed).toEqual([]);
+    });
+
     it("never sweeps the running match's telemetry, however long the match", async () => {
       file("status-146210.json", 800, daysAgo(400));
       file("timeline-146210.ndjson", 5000, daysAgo(400));
