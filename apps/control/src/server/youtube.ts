@@ -452,6 +452,36 @@ export async function listBroadcasts(
     }));
 }
 
+export interface StreamStatus {
+  streamId: string;
+  /** YouTuben raaka arvo: created|ready|active|inactive|error. Tallennetaan
+   *  sellaisenaan — vain "active" tarkoittaa että dataa virtaa sisään. */
+  streamStatus: string | null;
+  /** status.healthStatus.status: good|ok|bad|noData. */
+  healthStatus: string | null;
+}
+
+/** Yhden striimin tila. Tämä on ainoa tieto siitä, työntääkö lähde oikeasti
+ *  kuvaa sisään: lähetyksen lifeCycleStatus voi olla "live" vaikka ingest
+ *  olisi jo katkennut. Tuntematon striimi (esim. poistettu) ei ole virhe
+ *  vaan null. */
+export async function getStreamStatus(streamId: string): Promise<StreamStatus | null> {
+  const response = await ytRequest<ListResponse<LiveStreamResource>>(
+    "GET",
+    "liveStreams",
+    { id: streamId, part: "status" },
+    null,
+    "list"
+  );
+  const item = response.items?.[0];
+  if (!item) return null;
+  return {
+    streamId,
+    streamStatus: item.status?.streamStatus ?? null,
+    healthStatus: item.status?.healthStatus?.status ?? null,
+  };
+}
+
 export interface PlaylistSummary {
   id: string;
   title: string;
