@@ -83,7 +83,7 @@ function makeLoop(overrides: Partial<RelayConfig> = {}): LoopInternals {
 
 beforeEach(() => fetchMock.mockReset());
 
-describe("CommentaryLoop delta polling (HANDOFF.md 15.7. kohta 6)", () => {
+describe("CommentaryLoop delta polling", () => {
   it("full fetch replaces the history and re-bases the delta cursor", async () => {
     const loop = makeLoop();
     fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
@@ -182,7 +182,7 @@ describe("CommentaryLoop delta polling (HANDOFF.md 15.7. kohta 6)", () => {
     expect(loop.history.events.map((e) => e.id)).toEqual([1, 2]);
   });
 
-  it("polls with full fetches while the history is empty — no delta, no reset loop (HANDOFF.md 17.7. kohta 1)", async () => {
+  it("polls with full fetches while the history is empty — no delta, no reset loop", async () => {
     const loop = makeLoop();
     // Match being initialized: the full fetch succeeds but returns no events.
     fetchMock.mockResolvedValue(result([]));
@@ -212,7 +212,7 @@ describe("CommentaryLoop delta polling (HANDOFF.md 15.7. kohta 6)", () => {
   });
 });
 
-describe("CommentaryLoop poll statistics + failure streaks (HANDOFF.md 17.7.)", () => {
+describe("CommentaryLoop poll statistics + failure streaks", () => {
   it("counts polls, delta merges, 304 skips and full fetches into the heartbeat summary", async () => {
     const loop = makeLoop();
     fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));

@@ -3,7 +3,7 @@
  *  ElevenLabs path.
  *
  *  ElevenLabs multilingual v2 reads bare digits in short Finnish phrases
- *  unclearly ("4, 3", "3 paloa" — HANDOFF.md 17.7.), while the same numbers
+ *  unclearly ("4, 3", "3 paloa"), while the same numbers
  *  written out as words are read fine. Piper reads digits correctly, so this
  *  is applied only inside the EL adapters (broadcast elevenLabsTts.ts, web
  *  elevenlabs.ts) — never to the readable text shown in logs/feed, and not a

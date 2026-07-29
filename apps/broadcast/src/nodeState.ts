@@ -31,7 +31,7 @@ export function loadState(filePath: string): WatcherState {
 
 /** Async on purpose: this runs on every poll cycle, and a synchronous write
  *  would block the event loop — including NarrationFifo's 20ms tick that
- *  feeds ffmpeg — for the duration of the disk I/O (HANDOFF.md 8). */
+ *  feeds ffmpeg — for the duration of the disk I/O. */
 export function saveState(filePath: string, state: WatcherState): Promise<void> {
   return writeFile(filePath, JSON.stringify(serializeWatcherState(state), null, 2));
 }

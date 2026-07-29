@@ -45,7 +45,7 @@ import type { RelayConfig } from "./config.js";
 const SUMMARY_EVERY_N = 10;
 /** No speech for this long → break the silence with an idle filler. 90 s
  *  (was 2 min): with the pipeline's own latency on top, a 2 min gap already
- *  felt like the narration had died (HANDOFF.md 16.7. kohta 4). */
+ *  felt like the narration had died. */
 const IDLE_FILLER_MS = 90 * 1000;
 /** Pre-game: welcome-filler cadence while waiting for the match to start. */
 const WELCOME_FILLER_MS = 90 * 1000;
@@ -73,7 +73,7 @@ const FULL_FETCH_TIMEOUT_MS = 10_000;
  *  per poll. Aborting a delta costs nothing: the next poll retries immediately
  *  and the 60 s resync closes any gap. */
 const SMALL_FETCH_TIMEOUT_MS = 4_000;
-/** Delta polling (HANDOFF.md 15.7. kohta 6): events carry no per-event
+/** Delta polling: events carry no per-event
  *  wall-clock field (verified against real data 2026-07-17 — only the
  *  match-epoch-relative `timestamp`), so the `after=` value is derived from
  *  the last successful response's Date header minus this safety margin. The
@@ -110,13 +110,13 @@ const DELTA_RESET_BREAKER_STREAK = 5;
 /** How many consecutive failed poll cycles before the failure log line turns
  *  alarming. A lone timeout is routine — one live match saw 22 isolated 8 s
  *  client-timeout blips in 45 min with zero events lost (the next poll always
- *  caught up) — so only a streak deserves attention (HANDOFF.md 17.7.). */
+ *  caught up) — so only a streak deserves attention. */
 const FETCH_FAILURE_ALARM_STREAK = 3;
 
 export type SpeechSink = (spokenText: string, readableText: string) => Promise<void>;
 
 /** Lets the loop see the narration output stage so it can decide whether a
- *  pre-game filler is worth synthesizing right now (HANDOFF.md 7). Kept as a
+ *  pre-game filler is worth synthesizing right now. Kept as a
  *  narrow port rather than a direct FfmpegMixer reference so the loop stays
  *  testable and decoupled from ffmpeg. When absent (dry-run/tests) the loop
  *  treats narration as always ready, preserving the old behavior. */
@@ -201,12 +201,12 @@ export class CommentaryLoop {
    *  attached (or immediately when there is no status port — dry-run/tests).
    *  Before the latch, speak() runs its bookkeeping but skips the sink handoff
    *  entirely: clips synthesized before the FIRST attach would pile up in the
-   *  FIFO and play out minutes stale in one burst on connect (HANDOFF.md 7,
-   *  case B). AFTER the latch the behavior deliberately never reverts —
+   *  FIFO and play out minutes stale in one burst on connect. AFTER the latch
+   *  the behavior deliberately never reverts —
    *  mid-game ffmpeg drops (flapping source) keep queueing event narration
    *  exactly as before, since a short outage losing all narration is the
-   *  worse failure mode there (observed live); revisiting that is a separate open
-   *  HANDOFF question. */
+   *  worse failure mode there (observed live); revisiting that is a separate
+   *  open question. */
   private narrationEverReady: boolean;
   /** True if any speech was suppressed pre-latch, so the latch moment knows
    *  to speak one fresh catch-up recap instead of the stale suppressed clips. */
@@ -220,7 +220,7 @@ export class CommentaryLoop {
    *  hasn't started and the loop speaks welcome fillers instead of recaps. */
   private matchStarted = false;
   /** Estimated wall-clock instant (ms) corresponding to event.timestamp=0,
-   *  for the first-seen delay log (HANDOFF.md 6c). The API gives no epoch
+   *  for the first-seen delay log. The API gives no epoch
    *  field, so this is inferred from observed events: since publish delay is
    *  always ≥0, (first-seen walltime − timestamp) is an upper bound on the
    *  true epoch, and the running minimum over all first-seen events
@@ -250,7 +250,7 @@ export class CommentaryLoop {
    *  stretches poll a stable URL and get cheap 304s. */
   private deltaCursor: { after: string; afterMs: number; etag: string | null } | null = null;
   /** Cumulative per-run poll statistics, surfaced on the mixer's heartbeat
-   *  line (HANDOFF.md 17.7.) — 304 skips, full-fetch fallbacks and reset
+   *  line — 304 skips, full-fetch fallbacks and reset
    *  answers are otherwise invisible in the log (the 304 path is deliberately
    *  silent, and reset answers only log once per streak). */
   private pollStats = { polls: 0, deltaMerges: 0, fullFetches: 0, notModified: 0, deltaResets: 0, fetchFailures: 0 };
@@ -403,7 +403,7 @@ export class CommentaryLoop {
    *  A missing/invalid file is ignored (keep the current value) rather than
    *  treated as an error, so a half-written edit can't crash the loop.
    *  Async read: a sync one would block NarrationFifo's 20ms tick every
-   *  poll (HANDOFF.md 8). */
+   *  poll. */
   private async refreshRuntimeControls(): Promise<void> {
     let parsed: Record<string, unknown>;
     try {
@@ -522,7 +522,7 @@ export class CommentaryLoop {
     // (it would only pile up stale in the FIFO); the latch moment then speaks
     // a fresh recap instead. The pre-game welcome filler is additionally only
     // worth queuing once ffmpeg is attached and the queue empty, or it bursts
-    // on connect (HANDOFF.md 7) — skipping it here just defers it to
+    // on connect — skipping it here just defers it to
     // maybeAnnounceSummary, which re-checks readiness each poll.
     if (this.matchStarted) {
       this.speak(formatStartupSpeech(meta, this.buildContext()));
@@ -611,7 +611,7 @@ export class CommentaryLoop {
   /** A lone poll failure is routine noise (8 s client-timeout blips — one
    *  live match had 22 in 45 min with zero events lost); the log line carries the
    *  cycle duration and the streak position, and only a streak of
-   *  FETCH_FAILURE_ALARM_STREAK+ turns the line alarming (HANDOFF.md 17.7.). */
+   *  FETCH_FAILURE_ALARM_STREAK+ turns the line alarming. */
   private recordPollFailure(err: unknown, cycleStartedAt: number): void {
     this.pollStats.fetchFailures++;
     const streak = ++this.consecutiveFetchFailures;
@@ -724,7 +724,7 @@ export class CommentaryLoop {
     return this.adoptFullSnapshot(res);
   }
 
-  /** One poll's events fetch (HANDOFF.md 15.7. kohta 6). Delta mode asks only
+  /** One poll's events fetch. Delta mode asks only
    *  for recent events (`after=` + If-None-Match) and merges them into the
    *  local full history; returns null on 304 (nothing changed). A reset answer
    *  replaces the history in place (handleResetResponse), an inconsistent
@@ -848,7 +848,7 @@ export class CommentaryLoop {
         state.announcedTurnKey = turnKey;
       }
 
-      // First-seen delay log (HANDOFF.md 6c): one line per event with at
+      // First-seen delay log: one line per event with at
       // least one genuinely new sub-event (not per sub-event), so a later
       // pass can split total delay into API-side publish delay (this delta)
       // vs. our own portion (speak-time minus this log's timestamp).
@@ -973,7 +973,7 @@ export class CommentaryLoop {
       // Only synthesize the welcome filler when it will actually be heard in
       // real time (ffmpeg attached, queue empty). Otherwise skip this round —
       // the ~90s cadence assumes real-time playback, and queuing fillers
-      // before ffmpeg attaches makes them all burst on connect (HANDOFF.md 7).
+      // before ffmpeg attaches makes them all burst on connect.
       if (!this.narrationReadyForFiller()) return;
       this.speak(formatWelcomeFiller(meta), false);
       return;
@@ -986,7 +986,7 @@ export class CommentaryLoop {
     // is worthless unless it is heard in real time. Skip WITHOUT advancing the
     // bookkeeping below, so the first ready poll speaks a fresh one instead of
     // queueing stale "tilanne on edelleen…" clips every ~2 min through a long
-    // ffmpeg outage (HANDOFF.md 7, extension). Event narration is unaffected.
+    // ffmpeg outage. Event narration is unaffected.
     if (!this.narrationReadyForFiller()) return;
     this.lastSummaryCount = this.state.announcementCount;
     this.state.lastSummaryTime = now;
@@ -1023,7 +1023,7 @@ export class CommentaryLoop {
    *  handed to synthQueue instead of awaited inline. Previously the poll loop
    *  awaited each clip's synthesis (~1s/clip) before moving on, so a cluster
    *  of several announcements in one poll delayed the next poll by several
-   *  seconds (see HANDOFF.md 6b). synthQueue keeps clips in order while
+   *  seconds. synthQueue keeps clips in order while
    *  letting the poll loop run on its own fixed cadence. */
   private speak(text: string, countAnnouncement = true, dedupeKey: string = text): void {
     if (dedupeKey === this.lastSpeech) return;
@@ -1031,7 +1031,7 @@ export class CommentaryLoop {
     this.lastSpeechAt = Date.now();
     if (countAnnouncement) this.state.announcementCount++;
     const spoken = preventOrdinalReading(applyPronunciations(text, this.pronunciations));
-    // Pre-first-attach suppression (HANDOFF.md 7, case B): all decision-time
+    // Pre-first-attach suppression: all decision-time
     // bookkeeping above ran normally — so dedupe/scoring/turn state stay
     // exactly as if the clip had played — but the sink handoff is skipped:
     // synthesizing now would only stack stale clips in the FIFO to burst out
@@ -1049,8 +1049,8 @@ export class CommentaryLoop {
       return;
     }
     logInfo("speech.spoken", `Selostus: ${text}`);
-    // Artificial playback delay (RELAY_NARRATION_DELAY_MS / control file,
-    // HANDOFF.md 8): captured at decision time and applied ONLY to the sink
+    // Artificial playback delay (RELAY_NARRATION_DELAY_MS / control file):
+    // captured at decision time and applied ONLY to the sink
     // handoff below — all dedupe/state bookkeeping above already ran
     // synchronously, so the delay never affects what gets announced, only
     // when it plays. The wait is measured from the decision instant, not
@@ -1086,7 +1086,7 @@ export class CommentaryLoop {
   private maybeLatchNarrationReady(meta: MatchMetadata): void {
     if (this.narrationEverReady) return;
     if (!this.narrationStatus?.isReaderAttached()) return;
-    // First-speech grace (HANDOFF.md 16.7. kohta 1): hold the latch until
+    // First-speech grace: hold the latch until
     // ffmpeg has been attached for firstSpeechDelayMs, measured from the
     // FIRST attach ever (not relay start — the source can go live minutes
     // later), so early viewers have time to join before the first line.
@@ -1108,7 +1108,7 @@ export class CommentaryLoop {
 
   /** True when a pre-game/idle filler is worth synthesizing right now: ffmpeg
    *  attached AND the narration queue empty, so the clip is heard in real time
-   *  instead of piling up (HANDOFF.md 7). With no status port (dry-run/tests)
+   *  instead of piling up. With no status port (dry-run/tests)
    *  narration is treated as always ready, preserving prior behavior. Event
    *  narration never goes through this gate — only fillers. */
   private narrationReadyForFiller(): boolean {

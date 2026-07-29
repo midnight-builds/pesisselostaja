@@ -12,21 +12,21 @@ export interface RelayConfig {
   narrationGain: number;
   /** Artificial delay (ms) inserted between detecting an event and handing its
    *  narration to synthesis, so speech lands after the corresponding video
-   *  instead of ahead of it once the API skip-delay shortened the feed lag
-   *  (HANDOFF.md 8). Default DEFAULT_NARRATION_DELAY_MS. Runtime-overridable
+   *  instead of ahead of it once the API skip-delay shortened the feed lag.
+   *  Default DEFAULT_NARRATION_DELAY_MS. Runtime-overridable
    *  via the control file — see commentaryLoop. */
   narrationDelayMs: number;
   /** Don't speak until ffmpeg has been attached this long, measured from the
    *  FIRST attach ever (not relay start — the source can go live minutes
-   *  later), so early viewers have time to join before the first line
-   *  (HANDOFF.md 16.7. kohta 1). 0 = off. Only affects the start of the run;
+   *  later), so early viewers have time to join before the first line.
+   *  0 = off. Only affects the start of the run;
    *  respawns after the first attach add no new delay. */
   firstSpeechDelayMs: number;
   urlRefreshMs: number;
   maxFailureWindowMs: number;
   /** Shorter give-up window used instead of maxFailureWindowMs once the match
    *  has finished — retrying a dead source for 12 min after "Ottelu päättyi"
-   *  only delays cleanup (HANDOFF.md 16.7. kohta 6.2). */
+   *  only delays cleanup. */
   finishedFailureWindowMs: number;
   /** Delta polling (after= + ETag) on by default; RELAY_DELTA_FETCH=false or
    *  the control file's deltaFetch key flips back to full fetches live. */
@@ -57,7 +57,7 @@ export interface RelayConfig {
 
 /** Default artificial narration delay (ms) — the gap between detecting an event
  *  and handing its narration to synthesis, so speech lands just after the video
- *  instead of ahead of it (HANDOFF.md 8).
+ *  instead of ahead of it.
  *
  *  4000 ms, not the earlier 2000: every live-calibrated match has needed the
  *  operator to raise it by hand mid-broadcast (one match settled on 4000 ms, a
@@ -137,7 +137,7 @@ export function parseRelayConfig(): RelayConfig {
   // control file's pollIntervalMs (min 2000 — see commentaryLoop).
   const pollInterval = parseInt(values["poll-interval"] ?? process.env.RELAY_POLL_INTERVAL ?? "3000", 10);
   const narrationGain = parseFloat(values["narration-gain"] ?? process.env.RELAY_NARRATION_GAIN ?? "1.3");
-  // Artificial narration delay (HANDOFF.md 8), see DEFAULT_NARRATION_DELAY_MS.
+  // Artificial narration delay, see DEFAULT_NARRATION_DELAY_MS.
   // A bad value falls back to the default rather than NaN (which would make
   // every wait computation NaN).
   const narrationDelayRaw = parseInt(
@@ -148,7 +148,7 @@ export function parseRelayConfig(): RelayConfig {
     ? DEFAULT_NARRATION_DELAY_MS
     : Math.max(0, narrationDelayRaw);
   // ~20 s grace from the FIRST ffmpeg attach before anything is spoken, so
-  // viewers have time to open the stream (HANDOFF.md 16.7. kohta 1). 0 = off.
+  // viewers have time to open the stream. 0 = off.
   const firstSpeechDelayRaw = parseInt(process.env.RELAY_FIRST_SPEECH_DELAY_MS ?? "20000", 10);
   const firstSpeechDelayMs = Number.isNaN(firstSpeechDelayRaw) ? 20000 : Math.max(0, firstSpeechDelayRaw);
   const urlRefreshMs = parseInt(values["url-refresh-ms"] ?? process.env.RELAY_URL_REFRESH_MS ?? String(15 * 60 * 1000), 10);
@@ -161,7 +161,7 @@ export function parseRelayConfig(): RelayConfig {
     10
   );
   // Once the match has finished, keeping the process up for the full generous
-  // window is pointless — give up much sooner (HANDOFF.md 16.7. kohta 6.2).
+  // window is pointless — give up much sooner.
   const finishedFailureWindowMs = parseInt(
     process.env.RELAY_FINISHED_FAILURE_WINDOW_MS ?? String(2 * 60 * 1000),
     10

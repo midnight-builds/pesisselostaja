@@ -9,7 +9,7 @@ export const ELEVENLABS_VOICE_ID = "onwK4e9ZLuTAKqWW03F9"; // Daniel — valittu
 export const ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 
 export async function elevenLabsSynthesize(rawText: string, apiKey: string): Promise<Blob> {
-  // EL reads bare digits unclearly in short Finnish phrases (HANDOFF.md 17.7.)
+  // EL reads bare digits unclearly in short Finnish phrases.
   // — spell them out as words on this path only; Piper/Web Speech read digits fine.
   const text = spellOutNumbers(rawText);
   const res = await fetch(

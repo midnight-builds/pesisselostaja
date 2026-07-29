@@ -90,8 +90,7 @@ async function main(): Promise<void> {
     {
       // Dry-run never attaches ffmpeg but should still log fillers, so report
       // "ready" there; otherwise defer to the live mixer's session/queue state
-      // so pre-game filler isn't synthesized before ffmpeg is reading it
-      // (HANDOFF.md 7).
+      // so pre-game filler isn't synthesized before ffmpeg is reading it.
       isReaderAttached: () => config.dryRun || (mixer?.isReaderAttached ?? false),
       pendingClips: () => mixer?.pendingClips ?? 0,
       // Dry-run reports epoch 0 = "attached long ago", so the first-speech
@@ -155,7 +154,7 @@ async function main(): Promise<void> {
       maxFailureWindowMs: config.maxFailureWindowMs,
       finishedFailureWindowMs: config.finishedFailureWindowMs,
       // The loop owns the finished state; the supervisor uses it to give up
-      // on a dead source quickly once the match has ended (HANDOFF 6.2).
+      // on a dead source quickly once the match has ended.
       isMatchFinished: () => loop.matchFinished,
       heartbeatExtra: () => loop.pollStatsSummary,
       fifoPath,

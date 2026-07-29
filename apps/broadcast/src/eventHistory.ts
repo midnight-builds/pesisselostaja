@@ -17,7 +17,7 @@ export interface MergeResult {
 /** Local full-history mirror of the online/{id}/events feed, so delta
  *  (`after=`) polling can coexist with processing code that assumes the
  *  complete history every poll (processEventsLive, recomputeCurrentOutsKeyed,
- *  outsThroughSubEvent — see HANDOFF.md 15.7. kohta 6). Delta responses are
+ *  outsThroughSubEvent). Delta responses are
  *  merged in; `events` always exposes the merged full list in first-seen
  *  order, which matches the API's append-order for a growing feed.
  *

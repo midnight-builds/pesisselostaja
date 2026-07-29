@@ -31,3 +31,9 @@ pesis-ai-youtube-pack-*.zip
 apps/control/test-results/
 apps/control/playwright-report/
 apps/control/.playwright-tmp/
+
+# Sessiokohtaiset muistiinpanot (handoff, aamuraportit). Nämä ovat voimassa
+# rajallisen ajan, joten ne eivät kuulu versionhallintaan: mikä niistä on
+# pysyvästi arvokasta, kuuluu README/DESIGN/CLAUDE.md:hen tai issueksi.
+HANDOFF*.md
+AAMU*.md

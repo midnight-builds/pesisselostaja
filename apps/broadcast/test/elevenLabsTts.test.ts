@@ -72,7 +72,7 @@ describe("ElevenLabsTts", () => {
     expect(tts.totalCharsUsed).toBe(7);
   });
 
-  describe("number spelling (HANDOFF.md 17.7. kohta 4)", () => {
+  describe("number spelling", () => {
     it("sends numbers spelled out as Finnish words, and counts the spoken chars", async () => {
       const tts = makeTts();
       await tts.synthesize("Tasan 4, 4.");
@@ -95,7 +95,7 @@ describe("ElevenLabsTts", () => {
     });
   });
 
-  describe("previous_text context (HANDOFF.md 16.7. kohta 3)", () => {
+  describe("previous_text context", () => {
     it("sends no previous_text on the first request, then the prior text on the next", async () => {
       const tts = makeTts();
       await tts.synthesize("Palo! KPL.");

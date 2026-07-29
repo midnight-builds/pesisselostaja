@@ -109,5 +109,5 @@ Se tapahtuu näissä tilanteissa (`ffmpegMixer.ts`, `config.ts`):
   ilman virheitä → Auto-start unohtui lähetystä luodessa. Paina Studiossa
   **Go live** käsin.
 
-Täydet tekniset taustat: `apps/broadcast/README.md`, `apps/broadcast/HANDOFF.md`,
+Täydet tekniset taustat: `apps/broadcast/README.md`,
 `apps/broadcast/DESIGN.md`.

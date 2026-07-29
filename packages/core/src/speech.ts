@@ -231,8 +231,8 @@ function formatBatterChangeSubEvent(sub: SubEvent, lookup: PlayerLookup): string
       const name = resolvePlayerName(lookup, el);
       // Weighted toward longer phrasings: ElevenLabs hallucinates extra
       // syllables at the start of very short inputs ("Lyömässä X." alone can
-      // come out as "reewer lyömässä X", HANDOFF.md 16.7. kohta 3) — more
-      // context stabilizes the synthesis. Short forms stay in the pool but as
+      // come out as "reewer lyömässä X") — more context stabilizes the
+      // synthesis. Short forms stay in the pool but as
       // a minority.
       if (name) {
         return pickVariant("batter", [
@@ -376,8 +376,8 @@ export function formatSituationSummary(meta: MatchMetadata, ctx: SpeechContext):
 export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): string {
   const h = ctx.periodHomeRuns;
   const a = ctx.periodAwayRuns;
-  // Light stat-style variant with the batting team included (user request,
-  // HANDOFF.md 16.7. kohta 4) — the clause is dropped when the batting team
+  // Light stat-style variant with the batting team included (user request)
+  // — the clause is dropped when the batting team
   // isn't known, so the sentence stays complete either way. Score is always
   // home-first regardless of who leads.
   const batting = ctx.currentBatTeamId != null
@@ -463,7 +463,7 @@ export function subEventToSpeech(
 
   // The appended score starts a new sentence after the run phrase, so it must
   // be capitalized — the tie variant used to leak through lowercase ("…
-  // tuojana X. tasan 7, 7.", HANDOFF.md 16.7. kohta 6.2 sivuhuomio).
+  // tuojana X. tasan 7, 7.").
   if (rawText.includes("löi juoksun")) {
     const base = formatRunScored(texts, meta, lookup);
     return ctx ? `${base} ${capitalize(formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns))}.` : base;
@@ -610,7 +610,7 @@ function formatDrawOfChoice(texts: EventTextElement[], meta: MatchMetadata, look
  *  mid-game situation summary. */
 export function formatMatchEnd(meta: MatchMetadata, ctx?: SpeechContext): string {
   // The closing announcement is the last thing the audience hears (narration
-  // goes silent after it), so thank them here (HANDOFF.md 16.7. kohta 5).
+  // goes silent after it), so thank them here.
   const thanks = pickVariant("thanks-viewers", [
     "Kiitos katsojille.",
     "Kiitokset kaikille katsojille.",
