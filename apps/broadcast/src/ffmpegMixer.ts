@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import { NarrationFifo } from "./narrationFifo.js";
-import { resolveSourceUrl, SourceNotLiveYetError } from "./ytdlpSource.js";
+import { resolveSourceUrl, SourceEndedError, SourceNotLiveYetError } from "./ytdlpSource.js";
 import {
   classifyFfmpegFailure,
   createStderrTail,
@@ -36,6 +36,10 @@ export interface FfmpegMixerOptions {
    *  failed attempt even when ffmpeg exited cleanly with code=0 — see
    *  minProductiveRunMs below / issue #45. */
   minProductiveRunMs?: number;
+  /** Shortest session that can count as a replayed tail (issue #103). Below
+   *  this a clean short exit is a start-up failure, not a finished broadcast's
+   *  leftover window. Overridable so tests can work in millisecond sessions. */
+  minTailMs?: number;
   /** Lets the supervisor know the match has ended (the commentary loop owns
    *  that state), for finishedFailureWindowMs. Absent → always false. */
   isMatchFinished?: () => boolean;
@@ -87,6 +91,10 @@ interface SessionResult {
   /** True when *we* ended the session on purpose (scheduled URL refresh), so
    *  its length says nothing about the source's health. */
   refreshKill: boolean;
+  /** ffmpeg's exit code, or null when it died on a signal. 0 means it read its
+   *  input to a clean end — which is what a finished broadcast's leftover DVR
+   *  window produces, over and over (issue #103). */
+  exitCode: number | null;
 }
 
 /** foo.mp4 -> foo.session3.mp4, so successive respawns never overwrite each
@@ -185,7 +193,32 @@ const HEARTBEAT_MS = 2 * 60 * 1000;
  *  long — signals the original broadcast is gone for good (not a transient
  *  network blip), so the caller should stop retrying and shut the relay down
  *  instead of hammering yt-dlp every 30s forever. */
-export class SourceExhaustedError extends Error {}
+/** Why the relay is finishing.
+ *
+ *  `"ended"` = the source was deliberately ended (the camera operator stopped,
+ *  the broadcast is over). Nothing is wrong, and the log must not send anyone
+ *  looking for a fault — the morning of 29.7.2026 it said "tarkista stream
+ *  key" about a target that was working perfectly (issue #103).
+ *  `"exhausted"` = the source stopped answering and never came back. */
+export type SourceEndReason = "ended" | "exhausted";
+
+export class SourceExhaustedError extends Error {
+  readonly reason: SourceEndReason;
+
+  constructor(message: string, reason: SourceEndReason = "exhausted") {
+    super(message);
+    this.name = "SourceExhaustedError";
+    this.reason = reason;
+  }
+}
+
+/** How close two session lengths must be to count as the same replayed tail.
+ *  The measured repeats were 34 s every single time — a live source's sessions
+ *  do not land that consistently, so a tenth is generous and still specific. */
+const TAIL_TOLERANCE = 0.1;
+/** A tail shorter than this is a start-up failure, not a republished tail
+ *  (issue #45: ~200 ms sessions). Those keep their own give-up path. */
+const DEFAULT_TAIL_MIN_MS = 5000;
 
 /** Total time a merely-*scheduled* source may keep not starting before the
  *  relay gives up anyway. Waiting is the right default — YouTube is telling us
@@ -274,6 +307,13 @@ export class FfmpegMixer {
    *  picture is stuttering", which is otherwise only visible by reading the
    *  log. */
   private respawns = 0;
+  private readonly minTailMs: number;
+  /** True once any session ran long enough to be real broadcast. Separates
+   *  "the source ended" from "the source never started" (issues #103 / #45). */
+  private hadProductiveSession = false;
+  /** Length of the previous consecutive clean, short session — the thing a
+   *  replayed tail repeats. Null whenever the streak is broken. */
+  private lastCleanTailMs: number | null = null;
   private sourceStateValue: "live" | "scheduled" | "resolving" | "failed" | "unknown" = "unknown";
   private sourceDetailValue: string | null = null;
   /** Wall clock of the FIRST completed FIFO handshake ever, never reset —
@@ -295,6 +335,7 @@ export class FfmpegMixer {
     this.fifo = new NarrationFifo(opts.fifoPath);
     this.maxFailureWindowMs = opts.maxFailureWindowMs ?? 5 * 60 * 1000;
     this.minProductiveRunMs = opts.minProductiveRunMs ?? 60 * 1000;
+    this.minTailMs = opts.minTailMs ?? DEFAULT_TAIL_MIN_MS;
   }
 
   enqueueNarration(pcm: Buffer): void {
@@ -356,6 +397,18 @@ export class FfmpegMixer {
         // confirming the source exists. Counting those answers toward the
         // give-up window is what forced starting the relay in a narrow slot
         // just before kickoff (observed live 27.7.) — wait instead.
+        // yt-dlp says the broadcast is over. This is the direct evidence the
+        // tail heuristic above only approximates, so it ends the run at once
+        // — and as "ended", not as a failure nobody caused (issue #103).
+        if (err instanceof SourceEndedError) {
+          this.stopped = true;
+          this.sourceStateValue = "failed";
+          this.sourceDetailValue = err.message;
+          throw new SourceExhaustedError(
+            `Lähde on päättynyt (${err.message}) — lopetetaan siististi.`,
+            "ended"
+          );
+        }
         if (err instanceof SourceNotLiveYetError) {
           if (this.scheduledSince === null) this.scheduledSince = monoNow();
           if (monoNow() - this.scheduledSince > SCHEDULED_WAIT_MAX_MS) {
@@ -417,9 +470,12 @@ export class FfmpegMixer {
     if (session.ranMs >= this.minProductiveRunMs) {
       this.failingSince = null;
       this.backoffMs = 1000; // fresh backoff after a healthy run
+      this.hadProductiveSession = true;
+      this.lastCleanTailMs = null;
       return;
     }
     if (session.refreshKill) return;
+    this.noteTailIfRepeated(session);
     logWarn(
       "ffmpeg.unproductive",
       `ffmpeg kuoli alle ${Math.round(this.minProductiveRunMs / 1000)} s käynnistyksestä — ` +
@@ -440,6 +496,43 @@ export class FfmpegMixer {
       (mins) =>
         `Yritykset ovat kuolleet alle ${Math.round(this.minProductiveRunMs / 1000)} sekunnissa ` +
         `${mins} minuutin ajan${sideNote}`
+    );
+  }
+
+  /** Ends the run when the source is replaying the same tail.
+   *
+   *  A finished YouTube live keeps its last DVR window available for a while.
+   *  yt-dlp still resolves it, ffmpeg reads it to a clean end, and the loop
+   *  respawns — so the audience hears the last seconds of the match again and
+   *  again. Measured on 29.7.2026: 34 s exactly, four times in one match and
+   *  twice in another (issue #103).
+   *
+   *  Three conditions together, because each one alone has an innocent
+   *  explanation:
+   *   - **the run already produced broadcast** — otherwise this is issue #45's
+   *     "never got going" case, which has its own verdict and its own wording;
+   *   - **ffmpeg exited cleanly** — a crash or a dropped push is not a tail;
+   *   - **two sessions of near-identical length in a row** — a live source's
+   *     sessions do not land within a tenth of each other twice running.
+   *
+   *  One replay is allowed to slip out before we are sure; that is the price
+   *  of not cutting a broadcast that was merely stuttering. */
+  private noteTailIfRepeated(session: SessionResult): void {
+    if (!this.hadProductiveSession || session.exitCode !== 0 || session.ranMs < this.minTailMs) {
+      this.lastCleanTailMs = null;
+      return;
+    }
+    const previous = this.lastCleanTailMs;
+    this.lastCleanTailMs = session.ranMs;
+    if (previous === null) return;
+    if (Math.abs(session.ranMs - previous) > previous * TAIL_TOLERANCE) return;
+
+    this.stopped = true;
+    const seconds = Math.round(session.ranMs / 1000);
+    throw new SourceExhaustedError(
+      `Lähde toisti saman ${seconds} s jakson kahdesti peräkkäin ilman virhettä — ` +
+        "lähetys on päätetty, lopetetaan siististi.",
+      "ended"
     );
   }
 
@@ -572,8 +665,16 @@ export class FfmpegMixer {
     const failureSide = classifyFfmpegFailure(stderrTail.text());
     const weakTarget = hasWeakTargetSignal(stderrTail.text());
     // The caller judges the run (noteSessionEnd): backoff and give-up window
-    // both hang off whether this was real broadcast, not off the exit code.
-    return { ranMs, refreshKill: this.refreshKillRequested, failureSide, weakTarget };
+    // hang off whether this was real broadcast. The exit code is carried for
+    // one narrow purpose — recognising a cleanly-read tail being replayed
+    // (issue #103) — and still decides nothing on its own.
+    return {
+      ranMs,
+      refreshKill: this.refreshKillRequested,
+      failureSide,
+      weakTarget,
+      exitCode: result.error ? null : result.code,
+    };
   }
 
   /** Waits for a natural gap in the narration before killing ffmpeg for a

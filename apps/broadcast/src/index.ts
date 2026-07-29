@@ -164,7 +164,13 @@ async function main(): Promise<void> {
     mixer.start().catch((err) => {
       logError("ffmpeg.supervisor_failed", `ffmpeg-valvoja päättyi virheeseen: ${err instanceof Error ? err.message : err}`);
       if (err instanceof SourceExhaustedError) {
-        logError("relay.source_gone", "Alkuperäinen lähde ei palautunut — sammutetaan koko relay.");
+        // "ended" = the broadcast was finished on purpose; nothing is broken,
+        // and the log must not send anyone hunting for a fault (issue #103).
+        if (err.reason === "ended") {
+          logInfo("relay.source_ended", "Lähde on päättynyt — sammutetaan relay siististi.");
+        } else {
+          logError("relay.source_gone", "Alkuperäinen lähde ei palautunut — sammutetaan koko relay.");
+        }
         shutdown();
       }
     });

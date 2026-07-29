@@ -38,6 +38,8 @@ export type EventCode =
   | "relay.dry_run"
   | "relay.tts_usage"
   | "relay.source_gone"
+  // Lähde päätettiin hallitusti — ei vika (#103).
+  | "relay.source_ended"
   // yt-dlp source resolution
   | "source.resolving"
   | "source.not_live"

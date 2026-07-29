@@ -37,6 +37,39 @@ export class SourceNotLiveYetError extends Error {
   }
 }
 
+/** Thrown when yt-dlp says the broadcast is over — not that it failed to
+ *  reach it. The distinction decides whether the relay retries or finishes:
+ *  a source that ended will not come back, and retrying it republishes the
+ *  same tail over and over (issue #103).
+ *
+ *  Deliberately a sibling of SourceNotLiveYetError rather than a subclass of
+ *  Error alone: "not yet" and "not any more" are the two ends of the same
+ *  broadcast, and both are ordinary states rather than faults. */
+export class SourceEndedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SourceEndedError";
+  }
+}
+
+/** yt-dlp's wording when the live is over. Captured verbatim.
+ *
+ *  "Requested format is not available" is what a finished YouTube live answers
+ *  while its recording is still being processed: the video exists, the m3u8
+ *  rendition we ask for does not. It is the same message a genuinely bad
+ *  format selector would produce — but we always ask for the same selector,
+ *  and it resolved fine seconds earlier, so in this process the only way to
+ *  reach it is that the stream ended. */
+const ENDED_PATTERNS = [
+  /Requested format is not available/i,
+  /This live stream recording is not available/i,
+  /This live event has ended/i,
+] as const;
+
+export function parseSourceEnded(stderr: string): boolean {
+  return ENDED_PATTERNS.some((pattern) => pattern.test(stderr));
+}
+
 const UNIT_MS: Record<string, number> = {
   second: 1000,
   minute: 60 * 1000,
@@ -72,12 +105,20 @@ export function resolveSourceUrl(youtubeUrl: string): Promise<string> {
       { maxBuffer: 4 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) {
-          const scheduled = parseScheduledStart(stderr ?? "");
-          reject(
-            scheduled
-              ? new SourceNotLiveYetError(String(stderr).trim().split("\n").at(-1) ?? "", scheduled.startsInMs)
-              : err
-          );
+          const text = String(stderr ?? "");
+          const lastLine = text.trim().split("\n").at(-1) ?? "";
+          const scheduled = parseScheduledStart(text);
+          if (scheduled) {
+            reject(new SourceNotLiveYetError(lastLine, scheduled.startsInMs));
+            return;
+          }
+          // Checked after "not live yet": a scheduled broadcast can also
+          // mention formats, and waiting must win over finishing.
+          if (parseSourceEnded(text)) {
+            reject(new SourceEndedError(lastLine));
+            return;
+          }
+          reject(err);
           return;
         }
         const url = stdout.trim().split("\n")[0];
