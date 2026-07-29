@@ -37,12 +37,31 @@ describe("scheduledRecheckDelayMs", () => {
 
   it("caps a far-off start at 5 min instead of hammering yt-dlp", () => {
     expect(scheduledRecheckDelayMs(103 * 60 * 1000)).toBe(5 * 60 * 1000);
-    expect(scheduledRecheckDelayMs(null)).toBe(5 * 60 * 1000);
   });
 
   it("never drops below 5 s, even past the announced time", () => {
     expect(scheduledRecheckDelayMs(1000)).toBe(5000);
     expect(scheduledRecheckDelayMs(0)).toBe(5000);
+  });
+
+  /** Regression, match 145889 on 29.7.2026: a withheld time means the stream is
+   *  about to start, and the old code answered it with the 5 min cap — losing
+   *  the match start, the first palo and both first-period runs. */
+  it("polls TIGHTLY when yt-dlp stops naming a time — that means imminent", () => {
+    expect(scheduledRecheckDelayMs(null)).toBe(20_000);
+    expect(scheduledRecheckDelayMs(null, 0)).toBe(20_000);
+    expect(scheduledRecheckDelayMs(null, 19 * 60 * 1000)).toBe(20_000);
+  });
+
+  it("falls back to the slow cap once 'a few moments' has lasted 20 min", () => {
+    expect(scheduledRecheckDelayMs(null, 20 * 60 * 1000)).toBe(5 * 60 * 1000);
+    expect(scheduledRecheckDelayMs(null, 3 * 60 * 60 * 1000)).toBe(5 * 60 * 1000);
+  });
+
+  it("is never slower for a withheld time than for a named one about to start", () => {
+    // The whole bug in one assertion: "in 1 minute" and "in a few moments" are
+    // the same situation, so the latter must not sleep 15x longer.
+    expect(scheduledRecheckDelayMs(null)).toBeLessThanOrEqual(scheduledRecheckDelayMs(60_000));
   });
 });
 
@@ -78,6 +97,30 @@ describe("FfmpegMixer waiting for a scheduled source", () => {
       expect(waited[0]).toContain("alkaa noin 25 s kuluttua");
       // The alarming failure wording is reserved for genuine failures.
       expect(logSpy.mock.calls.map((c) => String(c[0])).join("\n")).not.toContain("ffmpeg-käynnistysvirhe");
+    } finally {
+      logSpy.mockRestore();
+    }
+  }, 10000);
+
+  /** The log line this asserts is the one that read "Tarkistetaan uudelleen
+   *  300 s kuluttua" at 08:28 on 29.7.2026, five minutes before ffmpeg
+   *  attached. It must now read 20 s. */
+  it("logs a 20 s recheck — not 300 s — once yt-dlp withholds the start time", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const mixer = scheduledMixer(async () => {
+        throw new SourceNotLiveYetError("This live event will begin in a few moments.", null);
+      });
+      await Promise.race([
+        mixer.start().catch(() => "gave-up"),
+        new Promise((r) => setTimeout(r, 500)),
+      ]);
+      mixer.stop();
+      const waited = logSpy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("Lähde ei ole vielä livenä"));
+      expect(waited[0]).toContain("Tarkistetaan uudelleen 20 s kuluttua");
+      expect(waited[0]).not.toContain("300 s");
+      // No countdown to quote when yt-dlp withheld one.
+      expect(waited[0]).not.toContain("alkaa noin");
     } finally {
       logSpy.mockRestore();
     }

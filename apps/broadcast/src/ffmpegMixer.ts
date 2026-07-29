@@ -197,10 +197,33 @@ const SCHEDULED_WAIT_MAX_MS = 3 * 60 * 60 * 1000;
  *  estimate moves, and a far-off start shouldn't mean hammering yt-dlp). */
 const SCHEDULED_RECHECK_MAX_MS = 5 * 60 * 1000;
 const SCHEDULED_RECHECK_MIN_MS = 5000;
+/** Cadence once yt-dlp stops naming a time ("This live event will begin in a
+ *  few moments"). That wording is not a far-off start — it is the last thing
+ *  yt-dlp says before the stream actually goes live, so it must be the
+ *  *tightest* poll we run, not the slackest.
+ *
+ *  This branch used to return SCHEDULED_RECHECK_MAX_MS, i.e. exactly backwards.
+ *  Observed live in match 145889 on 29.7.2026: the countdown disappeared at
+ *  08:28, the relay then slept the full 5 min, and ffmpeg attached only at
+ *  08:33. The match start, IPV's first palo and both first-period runs were
+ *  narrated into a FIFO nobody was reading — viewers joined at 0-2 having
+ *  heard neither run. A wasted yt-dlp call every 20 s is far cheaper. */
+const SCHEDULED_RECHECK_IMMINENT_MS = 20_000;
+/** How long the imminent cadence may run before falling back to the slow cap.
+ *  "A few moments" that outlasts this is a postponed broadcast rather than an
+ *  imminent one, and polling hard for the remaining hours of
+ *  SCHEDULED_WAIT_MAX_MS would only invite throttling. */
+const IMMINENT_CADENCE_MAX_MS = 20 * 60 * 1000;
 
-/** How long to wait before asking yt-dlp again about a scheduled source. */
-export function scheduledRecheckDelayMs(startsInMs: number | null): number {
-  if (startsInMs === null) return SCHEDULED_RECHECK_MAX_MS;
+/** How long to wait before asking yt-dlp again about a scheduled source.
+ *
+ *  @param imminentForMs how long yt-dlp has been withholding a time already;
+ *         0 whenever it is still naming one.
+ */
+export function scheduledRecheckDelayMs(startsInMs: number | null, imminentForMs = 0): number {
+  if (startsInMs === null) {
+    return imminentForMs >= IMMINENT_CADENCE_MAX_MS ? SCHEDULED_RECHECK_MAX_MS : SCHEDULED_RECHECK_IMMINENT_MS;
+  }
   return Math.min(Math.max(startsInMs - 20_000, SCHEDULED_RECHECK_MIN_MS), SCHEDULED_RECHECK_MAX_MS);
 }
 
@@ -254,6 +277,12 @@ export class FfmpegMixer {
    *  or null if the source has since responded some other way. Bounds the wait
    *  via SCHEDULED_WAIT_MAX_MS. */
   private scheduledSince: number | null = null;
+  /** When yt-dlp last started withholding a start time, or null while it is
+   *  still naming one. Bounds the imminent cadence via IMMINENT_CADENCE_MAX_MS.
+   *  Separate from scheduledSince: a countdown that reappears is genuine new
+   *  information from YouTube and earns a fresh imminent budget, without
+   *  resetting the overall give-up window. */
+  private imminentSince: number | null = null;
 
   constructor(private opts: FfmpegMixerOptions) {
     this.fifo = new NarrationFifo(opts.fifoPath);
@@ -292,6 +321,7 @@ export class FfmpegMixer {
       try {
         const session = await this.spawnOnce();
         this.scheduledSince = null;
+        this.imminentSince = null;
         if (this.stopped) break;
         this.noteSessionEnd(session);
       } catch (err) {
@@ -316,13 +346,22 @@ export class FfmpegMixer {
           }
           this.failingSince = null;
           this.backoffMs = 1000; // fresh backoff for when it does go live
-          const waitMs = scheduledRecheckDelayMs(err.startsInMs);
+          if (err.startsInMs === null) {
+            if (this.imminentSince === null) this.imminentSince = monoNow();
+          } else {
+            this.imminentSince = null;
+          }
+          const waitMs = scheduledRecheckDelayMs(
+            err.startsInMs,
+            this.imminentSince === null ? 0 : monoNow() - this.imminentSince
+          );
           const eta = err.startsInMs === null ? "" : ` — alkaa noin ${formatEta(err.startsInMs)} kuluttua`;
           log(`Lähde ei ole vielä livenä${eta}. Tarkistetaan uudelleen ${Math.round(waitMs / 1000)} s kuluttua.`);
           await this.interruptibleDelay(waitMs);
           continue;
         }
         this.scheduledSince = null;
+        this.imminentSince = null;
         log(`ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
         this.noteUnproductiveAttempt((mins) => `Lähde ei ole vastannut ${mins} minuuttiin`);
       }
