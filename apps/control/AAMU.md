@@ -37,14 +37,26 @@ Naisten Ykköspesis). Loput menisivät Piperillä — ääni vaihtuu kuuluvasti.
 kotivalikkoon* → avaa kuvakkeesta → Live-välilehti → *Ota ilmoitukset
 käyttöön* → **lähetä testi-ilmoitus ennen ottelua**, ei sen aikana.
 
-## Avoin kysymys johon tarvitsen vastauksesi
+## Streamlabs-kytkentä — vastattu 29.7.2026
 
-**Miten Streamlabs on kytketty YouTubeen?** Jos se käyttää YouTube-integraatiota
-(kirjautuu tilille ja luo lähetyksen itse), niin UI:n etukäteen luoma
-lähdelähetys jää turhaksi. Jos se työntää **omaan stream keyhin** (custom RTMP),
-suunnitelma toimii sellaisenaan. Tämä ratkaisee, luodaanko lähdelähetykselle
-oma avain vai ei — YouTube-moduuli tukee molempia, mutta oletus pitää valita
-oikein.
+**Kuvauskännykässä on Streamlabs YouTube-integraatiolla, ja se näyttää kaikki
+kanavan ajastetut lähetykset.** Kuvauksen alussa valitaan vain oikea listalta.
+Streamlabs ei siis luo lähetystä, vaan kiinnittyy etukäteen luotuun — eli
+UI:n ennakkoon luoma lähdelähetys on täsmälleen oikea ratkaisu, ei turha.
+
+Tämä vahvistaa myös sen, että **API:lla luodut lähetykset näkyvät puhelimen
+listassa**: nykyinen käsityökulku käyttää jo YouTube Data API v3:a
+(`tools/youtube-create-broadcast.js`, jaettu 28.7. paketissa) ja toimii.
+Erillistä koeajoa ei tarvita.
+
+Oletus on siis lukittu, ja `src/server/youtube.ts` toteuttaa sen jo oikein:
+
+- **Normaali lähetys** luodaan **ilman omaa striimiä** ja
+  `enableAutoStart/-Stop: false` — Streamlabs tuo oman striiminsä ja käynnistää.
+  Me emme koskaan anna sille stream keytä.
+- **Selostettu lähetys** saa oman kertakäyttöisen striimin
+  (`liveStreams.insert` → `bind` → `liveStreams.list`) ja
+  `enableAutoStart/-Stop: true`, koska relay työntää siihen automaattisesti.
 
 ## Google-yhteys (kun ehdit)
 

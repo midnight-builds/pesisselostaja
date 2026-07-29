@@ -29,11 +29,24 @@ unohtuu ensin.
 - **Kirjautuminen laitevirralla** (OAuth client: *TVs and Limited Input
   devices*). Ei paluuosoitetta eikä verkkotunnuksen omistusvahvistusta — emme
   omista `ts.net`-domainia, joten web-redirect voisi kaatua juuri siihen.
-- **UI luo molemmat lähetykset etukäteen.** Puhelimella kuvataan
-  **Streamlabsilla**, joka on RTMP-enkooderi → se työntää lähteen stream
-  keyhin. Etukäteen luotu lähetys on siis täsmälleen se mitä se haluaa.
-- **Uusi stream key per lähetys** (ei uudelleenkäytettävää striimiä). UI hoitaa
-  kopioinnin, joten avainten vaihtuminen ei maksa käsityötä.
+- **UI luo molemmat lähetykset etukäteen.** Vahvistettu 29.7.2026: puhelimen
+  **Streamlabs käyttää YouTube-integraatiota** ja näyttää kanavan kaikki
+  ajastetut lähetykset — kuvauksen alussa valitaan vain oikea listalta.
+  Streamlabs ei siis luo lähetystä eikä tarvitse meiltä stream keytä; se
+  kiinnittyy etukäteen luotuun. Ennakkoon luominen on tämän vuoksi
+  välttämätöntä, ei valinnaista.
+  *(Aiempi oletus tässä kohdassa oli väärä: Streamlabsia luultiin pelkäksi
+  RTMP-enkooderiksi, jolle syötetään avain. Lopputulos säilyi silti oikeana.)*
+- **Vain selostettu lähetys saa meiltä stream keyn** — kertakäyttöinen striimi
+  per lähetys (`isReusable: false`), ei uudelleenkäytettävää. UI hoitaa
+  kopioinnin `.env.relay`:hin, joten avainten vaihtuminen ei maksa käsityötä.
+  Normaali lähetys luodaan **ilman striimiä** ja ilman autostartia.
+- **Käsityökulku on jo API-pohjainen ja koeteltu.** 28.7.2026 jaettu paketti
+  (`tools/youtube-create-broadcast.js`, `-with-stream.js`) luo lähetykset
+  YouTube Data API v3:lla, ja ne näkyvät puhelimen listassa normaalisti.
+  `src/server/youtube.ts` toistaa saman kutsuketjun ja samat asetukset — UI ei
+  siis ota käyttöön uutta, todentamatonta reittiä vaan automatisoi olemassa
+  olevan.
 - **Terveystarkistus** seuraa: tokenin ikä ja viimeisin onnistunut päivitys
   (7 vrk:n vanheneminen jos sovellus jää *Testing*-tilaan), myönnetyt scopet,
   **mikä kanava on valtuutettu** (väärä tili = lähetys väärälle kanavalle),
@@ -135,6 +148,15 @@ hallinta.
 
 ## Avoimet asiat
 
-- Thumbnail-pohjakuva ja nykyiset otsikko-/kuvausmuodot saamatta
-- Aamun 8:30 ottelu yksilöimättä (UI:n ottelunvalinta ratkaisee tämän itse)
-- Google Cloud -projekti ja OAuth-client luomatta (vaatii käyttäjän, ~10 min)
+- Google Cloud -projekti ja OAuth-client luomatta (vaatii käyttäjän, ~10 min).
+  Tämä on ainoa este koko YouTube-ketjun ajamiselle oikeita tunnuksia vasten —
+  kaikki reitit ovat toteutettuina mutta ajamattomina.
+
+Ratkaistu 29.7.2026:
+
+- ~~Thumbnail-pohjakuva ja otsikko-/kuvausmuodot saamatta~~ — saatu 28.7.
+  paketissa: `assets/pesaysit-bg-raw-001.png`, `docs/youtube-runbook.md` ja
+  kaksi SKILL-tiedostoa ovat paikallaan.
+- ~~Aamun 8:30 ottelu yksilöimättä~~ — ottelu 145889, Pesä Ysit – Imatran
+  Pallo-Veikot, Naperoleiri F-pojat, Liperin kirkonkylän kenttä 4.
+- ~~Streamlabsin kytkentä YouTubeen~~ — ks. YouTube-ketju yllä.
