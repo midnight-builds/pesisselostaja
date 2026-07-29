@@ -107,10 +107,14 @@ function applyPatch(
  *  return the array to persist — applyPatch's thrown errors (not-found,
  *  invariant violation) propagate out of the reducer, so the store is never
  *  written on a rejected change. */
-async function updateJob(id: string, patch: Partial<Job>): Promise<Job> {
+async function updateJob(
+  id: string,
+  patch: Partial<Job>,
+  opts: { force?: boolean } = {}
+): Promise<Job> {
   let job!: Job;
   await store.update((jobs) => {
-    const result = applyPatch(jobs, id, patch);
+    const result = applyPatch(jobs, id, patch, opts);
     job = result.job;
     return result.jobs;
   });
