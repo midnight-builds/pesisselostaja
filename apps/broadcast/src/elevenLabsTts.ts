@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs";
 import { readFile, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spellOutNumbers } from "@pesisselostaja/core";
-import { log } from "./log.js";
+import { logDebug, logWarn } from "./log.js";
 
 export interface ElevenLabsTtsOptions {
   apiKey: string;
@@ -85,11 +85,11 @@ export class ElevenLabsTts {
     const mp3 = Buffer.from(await res.arrayBuffer());
     this.lastText = text;
     this.charsUsed += text.length;
-    log(`ElevenLabs-synteesi: ${text.length} merkkiä (ajon aikana yhteensä ${this.charsUsed})`);
+    logDebug("tts.elevenlabs", `ElevenLabs-synteesi: ${text.length} merkkiä (ajon aikana yhteensä ${this.charsUsed})`);
 
     const pcm = await (this.opts.decode ?? mp3ToPcm)(mp3);
     await writeFile(cachePath, pcm).catch((err) =>
-      log(`TTS-cachen kirjoitus epäonnistui: ${err instanceof Error ? err.message : err}`)
+      logWarn("tts.cache_write_failed", `TTS-cachen kirjoitus epäonnistui: ${err instanceof Error ? err.message : err}`)
     );
     return pcm;
   }

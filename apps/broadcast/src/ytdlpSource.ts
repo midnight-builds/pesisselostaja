@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { log } from "./log.js";
+import { logWarn } from "./log.js";
 
 /** yt-dlp has required a JavaScript runtime for YouTube extraction since the
  *  2026.07 releases, and Deno — its only enabled-by-default runtime — is not
@@ -86,7 +86,8 @@ export function resolveSourceUrl(youtubeUrl: string): Promise<string> {
           return;
         }
         if (!isHlsManifestUrl(url)) {
-          log(
+          logWarn(
+            "source.progressive_fallback",
             "HUOM: yt-dlp ei palauttanut HLS-manifestia — lähetys menee todennäköisesti " +
               "heikkolaatuisena (progressiivinen varamuoto). Tarkista että yt-dlp on ajan " +
               "tasalla ja että sen JS-runtime toimii."

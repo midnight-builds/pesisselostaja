@@ -193,6 +193,48 @@ was about to go live. In match 145889 on 29.7. the countdown vanished at 08:28
 and ffmpeg attached only at 08:33, so the match start, IPV's first palo and both
 first-period runs were narrated into a FIFO nobody was reading.
 
+### Telemetry: status + timeline
+
+Every run writes two machine-readable files into `run/`, for the control app
+(`apps/control`) to read while the broadcast is live:
+
+| File | What it is |
+|---|---|
+| `status-<ID>.json` | The current snapshot, rewritten every poll. Written once immediately at startup and once more on shutdown, so it exists from the moment the unit is active and describes how the run *ended* rather than one poll before. Whole-file and atomic (`.tmp` + rename), so a reader never catches it half-written. |
+| `timeline-<ID>.ndjson` | Append-only history: every log line with its level and code, and every narration clip through detected → synthesized → spoken. One JSON object per line. |
+
+The snapshot's most useful field is `readerAttached`: the relay can be running
+happily for minutes while ffmpeg is not attached, and everything narrated in
+that window is heard by nobody. `narration.muted` counts exactly those clips.
+That is not hypothetical — see the poll bug described under "Starting before
+the source goes live".
+
+Both files are covered by the `run/` retention sweep, and the running match's
+own files are never swept regardless of age.
+
+Telemetry is a pure observer: every write is wrapped, a failure disables
+telemetry for the run and says so once, and nothing on the narration path ever
+waits for it.
+
+### Log levels and event codes
+
+Each log line carries a **stable event code** (`ffmpeg.respawn`,
+`source.not_live`, `speech.muted`, …) and a real severity. Under systemd the
+severity goes out as a syslog priority prefix, which journald records as
+`PRIORITY` — so `journalctl --user -u pesisselostaja-relay -p warning` works,
+and the control app reads the level instead of guessing it from Finnish prose.
+
+The prefix is emitted only when stdout really is the journald stream: systemd
+publishes `JOURNAL_STREAM` as `device:inode`, and that is compared against
+`fstat(1)`. Presence alone is not enough — the variable is inherited by child
+processes, so a relay started by hand from a shell under a systemd unit would
+otherwise print `<6>` on every line.
+
+Codes are part of the contract with the control app; the full list is the
+`EventCode` union in `src/log.ts`. The developer tools (`flapTest.ts`,
+`simulate.ts`) deliberately keep plain uncoded lines — they are not on the
+service's path.
+
 ### Give-up window after the match ends
 
 While a match is running, a dead source is retried for the generous

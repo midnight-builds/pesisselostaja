@@ -27,7 +27,7 @@ type Level = LogLine["level"];
 
 const LEVEL_RANK: Record<Level, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
-interface JournalRecord {
+export interface JournalRecord {
   MESSAGE?: string | number[];
   PRIORITY?: string;
   __REALTIME_TIMESTAMP?: string;
@@ -41,30 +41,42 @@ function decodeMessage(message: string | number[] | undefined): string {
   return "";
 }
 
-/** VÄLIAIKAINEN HEURISTIIKKA — poistetaan vaiheessa B.
+/** The relay now emits a real syslog priority (systemd reads a leading `<N>`
+ *  on stdout) and a stable event code, so a line's severity is read, not
+ *  guessed.
  *
- *  The relay currently logs everything at stdout/PRIORITY=6, so syslog priority
- *  tells us almost nothing and the only signal left is the Finnish prose. That
- *  is a losing game: the wording changes whenever someone edits a log call, and
- *  a missed "error" here means the operator's phone shows green while the
- *  broadcast is down.
+ *  The prose matching below is what is LEFT of the old heuristic, and it is
+ *  deliberately not deleted outright: journald still holds lines from relay
+ *  builds that predate the change, and a broadcast can be running one of them
+ *  right now — `~/relay-deploy` only moves when someone runs `relay:deploy`.
+ *  Deleting it today would quietly re-label every historical error as info,
+ *  which is the exact failure it was written to prevent.
  *
- *  Phase B gives every one of the ~90 log call sites a stable event code
- *  (`ffmpeg.respawn`, `source.not_live`, …) plus a real level. When that lands,
- *  `code` stops being null and this pattern matching is deleted rather than
- *  extended. Until then the rules are deliberately CAUTIOUS: they only fire on
- *  words that cannot plausibly appear in a healthy line, because a false "error"
- *  on the field costs more attention than a missed one. */
-function inferLevel(text: string, priority: number | null): Level {
-  // A real syslog priority, if one ever shows up, beats any guess from prose.
+ *  It applies ONLY to lines that carry no event code, i.e. only to those older
+ *  builds. Once no relay without codes can still be deployed, this function
+ *  collapses to the priority mapping and the regexes go. */
+function inferLevel(text: string, priority: number | null, code: string | null): Level {
   if (priority !== null) {
     if (priority <= 3) return "error";
     if (priority === 4) return "warn";
     if (priority >= 7) return "debug";
+    // PRIORITY 5/6 from a coded line is the relay saying "info", and it means it.
+    if (code) return "info";
   }
   if (/virhe|epäonnistui|kaatui|✗/i.test(text)) return "error";
   if (/varoitus|⚠|luovuttaa/i.test(text)) return "warn";
   return "info";
+}
+
+/** "ffmpeg.respawn: teksti" → code + text. Codes are `subsystem.event`, lower
+ *  case with dots and underscores, so the pattern cannot swallow ordinary
+ *  Finnish prose that happens to contain a colon ("Pisteet (1. jakso): 3-1"). */
+const CODE_PREFIX = /^([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+):\s+/;
+
+function splitCode(text: string): { code: string | null; msg: string } {
+  const m = CODE_PREFIX.exec(text);
+  if (!m) return { code: null, msg: text };
+  return { code: m[1], msg: text.slice(m[0].length) };
 }
 
 /** "[16.40.44] teksti" → "teksti". The separator is a dot under fi-FI
@@ -77,18 +89,21 @@ function stripTimePrefix(text: string): string {
   return text.replace(TIME_PREFIX, "");
 }
 
-function toLogLine(record: JournalRecord): LogLine | null {
-  const msg = stripTimePrefix(decodeMessage(record.MESSAGE).trimEnd());
+/** Exported for tests: one journald record → one log line. This is the whole
+ *  contract between the relay's stdout and the operator's log view, so it is
+ *  worth pinning directly rather than only through readLog's journalctl shell-out. */
+export function toLogLine(record: JournalRecord): LogLine | null {
+  const text = stripTimePrefix(decodeMessage(record.MESSAGE).trimEnd());
+  if (!text) return null;
+  const { code, msg } = splitCode(text);
   if (!msg) return null;
   const usec = Number(record.__REALTIME_TIMESTAMP);
   const ts = Number.isFinite(usec) ? new Date(usec / 1000).toISOString() : new Date().toISOString();
   const priorityRaw = Number(record.PRIORITY);
   return {
     ts,
-    level: inferLevel(msg, Number.isFinite(priorityRaw) ? priorityRaw : null),
-    // Null until phase B — see inferLevel. The client must not key any logic on
-    // codes yet.
-    code: null,
+    level: inferLevel(msg, Number.isFinite(priorityRaw) ? priorityRaw : null, code),
+    code,
     msg,
   };
 }

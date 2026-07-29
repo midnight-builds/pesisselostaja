@@ -122,10 +122,18 @@ näyttää `wouldHaveDone`-kuivaharjoituksen, ja päälle kytkeminen vaatii
 vahvistuksen. YouTube-osiota ei ole vielä ajettu oikeita tunnuksia vasten —
 Google Cloud -projekti ja OAuth-client puuttuvat.
 
-**Vaihe B, yhä tekemättä:** relayn telemetria (`run/status-<ID>.json` +
-`timeline-<ID>.ndjson`), lokitasot ja pysyvät tapahtumakoodit, kaksivaiheinen
-selostuslista, uudet control-avaimet (mykistys, äänenvoimakkuus, oma
-selostus), jono, jälkityöt, ElevenLabs-osio ja passkey-suojaus.
+**Vaihe B, relayn telemetria (29.7.):** relay kirjoittaa nyt
+`run/status-<ID>.json`n ja `run/timeline-<ID>.ndjson`n, ja jokainen lokirivi
+kantaa pysyvää tapahtumakoodia ja oikeaa tasoa (syslog-prioriteetti
+journaldiin). `journal.ts`:n sanahaku on kutistunut varajärjestelmäksi, joka
+koskee enää koodittomia rivejä — eli vanhempia relay-buildeja, joita journald
+yhä säilöö. **Vaatii `npm run relay:deploy`n** ennen kuin ohjaamo näkee
+koodeja.
+
+**Vaihe B, yhä tekemättä:** kaksivaiheinen selostuslista (tämä on nyt
+mahdollinen — timeline erottaa havaitun, syntetisoidun ja puhutun), uudet
+control-avaimet (mykistys, äänenvoimakkuus, oma selostus), jono, jälkityöt,
+ElevenLabs-osio ja passkey-suojaus.
 
 Vaiheen B relay-muutokset vaativat `npm run relay:deploy` — ja se kieltäytyy
 ajamasta lähetyksen aikana. Se on tarkoituksellinen este, ei vika.

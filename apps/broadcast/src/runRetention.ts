@@ -12,6 +12,9 @@ const RUN_ARTIFACT_PATTERNS: readonly RegExp[] = [
   /^relay-(\d+)\.pcm$/, // narration FIFO, one per match (0 bytes, but piles up)
   /^\.state-(\d+)\.json$/, // resume state
   /^\.control-(\d+)\.json$/, // live control file
+  /^status-(\d+)\.json$/, // telemetry snapshot
+  /^status-(\d+)\.json\.tmp$/, // …and a snapshot whose rename never happened
+  /^timeline-(\d+)\.ndjson$/, // telemetry timeline
 ];
 
 const TTS_CACHE_DIR = "tts-cache";
