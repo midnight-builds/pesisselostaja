@@ -500,12 +500,21 @@ export class FfmpegMixer {
     return this.respawns;
   }
 
-  get sourceState(): "live" | "scheduled" | "resolving" | "failed" | "unknown" {
-    return this.sourceStateValue;
+  /** `no_signal` = katvekuvaa työnnetään juuri nyt. Se on oma tilansa eikä
+   *  korvaa sourceDetailia, joka kertoo yhä miksi lähde puuttuu. */
+  get sourceState(): "live" | "scheduled" | "resolving" | "failed" | "unknown" | "no_signal" {
+    return this.slateActive ? "no_signal" : this.sourceStateValue;
   }
 
   get sourceDetail(): string | null {
     return this.sourceDetailValue;
+  }
+
+  /** Selostussilmukka työntää valmiit tekstirivit tänne (index.ts, pollin
+   *  tahdissa). Mikseri ei laske pisteitä eikä paloja itse. */
+  setSlateSituation(situation: SlateSituation): void {
+    this.slateSituation = situation;
+    this.refreshSlateText();
   }
 
   get isReaderAttached(): boolean {
@@ -526,14 +535,23 @@ export class FfmpegMixer {
 
   async start(): Promise<void> {
     this.stopped = false;
+    // Lähde on "poissa" siihen asti kunnes se ensi kertaa saadaan kiinni, joten
+    // ennen ottelua käynnistetty relay näyttää katsojalle "kuvayhteyttä
+    // odotetaan" kynnysajan jälkeen sen sijaan että työntö olisi tauolla.
+    if (this.sourceMissingSince === null) this.sourceMissingSince = monoNow();
+    // Katvetilan aikana löytynyt lähdeosoite annetaan suoraan seuraavalle
+    // spawnOnce-kutsulle, jottei yt-dlp:tä ajeta kahdesti peräkkäin.
+    let preResolved: string | undefined;
     while (!this.stopped) {
       try {
-        const session = await this.spawnOnce();
+        const session = await this.spawnOnce(preResolved);
+        preResolved = undefined;
         this.scheduledSince = null;
         this.imminentSince = null;
         if (this.stopped) break;
         this.noteSessionEnd(session);
       } catch (err) {
+        preResolved = undefined;
         // Our own give-up verdict (from noteSessionEnd above) passes straight
         // through: it is not a start-up failure, and letting it fall into the
         // handling below would log "ffmpeg-käynnistysvirhe" and replace the
@@ -545,32 +563,8 @@ export class FfmpegMixer {
         // give-up window is what forced starting the relay in a narrow slot
         // just before kickoff (observed live 27.7.) — wait instead.
         if (err instanceof SourceNotLiveYetError) {
-          if (this.scheduledSince === null) this.scheduledSince = monoNow();
-          if (monoNow() - this.scheduledSince > SCHEDULED_WAIT_MAX_MS) {
-            this.stopped = true;
-            throw new SourceExhaustedError(
-              `Lähde on ollut "alkaa pian" -tilassa yli ${Math.round(SCHEDULED_WAIT_MAX_MS / 3600000)} h ` +
-                "eikä ole alkanut — luovutetaan."
-            );
-          }
-          this.failingSince = null;
-          this.backoffMs = 1000; // fresh backoff for when it does go live
-          if (err.startsInMs === null) {
-            if (this.imminentSince === null) this.imminentSince = monoNow();
-          } else {
-            this.imminentSince = null;
-          }
-          const waitMs = scheduledRecheckDelayMs(
-            err.startsInMs,
-            this.imminentSince === null ? 0 : monoNow() - this.imminentSince
-          );
-          const eta = err.startsInMs === null ? "" : ` — alkaa noin ${formatEta(err.startsInMs)} kuluttua`;
-          this.sourceStateValue = "scheduled";
-          this.sourceDetailValue = err.startsInMs === null
-            ? "alkaa hetkenä minä hyvänsä"
-            : `alkaa noin ${formatEta(err.startsInMs)} kuluttua`;
-          logInfo("source.not_live", `Lähde ei ole vielä livenä${eta}. Tarkistetaan uudelleen ${Math.round(waitMs / 1000)} s kuluttua.`);
-          await this.interruptibleDelay(waitMs);
+          const waitMs = this.noteScheduledAnswer(err);
+          preResolved = await this.waitBeforeNextAttempt(waitMs);
           continue;
         }
         this.scheduledSince = null;
@@ -582,9 +576,57 @@ export class FfmpegMixer {
       }
       if (this.stopped) break;
       logInfo("ffmpeg.respawn", `Uudelleenyritys ${this.backoffMs}ms kuluttua…`);
-      await delay(this.backoffMs);
+      preResolved = await this.waitBeforeNextAttempt(this.backoffMs);
       this.backoffMs = Math.min(this.backoffMs * 2, 30000);
     }
+  }
+
+  /** Kirjanpito ja lokitus "lähde alkaa myöhemmin" -vastaukselle; palauttaa
+   *  kuinka kauan seuraavaan tarkistukseen. Heittää SourceExhaustedErrorin kun
+   *  odotus on venynyt yli SCHEDULED_WAIT_MAX_MS:n.
+   *
+   *  Omana metodinaan siksi, että katvetilan oma koetin käyttää TÄSMÄLLEEN
+   *  samaa kirjanpitoa kuin päälooppi: katvekuvan työntäminen ei saa muuttaa
+   *  luovutusehtoja millään tavalla. */
+  private noteScheduledAnswer(err: SourceNotLiveYetError): number {
+    if (this.scheduledSince === null) this.scheduledSince = monoNow();
+    if (monoNow() - this.scheduledSince > SCHEDULED_WAIT_MAX_MS) {
+      this.stopped = true;
+      throw new SourceExhaustedError(
+        `Lähde on ollut "alkaa pian" -tilassa yli ${Math.round(SCHEDULED_WAIT_MAX_MS / 3600000)} h ` +
+          "eikä ole alkanut — luovutetaan."
+      );
+    }
+    this.failingSince = null;
+    this.backoffMs = 1000; // fresh backoff for when it does go live
+    if (err.startsInMs === null) {
+      if (this.imminentSince === null) this.imminentSince = monoNow();
+    } else {
+      this.imminentSince = null;
+    }
+    const waitMs = scheduledRecheckDelayMs(
+      err.startsInMs,
+      this.imminentSince === null ? 0 : monoNow() - this.imminentSince
+    );
+    const eta = err.startsInMs === null ? "" : ` — alkaa noin ${formatEta(err.startsInMs)} kuluttua`;
+    this.sourceStateValue = "scheduled";
+    this.sourceDetailValue = err.startsInMs === null
+      ? "alkaa hetkenä minä hyvänsä"
+      : `alkaa noin ${formatEta(err.startsInMs)} kuluttua`;
+    logInfo("source.not_live", `Lähde ei ole vielä livenä${eta}. Tarkistetaan uudelleen ${Math.round(waitMs / 1000)} s kuluttua.`);
+    return waitMs;
+  }
+
+  /** Odottaa seuraavaan lähdeyritykseen. Kun katvetila on perusteltu, odotus
+   *  vietetään katvekuvaa työntäen; muuten käytös on täsmälleen entinen eli
+   *  pelkkä uni. Palauttaa katvetilan aikana löytyneen lähdeosoitteen, jotta
+   *  seuraava spawnOnce ei aja yt-dlp:tä uudelleen. */
+  private async waitBeforeNextAttempt(waitMs: number): Promise<string | undefined> {
+    if (!this.slateWarranted()) {
+      await this.interruptibleDelay(waitMs);
+      return undefined;
+    }
+    return (await this.runSlateSession(waitMs)) ?? undefined;
   }
 
   /** Judges a finished ffmpeg session: a run long enough to be real broadcast
@@ -668,15 +710,26 @@ export class FfmpegMixer {
     this.child?.kill("SIGTERM");
   }
 
-  private async spawnOnce(): Promise<SessionResult> {
+  /** Yksi lähdeosoitteen selvitys. Omana metodinaan, jotta katvetilan koetin
+   *  käyttää samaa polkua ja voi antaa löytämänsä osoitteen suoraan
+   *  spawnOnce:lle. Heittää samat virheet kuin ennenkin. */
+  private async resolveSource(): Promise<string> {
+    this.probingSource = true;
+    this.refreshSlateText();
+    try {
+      if (this.opts.resolveTestSource) return await this.opts.resolveTestSource();
+      logInfo("source.resolving", "Haetaan lähdeosoite yt-dlp:llä…");
+      this.sourceStateValue = "resolving";
+      return await resolveSourceUrl(this.opts.youtubeUrl);
+    } finally {
+      this.probingSource = false;
+      this.refreshSlateText();
+    }
+  }
+
+  private async spawnOnce(preResolved?: string): Promise<SessionResult> {
     this.refreshKillRequested = false;
-    const sourceUrl = this.opts.resolveTestSource
-      ? await this.opts.resolveTestSource()
-      : await (async () => {
-          logInfo("source.resolving", "Haetaan lähdeosoite yt-dlp:llä…");
-          this.sourceStateValue = "resolving";
-          return resolveSourceUrl(this.opts.youtubeUrl);
-        })();
+    const sourceUrl = preResolved ?? (await this.resolveSource());
 
     // Must exist before ffmpeg is spawned, and before fifo.open() (which
     // blocks until ffmpeg attaches as a reader) — see narrationFifo.ts.
@@ -730,6 +783,12 @@ export class FfmpegMixer {
     }
 
     this.sessionActive = true;
+    // Lähde on kiinni: katvetilan kynnys nollautuu ja seuraavan katkon
+    // sanamuoto on "kuvayhteys katkesi" eikä "kuvayhteyttä odotetaan".
+    // Huom: tämä EI kosketa luovutusikkunaa (failingSince) — sen ainoa
+    // tuomari on yhä noteSessionEnd.
+    this.sourceMissingSince = null;
+    this.hasHadSource = true;
     if (this.firstAttachedAtMs === null) this.firstAttachedAtMs = Date.now();
     this.opts.onSessionStart?.(Date.now());
 
@@ -750,6 +809,10 @@ export class FfmpegMixer {
 
     const result = await childDone;
     this.sessionActive = false;
+    // Lähde irtosi juuri nyt — katvetilan kynnys alkaa tästä. Yksittäinen
+    // respawn (URL-päivitys) ehtii uudelleen kiinni reilusti alle kynnysajan,
+    // joten se ei vilkuta katvekuvaa.
+    if (this.sourceMissingSince === null) this.sourceMissingSince = monoNow();
     clearInterval(heartbeat);
     this.fifo.closeIo();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
@@ -771,30 +834,297 @@ export class FfmpegMixer {
    *  can't be postponed forever by back-to-back announcements. */
   private async killForRefresh(childToKill: ChildProcess | null): Promise<void> {
     if (!childToKill || childToKill !== this.child) return;
+    const drain = await this.waitForNarrationGap(childToKill);
+    if (!drain) return;
+    logInfo(
+      "ffmpeg.respawn",
+      `Määräaikainen URL-päivitys — käynnistetään ffmpeg uudelleen. ` +
+        `Selostusjono ${drain.status}; odotettiin ${drain.waitedMs}ms, jonossa ${drain.pendingAtStart} klippiä respawnin alkaessa.`
+    );
+    this.refreshKillRequested = true;
+    childToKill.kill("SIGTERM");
+  }
+
+  /** Odottaa luonnollista taukoa selostuksessa ennen kuin `childToKill`
+   *  tapetaan, jottei respawn katkaise klippiä kesken sanan. Palauttaa null kun
+   *  odotus ei enää koske tätä prosessia (stop(), tai lapsi vaihtui alta), eli
+   *  kutsujan ei pidä tappaa mitään.
+   *
+   *  Jaettu määräaikaisen URL-päivityksen ja katvesession lopetuksen kesken:
+   *  molemmat ovat respawneja jotka me itse ajoitamme, ja kummassakin kesken
+   *  lausetta katkaiseminen kuulostaa rikkinäiseltä. */
+  private async waitForNarrationGap(
+    childToKill: ChildProcess
+  ): Promise<{ waitedMs: number; pendingAtStart: number; status: string } | null> {
     const pendingAtStart = this.fifo.pendingClips;
     const waitStart = monoNow();
     const deadline = waitStart + 10000;
     while (this.fifo.pendingClips > 0 && monoNow() < deadline && !this.stopped && this.child === childToKill) {
       await delay(200);
     }
-    if (this.stopped || this.child !== childToKill) return;
+    if (this.stopped || this.child !== childToKill) return null;
     // Give ffmpeg a moment to actually drain what's already sitting in the
     // pipe buffer before we pull it out from under it.
     await delay(500);
-    if (this.stopped || this.child !== childToKill) return;
-    const waited = monoNow() - waitStart;
+    if (this.stopped || this.child !== childToKill) return null;
     const remaining = this.fifo.pendingClips;
     // Whether the queue actually drained is the evidence that the respawn
     // didn't sever a clip mid-word (apps/broadcast/HANDOFF.md fix #2): "tyhjeni" =
     // clean gap, "EI tyhjentynyt" = the 10s bound cut it off anyway.
-    const drainStatus =
+    const status =
       remaining === 0 ? "tyhjeni" : `EI tyhjentynyt (${remaining} klippiä jäljellä, 10s katkaisu)`;
-    logInfo(
-      "ffmpeg.respawn",
-      `Määräaikainen URL-päivitys — käynnistetään ffmpeg uudelleen. ` +
-        `Selostusjono ${drainStatus}; odotettiin ${waited}ms, jonossa ${pendingAtStart} klippiä respawnin alkaessa.`
+    return { waitedMs: monoNow() - waitStart, pendingAtStart, status };
+  }
+
+  /** Ohjaamon havainto lähteen syötteestä, tai null kun tietoa ei ole.
+   *
+   *  Puuttuva, vanhentunut (yli SOURCE_INGEST_MAX_AGE_MS) tai jäsentymätön
+   *  havainto tarkoittaa nimenomaan "EI TIETOA", ei "lähde poikki". Signaali
+   *  saapuu jopa 30 s myöhässä ja riippuu ohjaamosta ja Google-yhteydestä,
+   *  eikä lähetyksen käytös saa riippua kummastakaan. Siksi katvetilan
+   *  LAUKAISIN on aina relayn oma paikallinen havainto (sourceMissingSince),
+   *  ja tätä käytetään vain kahteen asiaan:
+   *    (a) `lifeCycleStatus === "complete"` ⇒ lähde on päättynyt hallitusti,
+   *        joten katvetilaan ei mennä lainkaan (lähetys päätetään),
+   *    (b) tilannerivin sanamuodon tarkennus.
+   *  Tulevaisuuteen jäänyt leima on yhtä epäluotettava kuin vanhentunut. */
+  private freshSourceIngest(): SourceIngestObservation | null {
+    let raw: SourceIngestObservation | null;
+    try {
+      raw = this.opts.sourceIngest?.() ?? null;
+    } catch {
+      return null; // lukijan virhe ei ole tieto lähteestä
+    }
+    if (!raw || typeof raw.observedAt !== "string") return null;
+    const observedAt = Date.parse(raw.observedAt);
+    if (!Number.isFinite(observedAt)) return null;
+    const ageMs = Date.now() - observedAt;
+    if (ageMs > SOURCE_INGEST_MAX_AGE_MS || ageMs < -SOURCE_INGEST_MAX_AGE_MS) return null;
+    return raw;
+  }
+
+  /** Saako katvekuvan käynnistää juuri nyt. Estot ovat tärkeämpiä kuin
+   *  ominaisuus itse — järjestys on käynnissä oleva lähetys > katvekuva:
+   *
+   *  1. **Ottelu on päättynyt** tai ohjaamon tuore havainto sanoo lähetyksen
+   *     olevan `complete`: lähde on loppunut hallitusti, joten lähetys
+   *     päätetään eikä jäädä työntämään väripalkkeja tyhjään lähetykseen
+   *     (issuen oma rajaus).
+   *  2. **Katve on jo kerran epäonnistunut** → ei yritetä uudelleen.
+   *  3. **Kynnysaika**: hetkellinen respawn ei saa vilkuttaa katvekuvaa. */
+  private slateWarranted(): boolean {
+    const slate = this.opts.slate;
+    if (!slate || this.slateDisabled || this.stopped) return false;
+    if (!slate.available || !slate.layout) return false;
+    if (this.opts.isMatchFinished?.() ?? false) return false;
+    if (this.freshSourceIngest()?.lifeCycleStatus === "complete") return false;
+    if (this.sourceMissingSince === null) return false;
+    return monoNow() - this.sourceMissingSince >= (this.opts.slateAfterMs ?? DEFAULT_SLATE_AFTER_MS);
+  }
+
+  /** Tilannerivin tekninen puolisko — mitä katsojalle kerrotaan siitä, miksi
+   *  kuvaa ei ole. Taso on tarkoituksella KATSOJALLE, ei operaattorille:
+   *  respawnit ja poistumiskoodit kuuluvat lokiin ja ohjaamoon. */
+  private slateReason(): string {
+    if (this.probingSource) return SLATE_REASON_RECONNECTING;
+    const ingest = this.freshSourceIngest();
+    // created/ready/testing = lähetystä ei ole vielä aloitettu, vaikka relay
+    // olisi jo kerran nähnyt kuvaa (esim. testilähetys ennen ottelua).
+    if (ingest && ingest.lifeCycleStatus !== null && ingest.lifeCycleStatus !== "live") {
+      return SLATE_REASON_WAITING;
+    }
+    return this.hasHadSource ? SLATE_REASON_LOST : SLATE_REASON_WAITING;
+  }
+
+  /** Kirjoittaa kuvan tekstirivit nykytilan mukaan. Halpa kutsua usein:
+   *  NoSignalSlate kirjoittaa vain muuttuneen rivin. */
+  private refreshSlateText(): void {
+    const slate = this.opts.slate;
+    if (!slate?.available) return;
+    const reason = this.slateReason();
+    const situation = this.slateSituation.situation.trim();
+    slate.update({
+      score: this.slateSituation.score.trim(),
+      status: situation === "" ? reason : `${situation} — ${reason}`,
+    });
+  }
+
+  /** Sammuttaa katvetilan lopullisesti tältä ajolta, yhdellä varoitusrivillä.
+   *  Turvallisuusvaatimus: jos mikään katveketjun osa epäonnistuu, käytös on
+   *  nykyinen — ei kaatumista, ei uudelleenyrityssilmukkaa. */
+  private disableSlate(why: string): void {
+    if (this.slateDisabled) return;
+    this.slateDisabled = true;
+    logWarn(
+      "ffmpeg.slate_end",
+      `Katvekuva pois käytöstä tältä ajolta (${why}) — jatketaan lähteen uudelleenyrityksillä kuten ennenkin.`
     );
-    this.refreshKillRequested = true;
-    childToKill.kill("SIGTERM");
+  }
+
+  /** Työntää katvekuvaa RTMP:hen (tai tallennustiedostoon) ja koettaa
+   *  lähdettä samalla. Palauttaa lähdeosoitteen heti kun lähde ratkeaa, tai
+   *  null kun katve päättyi ilman lähdettä.
+   *
+   *  Luovutusikkuna kulkee tämän läpi muuttumattomana: jokainen epäonnistunut
+   *  koetin menee saman noteUnproductiveAttempt/noteScheduledAnswer
+   *  -kirjanpidon läpi kuin päälooppi, joten SourceExhaustedError syntyy
+   *  katvetilassa täsmälleen samalla hetkellä kuin ilman sitä. Katvekuvan
+   *  työntäminen ei nollaa mitään eikä kelpaa "tuottavaksi ajoksi". */
+  private async runSlateSession(initialWaitMs: number): Promise<string | null> {
+    const slate = this.opts.slate;
+    const layout = slate?.layout;
+    if (!slate || !layout) return null;
+
+    this.refreshSlateText();
+    const recordFilePath = this.opts.recordFile
+      ? indexedRecordPath(this.opts.recordFile, this.sessionIndex++)
+      : undefined;
+    const args = buildSlateFfmpegArgs(
+      {
+        imagePath: slate.imagePath,
+        scoreTextPath: slate.scoreTextPath,
+        statusTextPath: slate.statusTextPath,
+        layout,
+      },
+      this.opts,
+      recordFilePath
+    );
+
+    let child: ChildProcess;
+    try {
+      // Sama järjestys kuin lähdesessiossa: FIFO on oltava olemassa ennen
+      // spawnia ja avattava vasta sen jälkeen (narrationFifo.ts).
+      await this.fifo.prepare();
+      child = this.opts.spawnMixerProcess
+        ? this.opts.spawnMixerProcess(args)
+        : spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+    } catch (err) {
+      this.disableSlate(err instanceof Error ? err.message : String(err));
+      await this.interruptibleDelay(initialWaitMs);
+      return null;
+    }
+    this.child = child;
+    const redact = (s: string): string => redactStreamKey(s, this.opts.streamKey);
+    child.stdout?.on("data", (d: Buffer) => process.stdout.write(redact(d.toString())));
+    child.stderr?.on("data", (d: Buffer) => process.stderr.write(redact(d.toString())));
+    const childDone = new Promise<void>((resolve) => {
+      child.once("error", () => resolve());
+      child.once("exit", () => resolve());
+    });
+    let childAlive = true;
+    void childDone.then(() => {
+      childAlive = false;
+    });
+
+    const opened = await Promise.race([
+      this.fifo.open().then(() => true),
+      childDone.then(() => false),
+    ]);
+    if (!opened) {
+      this.fifo.closeIo();
+      this.child = null;
+      this.disableSlate("ffmpeg ei käynnistynyt katvetilassa");
+      await this.interruptibleDelay(initialWaitMs);
+      return null;
+    }
+
+    this.slateActive = true;
+    this.sessionActive = true;
+    if (this.firstAttachedAtMs === null) this.firstAttachedAtMs = Date.now();
+    logInfo(
+      "ffmpeg.slate_start",
+      "Katvekuva päälle: lähdettä ei ole saatu kiinni kynnysaikaan mennessä. " +
+        "RTMP-työntö jatkuu ja selostus kuuluu kuvan päällä."
+    );
+
+    let waitMs = initialWaitMs;
+    let resolvedUrl: string | null = null;
+    let endReason = "pysäytettiin";
+    try {
+      while (!this.stopped && childAlive) {
+        await this.sleepWhileSlateAlive(waitMs, () => childAlive);
+        if (this.stopped || !childAlive) break;
+        // Katvetilan ehdot voivat muuttua kesken session: ottelu päättyy tai
+        // ohjaamo kertoo lähetyksen olevan `complete`. Silloin katve puretaan
+        // heti, jotta luovutus/sammutus etenee normaalisti.
+        if (!this.slateStillAllowed()) {
+          endReason = "lähde on päättynyt hallitusti";
+          break;
+        }
+        try {
+          resolvedUrl = await this.resolveSource();
+          endReason = "lähde palasi";
+          break;
+        } catch (err) {
+          if (err instanceof SourceNotLiveYetError) {
+            waitMs = this.noteScheduledAnswer(err);
+            continue;
+          }
+          this.scheduledSince = null;
+          this.imminentSince = null;
+          this.sourceStateValue = "failed";
+          this.sourceDetailValue = err instanceof Error ? err.message : String(err);
+          logError(
+            "ffmpeg.start_failed",
+            `Lähde ei vastannut katvetilassa: ${err instanceof Error ? err.message : err}`
+          );
+          // Tässä luovutusikkuna umpeutuu, jos on umpeutuakseen — heitetty
+          // SourceExhaustedError kulkee finallyn kautta ulos ja lopettaa
+          // sekä katveen että koko relayn.
+          this.noteUnproductiveAttempt((mins) => `Lähde ei ole vastannut ${mins} minuuttiin`);
+          waitMs = Math.min(Math.max(waitMs * 2, 1000), 30000);
+        }
+      }
+    } finally {
+      await this.endSlateSession(child, childAlive, childDone, endReason);
+    }
+    return resolvedUrl;
+  }
+
+  /** Katvetila pysäytetään heti kun sen ehdot lakkaavat pätemästä. Erillään
+   *  slateWarranted():sta, koska kynnysaika koskee vain käynnistystä — kesken
+   *  session sitä ei enää mitata. */
+  private slateStillAllowed(): boolean {
+    if (this.stopped) return false;
+    if (this.opts.isMatchFinished?.() ?? false) return false;
+    return this.freshSourceIngest()?.lifeCycleStatus !== "complete";
+  }
+
+  /** Purkaa katvesession: odottaa selostusjonon tyhjenemistä samalla kuviolla
+   *  kuin killForRefresh (kesken lausetta katkaiseminen kuulostaa
+   *  rikkinäiseltä), tappaa prosessin ja sulkee FIFOn niin että seuraava
+   *  lähdesessio voi valmistella sen uudelleen. */
+  private async endSlateSession(
+    child: ChildProcess,
+    childAlive: boolean,
+    childDone: Promise<void>,
+    reason: string
+  ): Promise<void> {
+    if (childAlive && this.child === child) {
+      const drain = await this.waitForNarrationGap(child);
+      if (drain) {
+        logDebug(
+          "ffmpeg.slate_end",
+          `Katvekuva puretaan (${reason}); selostusjono ${drain.status}, odotettiin ${drain.waitedMs}ms.`
+        );
+      }
+      child.kill("SIGTERM");
+      await Promise.race([childDone, delay(5000)]);
+    }
+    this.slateActive = false;
+    this.sessionActive = false;
+    this.fifo.closeIo();
+    if (this.child === child) this.child = null;
+    logInfo("ffmpeg.slate_end", `Katvekuva pois: ${reason}.`);
+  }
+
+  /** Kuten interruptibleDelay, mutta herää heti myös jos katvesession ffmpeg
+   *  kuolee alta — muuten hiljainen prosessi jäisi odottamaan koko
+   *  koetinvälin ennen kuin katkosta huomattaisiin. */
+  private async sleepWhileSlateAlive(ms: number, alive: () => boolean): Promise<void> {
+    const until = monoNow() + ms;
+    while (!this.stopped && alive() && monoNow() < until) {
+      await delay(Math.min(200, until - monoNow()));
+    }
   }
 }
