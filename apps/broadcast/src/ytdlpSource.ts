@@ -52,14 +52,11 @@ export class SourceEndedError extends Error {
   }
 }
 
-/** yt-dlp's wording when the live is over. Captured verbatim.
+/** yt-dlp's wording when the live is over and it cannot even list formats.
  *
- *  "Requested format is not available" is what a finished YouTube live answers
- *  while its recording is still being processed: the video exists, the m3u8
- *  rendition we ask for does not. It is the same message a genuinely bad
- *  format selector would produce — but we always ask for the same selector,
- *  and it resolved fine seconds earlier, so in this process the only way to
- *  reach it is that the stream ended. */
+ *  Secondary evidence only: `live_status` below is the real answer and comes
+ *  back on every successful extraction. These strings are what is left for the
+ *  case where yt-dlp fails before it can report a status at all. */
 const ENDED_PATTERNS = [
   /Requested format is not available/i,
   /This live stream recording is not available/i,
@@ -97,11 +94,82 @@ export function parseScheduledStart(stderr: string): { startsInMs: number | null
  *
  *  Rejects with SourceNotLiveYetError when the broadcast is scheduled but not
  *  live yet — that is a wait, not a failure. */
-export function resolveSourceUrl(youtubeUrl: string): Promise<string> {
+/** What YouTube says about the broadcast itself, straight from yt-dlp's
+ *  `live_status`. Verified against real sources 29.7.2026: an active live
+ *  answers `is_live`, and the morning match's finished source answers
+ *  `post_live`.
+ *
+ *  This is the difference between "the source is in trouble" and "the
+ *  broadcast is over" — and it is an ANSWER, not an inference. A finished live
+ *  keeps serving its last DVR window for a while, so without asking, the two
+ *  look identical from outside: yt-dlp resolves, ffmpeg reads a clean 34
+ *  seconds, and the loop republishes the end of the match over and over
+ *  (issue #103). */
+export type LiveStatus =
+  | "is_live"
+  /** Ingest has stopped; the DVR tail is still being served. THE tail case. */
+  | "post_live"
+  /** The recording is finished and processed. */
+  | "was_live"
+  | "not_live"
+  | "is_upcoming"
+  /** yt-dlp did not say — an older build, or an extraction that got this far
+   *  without the field. "No information", never "ended". */
+  | "unknown";
+
+const LIVE_STATUSES: readonly string[] = [
+  "is_live",
+  "post_live",
+  "was_live",
+  "not_live",
+  "is_upcoming",
+];
+
+/** True for the statuses that mean no new video is coming. `unknown` is
+ *  deliberately absent: not knowing must never end a broadcast. */
+export function isEndedStatus(status: LiveStatus): boolean {
+  return status === "post_live" || status === "was_live" || status === "not_live";
+}
+
+export interface ResolvedSource {
+  url: string;
+  liveStatus: LiveStatus;
+}
+
+/** yt-dlp prints `--print` fields before `-g`'s URLs, so the status arrives on
+ *  its own line ahead of the manifest. Parsed by recognising the values rather
+ *  than by line position, so an extra warning line cannot shift it. */
+export function parseResolveOutput(stdout: string): { url: string | null; liveStatus: LiveStatus } {
+  let url: string | null = null;
+  let liveStatus: LiveStatus = "unknown";
+  for (const line of stdout.split("\n")) {
+    const value = line.trim();
+    if (!value) continue;
+    if (LIVE_STATUSES.includes(value)) {
+      liveStatus = value as LiveStatus;
+      continue;
+    }
+    if (!url && /^https?:\/\//.test(value)) url = value;
+  }
+  return { url, liveStatus };
+}
+
+export function resolveSourceUrl(youtubeUrl: string): Promise<ResolvedSource> {
   return new Promise((resolve, reject) => {
     execFile(
       "yt-dlp",
-      ["-g", "-f", "best[protocol^=m3u8]/best", "--no-playlist", ...JS_RUNTIME_ARGS, youtubeUrl],
+      [
+        "-g",
+        // Asked for in the SAME call as the URL: a second invocation would
+        // cost another extraction and could answer about a different instant.
+        "--print",
+        "%(live_status)s",
+        "-f",
+        "best[protocol^=m3u8]/best",
+        "--no-playlist",
+        ...JS_RUNTIME_ARGS,
+        youtubeUrl,
+      ],
       { maxBuffer: 4 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) {
@@ -121,7 +189,14 @@ export function resolveSourceUrl(youtubeUrl: string): Promise<string> {
           reject(err);
           return;
         }
-        const url = stdout.trim().split("\n")[0];
+        const { url, liveStatus } = parseResolveOutput(stdout);
+        // Status first, URL second: a finished live still hands out a playable
+        // URL for its DVR tail, and playing that IS the bug. Nothing
+        // downstream ever sees the URL of a broadcast that is over.
+        if (isEndedStatus(liveStatus)) {
+          reject(new SourceEndedError(`yt-dlp: live_status=${liveStatus}`));
+          return;
+        }
         if (!url) {
           reject(new Error("yt-dlp returned no URL"));
           return;
@@ -134,7 +209,7 @@ export function resolveSourceUrl(youtubeUrl: string): Promise<string> {
               "tasalla ja että sen JS-runtime toimii."
           );
         }
-        resolve(url);
+        resolve({ url, liveStatus });
       }
     );
   });
