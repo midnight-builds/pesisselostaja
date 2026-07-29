@@ -14,7 +14,7 @@
  *  live relay uses. */
 
 import { execFile } from "node:child_process";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { DEFAULT_NARRATION_DELAY_MS } from "../../../broadcast/src/config.js";
@@ -116,6 +116,55 @@ export async function getRelayProcess(): Promise<RelayProcess> {
     deployedCommit: commit,
     nRestarts: Number.isFinite(restarts) ? restarts : null,
   };
+}
+
+/** Kuinka tuore `status-<id>.json` on vielä todiste siitä mitä relay ajaa.
+ *  Telemetria kirjoitetaan suunnilleen pollivälin tahdissa (3 s oletuksena),
+ *  joten minuutti on kymmeniä kirjoituksia — mutta silti niin lyhyt, että
+ *  sammuneen relayn jälki ei jää elämään. */
+const STATUS_FRESH_MS = 60_000;
+
+const STATUS_FILE = /^status-(\d+)\.json$/;
+
+/** Mitä ottelua relay OIKEASTI ajaa juuri nyt, tai `null` kun siitä ei ole
+ *  tuoretta näyttöä.
+ *
+ *  Lähteenä relayn oma telemetria, koska relay on ainoa joka tietää tämän
+ *  (CLAUDE.md, "yksi totuuslähde"): systemd kertoo vain että jokin ajaa, ja
+ *  `.env.relay` kertoo mitä ottelua relaylle on TARKOITUS antaa — se
+ *  kirjoitetaan jo aktivoinnissa, ennen relayn uudelleenkäynnistystä, joten se
+ *  on ennuste eikä havainto. Aktivoinnin ja restartin välissä ne osoittavat eri
+ *  otteluun.
+ *
+ *  Tuoreus mtimestä eikä tiedoston sisällöstä: sisältö on relayn sopimusta,
+ *  mtime on käyttöjärjestelmän, ja tässä riittää tietää että kirjoituksia yhä
+ *  tulee. */
+export async function readRunningMatchId(nowMs: number = Date.now()): Promise<number | null> {
+  let names: string[];
+  try {
+    names = await readdir(CONFIG.relayRunDir);
+  } catch {
+    // Hakemistoa ei ole (tuore kone) tai sitä ei saa luettua: ei näyttöä.
+    return null;
+  }
+
+  let newest: { matchId: number; mtimeMs: number } | null = null;
+  for (const name of names) {
+    const m = name.match(STATUS_FILE);
+    if (!m) continue;
+    let mtimeMs: number;
+    try {
+      mtimeMs = (await stat(join(CONFIG.relayRunDir, name))).mtimeMs;
+    } catch {
+      continue; // poistettiin altamme
+    }
+    // Negatiivinen ikä = kello on siirtynyt taaksepäin (NTP-korjaus,
+    // suspendista herääminen). Tuoreena pitäminen on turvallisempi tulkinta
+    // kuin "relay ei aja mitään": väärä hylkäys sokeuttaisi pollerin.
+    if (nowMs - mtimeMs > STATUS_FRESH_MS) continue;
+    if (!newest || mtimeMs > newest.mtimeMs) newest = { matchId: Number(m[1]), mtimeMs };
+  }
+  return newest?.matchId ?? null;
 }
 
 async function systemctlVerb(verb: "start" | "stop" | "restart"): Promise<RelayProcess> {
