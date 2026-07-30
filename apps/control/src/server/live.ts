@@ -705,14 +705,6 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     }
   }
 
-  /** The relay shuts ITSELF down when the source ends — we never cut it short
-   *  (uptime first), so a broadcast routinely finishes with nobody calling
-   *  /api/relay/stop. This poller is the only always-on observer of that
-   *  moment, so it is the one that lets go of the broadcast slot.
-   *
-   *  Falling edge only. "Relay is inactive" on its own is the normal state of a
-   *  job that has been armed but not started yet, and closing that would cancel
-   *  the next broadcast before it began (#101). */
   /** Hard stopin siivous (#123). Ajetaan vain kun relayn oma telemetria kertoo
    *  että se sammutti itsensä takarajan takia (`endReason === "hard_stop"`) —
    *  siis ottelu oli päättynyt ja lähde oireili. Normaalissa lopetuksessa ei
@@ -769,6 +761,14 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     }
   }
 
+  /** The relay shuts ITSELF down when the source ends — we never cut it short
+   *  (uptime first), so a broadcast routinely finishes with nobody calling
+   *  /api/relay/stop. This poller is the only always-on observer of that
+   *  moment, so it is the one that lets go of the broadcast slot.
+   *
+   *  Falling edge only. "Relay is inactive" on its own is the normal state of a
+   *  job that has been armed but not started yet, and closing that would cancel
+   *  the next broadcast before it began (#101). */
   let relayWasActive = false;
   async function followRunEdges(): Promise<void> {
     const wasActive = relayWasActive;
