@@ -72,7 +72,9 @@ test.describe("työn lomake", () => {
 
     await expect.poll(() => api.called("POST", "/api/jobs/job-0001/activate")).toBe(true);
     const order = api.calls
-      .filter((c) => c.path.startsWith("/api/jobs/job-0001"))
+      // Vain kirjoitukset: näkymä myös LUKEE työn jakoviestin (#131), ja se
+      // haku osuu samaan polkuun. Väite koskee kirjoitusten järjestystä.
+      .filter((c) => c.path.startsWith("/api/jobs/job-0001") && c.method !== "GET")
       .map((c) => `${c.method} ${c.path}`);
     expect(order[0], "lomake tallennetaan ennen aktivointia").toBe("PATCH /api/jobs/job-0001");
     expect(order).toContain("POST /api/jobs/job-0001/activate");

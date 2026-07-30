@@ -21,6 +21,9 @@ async function openMatches(page: import("@playwright/test").Page): Promise<void>
   await expect(page.getByRole("heading", { name: "Päivä" })).toBeVisible();
 }
 
+const showPastToggle = (page: import("@playwright/test").Page) =>
+  page.getByRole("button", { name: /Näytä menneet/ });
+
 const stadiumSelect = (page: import("@playwright/test").Page) =>
   page.locator("select").filter({ has: page.locator("option", { hasText: "Kaikki kentät" }) });
 const seriesSelect = (page: import("@playwright/test").Page) =>
@@ -61,6 +64,10 @@ test.describe("ottelun valinta", () => {
   test("kenttäsuodatin karsii listan", async ({ page, openApp }) => {
     await openApp();
     await openMatches(page);
+    // Karhunpesän Kiitäjät on jo pelattu, eli piilossa oletuksena (#128).
+    // Kenttäsuodattimen testi tarvitsee sen näkyviin, jotta "katoaa
+    // suodattimen takia" eroaa "ei ollut näkyvissä muutenkaan" -tilanteesta.
+    await showPastToggle(page).click();
 
     await expect(page.getByRole("button", { name: /Mustikkamäen Maila/ })).toBeVisible();
 
@@ -78,6 +85,7 @@ test.describe("ottelun valinta", () => {
   }) => {
     await openApp();
     await openMatches(page);
+    await showPastToggle(page).click(); // ks. edellinen testi
 
     await seriesSelect(page).selectOption("Juniorileiri");
     await expect(page.getByRole("button", { name: /Ankkalammen Ampujat/ })).toBeVisible();
@@ -87,6 +95,33 @@ test.describe("ottelun valinta", () => {
     await stadiumSelect(page).selectOption("Testikenttä 2");
     await expect(page.getByRole("button", { name: /Karhunpesän Kiitäjät/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Ankkalammen Ampujat/ })).toBeHidden();
+  });
+
+
+  test("menneet ottelut ovat piilossa oletuksena, käynnissä oleva ei koskaan", async ({
+    page,
+    openApp,
+  }, info) => {
+    // #128: leiripäivänä lista on ~200 ottelua pitkä ja ajastettava hukkuu jo
+    // pelattujen sekaan.
+    await openApp();
+    await openMatches(page);
+
+    // Yli tunti sitten alkanut on poissa…
+    await expect(page.getByRole("button", { name: /Karhunpesän Kiitäjät/ })).toBeHidden();
+    // …mutta käynnissä olevaa ei piiloteta, vaikka alkuajasta on kulunut aikaa:
+    // juuri siihen voi joutua palaamaan kesken päivän.
+    await expect(page.getByRole("button", { name: /Ankkalammen Ampujat/ })).toBeVisible();
+    // Tulevat pysyvät luonnollisesti näkyvissä.
+    await expect(page.getByRole("button", { name: /Kuvitteellisen Kylän Veikot/ })).toBeVisible();
+
+    // Kytkin kertoo montako on piilossa — muuten piilotettua ei osaa etsiä.
+    await expect(showPastToggle(page)).toBeVisible();
+    await expect(page.getByText(/1 ottelua piilossa/)).toBeVisible();
+    await shot(page, info, "matches-past-hidden");
+
+    await showPastToggle(page).click();
+    await expect(page.getByRole("button", { name: /Karhunpesän Kiitäjät/ })).toBeVisible();
   });
 
   test("rastitus ja Luo työ lähettävät oikean ottelu-ID:n", async ({ page, openApp, api }, info) => {

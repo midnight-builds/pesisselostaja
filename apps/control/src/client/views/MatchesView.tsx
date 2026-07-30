@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { DayMatches, MatchOption } from "../../shared/types";
 import { api } from "../api";
-import { fiDate, fiTime, parseMatchId, shiftIsoDate, todayInFinland } from "../format";
+import { fiDate, fiTime, isPastMatch, parseMatchId, shiftIsoDate, todayInFinland } from "../format";
+import { ToggleRow } from "../components/ToggleRow";
 
 /** Day → stadium → tick the matches. A day can hold 200 matches across 30
  *  series, so the filters are not optional decoration. */
@@ -22,6 +23,9 @@ export function MatchesView({ notify, onJobCreated }: Props) {
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [manual, setManual] = useState("");
   const [busy, setBusy] = useState(false);
+  /** Menneet ottelut piilossa oletuksena (#128): leiripäivänä lista on ~200
+   *  ottelua pitkä, ja ajastettava hukkuu jo pelattujen sekaan. */
+  const [showPast, setShowPast] = useState(false);
 
   const load = useCallback(
     async (target: string) => {
@@ -46,11 +50,22 @@ export function MatchesView({ notify, onJobCreated }: Props) {
     void load(date);
   }, [date, load]);
 
-  const matches = (day?.matches ?? [])
+  const filtered = (day?.matches ?? [])
     .filter((m) => stadium === ALL || m.stadium === stadium)
     .filter((m) => series === ALL || m.seriesName === series)
     .slice()
     .sort((a, b) => (a.startsAt ?? "").localeCompare(b.startsAt ?? ""));
+
+  // Luetaan renderissä eikä tilasta: lista päivittyy joka tapauksessa päivän
+  // vaihtuessa ja suodattimia koskettaessa, eikä minuutin tarkkuus ole tässä
+  // arvokkaampi kuin ajastin joka herättää näkymän taustalla.
+  const nowMs = Date.now();
+  // Käynnissä olevaa ottelua ei piiloteta koskaan, vaikka alusta olisi kulunut
+  // yli tunti: juuri siihen voi joutua palaamaan kesken päivän.
+  const matches = filtered.filter(
+    (m) => showPast || m.status === "live" || !isPastMatch(m.startsAt, nowMs),
+  );
+  const hiddenCount = filtered.length - matches.length;
 
   const toggle = (id: number) => {
     const next = new Set(picked);
@@ -125,6 +140,21 @@ export function MatchesView({ notify, onJobCreated }: Props) {
           options={day?.seriesNames ?? []}
           onChange={setSeries}
           allLabel="Kaikki sarjat"
+        />
+        {/* Kytkin on näkyvissä aina, myös kun piilotettavaa ei ole, ja kertoo
+            määrän. Menneen päivän kohdalla kaikki ottelut ovat menneitä, ja
+            ilman näkyvää kytkintä lista näyttäisi vain tyhjältä — piilotettua
+            ei osaa etsiä. */}
+        <ToggleRow
+          label="Näytä menneet"
+          hint={
+            hiddenCount > 0
+              ? `${hiddenCount} ottelua piilossa (alkanut yli tunti sitten)`
+              : "Yli tunti sitten alkaneet piilotetaan"
+          }
+          on={showPast}
+          disabled={loading}
+          onToggle={setShowPast}
         />
       </section>
 
