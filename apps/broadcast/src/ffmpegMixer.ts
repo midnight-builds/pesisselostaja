@@ -645,6 +645,10 @@ export class FfmpegMixer {
         this.sourceStateValue = "failed";
         this.sourceDetailValue = err instanceof Error ? err.message : String(err);
         logError("ffmpeg.start_failed", `ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
+        // Käynnistysvirhe katkaisee code=0-parikuvion: "kaksi peräkkäistä
+        // lähes samanmittaista sessiota" ei saa muodostua sessioista joiden
+        // välissä lähde ei auennut lainkaan (#123, adversaarilöydös).
+        this.lastShortCleanRunMs = null;
         this.noteUnproductiveAttempt((mins) => `Lähde ei ole vastannut ${mins} minuuttiin`);
       }
       if (this.stopped) break;
