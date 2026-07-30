@@ -225,6 +225,7 @@ export class Telemetry {
       },
       tts: { engine: probe.ttsEngine, elevenLabsCharsUsed: probe.elevenLabsCharsUsed },
       lastProblem: this.lastProblem,
+      ...(probe.endReason ? { endReason: probe.endReason } : {}),
     };
     this.writeAtomic(this.statusPath, JSON.stringify(status, null, 2) + "\n");
   }
