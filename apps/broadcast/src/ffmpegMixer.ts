@@ -92,7 +92,7 @@ export interface FfmpegMixerOptions {
    *  that state), for finishedFailureWindowMs. Absent → always false. */
   isMatchFinished?: () => boolean;
   /** Extra fragment appended to the heartbeat line — the commentary loop's
-   *  poll statistics (HANDOFF.md 17.7.), since 304 skips and full-fetch
+   *  poll statistics, since 304 skips and full-fetch
    *  fallbacks are otherwise invisible in the log. Absent → plain heartbeat. */
   heartbeatExtra?: () => string;
   /** Local-file test mode: write the mixed result to this path instead of
@@ -529,7 +529,7 @@ export class FfmpegMixer {
    *  actually drains in real time. The commentary loop reads this to avoid
    *  synthesizing pre-game filler nobody would hear yet — otherwise those
    *  welcome clips pile up in the FIFO before ffmpeg attaches and all play
-   *  back-to-back on connect (HANDOFF.md 7). */
+   *  back-to-back on connect. */
   /** Telemetry accessors. Read-only views of state the supervisor already
    *  keeps — nothing here changes a decision. */
   get respawnCount(): number {
@@ -738,8 +738,7 @@ export class FfmpegMixer {
   /** Records an attempt that produced no broadcast and gives up (throws
    *  SourceExhaustedError, which the caller turns into a relay shutdown) once
    *  the unbroken run of such attempts outlasts the give-up window. A finished
-   *  match's source won't come back, so it uses the much shorter window
-   *  (HANDOFF.md 16.7. kohta 6.2). */
+   *  match's source won't come back, so it uses the much shorter window. */
   private noteUnproductiveAttempt(
     describe: (windowMins: number) => string,
     opts: { window?: number; reason?: SourceEndReason } = {}
@@ -950,7 +949,7 @@ export class FfmpegMixer {
     if (this.stopped || this.child !== childToKill) return null;
     const remaining = this.fifo.pendingClips;
     // Whether the queue actually drained is the evidence that the respawn
-    // didn't sever a clip mid-word (apps/broadcast/HANDOFF.md fix #2): "tyhjeni" =
+    // didn't sever a clip mid-word: "tyhjeni" =
     // clean gap, "EI tyhjentynyt" = the 10s bound cut it off anyway.
     const status =
       remaining === 0 ? "tyhjeni" : `EI tyhjentynyt (${remaining} klippiä jäljellä, 10s katkaisu)`;

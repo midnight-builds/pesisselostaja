@@ -112,7 +112,7 @@ function latchedLoop(sink: SpeechSink, s: { attached: boolean; pending: number }
   return loop;
 }
 
-describe("CommentaryLoop pre-game filler gating (HANDOFF.md 7)", () => {
+describe("CommentaryLoop pre-game filler gating", () => {
   it("is not ready while ffmpeg is unattached, unlatched, or while clips are still queued", () => {
     const a = mutableStatus(false, 0);
     expect(internals(new CommentaryLoop(makeConfig(), recordingSink(), a.port)).narrationReadyForFiller()).toBe(false);
@@ -160,7 +160,7 @@ describe("CommentaryLoop pre-game filler gating (HANDOFF.md 7)", () => {
   });
 });
 
-describe("CommentaryLoop in-game filler gating (HANDOFF.md 7, extension)", () => {
+describe("CommentaryLoop in-game filler gating", () => {
   function inGameLoop(sink: SpeechSink, s: { attached: boolean; pending: number }, port: NarrationStatus) {
     const loop = latchedLoop(sink, s, port);
     loop.matchStarted = true;
@@ -207,7 +207,7 @@ describe("CommentaryLoop in-game filler gating (HANDOFF.md 7, extension)", () =>
   });
 });
 
-describe("CommentaryLoop pre-first-attach suppression + connect recap (HANDOFF.md 7, case B)", () => {
+describe("CommentaryLoop pre-first-attach suppression + connect recap", () => {
   it("suppresses event narration before the first attach while bookkeeping still advances", async () => {
     const sink = recordingSink();
     const { port } = mutableStatus(false, 0);
@@ -290,7 +290,7 @@ describe("CommentaryLoop pre-first-attach suppression + connect recap (HANDOFF.m
   });
 });
 
-describe("CommentaryLoop first-speech grace (HANDOFF.md 16.7. kohta 1)", () => {
+describe("CommentaryLoop first-speech grace", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
@@ -347,7 +347,7 @@ describe("CommentaryLoop first-speech grace (HANDOFF.md 16.7. kohta 1)", () => {
   });
 });
 
-describe("CommentaryLoop narration delay (HANDOFF.md 8)", () => {
+describe("CommentaryLoop narration delay", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(0); // pin the fake clock so `at` timings are relative to 0

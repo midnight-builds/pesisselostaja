@@ -54,10 +54,10 @@ describe("formatBatTurnChangeSpeech: team names are never inflected with a colon
   });
 });
 
-describe("formatScore ordering (via public callers) — HANDOFF task 2", () => {
+describe("formatScore ordering (via public callers)", () => {
   // Runs must always be spoken home-first, in match order, regardless of who
   // leads. The old bug printed away-first when the away team led ("6, 3, Sudet
-  // johtaa" for a 3–6 game). See relay/HANDOFF.md.
+  // johtaa" for a 3–6 game) — found in the first live test.
   it("keeps home runs first even when the away team leads (turn change)", () => {
     const speech = formatBatTurnChangeSpeech(meta, 100, 200, 3, 6, 1, 1);
     expect(speech).toContain("3, 6, Sudet johtaa");
@@ -88,7 +88,7 @@ describe("formatScore ordering (via public callers) — HANDOFF task 2", () => {
   });
 });
 
-describe("eventFingerprint cross-turn palo collision — HANDOFF task 1", () => {
+describe("eventFingerprint cross-turn palo collision", () => {
   const paloSub = (): SubEvent => ({
     texts: [{ type: "event", text: "Palo", base: null }, { type: "stat", out: 1 }],
   });

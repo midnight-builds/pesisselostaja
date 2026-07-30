@@ -1,6 +1,6 @@
 # Kenttäaudion normalisointi ja tuulenpoisto — kuunneltava demo (v2)
 
-Vastaa HANDOFF.md:n ideaan ("kenttäaudion normalisointi ja tuulen suhinan
+Vastaa käyttäjän ideaan ("kenttäaudion normalisointi ja tuulen suhinan
 poisto livenä", 18.7.2026). Koskee vain **alkuperäisen videon omaa ääntä**
 (kentän ambienssi, tuuli, huudot) — ei selostusta, paitsi lopun ducking-demo
 jossa molemmat yhdistyvät.

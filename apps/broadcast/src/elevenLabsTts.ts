@@ -28,7 +28,7 @@ export class ElevenLabsTts {
   /** Most recently synthesized text, sent as `previous_text` on the next
    *  request. It conditions the model without being spoken, which stabilizes
    *  very short inputs — EL is known to hallucinate extra syllables at the
-   *  start of short standalone phrases ("reewer lyömässä X", HANDOFF.md 16.7.
+   *  start of short standalone phrases ("reewer lyömässä X".7.
    *  kohta 3). Updated on cache hits too: the cached clip still precedes the
    *  next one acoustically. Note the cache key deliberately ignores
    *  previous_text — identical text = same cached clip. */

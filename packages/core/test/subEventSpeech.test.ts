@@ -80,7 +80,7 @@ describe("subEventToSpeech: batter change", () => {
   };
 
   // Pool weighted toward longer phrasings — very short standalone inputs make
-  // ElevenLabs hallucinate extra syllables (HANDOFF.md 16.7. kohta 3).
+  // ElevenLabs hallucinate extra syllables.
   const batterVariants = (name: string) => [
     `Vuorossa ${name}.`,
     `Lyömässä ${name}.`,
@@ -210,8 +210,7 @@ describe("subEventToSpeech: palo", () => {
 
 describe("subEventToSpeech: match end", () => {
   const endSub: SubEvent = { texts: [{ type: "event", text: "Ottelu päättyi", base: null }] };
-  // The closing line ends with a thanks-to-viewers variant (HANDOFF.md 16.7.
-  // kohta 5); tests accept the whole variant set.
+  // The closing line ends with a thanks-to-viewers variant; tests accept the whole variant set.
   const THANKS = ["Kiitos katsojille.", "Kiitokset kaikille katsojille.", "Kiitos, että olitte mukana."];
   function expectClosingLine(actual: string | null, fixedPart: string): void {
     expect(actual).not.toBeNull();

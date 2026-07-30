@@ -35,7 +35,7 @@ describe("finnishCardinal", () => {
   });
 });
 
-describe("spellOutNumbers (EL path normalization, HANDOFF.md 17.7. kohta 4)", () => {
+describe("spellOutNumbers (EL path normalization)", () => {
   it("spells out the score phrases EL misread live", () => {
     expect(spellOutNumbers("Tasan 4, 4.")).toBe("Tasan neljä, neljä.");
     expect(spellOutNumbers("4, 3, Ysit johtaa")).toBe("neljä, kolme, Ysit johtaa");

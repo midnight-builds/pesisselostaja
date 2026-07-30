@@ -20,7 +20,7 @@ function failingMixer(opts: { finished: boolean; maxWindowMs: number; finishedWi
   });
 }
 
-describe("FfmpegMixer give-up window after match end (HANDOFF.md 16.7. kohta 6.2)", () => {
+describe("FfmpegMixer give-up window after match end", () => {
   it("gives up after the SHORT window when the match has finished", async () => {
     // finished window 50 ms < first backoff (1 s) → the second failed attempt
     // already exceeds it; without the finished window the 10 min max would

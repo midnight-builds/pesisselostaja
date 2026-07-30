@@ -489,6 +489,14 @@ is not something to try to eliminate.
 - **RTMP push drops repeatedly** — ffmpeg has no automatic reconnect for the
   push side; each drop triggers a full respawn (with backoff). Persistent
   drops point to a network/ISP issue on this host, not a code bug.
+- **The target broadcast stays "live" in Studio for minutes after the push
+  stops** — expected. Auto-stop works, but with a delay; end it by hand from
+  Studio if it needs to be immediate.
+- **A live glitch cannot be replayed from the API afterwards** — once a match
+  ends, `online/{id}/events` returns only the final, cleaned history. The
+  evidence for anything that happened *during* the match is what the run left
+  behind in `run/`: `.state-<ID>.json`, `status-<ID>.json` and
+  `timeline-<ID>.ndjson`. Keep them before cleaning up.
 
 ## ElevenLabs voice (primary engine)
 

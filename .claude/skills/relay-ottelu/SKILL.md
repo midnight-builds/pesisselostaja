@@ -22,7 +22,7 @@ ohjeet käyttäjälle suoraan (kohta "AJON AIKANA"), älä vain viittaa niihin.
 - **Lokin luku, varoitusmerkit, itsesammutus ja vianetsintä:**
   `.claude/skills/relay-ottelu/seuranta-ja-vianetsinta.md` — lue se, kun relay on
   ajossa tai kun jokin näyttää väärältä.
-- Tekninen tausta: `apps/broadcast/README.md`, `apps/broadcast/HANDOFF.md`,
+- Tekninen tausta: `apps/broadcast/README.md`,
   `apps/broadcast/DESIGN.md`.
 
 **Lukuja ei toisteta tässä ohjeessa.** Oletusarvot elävät koodissa
