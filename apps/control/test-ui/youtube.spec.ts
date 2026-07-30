@@ -7,7 +7,7 @@
  *  Kaikki avaukset menevät `openApp`in kautta: se asentaa API-mockin. Suora
  *  page.goto ohittaisi mockin ja päästäisi testin oikeaan palvelimeen. */
 
-import { expect, test } from "./support/harness";
+import { expect, test, shot } from "./support/harness";
 import * as fixture from "./support/state";
 
 async function openYouTube(page: import("@playwright/test").Page) {
@@ -75,5 +75,53 @@ test.describe("YouTube-välilehti", () => {
     await openYouTube(page);
 
     await expect(page.getByText("Joku muu kanava").first()).toBeVisible();
+  });
+});
+
+/** #95: jaettava viesti on se mitä WhatsApp-ryhmiin liimataan, ja otsikon
+ *  joukkuenimet eivät tule tulospalvelusta — ne kysytään. */
+test.describe("lähetysten luonti", () => {
+  test("otsikkokentät menevät esikatseluun ja viesti käyttää niitä", async ({ page, openApp, api }, info) => {
+    api.authHealth = fixture.authHealthConnected();
+    await openApp();
+    await page.getByRole("button", { name: "YouTube", exact: true }).click();
+
+    await page.getByLabel("Oma joukkue otsikossa (valinnainen)").fill("Pesä Ysit F-pojat");
+    await page.getByLabel("Vastustaja otsikossa (valinnainen)").fill("IPV");
+    await page.getByRole("button", { name: "Esikatsele tekstit" }).click();
+
+    const preview = api.calledWith("POST", "/api/youtube/templates/preview")[0];
+    expect((preview.body as { overrides?: Record<string, string> }).overrides).toEqual({
+      teamLabel: "Pesä Ysit F-pojat",
+      opponent: "IPV",
+    });
+    await expect(page.getByText(/Seuraava live on klo 8:30: Pesä Ysit F-pojat - IPV/)).toBeVisible();
+    await shot(page, info, "youtube-preview-overrides");
+  });
+
+  test("luonnin jälkeen jaettava viesti on kokonaisuudessaan kopioitavissa", async ({ page, openApp, api }, info) => {
+    api.authHealth = fixture.authHealthConnected();
+    await openApp();
+    await page.getByRole("button", { name: "YouTube", exact: true }).click();
+
+    await page.getByRole("button", { name: "Esikatsele tekstit" }).click();
+    await expect(page.getByRole("heading", { name: "Luo lähetykset" })).toBeVisible();
+
+    await page.getByRole("button", { name: /Olen tarkistanut/ }).click();
+    await page.getByRole("button", { name: "Luo lähetykset YouTubeen" }).click();
+    await page.getByRole("button", { name: "Vahvista: luo 2 lähetystä" }).click();
+
+    const message = page.getByTestId("share-message");
+    await expect(message).toBeVisible();
+    // Paikkamerkkien tilalla ovat oikeat linkit — juuri se erottaa luodun
+    // viestin esikatselusta.
+    await expect(message).toContainText("YouTube: https://www.youtube.com/watch?v=NORMAALI");
+    await expect(message).toContainText("YouTube selostettu: https://www.youtube.com/watch?v=SELOSTETTU");
+    await expect(message).toContainText("Tulospalvelu: https://www.pesistulokset.fi/ottelut/999001");
+    // Eikä stream key koskaan: viesti menee ulkopuolisille.
+    await expect(message).not.toContainText("cccc-dddd");
+
+    await expect(page.getByRole("button", { name: "Kopioi jaettava viesti" })).toBeEnabled();
+    await shot(page, info, "youtube-share-message");
   });
 });

@@ -11,6 +11,8 @@ import {
   buildBroadcastTexts,
   buildDescription,
   buildShareMessage,
+  normalizeShareTemplate,
+  DEFAULT_SHARE_TEMPLATE,
   buildThumbnailHeadline,
   buildTitle,
   formatIsoInZone,
@@ -132,7 +134,7 @@ describe("kuvaus", () => {
         "Paikka: Kempeleen Sarkkirannan kenttä 2, Kempele",
         "Tapahtuma: Tenavaleiri 2026",
         "Vaihe: Alkulohko",
-        "Tulospalvelu: https://www.pesistulokset.fi/ottelu/146210",
+        "Tulospalvelu: https://www.pesistulokset.fi/ottelut/146210",
         "",
         "#pesäpallo #pesäysit #live #livestream",
       ].join("\n")
@@ -148,6 +150,53 @@ describe("kuvaus", () => {
 });
 
 describe("jaettava viesti", () => {
+  // #95: viesti käyttää samoja joukkuenimiä kuin otsikko. Ensimmäinen oikea
+  // lähetyspari (144980, 29.7.2026) jakoi tulospalvelun raa'at nimet, vaikka
+  // otsikossa luki jo vakiintunut muoto.
+  it("käyttää otsikon joukkuenimiä, ei tulospalvelun raakoja nimiä", () => {
+    const texts = buildBroadcastTexts(
+      campMatch({ teamLabel: "Pesä Ysit F-pojat", opponent: "IPV" })
+    );
+    expect(texts.shareMessage).toContain("Pesä Ysit F-pojat - IPV");
+    expect(texts.shareMessage).not.toContain("Hyvinkään Tahko");
+  });
+
+  it("ilman ohituksia pari on edelleen täydet nimet", () => {
+    const texts = buildBroadcastTexts(campMatch());
+    expect(texts.shareMessage).toContain("Hyvinkään Tahko");
+  });
+
+  it("noudattaa run/share-template.jsonin muotoa kun sellainen on annettu", () => {
+    const texts = buildBroadcastTexts(campMatch(), {
+      opening: "Tänään klo {time} pelataan {matchup}!",
+      lines: ["Katso: {watchUrl}", "Tulokset: {matchUrl}"],
+    });
+    expect(texts.shareMessage.split("\n")).toEqual([
+      // Oma joukkue ensin, kuten otsikossa — sama pari molemmissa (#95).
+      "Tänään klo 13:30 pelataan Pesä Ysit E-tytöt kilpa - Hyvinkään Tahko!",
+      "Katso: <youtube-linkki>",
+      "Tulokset: https://www.pesistulokset.fi/ottelut/146210",
+    ]);
+  });
+
+  it("jättää tuntemattoman paikkamerkin näkyviin — kirjoitusvirhe kuuluu huomata esikatselusta", () => {
+    const message = buildShareMessage(
+      { localTime: "13:30", matchup: "A - B" },
+      { matchUrl: "https://www.pesistulokset.fi/ottelut/1" },
+      { opening: "Klo {aika}: {matchup}", lines: ["{matchUrl}"] }
+    );
+    expect(message).toContain("{aika}");
+  });
+
+  it("rikkinäinen tiedosto palautuu oletukseen sen sijaan että viesti jäisi tyhjäksi", () => {
+    expect(normalizeShareTemplate({ opening: "", lines: [] })).toEqual(DEFAULT_SHARE_TEMPLATE);
+    expect(normalizeShareTemplate(null)).toEqual(DEFAULT_SHARE_TEMPLATE);
+    expect(normalizeShareTemplate({ opening: "Oma {matchup}" })).toEqual({
+      opening: "Oma {matchup}",
+      lines: DEFAULT_SHARE_TEMPLATE.lines,
+    });
+  });
+
   it("alkaa aina tarkalleen fraasilla 'Seuraava live on '", () => {
     const texts = buildBroadcastTexts(campMatch());
     expect(texts.shareMessage.startsWith(SHARE_MESSAGE_OPENING)).toBe(true);
@@ -159,7 +208,7 @@ describe("jaettava viesti", () => {
       {
         watchUrl: "https://www.youtube.com/watch?v=aaa",
         narratedWatchUrl: "https://www.youtube.com/watch?v=bbb",
-        matchUrl: "https://www.pesistulokset.fi/ottelu/146210",
+        matchUrl: "https://www.pesistulokset.fi/ottelut/146210",
       }
     );
     expect(message).toBe(
@@ -167,7 +216,7 @@ describe("jaettava viesti", () => {
         "Seuraava live on klo 13:30: Hyvinkään Tahko - Pesä Ysit E-tytöt kilpa. Alla linkit:",
         "YouTube: https://www.youtube.com/watch?v=aaa",
         "YouTube selostettu: https://www.youtube.com/watch?v=bbb",
-        "Tulospalvelu: https://www.pesistulokset.fi/ottelu/146210",
+        "Tulospalvelu: https://www.pesistulokset.fi/ottelut/146210",
       ].join("\n")
     );
   });

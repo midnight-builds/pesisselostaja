@@ -49,6 +49,7 @@ import {
   deleteVideo,
   listBroadcasts,
   listPlaylists,
+  setThumbnail,
   updateVideoMetadata,
   YouTubeApiError,
   type PrivacyStatus,
@@ -59,7 +60,9 @@ import {
   templateInputFromMatch,
   type BroadcastTexts,
   type MatchTemplateInput,
+  type ShareTemplate,
 } from "./templates.js";
+import { ensureShareTemplateFile, readShareTemplate } from "./shareTemplate.js";
 import type { CreateJobRequest, PatchJobRequest, PatchKnobsRequest } from "../shared/api.js";
 import type { Job, LiveState, NotificationPrefs } from "../shared/types.js";
 
@@ -148,10 +151,13 @@ interface YoutubeCreateRequest {
 }
 
 type TemplateContext =
-  | { texts: BroadcastTexts; matchId: number; job: Job | null }
+  | { texts: BroadcastTexts; matchId: number; job: Job | null; shareTemplate: ShareTemplate }
   | { error: string; status: number };
 
 async function resolveTemplateContext(body: YoutubeCreateRequest): Promise<TemplateContext> {
+  // Luetaan joka pyynnöllä: operaattorin muokkaus run/share-template.jsoniin
+  // näkyy seuraavassa esikatselussa ilman uudelleenkäynnistystä (#95).
+  const shareTemplate = await readShareTemplate();
   let job: Job | null = null;
   if (body.jobId) {
     job = (await listJobs()).find((j) => j.id === body.jobId) ?? null;
@@ -168,7 +174,7 @@ async function resolveTemplateContext(body: YoutubeCreateRequest): Promise<Templ
     body.overrides ?? {}
   );
   try {
-    return { texts: buildBroadcastTexts(input), matchId, job };
+    return { texts: buildBroadcastTexts(input, shareTemplate), matchId, job, shareTemplate };
   } catch (err) {
     // Käytännössä vain "alkuaika puuttuu" — ottelu on listalla ilman
     // kellonaikaa, ja se on käyttäjän täydennettävä (overrides.localTime).
@@ -355,6 +361,34 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
     sendJson(res, 200, { id, path: thumbnailCachePath(id) });
     return;
   }
+  // Renders and uploads in one call, because the two halves have no separate
+  // use: setThumbnail existed in youtube.ts with no route at all, so a
+  // thumbnail could be previewed and rendered but never actually set from the
+  // UI (#95). Rendering here rather than trusting a client-supplied path keeps
+  // the upload bound to the same composer the preview showed.
+  const thumbnailUploadMatch = pathname.match(/^\/api\/youtube\/videos\/([^/]+)\/thumbnail$/);
+  if (thumbnailUploadMatch && method === "POST") {
+    const body = await readJsonBody<unknown>(req);
+    let opts;
+    try {
+      opts = parseThumbnailRequest(body);
+    } catch (err) {
+      sendError(res, 400, err instanceof Error ? err.message : "virheellinen pyyntö");
+      return;
+    }
+    let image: Buffer;
+    try {
+      image = await renderThumbnail(opts);
+    } catch (err) {
+      if (err instanceof ThumbnailRenderError) {
+        sendError(res, 502, err.message);
+        return;
+      }
+      throw err;
+    }
+    sendJson(res, 200, await setThumbnail(thumbnailUploadMatch[1], image, "image/png"));
+    return;
+  }
 
   // --- YouTube-ketju. Kaikki kirjoittavat kutsut kulkevat youtube.ts:n läpi,
   // joka kirjaa jokaisen luodun lähetyksen run/youtube-created.ndjson-lokiin.
@@ -409,7 +443,8 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
         streamForNormal: body.streamForNormal,
         normalAutoStart: body.normalAutoStart,
       },
-      texts
+      texts,
+      resolved.shareTemplate
     );
     // Työ tietää nyt kohteensa: selostettu lähetys on relayn kohde, normaali
     // on lähde jota puhelin työntää. Ilman tätä operaattori joutuisi
@@ -575,6 +610,11 @@ async function main(): Promise<void> {
   // else guarantees it exists before the first request — create it once at
   // boot rather than on every write.
   await mkdir(CONFIG.stateDir, { recursive: true });
+  // Materializes run/share-template.json with its defaults, so the operator can
+  // find and edit the share message's wording without being told it exists
+  // (#95). Failing to write it must not stop the server: the defaults are
+  // compiled in and the messages come out the same.
+  await ensureShareTemplateFile().catch(() => undefined);
 
   // Lähteen tilan polleri käynnistyy ennen aggregaattoria, jotta ensimmäinen
   // koottu tila voi jo sisältää havainnon. Se on porttien takana: ilman

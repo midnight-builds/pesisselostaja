@@ -38,6 +38,7 @@ import {
   formatScheduledLocal,
   HELSINKI,
   type BroadcastTexts,
+  type ShareTemplate,
 } from "./templates.js";
 
 const API_BASE = "https://www.googleapis.com/youtube/v3/";
@@ -345,7 +346,8 @@ async function createOne(
  *  videoId, streamKey) ovat runbookin mukaan pakollisia. */
 export async function createBroadcastPair(
   job: BroadcastJobInput,
-  texts: BroadcastTexts
+  texts: BroadcastTexts,
+  shareTemplate?: ShareTemplate
 ): Promise<BroadcastPair> {
   const timeZone = job.timeZone ?? HELSINKI;
   // Heittää jos vyöhykemuunnos ei käänny takaisin samaksi paikallisajaksi —
@@ -375,9 +377,11 @@ export async function createBroadcastPair(
     autoStart: true,
   });
 
+  // Sama muotoilu kuin esikatselussa (#95) — vain linkit ovat nyt oikeat.
   const shareMessage = buildShareMessage(
     { localTime: texts.localTime, matchup: texts.matchup },
-    { watchUrl: normal.watchUrl, narratedWatchUrl: narrated.watchUrl, matchUrl: texts.matchUrl }
+    { watchUrl: normal.watchUrl, narratedWatchUrl: narrated.watchUrl, matchUrl: texts.matchUrl },
+    shareTemplate
   );
 
   const broadcastSummary = buildBroadcastSummary({
