@@ -808,6 +808,9 @@ export class FfmpegMixer {
     // monotonic clock has nothing to compare it against.
     const quietMs = Date.now() - eventEpoch;
     const quietLimitMs = this.opts.hardStopQuietMs ?? 3 * 60 * 1000;
+    // 0 (tai negatiivinen) = hard stop pois päältä. Ilman tätä 0 tarkoittaisi
+    // "laukea heti" — täsmälleen päinvastaista kuin arvon asettaja tarkoittaa.
+    if (quietLimitMs <= 0) return;
     if (quietMs < quietLimitMs) return;
     const symptom =
       pairSymptom ??
