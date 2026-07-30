@@ -104,10 +104,54 @@ kolmea lähdettä:
 - kirjoittaa `apps/broadcast/.env.relay` (vain ottelukohtaiset avaimet;
   `ELEVENLABS_API_KEY` ja `RELAY_URL_REFRESH_MS` säilytetään koskemattomina)
 - kirjoittaa `apps/broadcast/run/.control-<ID>.json` (relay lukee joka pollilla)
+- lukee relayn telemetrian: `run/status-<ID>.json` ja `run/timeline-<ID>.ndjson`
 - lukee `systemctl --user show`, `journalctl --user -u`, ja pesistulokset-API:n
+
+### `sourceIngest` — lähteen tila YouTube-API:sta (#104 vaihe 1)
+
+Ohjaamo on ainoa jolla on Google-tunnukset, joten se katsoo lähteen puolesta ja
+relay lukee. Relay **ei** kysy Googlelta itse: kaksi refresh_tokenin päivittäjää
+rikkoisi authin kesken ottelun, eikä lähetyksen jatkuminen saa riippua
+Google-yhteydestä.
+
+30 s välein ohjaamo hakee lähdelähetyksen `lifeCycleStatus`in
+(`liveBroadcasts.list`) ja siihen sidotun syötteen `streamStatus`in
+(`liveStreams.list`), ja kirjoittaa havainnon control-tiedoston
+`sourceIngest`-avaimeen (`observedAt`, `videoId`, tilat raakoina merkkijonoina,
+`error`). Arvot julkaistaan sellaisinaan — **päätös kuuluu relaylle, ei
+ohjaamolle**. Vain `streamStatus === "active"` tarkoittaa että dataa virtaa;
+`null` ja vanhentunut `observedAt` tarkoittavat *ei tietoa*, eivät *poikki*.
+
+Vaiheessa 1 relay ohittaa avaimen: käytös ei muutu. Vaihe 2 lukee sen ja
+vaihtaa katvekuvaan.
+
+Pollaus on portitettu tiukasti — työ tilassa `arming`/`live`, relay-yksikkö
+ajossa **ja relayn oma telemetria (`run/status-<ID>.json`) kertoo että se ajaa
+juuri tätä ottelua**, lähde-URL jäsentyy eikä ole sama kuin kohdevideo, Google-
+token tallennettu, kiintiötä yli varauksen. Portin sulkeutuminen ei ole vika
+vaan normaali lepotila, ja se näkyy ohjaamon Lähde-rivillä syynä.
 
 `run/` on symlinkattu ajokopiosta työpuuhun, joten ohjaamo näkee samat
 tiedostot jotka ajossa oleva relay kirjoittaa.
+
+### Yksi totuuslähde (#97)
+
+Kaikelle mitä sekä relay että ohjaamo tietävät, **relay on lähde**. Se on ainoa
+joka tietää mitä oikeasti sanottiin, millä sanamuodolla, millä kokoonpanolla ja
+kuuliko sitä kukaan. Ohjaamo lukee eikä päättele:
+
+- **Selostuslista** tulee `timeline-<ID>.ndjson`istä. Rivi ilmestyy kun relay on
+  sen päättänyt (`detected`) ja korostuu kun klippi on mennyt mikseriin
+  (`spoken`). **Vaimennettu rivi** — relay puhui, mutta ffmpeg ei ollut
+  kytkeytynyt — näkyy punaisena ja yliviivattuna: *se ei kuulunut kenellekään*.
+- **Lähteen tila ja jonon pituus** tulevat `status-<ID>.json`ista. Lokista
+  arvaaminen jätettiin varajärjestelmäksi vanhoja relay-buildeja varten.
+- Ohjaamo laskee itse vain sen mitä relay ei voi tietää: levytila, kuorma,
+  YouTube-tila, työjono ja tulostaulun oma luku pesistuloksesta.
+
+Jos ajokopio on vanhempi kuin PR #93, telemetriaa ei ole eikä selostuslistalla
+ole mitään näytettävää — lista sanoo sen ääneen sen sijaan että väittäisi
+hiljaisuutta. Korjaus on `npm run relay:deploy`.
 
 ## Vaiheet
 
@@ -130,10 +174,12 @@ koskee enää koodittomia rivejä — eli vanhempia relay-buildeja, joita journa
 yhä säilöö. **Vaatii `npm run relay:deploy`n** ennen kuin ohjaamo näkee
 koodeja.
 
-**Vaihe B, yhä tekemättä:** kaksivaiheinen selostuslista (tämä on nyt
-mahdollinen — timeline erottaa havaitun, syntetisoidun ja puhutun), uudet
-control-avaimet (mykistys, äänenvoimakkuus, oma selostus), jono, jälkityöt,
-ElevenLabs-osio ja passkey-suojaus.
+**Vaihe B, kaksivaiheinen selostuslista (29.7.):** lista luetaan relayn
+aikajanasta, ja `buildNarrationLines` + `NarrationCache` on poistettu
+kokonaan — ks. "Yksi totuuslähde" yllä.
+
+**Vaihe B, yhä tekemättä:** uudet control-avaimet (mykistys, äänenvoimakkuus,
+oma selostus), jono, jälkityöt, ElevenLabs-osio ja passkey-suojaus.
 
 Vaiheen B relay-muutokset vaativat `npm run relay:deploy` — ja se kieltäytyy
 ajamasta lähetyksen aikana. Se on tarkoituksellinen este, ei vika.

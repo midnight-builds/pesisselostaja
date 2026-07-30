@@ -128,7 +128,9 @@ interface LiveStreamResource {
       streamName?: string;
     };
   };
-  status?: { streamStatus?: string };
+  // healthStatus on sisäkkäinen objekti, ei merkkijono — YouTube palauttaa
+  // sen muodossa { status: "good" | "ok" | "bad" | "noData", ... }.
+  status?: { streamStatus?: string; healthStatus?: { status?: string } };
 }
 
 interface ListResponse<T> {
@@ -406,18 +408,32 @@ export interface BroadcastSummary {
 }
 
 /** Kanavan omat lähetykset. `status` = YouTuben broadcastStatus
- *  (upcoming/active/completed/all). */
+ *  (upcoming/active/completed/all).
+ *
+ *  `id` hakee yhden tunnetun videon. Se on **eri suodatin** kuin
+ *  broadcastStatus, eikä niitä saa lähettää samassa pyynnössä: YouTube Data
+ *  API:ssa `id` ja `mine`/`broadcastStatus` sulkevat toisensa pois, ja
+ *  `broadcastType` on dokumentoitu käytettäväksi vain `mine`/`broadcastStatus`
+ *  -pyynnöissä. Tyhjä tulos id-haussa on **normaali** vastaus — video ei
+ *  yksinkertaisesti ole omalla kanavalla — ei virhe. */
 export async function listBroadcasts(
-  opts: { status?: "upcoming" | "active" | "completed" | "all"; maxResults?: number } = {}
+  opts: { id?: string; status?: "upcoming" | "active" | "completed" | "all"; maxResults?: number } = {}
 ): Promise<BroadcastSummary[]> {
+  const filter: Params = opts.id
+    ? { id: opts.id }
+    : {
+        broadcastStatus: opts.status ?? "all",
+        broadcastType: "all",
+        maxResults: Math.min(Math.max(opts.maxResults ?? 25, 1), 50),
+      };
   const response = await ytRequest<ListResponse<LiveBroadcastResource>>(
     "GET",
     "liveBroadcasts",
     {
+      // Sama part molemmissa haussa, jotta boundStreamId ja lifeCycleStatus
+      // tulevat mukana myös id-haussa.
       part: "id,snippet,status,contentDetails",
-      broadcastStatus: opts.status ?? "all",
-      broadcastType: "all",
-      maxResults: Math.min(Math.max(opts.maxResults ?? 25, 1), 50),
+      ...filter,
     },
     null,
     "list"
@@ -434,6 +450,36 @@ export async function listBroadcasts(
       privacyStatus: item.status?.privacyStatus ?? null,
       boundStreamId: item.contentDetails?.boundStreamId ?? null,
     }));
+}
+
+export interface StreamStatus {
+  streamId: string;
+  /** YouTuben raaka arvo: created|ready|active|inactive|error. Tallennetaan
+   *  sellaisenaan — vain "active" tarkoittaa että dataa virtaa sisään. */
+  streamStatus: string | null;
+  /** status.healthStatus.status: good|ok|bad|noData. */
+  healthStatus: string | null;
+}
+
+/** Yhden striimin tila. Tämä on ainoa tieto siitä, työntääkö lähde oikeasti
+ *  kuvaa sisään: lähetyksen lifeCycleStatus voi olla "live" vaikka ingest
+ *  olisi jo katkennut. Tuntematon striimi (esim. poistettu) ei ole virhe
+ *  vaan null. */
+export async function getStreamStatus(streamId: string): Promise<StreamStatus | null> {
+  const response = await ytRequest<ListResponse<LiveStreamResource>>(
+    "GET",
+    "liveStreams",
+    { id: streamId, part: "status" },
+    null,
+    "list"
+  );
+  const item = response.items?.[0];
+  if (!item) return null;
+  return {
+    streamId,
+    streamStatus: item.status?.streamStatus ?? null,
+    healthStatus: item.status?.healthStatus?.status ?? null,
+  };
 }
 
 export interface PlaylistSummary {

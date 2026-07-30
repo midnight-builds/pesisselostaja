@@ -122,6 +122,7 @@ function state(overrides: {
     },
     knobs: null,
     job: overrides.job === undefined ? baseJob() : overrides.job,
+    telemetry: null,
     narration: [],
     log: [],
   };

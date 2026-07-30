@@ -6,6 +6,7 @@ import { CommentaryLoop } from "./commentaryLoop.js";
 import { PiperTts } from "./piperTts.js";
 import { ElevenLabsTts } from "./elevenLabsTts.js";
 import { FfmpegMixer, SourceExhaustedError } from "./ffmpegMixer.js";
+import { NoSignalSlate } from "./noSignalSlate.js";
 import { pruneRunDir, DAY_MS } from "./runRetention.js";
 import { Telemetry } from "./telemetry.js";
 
@@ -121,6 +122,12 @@ async function main(): Promise<void> {
       elevenLabsCharsUsed: elevenLabs?.totalCharsUsed ?? 0,
     });
 
+  // Katvekuvan tekstirivit päivitetään samalla pollin tahdilla kuin
+  // telemetriakin: kuvaa ohjaa drawtextin `reload`, joten tuore tiedosto
+  // näkyy ruudulla ilman respawnia. Turha kutsu on halpa — NoSignalSlate
+  // kirjoittaa vain muuttuneen rivin.
+  const pushSlateSituation = (): void => mixer?.setSlateSituation(loop.slateSituation);
+
   let shuttingDown = false;
   const shutdown = () => {
     if (shuttingDown) return;
@@ -141,11 +148,36 @@ async function main(): Promise<void> {
   // unit reports active, not one poll later — and a relay that dies during
   // startup would otherwise leave no trace of having started at all.
   writeStatus();
-  const statusTimer = setInterval(writeStatus, config.pollInterval);
+  const statusTimer = setInterval(() => {
+    writeStatus();
+    pushSlateSituation();
+  }, config.pollInterval);
   statusTimer.unref();
 
   if (!config.dryRun) {
     const fifoPath = `${config.runDir}relay-${config.matchId}.pcm`;
+    // Katvekuva (issue #104) on oletuksena pois. Kun se on päällä, kuva
+    // renderöidään kerran tässä: epäonnistuminen ei ole virhe vaan tarkoittaa
+    // vain että katvetila ohitetaan ja respawn-silmukka toimii kuten ennen.
+    let slate: NoSignalSlate | null = null;
+    if (config.noSignalSlate) {
+      slate = new NoSignalSlate({
+        matchId: config.matchId,
+        runDir: config.runDir,
+        width: config.noSignalSlateWidth,
+        height: config.noSignalSlateHeight,
+      });
+      await slate.prepare();
+      logInfo(
+        "relay.config",
+        `Katvekuva: ${slate.available ? "PÄÄLLÄ" : "PÄÄLLÄ mutta ei käytettävissä"} ` +
+          `(kynnys ${Math.round(config.noSignalSlateAfterMs / 1000)} s, ` +
+          // Resoluutio lokiin, koska sen EROAMINEN lähteestä on se asia joka
+          // aiheuttaa ylimääräisen katkon vaihdossa — ja se on ainoa tapa
+          // huomata se jälkikäteen lokista.
+          `${config.noSignalSlateWidth}x${config.noSignalSlateHeight})`
+      );
+    }
     mixer = new FfmpegMixer({
       youtubeUrl: config.youtubeUrl,
       rtmpUrl: config.rtmpUrl,
@@ -160,11 +192,30 @@ async function main(): Promise<void> {
       heartbeatExtra: () => loop.pollStatsSummary,
       fifoPath,
       recordFile: config.recordFile,
+      slate,
+      slateAfterMs: config.noSignalSlateAfterMs,
+      // Ohjaamon havainto on VAPAAEHTOINEN tulo: se ei laukaise katvetilaa
+      // (se on relayn oma paikallinen päätös), vaan estää sen kun lähetys on
+      // päätetty ja tarkentaa tilannerivin sanamuotoa.
+      sourceIngest: () => loop.sourceIngest,
     });
+    pushSlateSituation();
     mixer.start().catch((err) => {
-      logError("ffmpeg.supervisor_failed", `ffmpeg-valvoja päättyi virheeseen: ${err instanceof Error ? err.message : err}`);
+      // A deliberately ended source is not a fault, so it must not put an
+      // ERROR line in the journal at all — an operator reading "päättyi
+      // virheeseen" goes looking for a problem that does not exist (#103).
+      const endedCleanly = err instanceof SourceExhaustedError && err.reason === "ended";
+      if (!endedCleanly) {
+        logError("ffmpeg.supervisor_failed", `ffmpeg-valvoja päättyi virheeseen: ${err instanceof Error ? err.message : err}`);
+      }
       if (err instanceof SourceExhaustedError) {
-        logError("relay.source_gone", "Alkuperäinen lähde ei palautunut — sammutetaan koko relay.");
+        // "ended" = the broadcast was finished on purpose; nothing is broken,
+        // and the log must not send anyone hunting for a fault (issue #103).
+        if (err.reason === "ended") {
+          logInfo("relay.source_ended", "Lähde on päättynyt — sammutetaan relay siististi.");
+        } else {
+          logError("relay.source_gone", "Alkuperäinen lähde ei palautunut — sammutetaan koko relay.");
+        }
         shutdown();
       }
     });

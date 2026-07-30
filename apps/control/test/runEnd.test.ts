@@ -25,6 +25,12 @@ vi.mock("../src/server/relay.js", () => ({
     deltaFetch: true,
     pollIntervalMs: 3000,
   })),
+  // Lähteen tilan polleri (#104 vaihe 1) tuo nämä samasta moduulista. Mock on
+  // koko moduulin korvaus, joten puuttuva export kaataa importin — vaikka tämä
+  // testi ei pollaria käytäkään.
+  readRunningMatchId: vi.fn(async () => null),
+  writeSourceIngest: vi.fn(async () => undefined),
+  readSourceIngest: vi.fn(async () => null),
 }));
 vi.mock("../src/server/journal.js", () => ({ readLog: vi.fn(async () => []) }));
 vi.mock("../src/server/system.js", () => ({
