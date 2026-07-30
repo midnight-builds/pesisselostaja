@@ -426,3 +426,35 @@ describe("reconciling the broadcast slot", () => {
     live.stop();
   });
 });
+
+/** "Lopeta edellinen ja aktivoi tämä" (force) pysäyttää relayn ja vaihtaa
+ *  slotin haltijan saman HTTP-pyynnön sisällä. Laskeva reuna näkee 5 s
+ *  kuluttua relayn poissa ja slotissa JO SEURAAVAN ottelun työn — jos se
+ *  sulkee sen, operaattori käynnistää relayn työhön joka on juuri peruttu:
+ *  ei säätimiä, ei telemetriaa, ei hard stopin siivousta. */
+describe("ottelusta toiseen vaihtaminen", () => {
+  it("sulkee sen ajon jota seurattiin, ei slotin uutta haltijaa", async () => {
+    const previous = job({ id: "job-a", matchId: 144980, status: "live" });
+    const next = job({ id: "job-b", matchId: 145900, status: "arming", startedAt: null });
+    let active: Job = previous;
+    const closeRunningJob = vi.fn(async () => null);
+    relayUp();
+
+    const live = startLiveAggregator({
+      getActiveJob: async () => active,
+      closeRunningJob,
+      markRunStarted: async () => null,
+      getRunningStatus: async () => runStatus(relayState.active ? 144980 : null),
+    });
+    await tick();
+
+    // Force-aktivointi: relay pysäytetään ja slotti vaihtaa haltijaa.
+    relayDown();
+    active = next;
+    await tick();
+
+    expect(closeRunningJob).toHaveBeenCalledWith("job-a");
+    expect(closeRunningJob).not.toHaveBeenCalledWith("job-b");
+    live.stop();
+  });
+});

@@ -192,8 +192,12 @@ relayn omalla näytöllä**: `run/status-<ID>.json` kertoo mitä relay ajaa.
   (ohjaamo käynnistettiin uudelleen relayn sammuttua). Se vaatii aina näytön:
   relay ajossa ⇒ on tiedettävä mitä; relay alhaalla ⇒ 30 s ennen kuin ajo
   tulkitaan päättyneeksi, jottei relayn oma restart vapauta slottia kesken
-  lähetyksen. Sovittelu ajaa myös hard stopin siivouksen (#123), jottei
-  ohjaamon uudelleenkäynnistys jättäisi lähetyksiä päälle.
+  lähetyksen. Sovittelu yrittää myös hard stopin siivousta (#123), mutta sen
+  omat vartijat ratkaisevat: relayn status saa olla korkeintaan 90 s vanha.
+  **Käytännössä siivous onnistuu vain jos ohjaamo on takaisin pystyssä noin
+  minuutissa.** Pidempi katko ⇒ kohde- ja lähdelähetys jäävät päälle ja ne on
+  lopetettava käsin. Se on tietoinen raja: vanhentuneen syyn perusteella
+  sammuttaminen voisi katkaista lähetyksen joka on vasta alkamassa.
 - **Odottava työ vanhenee tunnissa.** `arming`-tilassa oleva työ, jolle ei ole
   käynnistetty relayta tuntiin (`ARMING_STALE_MS`, `jobs.ts`), perutaan
   automaattisesti. Aikaisin armaaminen ja kuvaajan odottelu on siis normaalia,

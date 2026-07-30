@@ -306,13 +306,35 @@ describe("closing a named run", () => {
 // forever — which is how #118's job survived the night and swallowed the next
 // morning's run, and how #101's activation kept failing with 409.
 describe("reconciling open jobs", () => {
-  it("closes an open job for a match the relay is not running", async () => {
+  it("closes a job left armed overnight while the relay runs another match", async () => {
     const stale = await createJob({ matchId: 145895 });
     await activateJob(stale.id);
 
-    const closed = await reconcileOpenJobs(145900);
+    const closed = await reconcileOpenJobs(145900, Date.now() + ARMING_STALE_MS + 1000);
     expect(closed.map((j) => j.id)).toEqual([stale.id]);
     expect((await listJobs())[0].status).toBe("cancelled");
+  });
+
+  it("gives a just-armed job the same grace even when the relay runs another match", async () => {
+    // Edellinen ottelu voi olla ajossa ilman omaa työtä (käsin käynnistetty
+    // relay, tai työ suljettu alta). Silloin seuraavan ottelun valmistelu on
+    // täysin normaalia, eikä sitä saa perua 5 s välein — oikea vastaus on
+    // ristiriitavaroitus, jonka sidonta jo nostaa.
+    const next = await createJob({ matchId: 145901 });
+    await activateJob(next.id);
+
+    expect(await reconcileOpenJobs(145900)).toEqual([]);
+    expect((await listJobs())[0].status).toBe("arming");
+  });
+
+  it("closes a live job whose match is not the one running", async () => {
+    // "live" ilman sitä ajoa: ajo on ohi riippumatta iästä.
+    const job = await createJob({ matchId: 145895 });
+    await activateJob(job.id);
+    await markRunStarted(145895);
+
+    const closed = await reconcileOpenJobs(145900);
+    expect(closed[0].status).toBe("finished");
   });
 
   it("leaves the job of the run that is actually happening alone", async () => {
