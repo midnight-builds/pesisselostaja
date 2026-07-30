@@ -218,6 +218,35 @@ joukkue ja vastustaja ("Pesä Ysit F-pojat", "IPV"), viesti käyttää niitä ei
 tulospalvelun raakoja nimiä. Tulospalvelun osoite on monikkomuodossa
 (`/ottelut/<id>`), kuten palvelu itse sen kirjoittaa.
 
+Viestin saa **milloin tahansa** työn elinkaaren aikana:
+`GET /api/jobs/:id/share`, ja Työ-välilehdellä oma kortti kopiointinapilla
+(#131). Se muodostetaan uudelleen työn linkeistä eikä talleteta luontihetkellä,
+joten mallin vaihtaminen kesken leiripäivän näkyy myös jo luoduissa töissä.
+Ennen lähetysten luontia viestissä on paikkamerkit ja `linksReady` on `false` —
+käyttöliittymä sanoo silloin "älä jaa sitä vielä".
+
+## Kenttänimen siivous
+
+Tulospalvelun kenttänimi on sisäisessä muodossaan: `01 - Viinijärven
+pallokenttä, tekonurmi 1| LEIRITUOTANTO`. Kenttänumero ja tuotantomerkintä
+siivotaan oletuksena pois otsikosta, kuvauksesta, thumbnailista ja
+jakoviestistä (#132) — yhdessä paikassa, `templateInputFromMatch`issa, koska
+kenttänimi haarautuu siitä neljään suuntaan.
+
+Säännöt ovat coressa (`venueDisplayName`), joten **selostus puhuu saman nimen
+kuin otsikkoon kirjoitetaan**: aiemmin puhe kuului muodossa "nolla viisi viiva
+Liperin kirkonkylän kenttä viisi" (#101).
+
+Kytkimet ovat `run/venue-cleanup.json`issa samalla idiomilla kuin jakoviestin
+pohja — oletukset levylle käynnistyksessä, luku joka pyynnöllä:
+
+```json
+{ "stripFieldNumber": true, "stripQualifier": true }
+```
+
+Vain kirjaimellinen `false` sammuttaa säännön; roska tai merkkijono `"false"`
+tarkoittaa oletusta. Käyttöliittymä tulee Asetukset-sivun mukana (#133).
+
 ## Vaiheet
 
 **Vaihe A (tehty ensin):** ottelun valinta, `.env.relay`, preflight, relayn
