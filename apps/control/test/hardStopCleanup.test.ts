@@ -88,6 +88,14 @@ const { startLiveAggregator } = await import("../src/server/live.js");
 const SOURCE_VIDEO_ID = "srcVIDEO123";
 const TARGET_VIDEO_ID = "tgtVIDEO456";
 
+/** Aikaleimat rakennetaan suhteessa NYKYHETKEEN, ei kiinteinä merkkijonoina:
+ *  siivouksen tuoreusvartija (#123) hylkää statuksen joka on yli
+ *  TELEMETRY_STALE_MS vanha, joten kiinteä päivämäärä tekisi jokaisesta
+ *  testistä "vanhentuneen ajon" heti kun kello käy eteenpäin. */
+function isoAgo(ms: number): string {
+  return new Date(Date.now() - ms).toISOString();
+}
+
 function job(overrides: Partial<Job> = {}): Job {
   return {
     id: "job-1",
@@ -103,28 +111,32 @@ function job(overrides: Partial<Job> = {}): Job {
     targetStreamKey: "key",
     targetRtmpUrl: "rtmp://a.rtmp.youtube.com/live2",
     targetVideoId: TARGET_VIDEO_ID,
-    startedAt: "2026-07-30T05:30:00.000Z",
+    startedAt: isoAgo(60 * 60 * 1000),
     endedAt: null,
     note: null,
     ...overrides,
   };
 }
 
-function telemetry(endReason: RelayTelemetry["endReason"]): RelayTelemetry {
+function telemetry(
+  endReason: RelayTelemetry["endReason"],
+  overrides: Partial<RelayTelemetry> = {}
+): RelayTelemetry {
   return {
-    at: "2026-07-30T06:27:00.000Z",
+    at: isoAgo(0),
     matchId: 145900,
-    startedAt: "2026-07-30T05:30:00.000Z",
+    startedAt: isoAgo(60 * 60 * 1000),
     uptimeSec: 3522,
     readerAttached: false,
     pendingClips: 0,
     respawns: 3,
     source: { state: "no_signal", detail: "ffmpeg poistui heti" },
-    match: { finished: true, eventCount: 412, lastEventAt: "2026-07-30T06:23:59.000Z" },
+    match: { finished: true, eventCount: 412, lastEventAt: isoAgo(3 * 60 * 1000) },
     narration: { detected: 90, spoken: 90, muted: 0, queued: 0 },
     tts: { engine: "piper", elevenLabsCharsUsed: 0 },
     lastProblem: null,
     endReason,
+    ...overrides,
   };
 }
 
@@ -141,8 +153,10 @@ async function runFallingEdge(options: {
   endReason: RelayTelemetry["endReason"];
   hardStopSource?: boolean;
   transition?: (videoId: string) => Promise<TransitionResult>;
+  telemetryOverrides?: Partial<RelayTelemetry>;
+  jobOverrides?: Partial<Job>;
 }): Promise<{ transition: ReturnType<typeof vi.fn>; closeRunningJob: ReturnType<typeof vi.fn> }> {
-  let active: Job | null = job();
+  let active: Job | null = job(options.jobOverrides);
   const closeRunningJob = vi.fn(async () => {
     const closed: Job = { ...(active as Job), status: "finished" };
     active = null;
@@ -154,8 +168,11 @@ async function runFallingEdge(options: {
   const live = startLiveAggregator({
     getActiveJob: async () => active,
     closeRunningJob,
+    // Nouseva reuna leimaisi arming-työn käyntiin oikean job-varaston kautta;
+    // testissä työn tila pysyy sinä miksi se on asetettu.
+    markRunStarted: async () => null,
     transitionBroadcast: transition,
-    readTelemetry: async () => telemetry(options.endReason),
+    readTelemetry: async () => telemetry(options.endReason, options.telemetryOverrides),
     hardStopSource: options.hardStopSource ?? false,
   });
   await tick();
@@ -255,5 +272,74 @@ describe("hard stop -siivous laskevalla reunalla", () => {
     // Molemmat yritettiin, kumpikaan ei onnistunut — eikä työ jäänyt auki.
     expect(transition).toHaveBeenCalledTimes(2);
     expect(closeRunningJob).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** Tuoreusvartija. Nämä ovat siivouksen tärkeimmät testit: ilman vartijaa
+ *  ohjaamo sammuttaa lähetyksiä levylle jääneen VANHAN ajon syyn perusteella,
+ *  ja pahimmassa tapauksessa katkaisee toisen ihmisen lähdelähetyksen ennen
+ *  kuin ottelu on edes alkanut. */
+describe("hard stop -siivous: status-tiedoston on kuuluttava tähän ajoon", () => {
+  it("EI siivoa arming-tilaista työtä — relay ei koskaan päässyt käyntiin", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    // Skenaario: edellinen ajo teki hard stopin ja jätti syyn levylle. Sama
+    // ottelu aktivoidaan uudelleen, mutta relay kaatuu käynnistyksessä (unit
+    // nousee ja putoaa) ehtimättä kirjoittaa statusta. Lähde on jo livenä.
+    const { transition, closeRunningJob } = await runFallingEdge({
+      endReason: "hard_stop",
+      hardStopSource: true,
+      jobOverrides: { status: "arming", startedAt: null },
+    });
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(closeRunningJob).toHaveBeenCalledTimes(1);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("EI siivoa vanhentuneen statuksen perusteella", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const { transition, closeRunningJob } = await runFallingEdge({
+      endReason: "hard_stop",
+      hardStopSource: true,
+      telemetryOverrides: { at: isoAgo(10 * 60 * 1000) }, // 10 min vanha kirjoitus
+    });
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(closeRunningJob).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls.map((c) => c.join(" ")).join("\n")).toMatch(/ohitettu.*vanha/i);
+  });
+
+  it("EI siivoa kun status on työtä vanhemmasta ajosta", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const { transition } = await runFallingEdge({
+      endReason: "hard_stop",
+      hardStopSource: true,
+      // Status on tuore, mutta relayn ajo alkoi ennen tätä työtä.
+      telemetryOverrides: { startedAt: isoAgo(3 * 60 * 60 * 1000) },
+      jobOverrides: { startedAt: isoAgo(10 * 60 * 1000) },
+    });
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(warn.mock.calls.map((c) => c.join(" ")).join("\n")).toMatch(/vanhemmasta ajosta/);
+  });
+
+  it("EI siivoa kun status kertoo eri ottelusta", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const { transition } = await runFallingEdge({
+      endReason: "hard_stop",
+      hardStopSource: true,
+      telemetryOverrides: { matchId: 999999 },
+    });
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(warn.mock.calls.map((c) => c.join(" ")).join("\n")).toContain("999999");
   });
 });
