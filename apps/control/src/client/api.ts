@@ -14,6 +14,7 @@ import type {
   MatchOption,
   PreflightResult,
   RelayProcess,
+  JobShareMessage,
   SchedulerState,
 } from "../shared/types";
 /** The YouTube chain's response shapes are the server module's own exported
@@ -189,6 +190,10 @@ export const api = {
    *  taking the slot. Only ever sent from an explicit, confirmed tap. */
   activateJob: (id: string, opts: { force?: boolean } = {}) =>
     postJson<Job>(`/api/jobs/${encodeURIComponent(id)}/activate`, opts.force ? { force: true } : undefined),
+  /** Jakoviesti työn linkeistä, muodostettuna uudelleen joka pyynnöllä (#131).
+   *  Toimii työn koko elinkaaren ajan, myös ennen lähetysten luontia — silloin
+   *  `linksReady` on false ja viestissä on paikkamerkit. */
+  jobShare: (id: string) => request<JobShareMessage>(`/api/jobs/${encodeURIComponent(id)}/share`),
   preflight: () => postJson<PreflightResult>("/api/preflight"),
   relay: (action: "start" | "stop" | "restart") => postJson<RelayProcess>(`/api/relay/${action}`),
   knobs: (payload: PatchKnobsRequest) => postJson<ControlKnobs>("/api/knobs", payload),

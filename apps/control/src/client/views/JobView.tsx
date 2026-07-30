@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Job, LiveState, PreflightResult } from "../../shared/types";
+import type { Job, JobShareMessage, LiveState, PreflightResult } from "../../shared/types";
 import { ApiRequestError, DEFAULT_RTMP_URL, api } from "../api";
 import { ConfirmButton } from "../components/ConfirmButton";
+import { CopyButton } from "../components/CopyButton";
 import { Field } from "../components/Field";
 import { SchedulerCard } from "../components/SchedulerCard";
 import { fiDate, fiTime } from "../format";
@@ -36,8 +37,34 @@ export function JobView({ live, notify, reloadToken }: Props) {
    *  into a button instead of a hand-written PATCH in the middle of a match
    *  changeover (#101). */
   const [clash, setClash] = useState<string | null>(null);
+  /** Jakoviesti (#131). Haetaan aina uudelleen valitulle työlle sen sijaan
+   *  että se talletettaisiin luontivastauksesta: luonnin jälkeen viesti näkyi
+   *  vain kerran, ja katosi jos operaattori ei kopioinut sitä heti tai sivu
+   *  latautui uudelleen. Katsojia tulee kanaville kesken ottelunkin. */
+  const [share, setShare] = useState<JobShareMessage | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
 
   const activeId = live?.job?.id ?? null;
+
+  useEffect(() => {
+    if (!selectedId) {
+      setShare(null);
+      setShareError(null);
+      return;
+    }
+    let cancelled = false;
+    setShare(null);
+    setShareError(null);
+    api.jobShare(selectedId).then(
+      (msg) => !cancelled && setShare(msg),
+      (err: unknown) => !cancelled && setShareError(err instanceof Error ? err.message : String(err))
+    );
+    return () => {
+      cancelled = true;
+    };
+    // reloadToken: lähetysten luonti YouTube-välilehdellä muuttaa työn linkit,
+    // jolloin sama työ tuottaa eri viestin.
+  }, [selectedId, reloadToken]);
 
   const loadJobs = useCallback(async () => {
     try {
@@ -231,6 +258,29 @@ export function JobView({ live, notify, reloadToken }: Props) {
               onConfirm={() => void activate(job, true)}
             />
           </div>
+        )}
+      </section>
+
+      {/* Jakoviesti on saatavilla työn koko elinkaaren ajan, ei vain
+          luontihetkellä (#131). Ennen lähetysten luontia se näkyy silti —
+          paikkamerkkeineen — jotta operaattori näkee mitä puuttuu. */}
+      <section className="card">
+        <h2 className="card__title">Jaettava viesti</h2>
+        {shareError && <p className="field__hint is-fail">{shareError}</p>}
+        {!shareError && !share && <p className="muted">Haetaan…</p>}
+        {share && (
+          <>
+            <pre className="textblock" data-testid="job-share-message">
+              {share.shareMessage}
+            </pre>
+            {!share.linksReady && (
+              <p className="field__hint is-fail">
+                Lähetyksiä ei ole vielä luotu — viestissä on paikkamerkit oikeiden linkkien sijaan.
+                Älä jaa sitä vielä.
+              </p>
+            )}
+            <CopyButton className="btn--wide" text={share.shareMessage} label="Kopioi jaettava viesti" />
+          </>
         )}
       </section>
 
