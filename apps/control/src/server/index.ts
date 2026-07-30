@@ -19,6 +19,7 @@ import {
 import { readLog } from "./journal.js";
 import { runControlPreflight } from "./preflight.js";
 import { startLiveAggregator } from "./live.js";
+import { createSourceIngestPoller } from "./sourceIngest.js";
 import { getDayMatches, getMatch } from "./matches.js";
 import {
   listJobs,
@@ -547,10 +548,19 @@ async function main(): Promise<void> {
   // boot rather than on every write.
   await mkdir(CONFIG.stateDir, { recursive: true });
 
+  // Lähteen tilan polleri käynnistyy ennen aggregaattoria, jotta ensimmäinen
+  // koottu tila voi jo sisältää havainnon. Se on porttien takana: ilman
+  // aktiivista työtä, ajossa olevaa relayta ja Google-tunnuksia se ei kutsu
+  // YouTubea kertaakaan (sourceIngest.ts).
+  const sourceIngest = createSourceIngestPoller();
+
   // The live view needs to know which job is currently the relay's job to
   // know what to poll; the aggregator asks rather than the server pushing it
   // in, so a job activated after the aggregator started is picked up too.
-  const live = startLiveAggregator({ getActiveJob });
+  const live = startLiveAggregator({
+    getActiveJob,
+    getSourceIngest: () => ({ ingest: sourceIngest.current(), reason: sourceIngest.reason() }),
+  });
 
   // Push triggers ride along as an ordinary subscriber instead of being wired
   // into the aggregator itself: notifications can then never alter, delay or
@@ -599,6 +609,10 @@ async function main(): Promise<void> {
     // Stopping the scheduler stops it from acting; it never stops a broadcast
     // that is already on air (uptime first — that is systemd's business).
     scheduler.stop();
+    // Polleri pysäytetään erikseen: sen ajastin on aggregaattorista
+    // riippumaton, eikä kesken oleva YouTube-kutsu saa pitää prosessia
+    // pystyssä sammutuksen jälkeen.
+    sourceIngest.stop();
     live.stop();
     server.close(() => process.exit(0));
   };

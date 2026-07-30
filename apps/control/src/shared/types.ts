@@ -83,7 +83,13 @@ export interface RelayTelemetry {
   pendingClips: number;
   respawns: number;
   source: {
-    state: "live" | "scheduled" | "resolving" | "failed" | "unknown";
+    /** Peilaa relayn omaa `RelayStatus.source.state`-unionia
+     *  (`apps/broadcast/src/telemetry.ts`). Kun relay saa uuden tilan, se on
+     *  lisättävä myös tänne — muuten arvo putoaa ohjaamon defaulttiin ja
+     *  tilarivi sanoo "relay ei kerro lähteen tilaa" juuri silloin kun relay
+     *  kertoo sen tarkasti. Niin kävi `ended`ille (#103) ja `no_signal`ille
+     *  (#104), jotka lisättiin relaylle tämän tyypin jo olemassa ollessa. */
+    state: "live" | "scheduled" | "resolving" | "failed" | "ended" | "unknown" | "no_signal";
     detail: string | null;
   };
   match: {
@@ -130,6 +136,32 @@ export interface ControlKnobs {
   pollIntervalMs: number;
 }
 
+/** Ohjaamon YouTube-API-havainto LÄHTEEN sisääntulosta. Ohjaamo on ainoa jolla
+ *  on Google-tunnukset, joten se katsoo ja relay lukee — relay ei koskaan kysy
+ *  Googlelta itse (yksi refresh_tokenin omistaja, eikä lähetyksen jatkuminen
+ *  saa riippua Google-yhteydestä). Vaihe 1 vain julkaisee; kuluttajaa ei vielä
+ *  ole. */
+export interface SourceIngest {
+  /** Havaintohetki, ISO. Kuluttajan ON kohdeltava vanhentunutta tietoa
+   *  tietämättömyytenä — ei "syöte poikki" -päätöksenä. */
+  observedAt: string;
+  /** Mitä videota katsottiin. Kuluttaja voi ristiintarkistaa tämän omaa
+   *  RELAY_YOUTUBE_URLiaan vasten; ilman sitä lähde ja kohde voivat sekaantua. */
+  videoId: string;
+  /** liveBroadcasts.list, raaka arvo: created|ready|testing|live|complete|revoked. */
+  lifeCycleStatus: string | null;
+  /** liveStreams.list, raaka arvo: created|ready|active|inactive|error.
+   *  VAIN "active" tarkoittaa että dataa virtaa sisään — kaikki muu on
+   *  "ei virtaa", ja null on "ei tietoa". */
+  streamStatus: string | null;
+  /** healthStatus.status: good|ok|bad|noData. */
+  healthStatus: string | null;
+  /** Lyhyt suomenkielinen syy kun havaintoa ei saatu; muuten null. Tila-kentät
+   *  ovat silloin null — vanhaa arvoa ei jätetä paikoilleen, koska vanhentunut
+   *  "active" on vaarallisempi kuin tietämättömyys. */
+  error: string | null;
+}
+
 /** Everything the live view needs, in one payload, pushed over SSE. */
 export interface LiveState {
   /** Server time, so the client can render "N s sitten" without trusting the
@@ -143,6 +175,11 @@ export interface LiveState {
   match: MatchState;
   system: SystemState;
   knobs: ControlKnobs | null;
+  /** Ohjaamon viimeisin YouTube-havainto lähteestä, tai null kun sitä ei
+   *  juuri nyt pollata. Valinnainen tarkoituksella: kenttä lisättiin
+   *  olemassa olevaan sopimukseen, eivätkä testien fixtuurit (test-ui/support/
+   *  state.ts) saa rikkoutua siitä että ohjaamo alkoi julkaista sen. */
+  sourceIngest?: SourceIngest | null;
   job: Job | null;
   /** What the relay says about itself, or null when it has published nothing
    *  for this match (not started, or a deploy older than PR #93). */

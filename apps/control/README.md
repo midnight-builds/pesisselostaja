@@ -107,6 +107,30 @@ kolmea lähdettä:
 - lukee relayn telemetrian: `run/status-<ID>.json` ja `run/timeline-<ID>.ndjson`
 - lukee `systemctl --user show`, `journalctl --user -u`, ja pesistulokset-API:n
 
+### `sourceIngest` — lähteen tila YouTube-API:sta (#104 vaihe 1)
+
+Ohjaamo on ainoa jolla on Google-tunnukset, joten se katsoo lähteen puolesta ja
+relay lukee. Relay **ei** kysy Googlelta itse: kaksi refresh_tokenin päivittäjää
+rikkoisi authin kesken ottelun, eikä lähetyksen jatkuminen saa riippua
+Google-yhteydestä.
+
+30 s välein ohjaamo hakee lähdelähetyksen `lifeCycleStatus`in
+(`liveBroadcasts.list`) ja siihen sidotun syötteen `streamStatus`in
+(`liveStreams.list`), ja kirjoittaa havainnon control-tiedoston
+`sourceIngest`-avaimeen (`observedAt`, `videoId`, tilat raakoina merkkijonoina,
+`error`). Arvot julkaistaan sellaisinaan — **päätös kuuluu relaylle, ei
+ohjaamolle**. Vain `streamStatus === "active"` tarkoittaa että dataa virtaa;
+`null` ja vanhentunut `observedAt` tarkoittavat *ei tietoa*, eivät *poikki*.
+
+Vaiheessa 1 relay ohittaa avaimen: käytös ei muutu. Vaihe 2 lukee sen ja
+vaihtaa katvekuvaan.
+
+Pollaus on portitettu tiukasti — työ tilassa `arming`/`live`, relay-yksikkö
+ajossa **ja relayn oma telemetria (`run/status-<ID>.json`) kertoo että se ajaa
+juuri tätä ottelua**, lähde-URL jäsentyy eikä ole sama kuin kohdevideo, Google-
+token tallennettu, kiintiötä yli varauksen. Portin sulkeutuminen ei ole vika
+vaan normaali lepotila, ja se näkyy ohjaamon Lähde-rivillä syynä.
+
 `run/` on symlinkattu ajokopiosta työpuuhun, joten ohjaamo näkee samat
 tiedostot jotka ajossa oleva relay kirjoittaa.
 

@@ -28,12 +28,14 @@ import type {
   NarrationLine,
   RelayProcess,
   RelayTelemetry,
+  SourceIngest,
   SystemState,
 } from "../shared/types.js";
 import { getActiveJob } from "./jobs.js";
 import { readLog } from "./journal.js";
 import { getMatchState } from "./matches.js";
 import { getRelayProcess, readKnobs } from "./relay.js";
+import { SOURCE_INGEST_STALE_MS } from "./sourceIngest.js";
 import { getSystemState } from "./system.js";
 import { NarrationTimeline, readRelayStatus } from "./telemetry.js";
 
@@ -88,6 +90,10 @@ export interface LiveAggregator {
  *  file on disk, and so index.ts can hand in the store it already imported. */
 export interface LiveAggregatorOptions {
   getActiveJob?: () => Promise<Job | null>;
+  /** Lähteen tilan polleri (sourceIngest.ts). Aggregaattori ei omista sitä:
+   *  polleri pollaa omalla 30 s välillään kiintiön takia, ja tämä vain kysyy
+   *  sen viimeisimmän tuloksen jokaisella tikillä. */
+  getSourceIngest?: () => { ingest: SourceIngest | null; reason: string | null };
 }
 
 // ------------------------------------------------------------ empty defaults
@@ -193,6 +199,13 @@ export interface Snapshot {
   /** Per-source failures from this cycle; a failed source can't be judged
    *  healthy just because its last known value looked fine. */
   errors: Map<SourceKey, string>;
+  /** Ohjaamon oma YouTube-havainto lähteestä. Valinnainen, koska se lisättiin
+   *  olemassa olevaan tyyppiin; puuttuva ja null tarkoittavat samaa asiaa
+   *  ("ei havaintoa"), eikä kumpikaan saa muuttaa yhtään terveyspäätöstä
+   *  entisestään. */
+  sourceIngest?: SourceIngest | null;
+  /** Pollerin syy sille ettei havaintoa juuri nyt ole. */
+  sourceIngestReason?: string | null;
 }
 
 function minutes(sec: number | null): string {
@@ -319,28 +332,130 @@ function chainRow(key: ChainKey, label: string, health: Health, detail: string):
   return { key, label, health, detail };
 }
 
-/** The relay's own five source states, in the operator's words. "scheduled" is
+/** Lähde-rivin sääntö YouTube-havainnolle: **API-havainto voi vain lisätä
+ *  epäilystä, ei koskaan tuottaa vihreää.**
+ *
+ *  Kaksi mielipidettä samasta rivistä on juuri se ongelma jonka issue #97
+ *  poistaa: relayn oma loki kertoo mitä relay näkee, ja jos ohjaamon havainto
+ *  saisi ylikirjoittaa sen, rivin väri riippuisi siitä kumpi ehti ensin. Siksi
+ *  lokipohjainen logiikka päättää lähtötason ja havainto saa korkeintaan
+ *  pudottaa ok → warn. Failiin ei mennä: vaihe 1 on julkaisu, eikä kukaan vielä
+ *  toimi tämän tiedon perusteella.
+ *
+ *  Vanhentunut tai virheellinen havainto ei muuta terveyttä lainkaan —
+ *  tietämättömyys ei ole todiste. */
+function applySourceIngest(
+  row: { health: Health; detail: string },
+  snap: Snapshot,
+  now: number
+): { health: Health; detail: string } {
+  const ingest = snap.sourceIngest ?? null;
+  const notes: string[] = [];
+  let health = row.health;
+  const doubt = (): void => {
+    // Vain ok → warn. Idle pysyy idlenä (relay ei lue lähdettä, joten
+    // syötteen tila ei kerro rivistä mitään), fail pysyy failina.
+    if (health === "ok") health = "warn";
+  };
+
+  const ageMs = ingest ? now - Date.parse(ingest.observedAt) : NaN;
+  // Ikä on oltava välillä [0, raja]. Negatiivinen ikä tarkoittaa aikaleimaa
+  // tulevaisuudessa (kello siirtynyt kirjoituksen jälkeen, käsin muokattu
+  // tiedosto) — ilman alarajaa sellainen havainto olisi IKUISESTI "tuore" ja
+  // ohjaisi tilariviä siitä eteenpäin.
+  const fresh =
+    ingest !== null &&
+    ingest.error === null &&
+    Number.isFinite(ageMs) &&
+    ageMs >= 0 &&
+    ageMs <= SOURCE_INGEST_STALE_MS;
+
+  if (!fresh) {
+    if (ingest !== null) {
+      notes.push(ingest.error ? "YouTube: havaintoa ei saatu" : "YouTube: havainto vanhentunut");
+    }
+  } else if (ingest) {
+    if (ingest.lifeCycleStatus === "complete") {
+      notes.push("YouTube: lähde on päättynyt");
+      // Relay yhä ajossa vaikka lähde on suljettu: se on epäilystä, ei vielä
+      // vikaa — relay sammuu itse kun lähde loppuu.
+      if (snap.relay.active) doubt();
+    }
+    if (ingest.streamStatus === "active") {
+      // Ainoa arvo joka tarkoittaa että dataa virtaa sisään. Se ei nosta
+      // terveyttä, vain vahvistaa mitä rivi jo sanoo.
+      notes.push("YouTube: syöte aktiivinen");
+    } else if (ingest.streamStatus !== null) {
+      notes.push(`YouTube: syöte ei virtaa (${ingest.streamStatus})`);
+      doubt();
+    }
+  }
+
+  // Pollerin syy näytetään AINA kun se on asetettu, myös silloin kun havainto
+  // on olemassa. Havainto muistissa ei tarkoita että se olisi julkaistu: kun
+  // kirjoitus control-tiedostoon epäonnistuu (levy täynnä, vain luku), polleri
+  // asettaa syyn mutta pitää havainnon — ja ilman tätä riviä operaattori lukisi
+  // "syöte aktiivinen" vihreänä tilanteessa jossa relay ei ole nähnyt yhtäkään
+  // havaintoa.
+  //
+  // Ilman työtä syy on aina "ei aktiivista työtä", jonka rivi sanoo jo itse.
+  if (snap.job && snap.sourceIngestReason) {
+    notes.push(`YouTube: ${snap.sourceIngestReason}`);
+    // Syy + olemassa oleva havainto = julkaisu on poikki (portin sulkeutuessa
+    // polleri nollaa havainnon). Se on tiedetty vika eikä tietämättömyys,
+    // joten se saa pudottaa rivin ok → warn.
+    if (ingest !== null) doubt();
+  }
+
+  return {
+    health,
+    detail: notes.length > 0 ? [row.detail, ...notes].join(" · ") : row.detail,
+  };
+}
+
+/** The relay's own source states, in the operator's words. "scheduled" is
  *  healthy, not a warning: the relay is waiting for a stream that has not begun
- *  yet, which is where every broadcast starts. */
-function sourceRowFromTelemetry(telemetry: RelayTelemetry): ChainStatus {
+ *  yet, which is where every broadcast starts.
+ *
+ *  Palauttaa {health, detail} eikä valmista riviä, koska ohjaamon oma
+ *  YouTube-havainto täydentää tätä jälkikäteen (applySourceIngest).
+ *
+ *  `ended` ja `no_signal` tulivat relaylle vasta issueiden #103 ja #104
+ *  myötä. Ilman omia haaroja ne putoaisivat defaultiin ja rivi sanoisi
+ *  "relay ei kerro lähteen tilaa" juuri silloin kun relay kertoo sen hyvin
+ *  tarkasti — kaksi eri tilaa naamioituneena telemetrian puutteeksi. */
+function sourceFromTelemetry(telemetry: RelayTelemetry): { health: Health; detail: string } {
   const detail = telemetry.source.detail;
   switch (telemetry.source.state) {
     case "live":
-      return chainRow("source", "Lähde", "ok", detail ?? "ffmpeg kiinni lähteessä");
+      return { health: "ok", detail: detail ?? "ffmpeg kiinni lähteessä" };
     case "scheduled":
-      return chainRow("source", "Lähde", "ok", `ei vielä livenä — ${detail ?? "relay odottaa"}`);
+      return { health: "ok", detail: `ei vielä livenä — ${detail ?? "relay odottaa"}` };
     case "resolving":
-      return chainRow("source", "Lähde", "ok", "haetaan lähdeosoitetta yt-dlp:llä");
+      return { health: "ok", detail: "haetaan lähdeosoitetta yt-dlp:llä" };
     case "failed":
-      return chainRow("source", "Lähde", "fail", detail ?? "lähteen avaus epäonnistui");
+      return { health: "fail", detail: detail ?? "lähteen avaus epäonnistui" };
+    case "ended":
+      // Kuvaaja lopetti lähteen (#103). Normaali, terve lopputila: relay
+      // sammuu itse, eikä tämä ole vika josta operaattoria herätetään.
+      return { health: "ok", detail: detail ?? "lähde päättyi — lähetys lopetetaan siististi" };
+    case "no_signal":
+      // Katvekuva päällä (#104): RTMP-työntö jatkuu ja selostus kuuluu, mutta
+      // KUVA ON POIKKI. Tämän on näkyttävä keltaisena, koska juuri tässä
+      // tilassa lähetys näyttää ulospäin sujuvalta — issuen oma rajaus on
+      // ettei katve saa peittää ongelmaa operaattorilta.
+      return {
+        health: "warn",
+        detail: `katvekuva päällä — kuva poikki, selostus jatkuu${detail ? ` (${detail})` : ""}`,
+      };
     default:
-      return chainRow("source", "Lähde", "warn", "relay ei kerro lähteen tilaa");
+      return { health: "warn", detail: "relay ei kerro lähteen tilaa" };
   }
 }
 
 /** Six dots, each one sentence. Any source that threw this cycle is red with
  *  its own error text — a stale green here would be a lie. */
-function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainStatus[] {
+export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainStatus[] {
   const { job, relay, match, system, errors, now } = snap;
   const telemetry = freshTelemetry(snap);
   const rows: ChainStatus[] = [];
@@ -353,23 +468,31 @@ function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainStatus[] {
   // of the 50-line window.
   const notLive = lastMatching(snap.log, PHRASE.sourceNotLive);
   const ffmpegStart = lastMatching(snap.log, PHRASE.ffmpegStart);
+  let source: { health: Health; detail: string };
   if (!job) {
-    rows.push(chainRow("source", "Lähde", "idle", "ei aktiivista työtä"));
+    source = { health: "idle", detail: "ei aktiivista työtä" };
   } else if (!job.sourceUrl) {
-    rows.push(chainRow("source", "Lähde", "warn", "lähde-URL puuttuu työstä"));
+    source = { health: "warn", detail: "lähde-URL puuttuu työstä" };
   } else if (!relay.active) {
-    rows.push(chainRow("source", "Lähde", "idle", "relay ei lue lähdettä"));
+    source = { health: "idle", detail: "relay ei lue lähdettä" };
   } else if (telemetry) {
-    rows.push(sourceRowFromTelemetry(telemetry));
+    source = sourceFromTelemetry(telemetry);
   } else if (notLive && (!ffmpegStart || Date.parse(notLive.ts) > Date.parse(ffmpegStart.ts))) {
     // Waiting for a scheduled start is a normal, healthy state — the relay
     // sleeps and rechecks without burning its give-up window.
-    rows.push(chainRow("source", "Lähde", "ok", "ei vielä livenä — relay odottaa"));
+    source = { health: "ok", detail: "ei vielä livenä — relay odottaa" };
   } else if (ffmpegStart) {
-    rows.push(chainRow("source", "Lähde", "ok", "ffmpeg kiinni lähteessä"));
+    source = { health: "ok", detail: "ffmpeg kiinni lähteessä" };
   } else {
-    rows.push(chainRow("source", "Lähde", "warn", "relay ei julkaise telemetriaa eikä lokissa ole havaintoa lähteestä"));
+    source = {
+      health: "warn",
+      detail: "relay ei julkaise telemetriaa eikä lokissa ole havaintoa lähteestä",
+    };
   }
+  // Ohjaamon YouTube-havainto vasta tämän jälkeen: se ei korvaa relayn omaa
+  // havaintoa, vaan täydentää sitä (ks. applySourceIngest).
+  const withIngest = applySourceIngest(source, snap, now);
+  rows.push(chainRow("source", "Lähde", withIngest.health, withIngest.detail));
 
   // --- Relay: the one row we can state as fact. All four reads that describe
   // the relay (unit state, journal, job store, control file) surface here,
@@ -496,7 +619,22 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
   let state: LiveState = assemble();
 
   function assemble(): LiveState {
-    const snap: Snapshot = { now: Date.now(), job, relay, match, system, telemetry, log, errors };
+    // Havainto luetaan pollerin muistista joka kokoamisella: se on synkroninen
+    // ja ilmainen, eikä aggregaattorin tikkien tarvitse tietää pollerin omasta
+    // 30 s rytmistä.
+    const source = opts.getSourceIngest?.() ?? { ingest: null, reason: null };
+    const snap: Snapshot = {
+      now: Date.now(),
+      job,
+      relay,
+      match,
+      system,
+      telemetry,
+      log,
+      errors,
+      sourceIngest: source.ingest,
+      sourceIngestReason: source.reason,
+    };
     const { health, headline } = deriveHealth(snap);
     return {
       // Server time: the phone's clock can be off, and "N s sitten" computed
@@ -509,6 +647,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       match,
       system,
       knobs,
+      sourceIngest: source.ingest,
       job,
       telemetry,
       narration,

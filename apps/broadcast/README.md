@@ -101,6 +101,27 @@ stalls the poll loop or reorders clips.
   writing only some keys leaves the others unchanged. The right value is
   calibrated live — the video path's latency varies between broadcasts.
 
+  Note that `>` **replaces** the whole file. The control app writes into the
+  same file by merge, so a shell one-liner also drops whatever it has published
+  there — currently the `sourceIngest` key (below). Nothing breaks: the control
+  app republishes within one of its own polls.
+
+### `sourceIngest` — what the control app publishes here
+
+The relay ignores every key it does not know, and `sourceIngest` is one of
+them: the control app (`apps/control`) is the only side with Google
+credentials, so it polls the *source* broadcast's `lifeCycleStatus` /
+`streamStatus` from the YouTube API every 30 s and writes the raw observation
+into this file. Today the relay does not read it and its behaviour is
+unaffected; it is groundwork for the "EI SIGNAALIA" slate (issue #104), where
+the mixer switches inputs when the phone stops pushing.
+
+When it does get read, two rules hold: only `streamStatus === "active"` means
+data is flowing, and a missing key or a stale `observedAt` means *no
+information* — never *the source is down*. The relay must keep behaving exactly
+as it does today whenever the signal is absent, because the control app's
+Google connection is allowed to fail without taking a broadcast with it.
+
 ### First-speech grace
 
 The very first line used to play the instant the relay went live, before any
