@@ -38,6 +38,10 @@ export type EventCode =
   | "relay.dry_run"
   | "relay.tts_usage"
   | "relay.source_gone"
+  // Lähde päätettiin hallitusti — ei vika (#103).
+  | "relay.source_ended"
+  // yt-dlp sanoi lähetyksen päättyneen, mutta sitä ei ole vielä vahvistettu (#103).
+  | "source.ended_unconfirmed"
   // yt-dlp source resolution
   | "source.resolving"
   | "source.not_live"
@@ -72,6 +76,11 @@ export type EventCode =
   | "api.delta_inconsistent"
   | "api.delta_fetch"
   | "api.first_seen"
+  // Kokoonpanon elinkaari (#90): puuttuu → muuttui → vakiintui.
+  | "api.roster_missing"
+  | "api.roster_refresh_failed"
+  | "api.roster_changed"
+  | "api.roster_settled"
   // match events worth seeing in the log
   | "match.score"
   | "match.palo"

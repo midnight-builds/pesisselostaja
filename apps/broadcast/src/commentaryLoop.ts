@@ -180,6 +180,34 @@ export interface NarrationObserver {
   spoken(clip: { id: string; text: string }, muted: boolean): void;
 }
 
+/** How often the roster is re-read while it can still change (issue #90).
+ *  The lineup is published late — `away.players` can still be empty minutes
+ *  before the first pitch — and it can change between the relay starting and
+ *  the scorer opening the match. Once a minute is often enough to catch that
+ *  without adding meaningful load to an API we don't own. */
+const ROSTER_REFRESH_MS = 60_000;
+
+/** Both teams have at least one player. Until then a name cannot be resolved
+ *  at all, so there is no point settling on the lookup we have. */
+function rostersPopulated(meta: MatchMetadata): boolean {
+  return meta.home.players.length > 0 && meta.away.players.length > 0;
+}
+
+/** Jersey number -> surname, per team, as one comparable string. Compared
+ *  rather than counted, because the failure this guards against is a number
+ *  pointing at a DIFFERENT player, not a shorter list. */
+function rosterSignature(meta: MatchMetadata): string {
+  return [meta.home, meta.away]
+    .map((team) => `${team.id}:${team.players.map((p) => `${p.number}=${p.last_name}`).sort().join(",")}`)
+    .join("|");
+}
+
+/** The names the narration speaks, and the metadata they came from. */
+interface RosterSnapshot {
+  meta: MatchMetadata;
+  lookup: PlayerLookup;
+}
+
 /** Standalone ~6s poll loop that reproduces WatcherController's announcement
  *  content/timing (src/watcher.ts) using the same pure speech/state helpers,
  *  but hands each announcement to a SpeechSink (narration synthesis) instead
@@ -217,6 +245,10 @@ export class CommentaryLoop {
   /** True if any speech was suppressed pre-latch, so the latch moment knows
    *  to speak one fresh catch-up recap instead of the stale suppressed clips. */
   private suppressedBeforeAttach = false;
+  /** Roster refresh bookkeeping (issue #90). See maybeRefreshRoster. */
+  private rosterRefreshedAt = 0;
+  private rosterRefreshedAfterStart = false;
+  private rosterSettled = false;
   /** False until the match has produced any event — the endpoint always
    *  returns the full history, so an empty history means the game genuinely
    *  hasn't started and the loop speaks welcome fillers instead of recaps. */
@@ -390,6 +422,64 @@ export class CommentaryLoop {
     }
   }
 
+  /** Re-reads the roster while it can still change, and hands back the names
+   *  the narration should use from now on (issue #90).
+   *
+   *  The lineup is fetched once at startup, and `online/{id}/events` carries no
+   *  names at all — only a jersey number and a team id. So if the lineup is
+   *  edited between the relay starting and the scorer opening the match, every
+   *  name is wrong for the whole broadcast, while the scores, palot and turns
+   *  stay perfectly right. That is what happened live on 28.7.2026: the only
+   *  reason it was caught is that a viewer knew the players by sight.
+   *
+   *  Refreshed until it cannot change any more: the match has started AND both
+   *  rosters carry players. After that the numbers stop moving (substitutions
+   *  arrive as events, from a lineup that is already published), so the polling
+   *  stops rather than running all game against someone else's API. */
+  private async maybeRefreshRoster(current: RosterSnapshot, now = Date.now()): Promise<RosterSnapshot> {
+    if (this.rosterSettled) return current;
+    const dueByTime = now - this.rosterRefreshedAt >= ROSTER_REFRESH_MS;
+    // The moment the match opens is the one worth an immediate re-read: that
+    // is when the final lineup appears.
+    const dueByStart = this.matchStarted && !this.rosterRefreshedAfterStart;
+    if (!dueByTime && !dueByStart) return current;
+    this.rosterRefreshedAt = now;
+
+    let meta: MatchMetadata;
+    try {
+      meta = await fetchMatchMetadata(this.config.matchId, {
+        apiBase: this.config.apiBase,
+        apiKey: this.config.apiKey,
+        timeoutMs: this.apiTimeoutMs("small"),
+      });
+    } catch (err) {
+      // Keep the names we have and try again next interval: a failed refresh
+      // must never be worse than not refreshing at all.
+      logWarn("api.roster_refresh_failed", `Kokoonpanon päivitys epäonnistui: ${err instanceof Error ? err.message : err}`);
+      return current;
+    }
+    if (this.matchStarted) this.rosterRefreshedAfterStart = true;
+
+    if (rosterSignature(meta) !== rosterSignature(current.meta)) {
+      // warn, not info: every name spoken before this instant may have been
+      // wrong, and that is exactly what an operator needs to see in the log.
+      logWarn(
+        "api.roster_changed",
+        `Kokoonpano muuttui haun jälkeen — nimet päivitetty (${current.meta.home.players.length}+${current.meta.away.players.length} → ${meta.home.players.length}+${meta.away.players.length} pelaajaa).`
+      );
+    }
+
+    if (this.rosterRefreshedAfterStart && rostersPopulated(meta)) {
+      this.rosterSettled = true;
+      logInfo("api.roster_settled", "Kokoonpano on julkaistu ja ottelu alkanut — nimet eivät enää muutu, päivitys lopetetaan.");
+    }
+    // Myös this.meta päivitetään: katvekuvan pisterivi lukee joukkuenimet
+    // sieltä (#104), ja kaksi eri metaa samassa luokassa on juuri se
+    // kahden totuuden tilanne jota vältetään.
+    this.meta = meta;
+    return { meta, lookup: buildPlayerLookup(meta) };
+  }
+
   /** Re-reads the control file each poll and applies a changed setting live.
    *  A missing/invalid file is ignored (keep the current value) rather than
    *  treated as an error, so a half-written edit can't crash the loop.
@@ -458,14 +548,25 @@ export class CommentaryLoop {
     );
 
     logInfo("api.fetching_meta", `Haetaan ottelutietoja (ID: ${this.config.matchId})…`);
-    const meta = await fetchMatchMetadata(this.config.matchId, {
+    let meta = await fetchMatchMetadata(this.config.matchId, {
       apiBase: this.config.apiBase,
       apiKey: this.config.apiKey,
       timeoutMs: this.apiTimeoutMs("small"),
     });
     this.meta = meta;
-    const lookup = buildPlayerLookup(meta);
+    let lookup = buildPlayerLookup(meta);
+    this.rosterRefreshedAt = Date.now();
     logInfo("api.match", `${meta.home.name} vs ${meta.away.name}`);
+    if (!rostersPopulated(meta)) {
+      // Normal when the relay is started early: the lineup is published late,
+      // sometimes minutes before the first pitch (issue #90). Said out loud
+      // because the alternative — silently speaking wrong names for a whole
+      // match — is the failure this refresh exists to prevent.
+      logWarn(
+        "api.roster_missing",
+        `Kokoonpanoa ei ole vielä julkaistu (${meta.home.players.length}+${meta.away.players.length} pelaajaa) — nimet päivitetään kun se ilmestyy.`
+      );
+    }
 
     logInfo("api.skip_history", "Ohitetaan historialliset tapahtumat…");
     // Full fetch — also seeds the local history + delta cursor (see
@@ -536,6 +637,9 @@ export class CommentaryLoop {
       if (signal.aborted) break;
       nextPollAt = Math.max(nextPollAt + this.pollIntervalMs, Date.now());
       await this.refreshRuntimeControls();
+      // Names before speech: a roster published since the last poll must be in
+      // use for THIS poll's events, not the next one's.
+      ({ meta, lookup } = await this.maybeRefreshRoster({ meta, lookup }));
       // Checked before processing so a latch-moment catch-up recap enters the
       // synth queue ahead of any events found in this same poll — the recap
       // covers the suppressed past, the events then narrate the present.

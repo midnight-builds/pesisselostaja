@@ -15,6 +15,7 @@ import {
   type SourceIngestObservation,
 } from "../src/ffmpegMixer.js";
 import { NoSignalSlate, type SlateLayout } from "../src/noSignalSlate.js";
+import { SourceEndedError } from "../src/ytdlpSource.js";
 
 const LAYOUT: SlateLayout = {
   width: 1920,
@@ -215,6 +216,35 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
     expect(isSlateSpawn(spawns[0])).toBe(true);
     expect(isSlateSpawn(spawns[spawns.length - 1])).toBe(false);
     expect(logged()).toContain("Katvekuva pois: lähde palasi");
+  }, 25000);
+
+  /** Issuen oma rajaus: katvekuva ei saa jäädä päälle ottelun päätyttyä. Kun
+   *  kuvaaja lopettaa lähteen, yt-dlp lukee YouTuben live_statuksen (#103) ja
+   *  heittää SourceEndedErrorin. Ilman omaa haaraa katvesilmukassa se uppoaisi
+   *  yleiseen catchiin (noteUnproductiveAttempt + backoff) ja relay työntäisi
+   *  väripalkkeja tyhjään lähetykseen koko luovutusikkunan ajan. */
+  it("ends the broadcast instead of holding the slate when the source was deliberately ended (#103)", async () => {
+    const spawns: string[][] = [];
+    let attempts = 0;
+    const mixer = harness({
+      slate: await preparedSlate(),
+      slateAfterMs: 0,
+      // Antelias ikkuna: jos luovutus tapahtuu, sen on tapahduttava
+      // SourceEndedErrorista eikä siitä että aika loppui.
+      maxFailureWindowMs: 10 * 60 * 1000,
+      resolveTestSource: () => {
+        attempts++;
+        if (attempts <= 1) throw new Error("ei vielä lähdettä");
+        throw new SourceEndedError("yt-dlp: live_status=post_live");
+      },
+      spawns,
+    });
+
+    await expect(mixer.start()).rejects.toThrow(SourceExhaustedError);
+    // …ja katve todella oli päällä, eli lopetus tapahtui SEN AIKANA.
+    expect(spawns.some(isSlateSpawn)).toBe(true);
+    expect(mixer.sourceState).toBe("ended");
+    expect(logged()).toContain("Katvekuva pois: lähde on päättynyt hallitusti");
   }, 25000);
 
   /** Kaksi ffmpegiä samaan RTMP-avaimeen katkaisee lähetyksen YouTuben päässä.

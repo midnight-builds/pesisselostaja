@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import { NarrationFifo } from "./narrationFifo.js";
-import { resolveSourceUrl, SourceNotLiveYetError } from "./ytdlpSource.js";
+import { resolveSourceUrl, SourceEndedError, SourceNotLiveYetError } from "./ytdlpSource.js";
 import type { NoSignalSlate, SlateLayout, SlateTextStyle } from "./noSignalSlate.js";
 import {
   classifyFfmpegFailure,
@@ -152,6 +152,10 @@ interface SessionResult {
   /** True when *we* ended the session on purpose (scheduled URL refresh), so
    *  its length says nothing about the source's health. */
   refreshKill: boolean;
+  /** ffmpeg's exit code, or null when it died on a signal. 0 means it read its
+   *  input to a clean end — which is what a finished broadcast's leftover DVR
+   *  window produces, over and over (issue #103). */
+  exitCode: number | null;
 }
 
 /** foo.mp4 -> foo.session3.mp4, so successive respawns never overwrite each
@@ -364,7 +368,24 @@ const HEARTBEAT_MS = 2 * 60 * 1000;
  *  long — signals the original broadcast is gone for good (not a transient
  *  network blip), so the caller should stop retrying and shut the relay down
  *  instead of hammering yt-dlp every 30s forever. */
-export class SourceExhaustedError extends Error {}
+/** Why the relay is finishing.
+ *
+ *  `"ended"` = the source was deliberately ended (the camera operator stopped,
+ *  the broadcast is over). Nothing is wrong, and the log must not send anyone
+ *  looking for a fault — the morning of 29.7.2026 it said "tarkista stream
+ *  key" about a target that was working perfectly (issue #103).
+ *  `"exhausted"` = the source stopped answering and never came back. */
+export type SourceEndReason = "ended" | "exhausted";
+
+export class SourceExhaustedError extends Error {
+  readonly reason: SourceEndReason;
+
+  constructor(message: string, reason: SourceEndReason = "exhausted") {
+    super(message);
+    this.name = "SourceExhaustedError";
+    this.reason = reason;
+  }
+}
 
 /** Total time a merely-*scheduled* source may keep not starting before the
  *  relay gives up anyway. Waiting is the right default — YouTube is telling us
@@ -453,7 +474,7 @@ export class FfmpegMixer {
    *  picture is stuttering", which is otherwise only visible by reading the
    *  log. */
   private respawns = 0;
-  private sourceStateValue: "live" | "scheduled" | "resolving" | "failed" | "unknown" = "unknown";
+  private sourceStateValue: "live" | "scheduled" | "resolving" | "failed" | "ended" | "unknown" = "unknown";
   private sourceDetailValue: string | null = null;
   /** True only while a katve (no-signal slate) ffmpeg session is pushing.
    *  Kept separate from sourceStateValue so telemetry can show the katve
@@ -516,8 +537,10 @@ export class FfmpegMixer {
   }
 
   /** `no_signal` = katvekuvaa työnnetään juuri nyt. Se on oma tilansa eikä
-   *  korvaa sourceDetailia, joka kertoo yhä miksi lähde puuttuu. */
-  get sourceState(): "live" | "scheduled" | "resolving" | "failed" | "unknown" | "no_signal" {
+   *  korvaa sourceDetailia, joka kertoo yhä miksi lähde puuttuu. `ended` =
+   *  lähde on päätetty hallitusti (#103), ja se voittaa katveen: päättyneen
+   *  lähetyksen päälle ei jäädä työntämään väripalkkeja. */
+  get sourceState(): "live" | "scheduled" | "resolving" | "failed" | "ended" | "unknown" | "no_signal" {
     return this.slateActive ? "no_signal" : this.sourceStateValue;
   }
 
@@ -577,6 +600,19 @@ export class FfmpegMixer {
         // confirming the source exists. Counting those answers toward the
         // give-up window is what forced starting the relay in a narrow slot
         // just before kickoff (observed live 27.7.) — wait instead.
+        // yt-dlp read YouTube's own live_status and it says the broadcast is
+        // over. That is an answer about the source, not a guess about our
+        // symptoms, so it needs no confirmation and no waiting: stop now, and
+        // stop as "ended" rather than as a failure nobody caused (issue #103).
+        if (err instanceof SourceEndedError) {
+          this.stopped = true;
+          this.sourceStateValue = "ended";
+          this.sourceDetailValue = err.message;
+          throw new SourceExhaustedError(
+            `Lähde on päättynyt (${err.message}) — lopetetaan siististi.`,
+            "ended"
+          );
+        }
         if (err instanceof SourceNotLiveYetError) {
           const waitMs = this.noteScheduledAnswer(err);
           preResolved = await this.waitBeforeNextAttempt(waitMs);
@@ -704,16 +740,27 @@ export class FfmpegMixer {
    *  the unbroken run of such attempts outlasts the give-up window. A finished
    *  match's source won't come back, so it uses the much shorter window
    *  (HANDOFF.md 16.7. kohta 6.2). */
-  private noteUnproductiveAttempt(describe: (windowMins: number) => string): void {
+  private noteUnproductiveAttempt(
+    describe: (windowMins: number) => string,
+    opts: { window?: number; reason?: SourceEndReason } = {}
+  ): void {
     if (this.failingSince === null) this.failingSince = monoNow();
     const finished = this.opts.isMatchFinished?.() ?? false;
-    const windowMs = finished
+    const defaultWindow = finished
       ? (this.opts.finishedFailureWindowMs ?? 2 * 60 * 1000)
       : this.maxFailureWindowMs;
+    // A caller with stronger evidence may shorten the window, never lengthen
+    // it: the shortest applicable window wins, so a finished match still ends
+    // promptly and a mid-match tail does not get MORE patience than a plain
+    // failure would.
+    const windowMs = Math.min(opts.window ?? defaultWindow, defaultWindow);
     if (monoNow() - this.failingSince > windowMs) {
       this.stopped = true;
+      const mins = windowMs < 60000 ? Math.round(windowMs / 1000) / 60 : Math.round(windowMs / 60000);
       throw new SourceExhaustedError(
-        `${describe(Math.round(windowMs / 60000))}${finished ? " ja ottelu on päättynyt" : ""} — luovutetaan.`
+        `${describe(mins)}${finished ? " ja ottelu on päättynyt" : ""} — ` +
+          (opts.reason === "ended" ? "lähetys on päätetty, lopetetaan siististi." : "luovutetaan."),
+        opts.reason ?? "exhausted"
       );
     }
   }
@@ -746,7 +793,7 @@ export class FfmpegMixer {
       if (this.opts.resolveTestSource) return await this.opts.resolveTestSource();
       logInfo("source.resolving", "Haetaan lähdeosoite yt-dlp:llä…");
       this.sourceStateValue = "resolving";
-      return await resolveSourceUrl(this.opts.youtubeUrl);
+      return (await resolveSourceUrl(this.opts.youtubeUrl)).url;
     } finally {
       this.probingSource = false;
       this.refreshSlateText();
@@ -849,8 +896,16 @@ export class FfmpegMixer {
     const failureSide = classifyFfmpegFailure(stderrTail.text());
     const weakTarget = hasWeakTargetSignal(stderrTail.text());
     // The caller judges the run (noteSessionEnd): backoff and give-up window
-    // both hang off whether this was real broadcast, not off the exit code.
-    return { ranMs, refreshKill: this.refreshKillRequested, failureSide, weakTarget };
+    // hang off whether this was real broadcast. The exit code is carried for
+    // one narrow purpose — recognising a cleanly-read tail being replayed
+    // (issue #103) — and still decides nothing on its own.
+    return {
+      ranMs,
+      refreshKill: this.refreshKillRequested,
+      failureSide,
+      weakTarget,
+      exitCode: result.error ? null : result.code,
+    };
   }
 
   /** Waits for a natural gap in the narration before killing ffmpeg for a
@@ -1094,6 +1149,25 @@ export class FfmpegMixer {
           endReason = "lähde palasi";
           break;
         } catch (err) {
+          // Lähde on päätetty hallitusti: yt-dlp luki YouTuben oman
+          // live_statuksen (#103). Katvekuva EI saa jäädä päälle ottelun
+          // päätyttyä — muuten relay työntäisi väripalkkeja tyhjään
+          // lähetykseen koko luovutusikkunan ajan. Tämä on issue #104:n oma
+          // rajaus, ja ilman tätä haaraa virhe uppoaisi alla olevaan
+          // yleiseen catchiin (noteUnproductiveAttempt + backoff).
+          //
+          // Heitto kulkee finallyn kautta, joka purkaa katvesession siististi
+          // (selostusjono tyhjenee, ffmpeg tapetaan) ennen kuin relay sammuu.
+          if (err instanceof SourceEndedError) {
+            this.stopped = true;
+            this.sourceStateValue = "ended";
+            this.sourceDetailValue = err.message;
+            endReason = "lähde on päättynyt hallitusti";
+            throw new SourceExhaustedError(
+              `Lähde on päättynyt (${err.message}) — lopetetaan siististi.`,
+              "ended"
+            );
+          }
           if (err instanceof SourceNotLiveYetError) {
             waitMs = this.noteScheduledAnswer(err);
             continue;

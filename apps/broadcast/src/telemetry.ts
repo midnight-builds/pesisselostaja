@@ -58,7 +58,7 @@ export interface RelayStatus {
      *  Oma arvonsa eikä `failed`in variantti, jotta ohjaamo voi näyttää
      *  operaattorille sujuvalta näyttävän lähetyksen TAKANA olevan ongelman —
      *  `detail` kertoo yhä miksi lähde puuttuu. */
-    state: "live" | "scheduled" | "resolving" | "failed" | "unknown" | "no_signal";
+    state: "live" | "scheduled" | "resolving" | "failed" | "ended" | "unknown" | "no_signal";
     detail: string | null;
   };
   match: {
