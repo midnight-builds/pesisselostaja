@@ -81,6 +81,12 @@ export interface RelayStatus {
   /** Most recent warn/error line, so a reader sees the reason without parsing
    *  the whole timeline. */
   lastProblem: { at: string; level: LogLevel; code: EventCode | null; msg: string } | null;
+  /** Why the run ended, written into the final snapshot before the process
+   *  exits (#123). Absent while the relay is running — and absent in every
+   *  snapshot older deploys wrote, so readers must treat it as optional.
+   *  (The control app mirrors RelayStatus by hand and ignores unknown keys,
+   *  so adding this here is safe without touching apps/control.) */
+  endReason?: SourceEndReason;
 }
 
 /** Everything the snapshot cannot observe for itself, supplied by the relay on
