@@ -1,6 +1,7 @@
 import { mkdirSync, renameSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { setLogSink, type EventCode, type LogLevel } from "./log.js";
+import type { SourceEndReason } from "./ffmpegMixer.js";
 
 /** Machine-readable relay telemetry, written into run/ beside the state and
  *  control files the relay already keeps there.
