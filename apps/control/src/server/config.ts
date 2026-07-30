@@ -40,7 +40,12 @@ export interface ControlConfig {
  *  a scratch directory and a unit that does not exist, and thereby cannot touch
  *  the live broadcast's `.env.relay`, control files or systemd service. */
 export const CONFIG: ControlConfig = {
-  port: Number(process.env.CONTROL_PORT ?? 3001),
+  // 3002, sama kuin ops/pesisselostaja-control.service asettaa: oletuksen ja
+  // ajossa olevan portin ero on jo kahdesti johtanut siihen että ohjaamoa on
+  // haettu väärästä portista. 3001 EI kelpaa — sen omistaa tällä palvelimella
+  // toinen projekti (finance-app-api.service), joka vastaa omilla 404:llaan
+  // sen sijaan että yhteys kieltäytyisi, joten virhe näyttää ohjaamon viasta.
+  port: Number(process.env.CONTROL_PORT ?? 3002),
   host: process.env.CONTROL_HOST ?? "0.0.0.0",
   repoRoot: REPO_ROOT,
   relayEnvPath: process.env.CONTROL_RELAY_ENV ?? join(REPO_ROOT, "apps/broadcast/.env.relay"),
