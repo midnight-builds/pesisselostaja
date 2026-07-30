@@ -12,8 +12,7 @@ import { mkdtempSync, rmSync, appendFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { NarrationTimeline, parseRelayStatus } from "../src/server/telemetry.js";
-
+import { NarrationTimeline, parseRelayStatus, SOURCE_STATES } from "../src/server/telemetry.js";
 let dir: string;
 let path: string;
 
@@ -235,5 +234,14 @@ describe("parseRelayStatus", () => {
   it("an unknown source state degrades to unknown rather than being shown as live", () => {
     const status = parseRelayStatus(JSON.stringify({ ...full, source: { state: "kaikki_hyvin" } }));
     expect(status?.source.state).toBe("unknown");
+  });
+
+  // Sopimustesti (#117): jäsennin ei saa pakottaa yhtäkään unionin arvoa
+  // "unknown"iksi. Kattavuuden (lista == unioni, molempiin suuntiin) vartioi
+  // telemetry.ts:n Record-tyyppinen SOURCE_STATE_SET jo käännösaikana; tämä
+  // varmistaa että jäsennin oikeasti päästää jokaisen arvon läpi.
+  it.each(SOURCE_STATES)("preserves source state %j verbatim", (state) => {
+    const status = parseRelayStatus(JSON.stringify({ ...full, source: { state } }));
+    expect(status?.source.state).toBe(state);
   });
 });

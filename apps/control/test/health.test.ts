@@ -331,11 +331,25 @@ describe("buildChain: lähde-rivi ja YouTube-havainto", () => {
 
   it("kertoo hallitusti päättyneen lähteen terveenä, ei telemetrian puutteena (#103)", () => {
     const row = sourceRow({
-      telemetry: baseTelemetry({ source: { state: "ended", detail: "yt-dlp: live_status=post_live" } }),
+      telemetry: baseTelemetry({
+        source: { state: "ended", detail: "yt-dlp: live_status=post_live" },
+        match: { finished: true, eventCount: 5, lastEventAt: new Date().toISOString() },
+      }),
     });
-    // Kuvaaja lopetti lähteen: normaali lopputila, ei vika josta herätetään.
+    // Kuvaaja lopetti lähteen ottelun jälkeen: normaali lopputila, ei vika
+    // josta herätetään.
     expect(row.health).toBe("ok");
     expect(row.detail).not.toMatch(/ei kerro lähteen tilaa/);
+  });
+
+  it("kesken ottelun päättynyt lähde on KELTAINEN, ei 'siisti lopetus' (#117)", () => {
+    const row = sourceRow({
+      telemetry: baseTelemetry({ source: { state: "ended", detail: null } }),
+    });
+    // baseTelemetryn ottelu ei ole päättynyt: lähteen loppuminen nyt tarkoittaa
+    // että lähetys on kuolemassa ennen aikojaan, eikä sitä saa kuitata vihreällä.
+    expect(row.health).toBe("warn");
+    expect(row.detail).toMatch(/kesken ottelun/);
   });
 
   it("näyttää katvekuvan KELTAISENA — se ei saa peittää poikki olevaa kuvaa (#104)", () => {

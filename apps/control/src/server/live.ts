@@ -440,8 +440,13 @@ function sourceFromTelemetry(telemetry: RelayTelemetry): { health: Health; detai
     case "failed":
       return { health: "fail", detail: detail ?? "lähteen avaus epäonnistui" };
     case "ended":
-      // Kuvaaja lopetti lähteen (#103). Normaali, terve lopputila: relay
-      // sammuu itse, eikä tämä ole vika josta operaattoria herätetään.
+      // Kuvaaja lopetti lähteen (#103). Ottelun jälkeen normaali, terve
+      // lopputila: relay sammuu itse. Kesken ottelun sama tila tarkoittaa
+      // että lähetys on kuolemassa ennen aikojaan — silloin ei saa näyttää
+      // vihreää "siistiä lopetusta" (adversaarilöydös #117:n arviosta).
+      if (!telemetry.match.finished) {
+        return { health: "warn", detail: detail ?? "lähde päättyi kesken ottelun" };
+      }
       return { health: "ok", detail: detail ?? "lähde päättyi — lähetys lopetetaan siististi" };
     case "no_signal":
       // Katvekuva päällä (#104): RTMP-työntö jatkuu ja selostus kuuluu, mutta

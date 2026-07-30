@@ -59,7 +59,22 @@ function bool(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-const SOURCE_STATES = ["live", "scheduled", "resolving", "failed", "unknown"] as const;
+/** Jokainen `RelayTelemetry["source"]["state"]`-unionin arvo. `Record`-tyyppi
+ *  vartioi kattavuuden molempiin suuntiin käännösaikana: unioniin lisätty tila
+ *  joka puuttuu tästä kaataa käännöksen, samoin unioniin kuulumaton avain.
+ *  Näin uusi lähdetila ei voi enää pudota hiljaa "unknown"iin, kuten kävi
+ *  `ended`ille ja `no_signal`ille (#117). */
+const SOURCE_STATE_SET: Record<RelayTelemetry["source"]["state"], true> = {
+  live: true,
+  scheduled: true,
+  resolving: true,
+  failed: true,
+  ended: true,
+  no_signal: true,
+  unknown: true,
+};
+
+export const SOURCE_STATES = Object.keys(SOURCE_STATE_SET) as RelayTelemetry["source"]["state"][];
 
 function sourceState(value: unknown): RelayTelemetry["source"]["state"] {
   return (SOURCE_STATES as readonly unknown[]).includes(value)
