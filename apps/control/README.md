@@ -25,7 +25,8 @@ systemctl --user is-active pesisselostaja-control.service
 
 Unit-tiedosto on `ops/pesisselostaja-control.service` (kopioi
 `~/.config/systemd/user/`). Palvelin kuuntelee porttia 3002; pääsy tapahtuu
-`tailscale serve`n kautta osoitteessa `https://codexsrv.tail6875ae.ts.net/`.
+`tailscale serve`n kautta tailnetin HTTPS-osoitteessa, jonka `tailscale serve
+status` kertoo (osoite on käyttöönottokohtainen).
 HTTPS ei ole koristetta: ilman sitä iOS ei anna asentaa sovellusta
 kotivalikkoon eikä salli push-ilmoituksia.
 

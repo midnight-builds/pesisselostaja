@@ -18,7 +18,7 @@ unohtuu ensin.
 | Työn yksikkö | **1 ottelu = 2 YouTube-lähetystä = 1 relay-ajo** | Uusi live joka pelille → jokaisesta pelistä jää katsottava tallenne. |
 | Sijainti | **Uusi `apps/control` tässä monorepossa** | Tarvitsee `@pesisselostaja/core`n, `preflight.ts`:n ja relayn sopimuspinnan. Repo-rajan yli ne joko kopioituisivat tai jäätyisivät — ja silloin UI näyttäisi vihreää kun relay kaatuisi. |
 | Prosessiraja | Oma systemd-unit, oma portti | Relay ajaa pinnatusta `~/relay-deploy`:sta; ohjauspalvelun restart ei kosketa lähetystä. |
-| Pääsy | **`tailscale serve` → `https://codexsrv.tail6875ae.ts.net/`** | Oikea sertti = secure context = PWA kotivalikkoon, Web Push, Wake Lock. http-IP ei olisi kumpaakaan. Ei Funnelia: vain tailnet. |
+| Pääsy | **`tailscale serve` → tailnetin `*.ts.net`-HTTPS-osoite** | Oikea sertti = secure context = PWA kotivalikkoon, Web Push, Wake Lock. http-IP ei olisi kumpaakaan. Ei Funnelia: vain tailnet. |
 | Frontend | **React + TypeScript + Vite** | Kahdeksan näkymää jatkuvasti päivittyvällä tilalla. Tyylikieli peritään `apps/web`:n CSS:stä (#1C7A43, Archivo/Hanken Grotesk). |
 | Tallennus | **JSON-tiedostot + NDJSON-lokit** | Sama idiomi kuin `.state-*.json`/`.control-*.json`. Kymmeniä töitä kaudessa — ei syytä skeemoille eikä natiiviriippuvuuksille. Tila luettavissa tiedostoselaimesta kun jokin on päin seiniä. |
 | Suojaus | Ei kirjautumista; **Face ID (passkey) tuhoaviin toimiin** | Tailnet on raja, eikä kesken pelin ehdi kirjautua. Videon poisto / lähetyksen katkaisu / auth-yhteyden purku vaativat tunnistuksen. Stream keyt peitossa napautuksen takana. |

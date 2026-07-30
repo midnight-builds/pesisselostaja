@@ -1,8 +1,8 @@
 /** Google-kirjautuminen laitevirralla (OAuth 2.0 Device Flow) + oma
  *  kiintiölaskuri + terveysraportti.
  *
- *  **Miksi laitevirta eikä web-redirect:** ohjaussovellus näkyy osoitteessa
- *  `https://codexsrv.tail6875ae.ts.net/`, emmekä omista `ts.net`-verkkotunnusta.
+ *  **Miksi laitevirta eikä web-redirect:** ohjaussovellus näkyy tailnetin
+ *  `*.ts.net`-osoitteessa, emmekä omista `ts.net`-verkkotunnusta.
  *  Web-redirect vaatisi paluuosoitteen rekisteröinnin ja käytännössä domainin
  *  omistusvahvistuksen — laitevirrassa (OAuth client: *TVs and Limited Input
  *  devices*) kumpaakaan ei tarvita: puhelin näyttää koodin, käyttäjä hyväksyy

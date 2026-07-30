@@ -17,8 +17,9 @@ import { createStore } from "./store.js";
 
 /** VAPID requires a contact `sub` claim (mailto: or https:) so a push service
  *  can reach whoever is sending. Nothing verifies it; it just has to be a
- *  valid, stable identifier — overridable for a different deployment. */
-const VAPID_SUBJECT = process.env.CONTROL_VAPID_SUBJECT ?? "mailto:pesisselostaja@codexsrv.tail6875ae.ts.net";
+ *  valid, stable identifier. The default is deployment-agnostic on purpose —
+ *  set `CONTROL_VAPID_SUBJECT` to a real contact address per deployment. */
+const VAPID_SUBJECT = process.env.CONTROL_VAPID_SUBJECT ?? "mailto:pesisselostaja@pesisselostaja.local";
 
 /** How long a push service should keep trying. Every notification we send is
  *  about the state of a broadcast RIGHT NOW; one delivered half an hour late
