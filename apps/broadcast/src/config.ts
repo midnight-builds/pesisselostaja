@@ -185,6 +185,7 @@ export function parseRelayConfig(): RelayConfig {
   );
   // Hard stop -takaraja (#123): hiljaisuusvaatimus tulospalvelun tapahtumille.
   // Oletus 3 min — mitoitettu ottelun 145900 datalla (issue #123).
+  // 0 = hard stop kokonaan pois päältä (mikseri tulkitsee, ffmpegMixer.ts).
   const hardStopQuietMs = nonNegativeNumber(
     process.env.RELAY_HARD_STOP_QUIET_MS,
     3 * 60 * 1000
