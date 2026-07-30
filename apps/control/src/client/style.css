@@ -1177,3 +1177,64 @@ select.field__input {
     transition: none !important;
   }
 }
+
+/* --- Esikatselun tekstit ja kuvat (#129) -----------------------------------
+ *
+ * Nämä luokat olivat käytössä mutta täysin tyylittelemättä, ja se näkyi vasta
+ * puhelimella: `<pre>` ei rivity oletuksena, joten kuvaus ja jaettava viesti
+ * työnsivät sivun vaakavieritykseen, ja thumbnail-esikatselu renderöityi
+ * luonnollisessa 1280 px:n leveydessään. Asettelutesti ei paljastanut kumpaakaan,
+ * koska se ei avaa esikatselua — se aukko on nyt paikattu (youtube.spec.ts).
+ *
+ * Ohjaamoa käytetään ensisijaisesti puhelimella kentän laidalla, joten
+ * vaakavieritys ei ole kauneusvirhe vaan estää tarkistamisen jota juuri tässä
+ * kohtaa pyydetään ("Olen tarkistanut tekstit ja kuvat"). */
+.textline {
+  margin: 0 0 8px;
+  /* Otsikko on yksi pitkä rivi ilman välilyöntejä juuri siinä kohtaa missä se
+     on pisin (URL-mainen kenttänimi), joten pelkkä normaali rivitys ei riitä. */
+  overflow-wrap: anywhere;
+}
+.textblock {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  /* Kuvaus on pitkä; sen ei tarvitse viedä koko ruutua, mutta se saa vierittyä
+     pystysuunnassa omassa laatikossaan. */
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.thumbs {
+  display: grid;
+  /* Allekkain puhelimella: 16:9-kuva 393 px:n ruudulla on jo vain ~200 px
+     korkea, ja vierekkäin niistä ei erottaisi juuri sitä mitä pitää tarkistaa
+     (otsikon rivitys ja merkki). */
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+.thumb {
+  margin: 0;
+}
+.thumb__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+.thumb__label,
+.thumb__loading,
+.thumb__error {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--faint);
+}
+.thumb__error {
+  color: var(--fail);
+}
