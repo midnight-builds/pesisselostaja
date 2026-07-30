@@ -13,8 +13,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NarrationTimeline, parseRelayStatus, SOURCE_STATES } from "../src/server/telemetry.js";
-import type { RelayTelemetry } from "../src/shared/types.js";
-
 let dir: string;
 let path: string;
 
@@ -239,25 +237,11 @@ describe("parseRelayStatus", () => {
   });
 
   // Sopimustesti (#117): jäsennin ei saa pakottaa yhtäkään unionin arvoa
-  // "unknown"iksi. Lista alla EI viittaa SOURCE_STATES-vakioon vaan toistaa
-  // unionin käsin — jos relay saa uuden tilan ja se lisätään tyyppiin muttei
-  // jäsentimeen, tämä testi kaatuu ennen kuin lähetys ehtii kaatua siihen.
-  // (Niin kävi `ended`ille #103 ja `no_signal`ille #104.)
-  const unionStates: RelayTelemetry["source"]["state"][] = [
-    "live",
-    "scheduled",
-    "resolving",
-    "failed",
-    "ended",
-    "no_signal",
-    "unknown",
-  ];
-  it.each(unionStates)("preserves source state %j verbatim", (state) => {
+  // "unknown"iksi. Kattavuuden (lista == unioni, molempiin suuntiin) vartioi
+  // telemetry.ts:n Record-tyyppinen SOURCE_STATE_SET jo käännösaikana; tämä
+  // varmistaa että jäsennin oikeasti päästää jokaisen arvon läpi.
+  it.each(SOURCE_STATES)("preserves source state %j verbatim", (state) => {
     const status = parseRelayStatus(JSON.stringify({ ...full, source: { state } }));
     expect(status?.source.state).toBe(state);
-  });
-
-  it("the test's union list and the parser's whitelist enumerate the same states", () => {
-    expect([...SOURCE_STATES].sort()).toEqual([...unionStates].sort());
   });
 });
