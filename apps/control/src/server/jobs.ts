@@ -101,10 +101,12 @@ function applyPatch(
   // ja juuri sillä korjattiin 30.7. väärä sidonta käsin. Ilman leimaa
   // reconcileOpenJobs putoaisi createdAt:iin, joka on aamulla luodulla työllä
   // jo tunteja vanha, ja sovittelu perisi työn heti (#118). */
-  const armedAt =
-    nextStatus === "arming" && current.status !== "arming"
-      ? new Date().toISOString()
-      : (patch.armedAt ?? current.armedAt);
+  // Leima uusitaan aina kun patch nimenomaisesti asettaa "arming"in, myös
+  // uudelleenaktivoinnissa: operaattori kosketti työtä, joten armonaika alkaa
+  // alusta. Ulkopuolelta annettua armedAt:ia ei kelpuuteta — PatchJobRequest ei
+  // sisällä sitä, ja käsin kirjoitettu runko tekisi työstä joko ikuisen tai
+  // heti vanhentuneen.
+  const armedAt = patch.status === "arming" ? new Date().toISOString() : current.armedAt;
   const job: Job = { ...current, ...patch, armedAt };
   nextJobs = nextJobs.slice();
   nextJobs[idx] = job;
