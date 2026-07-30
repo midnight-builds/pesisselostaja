@@ -30,6 +30,11 @@ export interface LiveEvent {
   events: SubEvent[];
   timestamp: number | null;
   updated?: number | null;
+  /** Kirjaushetki unix-sekunteina (seinäkello, toisin kuin ottelunsisäinen
+   *  `timestamp` joka on tällä syötteellä käytännössä aina null). Todennettu
+   *  oikeasta datasta 30.7.2026 (ottelu 145900); optionaalinen koska kentän
+   *  läsnäoloa kaikissa vastauksissa ei ole verifioitu (#119). */
+  created?: number | null;
 }
 
 export interface LiveEventsResponse {
