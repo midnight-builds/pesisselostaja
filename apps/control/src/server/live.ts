@@ -575,7 +575,13 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
   // it needs Google auth, which is phase B — until then we can only report what
   // we configured and what ffmpeg blamed when it died.
   const targetBlamed = lastMatching(snap.log, PHRASE.targetBlamed);
-  if (!job) {
+  const targetError = errors.get("target");
+  if (targetError) {
+    // Hard stopin siivous epäonnistui (#123). Tämä on juuri se tilanne jossa
+    // kohde voi jäädä työntämään roskaa, joten se ei saa jäädä pelkkään
+    // journaliin — operaattorin on tiedettävä että lopetus on kesken.
+    rows.push(chainRow("target", "Kohde", "fail", targetError));
+  } else if (!job) {
     rows.push(chainRow("target", "Kohde", "idle", "ei aktiivista työtä"));
   } else if (!job.targetStreamKey) {
     rows.push(chainRow("target", "Kohde", "fail", "stream key puuttuu — ei mihin pushata"));
