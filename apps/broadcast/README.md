@@ -101,6 +101,27 @@ stalls the poll loop or reorders clips.
   writing only some keys leaves the others unchanged. The right value is
   calibrated live — the video path's latency varies between broadcasts.
 
+  Note that `>` **replaces** the whole file. The control app writes into the
+  same file by merge, so a shell one-liner also drops whatever it has published
+  there — currently the `sourceIngest` key (below). Nothing breaks: the control
+  app republishes within one of its own polls.
+
+### `sourceIngest` — what the control app publishes here
+
+The relay ignores every key it does not know, and `sourceIngest` is one of
+them: the control app (`apps/control`) is the only side with Google
+credentials, so it polls the *source* broadcast's `lifeCycleStatus` /
+`streamStatus` from the YouTube API every 30 s and writes the raw observation
+into this file. Today the relay does not read it and its behaviour is
+unaffected; it is groundwork for the "EI SIGNAALIA" slate (issue #104), where
+the mixer switches inputs when the phone stops pushing.
+
+When it does get read, two rules hold: only `streamStatus === "active"` means
+data is flowing, and a missing key or a stale `observedAt` means *no
+information* — never *the source is down*. The relay must keep behaving exactly
+as it does today whenever the signal is absent, because the control app's
+Google connection is allowed to fail without taking a broadcast with it.
+
 ### First-speech grace
 
 The very first line used to play the instant the relay went live, before any
@@ -294,6 +315,96 @@ API, which is not wired up — the rest of issue #51.
 The stream key is redacted (`<stream-key>`) from everything ffmpeg writes to the
 journal, since ffmpeg prints the full output URL in its own error lines.
 
+### No-signal slate ("EI SIGNAALIA") — off by default
+
+When the source drops, ffmpeg exits and the respawn loop leaves the RTMP push
+*paused*, so the viewer sees a frozen picture or "stream offline". With the
+slate enabled the relay instead keeps pushing: a still image (colour bars,
+"EI SIGNAALIA", the score and a status line) with the narration mixed on top,
+until the source comes back.
+
+**The narration keeps running over it.** Commentary comes from the results
+service, not from the video, so it works even when the picture is gone — the
+viewer still gets the runs, the palot and the batters. That is why every
+wording on the status line ends in *"selostus jatkuu"*: it tells the viewer not
+to close the stream.
+
+| Situation | Status line |
+|---|---|
+| Source dropped mid-broadcast | `kuvayhteys katkesi, selostus jatkuu` |
+| Source has not started yet | `kuvayhteyttä odotetaan — selostus jatkuu` |
+| A reconnect attempt is running | `yhdistetään uudelleen — selostus jatkuu` |
+
+The current period and palot are prefixed when known (`1. jakso, 2 paloa — …`),
+and the score row above shows `<home> 12 – <away> 1` — each score next to its
+own team, because with the numbers between the names ("koti 12 - 1 vieras") the
+first person to read a preview read "1 vieras" as the team name. A row too wide
+for the frame is truncated with an ellipsis: `drawtext` cannot shrink text and
+its font size cannot depend on the measured width, so the writing side has to
+fit it. Both rows are supplied ready-made by the commentary loop; the mixer only
+displays them. Before the match has produced any event both rows are empty and
+the picture is just "EI SIGNAALIA" plus the footer — that is a valid result.
+
+**Turning it on**
+
+```
+RELAY_NO_SIGNAL_SLATE=true            # default false
+RELAY_NO_SIGNAL_SLATE_AFTER_MS=8000   # how long the source must be gone first (floor 2000)
+RELAY_NO_SIGNAL_SLATE_SIZE=1280x720   # default 1920x1080 — set it to the SOURCE's resolution
+```
+
+**Set the size to match the source.** The slate pushes to the same RTMP key as
+the source session, so if their resolution or frame rate differ, YouTube's
+transcoder restarts on the way in *and* on the way back — two extra viewer-side
+blips per outage, which is the very thing this feature exists to remove. The
+source's resolution is not available for free (`yt-dlp -g` does not report it),
+so it is the operator's job to say. A handheld phone stream is often 720p; the
+startup log prints the slate's size so a mismatch is visible afterwards.
+
+The threshold exists so a one-second respawn blip does not flash the slate; the
+issue asks for a 5–10 s outage before it engages. It is floored at 2000 ms — `0`
+would flash the slate on every scheduled URL refresh. The background is rendered
+once per run by `tools/no-signal-slate.py` into `run/slate-<matchId>.png`; the
+score and status rows live in `run/slate-score-<matchId>.txt` and
+`run/slate-status-<matchId>.txt` and are read by ffmpeg's `drawtext ... reload`,
+so they update **without a respawn**. All of these are covered by the `run/`
+retention sweep.
+
+**Why it defaults to off.** This is a new ffmpeg path that runs precisely when
+the broadcast is already in trouble, and it has not been exercised live. The
+first attempt has to be a deliberate choice, not something that happens by
+itself the first time a camera falls over mid-match.
+
+**What it will never do**
+
+- It never keeps the relay alive. The give-up window
+  (`RELAY_MAX_FAILURE_WINDOW_MS` / `RELAY_FINISHED_FAILURE_WINDOW_MS`) runs
+  unchanged while the slate is up: each source probe during the slate goes
+  through the same accounting as a normal respawn, so `SourceExhaustedError`
+  arrives at exactly the same moment it would without the slate. Pushing colour
+  bars is not "productive broadcast" and never resets anything.
+- It never starts once the match has finished, or when the control app's
+  `sourceIngest` observation says the source broadcast is `complete` — a source
+  that ended in an orderly way means the broadcast ends, not that we stand
+  there pushing bars into an empty stream.
+- Any failure in the chain (missing `python3`/PIL, a failed render, ffmpeg
+  dying in slate mode, a failed write) skips the slate for the rest of the run
+  with **one** warning line, and the respawn loop behaves exactly as it does
+  today.
+
+The state is visible to the control app: `status-<ID>.json` reports
+`source.state = "no_signal"` while the slate is up (with `source.detail` still
+naming the underlying reason), and the log carries `ffmpeg.slate_start` /
+`ffmpeg.slate_end`. A broadcast that *looks* smooth must not hide a camera that
+has fallen over.
+
+The `sourceIngest` key is an optional input only. It is used for the two things
+above (ending cleanly, and sharpening the wording) and never as the trigger:
+the trigger is always the relay's own local observation, because that signal
+arrives up to 30 s late and depends on the control app and on Google. Missing,
+stale (>120 s) or malformed means *no information* — never *the source is
+down*.
+
 ### Preflight (run this before every match)
 
 ```bash
@@ -422,6 +533,8 @@ had grown to 1.4 G. On startup `index.ts` now applies a retention policy
 | What | Rule | Env var (default) |
 |------|------|-------------------|
 | `relay-<matchId>.pcm`, `.state-<matchId>.json`, `.control-<matchId>.json` | removed when older than N days | `RELAY_RUN_RETENTION_DAYS` (`30`, `0` = off) |
+| `status-<matchId>.json`, `timeline-<matchId>.ndjson` | same | same |
+| `slate-<matchId>.png`, `slate-score-<matchId>.txt`, `slate-status-<matchId>.txt` (+ their `.tmp`) | same | same |
 | `run/tts-cache/<sha256>.pcm` | least-recently-used clips evicted until the directory fits the ceiling | `RELAY_TTS_CACHE_MAX_MB` (`1024`, `0` = off) |
 
 Two properties matter more than the numbers:

@@ -2,25 +2,21 @@
  *  LiveState the phone renders, so N connected clients cost one set of polls
  *  instead of N.
  *
- *  Phase A constraint: the relay publishes no telemetry yet (that is phase B —
- *  `status-<ID>.json` + `timeline-<ID>.ndjson`). Everything here is therefore
- *  derived from OUTSIDE evidence: systemd's unit state, journald prose, the
- *  pesistulokset feed and the machine's own vitals. Where that makes a value a
- *  guess, it is marked as one rather than dressed up. */
+ *  Where the values come from, in order of preference (issue #97):
+ *
+ *  1. **The relay's own telemetry** — `status-<ID>.json` and
+ *     `timeline-<ID>.ndjson`, read in telemetry.ts. Anything the relay knows is
+ *     read from there and never recomputed: it is the only process that knows
+ *     what was said, in which wording, and whether ffmpeg was attached to hear
+ *     it. Two counters counting the same thing always diverge, and on 29.7.2026
+ *     they diverged live in three separate ways in one match.
+ *  2. **Outside evidence** — systemd's unit state, journald, the machine's
+ *     vitals, and the pesistulokset feed for the scoreboard. Used for what the
+ *     relay cannot know about itself, and as the fallback while no telemetry
+ *     exists (relay not started, or a deploy older than PR #93).
+ *
+ *  Where a value is still a guess, it is marked as one rather than dressed up. */
 
-import {
-  buildPlayerLookup,
-  eventFingerprint,
-  fetchLiveEvents,
-  fetchMatchMetadata,
-  outsThroughSubEvent,
-  subEventToFeedText,
-  subEventToSpeech,
-  type LiveEvent,
-  type MatchMetadata,
-  type PlayerLookup,
-  type SpeechContext,
-} from "@pesisselostaja/core";
 import type {
   ChainStatus,
   ControlKnobs,
@@ -31,13 +27,17 @@ import type {
   MatchState,
   NarrationLine,
   RelayProcess,
+  RelayTelemetry,
+  SourceIngest,
   SystemState,
 } from "../shared/types.js";
-import { getActiveJob } from "./jobs.js";
+import { closeRunningJob, getActiveJob, markRunStarted } from "./jobs.js";
 import { readLog } from "./journal.js";
 import { getMatchState } from "./matches.js";
 import { getRelayProcess, readKnobs } from "./relay.js";
+import { SOURCE_INGEST_STALE_MS } from "./sourceIngest.js";
 import { getSystemState } from "./system.js";
+import { NarrationTimeline, readRelayStatus } from "./telemetry.js";
 
 /** systemd, machine vitals and journald: cheap, local, and the things that go
  *  wrong fastest. */
@@ -50,11 +50,17 @@ const MATCH_POLL_MS = 10_000;
 /** Enough scrollback for the health rules (respawn counting, heartbeat) without
  *  pushing a fat payload to a phone on mobile data every 5 s. */
 const LOG_LINES = 50;
-/** Narration lines kept in memory / pushed to the client. */
-const NARRATION_KEEP = 40;
-/** When we attach to a match already in progress we have no idea when its past
- *  events happened, so we show only the tail of them. */
-const NARRATION_BACKFILL = 10;
+
+/** How old a relay snapshot may be before we stop treating it as fact. The
+ *  relay rewrites it every poll (3 s by default, 60 s at the configurable
+ *  ceiling), so a minute and a half is "several missed writes", not "one slow
+ *  cycle". Past this we fall back to outside evidence instead of showing a
+ *  stopped relay's last good state as current. */
+const TELEMETRY_STALE_MS = 90_000;
+/** Grace before "ffmpeg is not attached" counts against the headline. The
+ *  reader attaches a second or two after ffmpeg spawns, and a warning that
+ *  fires on every single start is a warning nobody reads. */
+const READER_GRACE_SEC = 60;
 
 /** Window for "is this still happening" judgements on log evidence. Two minutes
  *  covers several relay poll cycles and one heartbeat, so a single slow cycle
@@ -71,7 +77,7 @@ type ChainKey = ChainStatus["key"];
  *  relay row, and if they shared a key a later success would quietly erase an
  *  earlier failure — the exact "shows green while it's broken" bug this whole
  *  view exists to prevent. */
-type SourceKey = ChainKey | "job" | "knobs" | "log" | "narration";
+type SourceKey = ChainKey | "job" | "knobs" | "log" | "telemetry";
 
 export interface LiveAggregator {
   subscribe(fn: (state: LiveState) => void): () => void;
@@ -84,6 +90,14 @@ export interface LiveAggregator {
  *  file on disk, and so index.ts can hand in the store it already imported. */
 export interface LiveAggregatorOptions {
   getActiveJob?: () => Promise<Job | null>;
+  /** Same reason as getActiveJob: a test drives the run-start and run-end
+   *  edges without a job file on disk. */
+  closeRunningJob?: () => Promise<Job | null>;
+  markRunStarted?: () => Promise<Job | null>;
+  /** Lähteen tilan polleri (sourceIngest.ts). Aggregaattori ei omista sitä:
+   *  polleri pollaa omalla 30 s välillään kiintiön takia, ja tämä vain kysyy
+   *  sen viimeisimmän tuloksen jokaisella tikillä. */
+  getSourceIngest?: () => { ingest: SourceIngest | null; reason: string | null };
 }
 
 // ------------------------------------------------------------ empty defaults
@@ -181,15 +195,40 @@ export interface Snapshot {
   relay: RelayProcess;
   match: MatchState;
   system: SystemState;
+  /** The relay's own snapshot, or null when it has written none for this match.
+   *  Pass it through `freshTelemetry` before believing it — see
+   *  TELEMETRY_STALE_MS. */
+  telemetry: RelayTelemetry | null;
   log: LogLine[];
   /** Per-source failures from this cycle; a failed source can't be judged
    *  healthy just because its last known value looked fine. */
   errors: Map<SourceKey, string>;
+  /** Ohjaamon oma YouTube-havainto lähteestä. Valinnainen, koska se lisättiin
+   *  olemassa olevaan tyyppiin; puuttuva ja null tarkoittavat samaa asiaa
+   *  ("ei havaintoa"), eikä kumpikaan saa muuttaa yhtään terveyspäätöstä
+   *  entisestään. */
+  sourceIngest?: SourceIngest | null;
+  /** Pollerin syy sille ettei havaintoa juuri nyt ole. */
+  sourceIngestReason?: string | null;
 }
 
 function minutes(sec: number | null): string {
   if (sec === null) return "kesto tuntematon";
   return sec < 60 ? `${sec} s` : `${Math.round(sec / 60)} min`;
+}
+
+/** The relay's snapshot, but only while it is still current AND the unit is up.
+ *  Two guards, because both failure modes are real: a relay that stopped
+ *  writing leaves its last (now false) snapshot behind, and a finished run
+ *  leaves a whole file describing a broadcast that ended hours ago. The
+ *  narration list deliberately does NOT go through this — a past match's lines
+ *  are history, not a claim about right now. */
+function freshTelemetry(snap: Snapshot): RelayTelemetry | null {
+  const telemetry = snap.telemetry;
+  if (!telemetry || !snap.relay.active) return null;
+  const at = Date.parse(telemetry.at);
+  if (!Number.isFinite(at) || snap.now - at > TELEMETRY_STALE_MS) return null;
+  return telemetry;
 }
 
 /** The one sentence the operator reads standing in a field, in priority order.
@@ -238,7 +277,27 @@ export function deriveHealth(snap: Snapshot): { health: Health; headline: string
       : { health: "idle", headline: "Ei aktiivista lähetystä" };
   }
 
-  // 5. Flapping. The stream technically exists but viewers hear gaps, so this
+  // 5. Narration going nowhere. The relay says the source is live but ffmpeg
+  //    never attached to the narration FIFO, so every clip is counted, deduped
+  //    and thrown away unheard. This looked exactly like a healthy broadcast in
+  //    match 145889 on 29.7.2026 and cost five minutes of narration including
+  //    two runs — the reason the relay reports readerAttached at all. Ranked
+  //    above flapping: gaps in the audio beat no audio at all.
+  const telemetry = freshTelemetry(snap);
+  if (
+    telemetry &&
+    telemetry.source.state === "live" &&
+    !telemetry.readerAttached &&
+    telemetry.uptimeSec > READER_GRACE_SEC
+  ) {
+    const muted = telemetry.narration.muted;
+    return {
+      health: "warn",
+      headline: `ffmpeg ei ole kytkeytynyt — selostus ei kuulu${muted > 0 ? ` (${muted} vaimennettua)` : ""}`,
+    };
+  }
+
+  // 6. Flapping. The stream technically exists but viewers hear gaps, so this
   //    is a warning the operator can act on (check the phone's uplink) rather
   //    than a failure we should escalate.
   if (respawns >= RESPAWN_WARN_COUNT) {
@@ -248,19 +307,19 @@ export function deriveHealth(snap: Snapshot): { health: Health; headline: string
     };
   }
 
-  // 6. Relay up, match still going: the normal, boring, good case. The duration
+  // 7. Relay up, match still going: the normal, boring, good case. The duration
   //    is the detail the operator actually wants ("42 min").
   if (relay.active && !match.finished) {
     return { health: "ok", headline: `Lähetys kunnossa, ${minutes(relay.uptimeSec)}` };
   }
 
-  // 7. Match over but the unit still up — expected: the relay shuts itself down
+  // 8. Match over but the unit still up — expected: the relay shuts itself down
   //    once the source ends, and we never cut it short (uptime first).
   if (relay.active && match.finished) {
     return { health: "ok", headline: "Ottelu päättyi — relay sammuu itse kun lähde loppuu" };
   }
 
-  // 8. Job exists, relay down, but the job isn't claiming to be live: waiting
+  // 9. Job exists, relay down, but the job isn't claiming to be live: waiting
   //    for kickoff or already wrapped up.
   if (job.status === "finished" || job.status === "cancelled") {
     return { health: "idle", headline: "Työ on päättynyt" };
@@ -277,38 +336,178 @@ function chainRow(key: ChainKey, label: string, health: Health, detail: string):
   return { key, label, health, detail };
 }
 
+/** Lähde-rivin sääntö YouTube-havainnolle: **API-havainto voi vain lisätä
+ *  epäilystä, ei koskaan tuottaa vihreää.**
+ *
+ *  Kaksi mielipidettä samasta rivistä on juuri se ongelma jonka issue #97
+ *  poistaa: relayn oma loki kertoo mitä relay näkee, ja jos ohjaamon havainto
+ *  saisi ylikirjoittaa sen, rivin väri riippuisi siitä kumpi ehti ensin. Siksi
+ *  lokipohjainen logiikka päättää lähtötason ja havainto saa korkeintaan
+ *  pudottaa ok → warn. Failiin ei mennä: vaihe 1 on julkaisu, eikä kukaan vielä
+ *  toimi tämän tiedon perusteella.
+ *
+ *  Vanhentunut tai virheellinen havainto ei muuta terveyttä lainkaan —
+ *  tietämättömyys ei ole todiste. */
+function applySourceIngest(
+  row: { health: Health; detail: string },
+  snap: Snapshot,
+  now: number
+): { health: Health; detail: string } {
+  const ingest = snap.sourceIngest ?? null;
+  const notes: string[] = [];
+  let health = row.health;
+  const doubt = (): void => {
+    // Vain ok → warn. Idle pysyy idlenä (relay ei lue lähdettä, joten
+    // syötteen tila ei kerro rivistä mitään), fail pysyy failina.
+    if (health === "ok") health = "warn";
+  };
+
+  const ageMs = ingest ? now - Date.parse(ingest.observedAt) : NaN;
+  // Ikä on oltava välillä [0, raja]. Negatiivinen ikä tarkoittaa aikaleimaa
+  // tulevaisuudessa (kello siirtynyt kirjoituksen jälkeen, käsin muokattu
+  // tiedosto) — ilman alarajaa sellainen havainto olisi IKUISESTI "tuore" ja
+  // ohjaisi tilariviä siitä eteenpäin.
+  const fresh =
+    ingest !== null &&
+    ingest.error === null &&
+    Number.isFinite(ageMs) &&
+    ageMs >= 0 &&
+    ageMs <= SOURCE_INGEST_STALE_MS;
+
+  if (!fresh) {
+    if (ingest !== null) {
+      notes.push(ingest.error ? "YouTube: havaintoa ei saatu" : "YouTube: havainto vanhentunut");
+    }
+  } else if (ingest) {
+    if (ingest.lifeCycleStatus === "complete") {
+      notes.push("YouTube: lähde on päättynyt");
+      // Relay yhä ajossa vaikka lähde on suljettu: se on epäilystä, ei vielä
+      // vikaa — relay sammuu itse kun lähde loppuu.
+      if (snap.relay.active) doubt();
+    }
+    if (ingest.streamStatus === "active") {
+      // Ainoa arvo joka tarkoittaa että dataa virtaa sisään. Se ei nosta
+      // terveyttä, vain vahvistaa mitä rivi jo sanoo.
+      notes.push("YouTube: syöte aktiivinen");
+    } else if (ingest.streamStatus !== null) {
+      notes.push(`YouTube: syöte ei virtaa (${ingest.streamStatus})`);
+      doubt();
+    }
+  }
+
+  // Pollerin syy näytetään AINA kun se on asetettu, myös silloin kun havainto
+  // on olemassa. Havainto muistissa ei tarkoita että se olisi julkaistu: kun
+  // kirjoitus control-tiedostoon epäonnistuu (levy täynnä, vain luku), polleri
+  // asettaa syyn mutta pitää havainnon — ja ilman tätä riviä operaattori lukisi
+  // "syöte aktiivinen" vihreänä tilanteessa jossa relay ei ole nähnyt yhtäkään
+  // havaintoa.
+  //
+  // Ilman työtä syy on aina "ei aktiivista työtä", jonka rivi sanoo jo itse.
+  if (snap.job && snap.sourceIngestReason) {
+    notes.push(`YouTube: ${snap.sourceIngestReason}`);
+    // Syy + olemassa oleva havainto = julkaisu on poikki (portin sulkeutuessa
+    // polleri nollaa havainnon). Se on tiedetty vika eikä tietämättömyys,
+    // joten se saa pudottaa rivin ok → warn.
+    if (ingest !== null) doubt();
+  }
+
+  return {
+    health,
+    detail: notes.length > 0 ? [row.detail, ...notes].join(" · ") : row.detail,
+  };
+}
+
+/** The relay's own source states, in the operator's words. "scheduled" is
+ *  healthy, not a warning: the relay is waiting for a stream that has not begun
+ *  yet, which is where every broadcast starts.
+ *
+ *  Palauttaa {health, detail} eikä valmista riviä, koska ohjaamon oma
+ *  YouTube-havainto täydentää tätä jälkikäteen (applySourceIngest).
+ *
+ *  `ended` ja `no_signal` tulivat relaylle vasta issueiden #103 ja #104
+ *  myötä. Ilman omia haaroja ne putoaisivat defaultiin ja rivi sanoisi
+ *  "relay ei kerro lähteen tilaa" juuri silloin kun relay kertoo sen hyvin
+ *  tarkasti — kaksi eri tilaa naamioituneena telemetrian puutteeksi. */
+function sourceFromTelemetry(telemetry: RelayTelemetry): { health: Health; detail: string } {
+  const detail = telemetry.source.detail;
+  switch (telemetry.source.state) {
+    case "live":
+      return { health: "ok", detail: detail ?? "ffmpeg kiinni lähteessä" };
+    case "scheduled":
+      return { health: "ok", detail: `ei vielä livenä — ${detail ?? "relay odottaa"}` };
+    case "resolving":
+      return { health: "ok", detail: "haetaan lähdeosoitetta yt-dlp:llä" };
+    case "failed":
+      return { health: "fail", detail: detail ?? "lähteen avaus epäonnistui" };
+    case "ended":
+      // Kuvaaja lopetti lähteen (#103). Normaali, terve lopputila: relay
+      // sammuu itse, eikä tämä ole vika josta operaattoria herätetään.
+      return { health: "ok", detail: detail ?? "lähde päättyi — lähetys lopetetaan siististi" };
+    case "no_signal":
+      // Katvekuva päällä (#104): RTMP-työntö jatkuu ja selostus kuuluu, mutta
+      // KUVA ON POIKKI. Tämän on näkyttävä keltaisena, koska juuri tässä
+      // tilassa lähetys näyttää ulospäin sujuvalta — issuen oma rajaus on
+      // ettei katve saa peittää ongelmaa operaattorilta.
+      return {
+        health: "warn",
+        detail: `katvekuva päällä — kuva poikki, selostus jatkuu${detail ? ` (${detail})` : ""}`,
+      };
+    default:
+      return { health: "warn", detail: "relay ei kerro lähteen tilaa" };
+  }
+}
+
 /** Six dots, each one sentence. Any source that threw this cycle is red with
  *  its own error text — a stale green here would be a lie. */
-function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainStatus[] {
+export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainStatus[] {
   const { job, relay, match, system, errors, now } = snap;
+  const telemetry = freshTelemetry(snap);
   const rows: ChainStatus[] = [];
 
-  // --- Lähde: the phone's own YouTube live, which we only ever read. We have
-  // no direct view of it in phase A, so the evidence is the relay's own log.
+  // --- Lähde: the phone's own YouTube live, which we only ever read. The relay
+  // reports its own view of it (yt-dlp result + ffmpeg session), so we quote
+  // that. The log fallback below is only for a relay too old to publish
+  // telemetry — and it is the one that produced #102, where a working stream
+  // read as "ei havaintoa lähteestä lokissa" once the start line scrolled out
+  // of the 50-line window.
   const notLive = lastMatching(snap.log, PHRASE.sourceNotLive);
   const ffmpegStart = lastMatching(snap.log, PHRASE.ffmpegStart);
+  let source: { health: Health; detail: string };
   if (!job) {
-    rows.push(chainRow("source", "Lähde", "idle", "ei aktiivista työtä"));
+    source = { health: "idle", detail: "ei aktiivista työtä" };
   } else if (!job.sourceUrl) {
-    rows.push(chainRow("source", "Lähde", "warn", "lähde-URL puuttuu työstä"));
+    source = { health: "warn", detail: "lähde-URL puuttuu työstä" };
   } else if (!relay.active) {
-    rows.push(chainRow("source", "Lähde", "idle", "relay ei lue lähdettä"));
+    source = { health: "idle", detail: "relay ei lue lähdettä" };
+  } else if (telemetry) {
+    source = sourceFromTelemetry(telemetry);
   } else if (notLive && (!ffmpegStart || Date.parse(notLive.ts) > Date.parse(ffmpegStart.ts))) {
     // Waiting for a scheduled start is a normal, healthy state — the relay
     // sleeps and rechecks without burning its give-up window.
-    rows.push(chainRow("source", "Lähde", "ok", "ei vielä livenä — relay odottaa"));
+    source = { health: "ok", detail: "ei vielä livenä — relay odottaa" };
   } else if (ffmpegStart) {
-    rows.push(chainRow("source", "Lähde", "ok", "ffmpeg kiinni lähteessä"));
+    source = { health: "ok", detail: "ffmpeg kiinni lähteessä" };
   } else {
-    rows.push(chainRow("source", "Lähde", "warn", "ei havaintoa lähteestä lokissa"));
+    source = {
+      health: "warn",
+      detail: "relay ei julkaise telemetriaa eikä lokissa ole havaintoa lähteestä",
+    };
   }
+  // Ohjaamon YouTube-havainto vasta tämän jälkeen: se ei korvaa relayn omaa
+  // havaintoa, vaan täydentää sitä (ks. applySourceIngest).
+  const withIngest = applySourceIngest(source, snap, now);
+  rows.push(chainRow("source", "Lähde", withIngest.health, withIngest.detail));
 
   // --- Relay: the one row we can state as fact. All four reads that describe
   // the relay (unit state, journal, job store, control file) surface here,
   // because a failure in any of them means this row's green is unverified.
   const respawns = countRecentRespawns(snap.log, now);
   const relayError =
-    errors.get("relay") ?? errors.get("log") ?? errors.get("job") ?? errors.get("knobs");
+    errors.get("relay") ??
+    errors.get("log") ??
+    errors.get("job") ??
+    errors.get("knobs") ??
+    errors.get("telemetry");
   if (relayError) {
     rows.push(chainRow("relay", "Relay", "fail", relayError));
   } else if (relay.active && respawns >= RESPAWN_WARN_COUNT) {
@@ -322,11 +521,28 @@ function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainStatus[] {
     rows.push(chainRow("relay", "Relay", "idle", relay.activeState));
   }
 
-  // --- Jono: narration waiting for synthesis + mixing, from the heartbeat line.
+  // --- Jono: narration waiting for synthesis + mixing. The relay counts both
+  // the queue and whether anyone is listening; the heartbeat parse below is
+  // again only the pre-telemetry fallback.
   const queue = parseQueueDepth(snap.log);
   const delay = knobs ? `, viive ${knobs.narrationDelayMs} ms` : "";
   if (!relay.active) {
     rows.push(chainRow("queue", "Jono", "idle", "ei ajossa"));
+  } else if (telemetry) {
+    const { pendingClips, readerAttached, narration } = telemetry;
+    if (!readerAttached) {
+      // The clip is decided, deduped and counted — and then dropped, because
+      // there is no reader on the FIFO. Silence that looks like narration.
+      rows.push(
+        chainRow("queue", "Jono", "warn", `ffmpeg ei kuuntele — ${narration.muted} vaimennettua selostusta${delay}`)
+      );
+    } else if (pendingClips >= QUEUE_WARN_CLIPS) {
+      rows.push(chainRow("queue", "Jono", "warn", `${pendingClips} klippiä jonossa — selostus jää jälkeen${delay}`));
+    } else {
+      rows.push(
+        chainRow("queue", "Jono", "ok", `${pendingClips} klippiä jonossa, ${narration.spoken} puhuttu${delay}`)
+      );
+    }
   } else if (!queue || !Number.isFinite(queue.at) || now - queue.at > RECENT_WINDOW_MS) {
     // The heartbeat is periodic; its absence while the relay is up means either
     // a very young run or a loop that has stopped reporting.
@@ -353,11 +569,9 @@ function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainStatus[] {
     rows.push(chainRow("target", "Kohde", "idle", "ei pushia"));
   }
 
-  // --- API: pesistulokset, the source of everything we narrate.
-  // Both pesistulokset reads (scoreboard + narration source) report here, each
-  // under its own key — sharing one would let a success on either erase the
-  // other's failure.
-  const apiError = errors.get("api") ?? errors.get("narration");
+  // --- API: pesistulokset, which the control app reads only for the
+  // scoreboard — the narration list comes from the relay (issue #97).
+  const apiError = errors.get("api");
   if (apiError) {
     rows.push(chainRow("api", "Tulospalvelu", "fail", apiError));
   } else if (!job) {
@@ -385,112 +599,14 @@ function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainStatus[] {
   return rows;
 }
 
-// ------------------------------------------------------------ narration list
-
-/** Phase A narration: derived from the pesistulokset feed, not from the relay.
- *
- *  That means these lines are what the relay SHOULD say, not proof that it did:
- *  `spokenAt` is always null and every line renders as queued. Two known
- *  inaccuracies, both accepted on purpose until phase B's timeline-<ID>.ndjson
- *  gives us the real two-phase state:
- *   - the wording can differ from what was spoken, because speech variants are
- *     picked at random per call (pickVariant);
- *   - `detectedAt` is when WE saw the event, which trails the relay's own
- *     detection by up to one poll interval. */
-interface NarrationCache {
-  matchId: number;
-  meta: MatchMetadata | null;
-  lookup: PlayerLookup | null;
-  /** Fingerprints already turned into lines. eventFingerprint includes the turn
-   *  coordinates, because event.id restarts at 0 every turn — without them the
-   *  second turn's first palo collides with the first turn's and disappears. */
-  seen: Set<string>;
-  seeded: boolean;
-  lines: NarrationLine[];
-}
-
-function newNarrationCache(matchId: number): NarrationCache {
-  return { matchId, meta: null, lookup: null, seen: new Set(), seeded: false, lines: [] };
-}
-
-/** The scoreboard context the speech functions need. Rebuilt from the MatchState
- *  we just fetched instead of kept as our own running tally — the derived
- *  scoreboard already lives in matches.ts, and two counters counting the same
- *  markings would eventually disagree. Without a context the closing line reads
- *  "Ottelu päättyi! X null, Y null" and every palo loses its ordinal. */
-function speechContextFrom(match: MatchState, events: LiveEvent[]): SpeechContext {
-  // Turn coordinates come from the last event that has a batting team, exactly
-  // the way core derives them — never guessed from counters.
-  let last: LiveEvent | null = null;
-  for (const event of events) if (event.team != null) last = event;
-  const currentPeriod = match.currentPeriod ?? last?.period ?? 0;
-  const score = match.periodScores[currentPeriod] ?? { home: 0, away: 0 };
-  return {
-    periodHomeRuns: score.home,
-    periodAwayRuns: score.away,
-    homePeriodsWon: match.periodsWonHome,
-    awayPeriodsWon: match.periodsWonAway,
-    // "Periods with any recorded runs" — camp matches are often a single jakso,
-    // where periodsWon can't decide anything (reference: match formats vary).
-    periodsPlayed: match.periodScores.filter((p) => p.home > 0 || p.away > 0).length,
-    currentOuts: match.palot ?? 0,
-    currentPeriod,
-    currentBatTeamId: last?.team ?? null,
-    currentInning: last?.inning ?? 0,
-    currentBatTurn: last?.batTurn ?? 0,
-  };
-}
-
-function buildNarrationLines(
-  cache: NarrationCache,
-  events: LiveEvent[],
-  match: MatchState,
-  announceBatterChanges: boolean
-): void {
-  const meta = cache.meta;
-  const lookup = cache.lookup;
-  if (!meta || !lookup) return;
-
-  const ctx = speechContextFrom(match, events);
-  const fresh: NarrationLine[] = [];
-  const detectedAt = new Date().toISOString();
-  for (let e = 0; e < events.length; e++) {
-    const event = events[e];
-    for (let i = 0; i < event.events.length; i++) {
-      const fingerprint = eventFingerprint(event, i);
-      if (cache.seen.has(fingerprint)) continue;
-      cache.seen.add(fingerprint);
-      const sub = event.events[i];
-      // Palot are announced with an ordinal ("kolmas palo"), and the ordinal is
-      // the count AT THAT MOMENT, not the current one — same call the relay's
-      // commentary loop makes per sub-event.
-      ctx.currentOuts = outsThroughSubEvent(events, e, i);
-      const speech = subEventToSpeech(event, sub, meta, lookup, announceBatterChanges, ctx);
-      const text = subEventToFeedText(speech, sub, lookup);
-      if (!text) continue;
-      fresh.push({ id: fingerprint, detectedAt, spokenAt: null, text });
-    }
-  }
-
-  if (!cache.seeded) {
-    // First poll for this match: the whole history arrives at once (the events
-    // endpoint is never windowed). Timestamping all of it "now" would fake a
-    // burst of narration, so only the tail is shown — and even that carries an
-    // approximate detectedAt, since the feed gives no per-event wall clock.
-    cache.seeded = true;
-    cache.lines = fresh.slice(-NARRATION_BACKFILL);
-    return;
-  }
-  cache.lines = [...cache.lines, ...fresh].slice(-NARRATION_KEEP);
-}
-
 // ------------------------------------------------------------------ the loop
 
 export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggregator {
   const readActiveJob = opts.getActiveJob ?? getActiveJob;
+  const closeRunningJobFn = opts.closeRunningJob ?? closeRunningJob;
+  const markRunStartedFn = opts.markRunStarted ?? markRunStarted;
   const subscribers = new Set<(state: LiveState) => void>();
   const errors = new Map<SourceKey, string>();
-  let narration = newNarrationCache(-1);
   let stopped = false;
 
   let job: Job | null = null;
@@ -499,11 +615,32 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
   let match = emptyMatch();
   let knobs: ControlKnobs | null = null;
   let log: LogLine[] = [];
+  let telemetry: RelayTelemetry | null = null;
+  /** Tail of the running match's timeline. Recreated when the job's match
+   *  changes; null when there is no job to read one for. */
+  let timeline: NarrationTimeline | null = null;
+  let timelineMatchId = -1;
+  let narration: NarrationLine[] = [];
 
   let state: LiveState = assemble();
 
   function assemble(): LiveState {
-    const snap: Snapshot = { now: Date.now(), job, relay, match, system, log, errors };
+    // Havainto luetaan pollerin muistista joka kokoamisella: se on synkroninen
+    // ja ilmainen, eikä aggregaattorin tikkien tarvitse tietää pollerin omasta
+    // 30 s rytmistä.
+    const source = opts.getSourceIngest?.() ?? { ingest: null, reason: null };
+    const snap: Snapshot = {
+      now: Date.now(),
+      job,
+      relay,
+      match,
+      system,
+      telemetry,
+      log,
+      errors,
+      sourceIngest: source.ingest,
+      sourceIngestReason: source.reason,
+    };
     const { health, headline } = deriveHealth(snap);
     return {
       // Server time: the phone's clock can be off, and "N s sitten" computed
@@ -516,8 +653,10 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       match,
       system,
       knobs,
+      sourceIngest: source.ingest,
       job,
-      narration: narration.lines,
+      telemetry,
+      narration,
       log,
     };
   }
@@ -545,6 +684,40 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     }
   }
 
+  /** The relay shuts ITSELF down when the source ends — we never cut it short
+   *  (uptime first), so a broadcast routinely finishes with nobody calling
+   *  /api/relay/stop. This poller is the only always-on observer of that
+   *  moment, so it is the one that lets go of the broadcast slot.
+   *
+   *  Falling edge only. "Relay is inactive" on its own is the normal state of a
+   *  job that has been armed but not started yet, and closing that would cancel
+   *  the next broadcast before it began (#101). */
+  let relayWasActive = false;
+  async function followRunEdges(): Promise<void> {
+    const wasActive = relayWasActive;
+    relayWasActive = relay.active;
+    if (wasActive === relay.active) return;
+    try {
+      // Rising edge: the unit came up, whoever started it. The job stops being
+      // "about to run" and gets its start time — the UI, the health rules and
+      // the post-match report all read those.
+      if (relay.active) {
+        if (job?.status !== "arming") return;
+        const started = await markRunStartedFn();
+        if (started) job = started;
+        return;
+      }
+      // Falling edge: the run is over.
+      if (job?.status !== "arming" && job?.status !== "live") return;
+      const closed = await closeRunningJobFn();
+      if (closed) job = closed;
+    } catch (err) {
+      // Surfaced on the relay row rather than swallowed: a job stuck in
+      // "arming" blocks the next match, and the operator has to know now.
+      errors.set("job", err instanceof Error ? err.message : String(err));
+    }
+  }
+
   let fastBusy = false;
   async function tickFast(): Promise<void> {
     if (stopped || fastBusy) return; // a slow systemctl must not stack up calls
@@ -564,18 +737,40 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       await track("job", readActiveJob, (value) => {
         job = value;
       });
+      await followRunEdges();
       if (job) {
         const matchId = job.matchId;
         await track("knobs", () => readKnobs(matchId), (value) => {
           knobs = value;
         });
+        // The relay's own telemetry: two local file reads, so it belongs on the
+        // fast cadence — a narration line the operator can already hear should
+        // not wait ten seconds to appear on the phone.
+        await track("telemetry", () => pollTelemetry(matchId), () => undefined);
       } else {
         knobs = null;
+        telemetry = null;
+        timeline = null;
+        narration = [];
       }
       publish();
     } finally {
       fastBusy = false;
     }
+  }
+
+  /** Reads what the relay published about itself. Both halves are wrapped by
+   *  one `track` key: they describe the same source, and a partial success
+   *  ("status fine, timeline unreadable") must not read as healthy. */
+  async function pollTelemetry(matchId: number): Promise<void> {
+    if (!timeline || timelineMatchId !== matchId) {
+      timeline = new NarrationTimeline(matchId);
+      timelineMatchId = matchId;
+      narration = [];
+    }
+    telemetry = await readRelayStatus(matchId);
+    await timeline.poll();
+    narration = timeline.lines();
   }
 
   let matchBusy = false;
@@ -585,7 +780,6 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     // and an idle control app has no business hitting it at all.
     if (!job) {
       match = emptyMatch();
-      narration = newNarrationCache(-1);
       return;
     }
     matchBusy = true;
@@ -594,28 +788,10 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       await track("api", () => getMatchState(matchId), (value) => {
         match = value;
       });
-      await track("narration", () => pollNarration(matchId), () => undefined);
       publish();
     } finally {
       matchBusy = false;
     }
-  }
-
-  async function pollNarration(matchId: number): Promise<void> {
-    if (narration.matchId !== matchId) narration = newNarrationCache(matchId);
-    if (!narration.meta) {
-      // Rosters are fetched once per match: names come from here, and a relay
-      // that started before the match was opened is exactly how player numbers
-      // end up wrong for a whole game.
-      narration.meta = await fetchMatchMetadata(matchId, { timeoutMs: 8000 });
-      narration.lookup = buildPlayerLookup(narration.meta);
-    }
-    // skip-delay mirrors what the relay asks for, so our list isn't a couple of
-    // minutes behind the narration it is supposed to describe.
-    const result = await fetchLiveEvents(matchId, { skipDelay: true, timeoutMs: 8000 });
-    // `match` was refreshed by getMatchState earlier in this same tick, so the
-    // scoreboard the speech quotes is the one the UI is showing.
-    buildNarrationLines(narration, result.events, match, knobs?.announceBatterChanges ?? true);
   }
 
   const fastTimer = setInterval(() => void tickFast(), FAST_POLL_MS);

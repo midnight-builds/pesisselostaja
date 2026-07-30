@@ -114,11 +114,23 @@ export interface CreatedBroadcastPair extends BroadcastPair {
   texts: BroadcastTexts;
 }
 
+/** Otsikon ja thumbnailin tiedot joita pesistulokset-API ei tunne: oman
+ *  joukkueen esitysnimi, vastustajan lyhenne ja lyhyt paikkamuoto. Ilman näitä
+ *  otsikoksi tulee tulospalvelun raakamuoto
+ *  ("Pesä Ysit, Lappeenranta - Espoon Pesis, 29.7.2026 04 - Liperin
+ *  kirkonkylän kenttä 4| LEIRITUOTANTO") vakiintuneen muodon sijaan (#95). */
+export interface TitleOverrides {
+  teamLabel?: string;
+  opponent?: string;
+  shortVenue?: string;
+}
+
 export interface CreateBroadcastsBody {
   jobId?: string;
   matchId?: number;
   privacy?: PrivacyStatus;
   playlistId?: string | null;
+  overrides?: TitleOverrides;
 }
 
 export interface VideoPatchBody {
@@ -167,7 +179,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
-  activateJob: (id: string) => postJson<Job>(`/api/jobs/${encodeURIComponent(id)}/activate`),
+  /** `force` = "lopeta edellinen ja aktivoi tämä": closes the job that holds
+   *  the broadcast slot (and stops the relay if it is still running) before
+   *  taking the slot. Only ever sent from an explicit, confirmed tap. */
+  activateJob: (id: string, opts: { force?: boolean } = {}) =>
+    postJson<Job>(`/api/jobs/${encodeURIComponent(id)}/activate`, opts.force ? { force: true } : undefined),
   preflight: () => postJson<PreflightResult>("/api/preflight"),
   relay: (action: "start" | "stop" | "restart") => postJson<RelayProcess>(`/api/relay/${action}`),
   knobs: (payload: PatchKnobsRequest) => postJson<ControlKnobs>("/api/knobs", payload),
@@ -203,6 +219,13 @@ export const api = {
    *  kutsupaikka on vahvistuksen takana (BroadcastCreateCard). */
   createBroadcasts: (payload: CreateBroadcastsBody) =>
     postJson<CreatedBroadcastPair>("/api/youtube/broadcasts", payload),
+  /** Renderöi thumbnailin ja lataa sen videolle samalla kutsulla. Sama
+   *  kuvantekijä kuin esikatselussa, joten ladattu kuva on se joka näytettiin. */
+  setThumbnail: (videoId: string, payload: ThumbnailRequest) =>
+    postJson<{ videoId: string }>(
+      `/api/youtube/videos/${encodeURIComponent(videoId)}/thumbnail`,
+      payload,
+    ),
   /** Metatietojen muokkaus. `confirm` lähtee aina mukana, koska palvelin
    *  vaatii sen näkyvyyden muutokseen ja UI kysyy sen erikseen. */
   patchVideo: (videoId: string, payload: VideoPatchBody) =>

@@ -19,12 +19,15 @@ import {
 import { readLog } from "./journal.js";
 import { runControlPreflight } from "./preflight.js";
 import { startLiveAggregator } from "./live.js";
+import { createSourceIngestPoller } from "./sourceIngest.js";
 import { getDayMatches, getMatch } from "./matches.js";
 import {
   listJobs,
   createJob,
   patchJob,
   activateJob,
+  closeRunningJob,
+  JobClashError,
   getActiveJob,
   MatchNotFoundError,
 } from "./jobs.js";
@@ -46,6 +49,7 @@ import {
   deleteVideo,
   listBroadcasts,
   listPlaylists,
+  setThumbnail,
   updateVideoMetadata,
   YouTubeApiError,
   type PrivacyStatus,
@@ -56,7 +60,9 @@ import {
   templateInputFromMatch,
   type BroadcastTexts,
   type MatchTemplateInput,
+  type ShareTemplate,
 } from "./templates.js";
+import { ensureShareTemplateFile, readShareTemplate } from "./shareTemplate.js";
 import type { CreateJobRequest, PatchJobRequest, PatchKnobsRequest } from "../shared/api.js";
 import type { Job, LiveState, NotificationPrefs } from "../shared/types.js";
 
@@ -145,10 +151,13 @@ interface YoutubeCreateRequest {
 }
 
 type TemplateContext =
-  | { texts: BroadcastTexts; matchId: number; job: Job | null }
+  | { texts: BroadcastTexts; matchId: number; job: Job | null; shareTemplate: ShareTemplate }
   | { error: string; status: number };
 
 async function resolveTemplateContext(body: YoutubeCreateRequest): Promise<TemplateContext> {
+  // Luetaan joka pyynnöllä: operaattorin muokkaus run/share-template.jsoniin
+  // näkyy seuraavassa esikatselussa ilman uudelleenkäynnistystä (#95).
+  const shareTemplate = await readShareTemplate();
   let job: Job | null = null;
   if (body.jobId) {
     job = (await listJobs()).find((j) => j.id === body.jobId) ?? null;
@@ -165,7 +174,7 @@ async function resolveTemplateContext(body: YoutubeCreateRequest): Promise<Templ
     body.overrides ?? {}
   );
   try {
-    return { texts: buildBroadcastTexts(input), matchId, job };
+    return { texts: buildBroadcastTexts(input, shareTemplate), matchId, job, shareTemplate };
   } catch (err) {
     // Käytännössä vain "alkuaika puuttuu" — ottelu on listalla ilman
     // kellonaikaa, ja se on käyttäjän täydennettävä (overrides.localTime).
@@ -235,12 +244,32 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
   }
   const activateMatch = pathname.match(/^\/api\/jobs\/([^/]+)\/activate$/);
   if (activateMatch && method === "POST") {
-    const job = await activateJob(activateMatch[1]);
-    // The route's whole job (api.ts): flipping a job to active is what makes
-    // it the one the relay will actually broadcast, so writing .env.relay is
-    // part of activation, not a separate step the client has to remember.
-    await writeRelayEnv(job);
-    sendJson(res, 200, job);
+    // `force` is the operator answering "lopeta edellinen ja aktivoi tämä".
+    // Strict boolean: this ends a broadcast that may be on air, so a truthy
+    // string from a hand-written curl must not do it by accident.
+    const body = await readJsonBody<{ force?: unknown }>(req).catch(() => ({}) as { force?: unknown });
+    const force = body.force === true;
+    try {
+      // Cutting the previous run means stopping the unit too, not just marking
+      // the job closed: leaving the relay pushing the old match while a new job
+      // owns .env.relay is a worse state than the clash we came here to fix.
+      if (force && (await getRelayProcess()).active) await stopRelay();
+      const job = await activateJob(activateMatch[1], { force });
+      // The route's whole job (api.ts): flipping a job to active is what makes
+      // it the one the relay will actually broadcast, so writing .env.relay is
+      // part of activation, not a separate step the client has to remember.
+      await writeRelayEnv(job);
+      sendJson(res, 200, job);
+    } catch (err) {
+      // A second job wanting the one broadcast slot is a state conflict with an
+      // obvious next step, not a server fault — 409, and the client turns it
+      // into a button instead of a red toast (#101).
+      if (err instanceof JobClashError) {
+        sendError(res, 409, err.message);
+        return;
+      }
+      throw err;
+    }
     return;
   }
   const jobIdMatch = pathname.match(/^\/api\/jobs\/([^/]+)$/);
@@ -332,6 +361,34 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
     sendJson(res, 200, { id, path: thumbnailCachePath(id) });
     return;
   }
+  // Renders and uploads in one call, because the two halves have no separate
+  // use: setThumbnail existed in youtube.ts with no route at all, so a
+  // thumbnail could be previewed and rendered but never actually set from the
+  // UI (#95). Rendering here rather than trusting a client-supplied path keeps
+  // the upload bound to the same composer the preview showed.
+  const thumbnailUploadMatch = pathname.match(/^\/api\/youtube\/videos\/([^/]+)\/thumbnail$/);
+  if (thumbnailUploadMatch && method === "POST") {
+    const body = await readJsonBody<unknown>(req);
+    let opts;
+    try {
+      opts = parseThumbnailRequest(body);
+    } catch (err) {
+      sendError(res, 400, err instanceof Error ? err.message : "virheellinen pyyntö");
+      return;
+    }
+    let image: Buffer;
+    try {
+      image = await renderThumbnail(opts);
+    } catch (err) {
+      if (err instanceof ThumbnailRenderError) {
+        sendError(res, 502, err.message);
+        return;
+      }
+      throw err;
+    }
+    sendJson(res, 200, await setThumbnail(thumbnailUploadMatch[1], image, "image/png"));
+    return;
+  }
 
   // --- YouTube-ketju. Kaikki kirjoittavat kutsut kulkevat youtube.ts:n läpi,
   // joka kirjaa jokaisen luodun lähetyksen run/youtube-created.ndjson-lokiin.
@@ -386,7 +443,8 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
         streamForNormal: body.streamForNormal,
         normalAutoStart: body.normalAutoStart,
       },
-      texts
+      texts,
+      resolved.shareTemplate
     );
     // Työ tietää nyt kohteensa: selostettu lähetys on relayn kohde, normaali
     // on lähde jota puhelin työntää. Ilman tätä operaattori joutuisi
@@ -444,8 +502,14 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
   if (relayActionMatch && method === "POST") {
     const action = relayActionMatch[1];
     if (action === "start") await startRelay();
-    else if (action === "stop") await stopRelay();
-    else await restartRelay();
+    else if (action === "stop") {
+      await stopRelay();
+      // Stopping the unit ends the run, so the job stops holding the broadcast
+      // slot. Without this the next match cannot be activated at all, and the
+      // operator finds that out at the worst possible moment (#101). Restart is
+      // deliberately NOT included: the same job keeps running.
+      await closeRunningJob();
+    } else await restartRelay();
     // Ask systemd fresh rather than trust whatever start/stop/restart
     // returned — the response should reflect reality even if the unit
     // didn't settle into the expected state.
@@ -546,11 +610,25 @@ async function main(): Promise<void> {
   // else guarantees it exists before the first request — create it once at
   // boot rather than on every write.
   await mkdir(CONFIG.stateDir, { recursive: true });
+  // Materializes run/share-template.json with its defaults, so the operator can
+  // find and edit the share message's wording without being told it exists
+  // (#95). Failing to write it must not stop the server: the defaults are
+  // compiled in and the messages come out the same.
+  await ensureShareTemplateFile().catch(() => undefined);
+
+  // Lähteen tilan polleri käynnistyy ennen aggregaattoria, jotta ensimmäinen
+  // koottu tila voi jo sisältää havainnon. Se on porttien takana: ilman
+  // aktiivista työtä, ajossa olevaa relayta ja Google-tunnuksia se ei kutsu
+  // YouTubea kertaakaan (sourceIngest.ts).
+  const sourceIngest = createSourceIngestPoller();
 
   // The live view needs to know which job is currently the relay's job to
   // know what to poll; the aggregator asks rather than the server pushing it
   // in, so a job activated after the aggregator started is picked up too.
-  const live = startLiveAggregator({ getActiveJob });
+  const live = startLiveAggregator({
+    getActiveJob,
+    getSourceIngest: () => ({ ingest: sourceIngest.current(), reason: sourceIngest.reason() }),
+  });
 
   // Push triggers ride along as an ordinary subscriber instead of being wired
   // into the aggregator itself: notifications can then never alter, delay or
@@ -599,6 +677,10 @@ async function main(): Promise<void> {
     // Stopping the scheduler stops it from acting; it never stops a broadcast
     // that is already on air (uptime first — that is systemd's business).
     scheduler.stop();
+    // Polleri pysäytetään erikseen: sen ajastin on aggregaattorista
+    // riippumaton, eikä kesken oleva YouTube-kutsu saa pitää prosessia
+    // pystyssä sammutuksen jälkeen.
+    sourceIngest.stop();
     live.stop();
     server.close(() => process.exit(0));
   };

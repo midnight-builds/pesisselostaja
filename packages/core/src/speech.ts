@@ -137,7 +137,16 @@ function vuoropariLabel(inning: number, batTurn: number): string {
  *  Never repeats the previous pick of the same group back to back, so the
  *  variation is actually audible (with 2 variants a plain draw repeats half
  *  the time). Group is a stable id per phrase family — the rendered strings
- *  can't key this, they change with names and scores. */
+ *  can't key this, they change with names and scores.
+ *
+ *  **A variant may vary the WORDING, never the CONTENT.** The listener does not
+ *  know which variant they got, so every variant of a group has to carry the
+ *  same facts. Two thirds of the harhaheitto runs in match 144980 were narrated
+ *  as a bare "juoksu" because two of three variants dropped the API's own
+ *  phrase (issue #99), and four fifths of the idle fillers never said who was
+ *  batting (issue #100). Both read as complete sentences, which is exactly why
+ *  nobody noticed. `test/variantParity.test.ts` walks every variant of every
+ *  group and fails if one drops a fact its siblings carry. */
 const lastVariantPick = new Map<string, number>();
 function pickVariant(group: string, variants: string[]): string {
   if (variants.length === 1) return variants[0];
@@ -383,22 +392,25 @@ export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): stri
   const batting = ctx.currentBatTeamId != null
     ? `, ja sisävuorossa on ${getTeamName(meta, ctx.currentBatTeamId)}.`
     : ".";
+  // Every variant below carries the batting team (and, when someone leads, the
+  // margin word): the filler is what a listener hears after a silent stretch,
+  // so it is the worst possible place to leave out who is at bat (issue #100).
   if (h === a) {
     return pickVariant("idle-tie", [
-      `Tilanne on edelleen tasan ${h}, ${a}.`,
-      `Ottelu jatkuu tasatilanteessa, ${h}, ${a}.`,
-      `Tulospalvelun mukaan tilanne on yhä tasan ${h}, ${a}.`,
+      `Tilanne on edelleen tasan ${h}, ${a}${batting}`,
+      `Ottelu jatkuu tasatilanteessa, ${h}, ${a}${batting}`,
+      `Tulospalvelun mukaan tilanne on yhä tasan ${h}, ${a}${batting}`,
       `Tilasto kertoo tilanteeksi tasan ${h}, ${a}${batting}`,
     ]);
   }
   const leader = h > a ? meta.home.shorthand : meta.away.shorthand;
   const adv = Math.abs(h - a) <= 2 ? "niukasti" : "reilusti";
   return pickVariant("idle", [
-    `Tilanne on edelleen ${h}, ${a}, kun ${leader} johtaa peliä ${adv}.`,
-    `Tilanne edelleen ${h}, ${a}, ${leader} johdossa ${adv}.`,
-    `Ottelu jatkuu, ${leader} johtaa ${adv}, tilanne ${h}, ${a}.`,
-    `Tulospalvelun mukaan tilanne on edelleen ${h}, ${a}, ${leader} johdossa.`,
-    `Tilasto kertoo tilanteeksi ${h}, ${a}, ${leader} johtaa${batting}`,
+    `Tilanne on edelleen ${h}, ${a}, kun ${leader} johtaa peliä ${adv}${batting}`,
+    `Tilanne edelleen ${h}, ${a}, ${leader} johdossa ${adv}${batting}`,
+    `Ottelu jatkuu, ${leader} johtaa ${adv}, tilanne ${h}, ${a}${batting}`,
+    `Tulospalvelun mukaan tilanne on edelleen ${h}, ${a}, ${leader} johdossa ${adv}${batting}`,
+    `Tilasto kertoo tilanteeksi ${h}, ${a}, ${leader} johtaa ${adv}${batting}`,
   ]);
 }
 
@@ -418,7 +430,7 @@ export function formatWelcomeFiller(meta: MatchMetadata): string {
   const at = stadium ? `, pelikenttänä ${stadium}` : "";
   return pickVariant("welcome", [
     `Tervetuloa seuraamaan ottelua ${pair}${at}.`,
-    `Odottelemme pelin alkua. Vastakkain ${pair}.`,
+    `Odottelemme pelin alkua. Vastakkain ${pair}${at}.`,
     `Ottelu ei ole vielä alkanut. ${pair}${at}.`,
   ]);
 }
@@ -466,17 +478,17 @@ export function subEventToSpeech(
   // tuojana X. tasan 7, 7.").
   if (rawText.includes("löi juoksun")) {
     const base = formatRunScored(texts, meta, lookup);
-    return ctx ? `${base} ${capitalize(formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns))}.` : base;
+    return withRunCountAndScore(base, sub, meta, ctx);
   }
 
   if (rawText.includes("löi kunnarin")) {
     const base = formatKunnari(texts, meta, lookup);
-    return ctx ? `${base} ${capitalize(formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns))}.` : base;
+    return withRunCountAndScore(base, sub, meta, ctx);
   }
 
   if (rawText.includes("toi juoksun")) {
     const base = formatRunBrought(texts, meta, lookup);
-    return ctx ? `${base} ${capitalize(formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns))}.` : base;
+    return withRunCountAndScore(base, sub, meta, ctx);
   }
 
   if (rawText.includes("Palo")) {
@@ -534,6 +546,26 @@ export function subEventToSpeech(
   return null;
 }
 
+/** Closes a run announcement: the run COUNT when the marking brought more than
+ *  one, then the score.
+ *
+ *  One marking usually means one run, and every run phrase is written in the
+ *  singular — but `oscscore` can be 2 or more (rare, confirmed by the user
+ *  29.7.2026), and then the scoreboard jumps further than the sentence
+ *  explains. Saying the number out loud is the only way a listener can follow
+ *  the score they are about to hear. */
+function withRunCountAndScore(
+  base: string,
+  sub: SubEvent,
+  meta: MatchMetadata,
+  ctx: SpeechContext | undefined
+): string {
+  const runs = runValueOfSubEvent(sub);
+  const count = runs > 1 ? ` ${capitalize(FI_CARDINAL[runs] ?? String(runs))} juoksua.` : "";
+  if (!ctx) return `${base}${count}`;
+  return `${base}${count} ${capitalize(formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns))}.`;
+}
+
 function formatRunScored(texts: EventTextElement[], _meta: MatchMetadata, lookup: PlayerLookup): string {
   const players: string[] = [];
   let eventText = "";
@@ -584,10 +616,14 @@ function formatRunBrought(texts: EventTextElement[], _meta: MatchMetadata, looku
   }
   const who = players[0] ?? "";
   if (!who) return `${eventText}.`;
+  // The source ships a finished Finnish phrase ("toi juoksun harhaheitolla"),
+  // and it is the only place the LISTENER learns how the run came about — a
+  // variant that replaces it with a bare "Juoksu!" invents nothing and loses
+  // everything (issue #99). So every variant speaks eventText verbatim.
   return pickVariant("run-brought", [
     `${who} ${eventText}.`,
-    `Juoksu! Tuojana ${who}.`,
-    `Tulospalveluun on kirjattu juoksu, tuojana ${who}.`,
+    `Ja ${who} ${eventText}.`,
+    `Tulospalveluun kirjattu: ${who} ${eventText}.`,
   ]);
 }
 

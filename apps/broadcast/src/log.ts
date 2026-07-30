@@ -38,6 +38,10 @@ export type EventCode =
   | "relay.dry_run"
   | "relay.tts_usage"
   | "relay.source_gone"
+  // Lähde päätettiin hallitusti — ei vika (#103).
+  | "relay.source_ended"
+  // yt-dlp sanoi lähetyksen päättyneen, mutta sitä ei ole vielä vahvistettu (#103).
+  | "source.ended_unconfirmed"
   // yt-dlp source resolution
   | "source.resolving"
   | "source.not_live"
@@ -51,6 +55,14 @@ export type EventCode =
   | "ffmpeg.failure_side"
   | "ffmpeg.heartbeat"
   | "ffmpeg.supervisor_failed"
+  // katvekuva ("EI SIGNAALIA", issue #104). Alku ja loppu ovat osa ohjaamon
+  // sopimusta: niistä ohjaamo tietää näyttää katvetilan operaattorille sen
+  // sijaan että sujuvalta näyttävä lähetys piilottaisi kaatuneen kameran.
+  | "ffmpeg.slate_start"
+  | "ffmpeg.slate_end"
+  | "slate.prepared"
+  | "slate.unavailable"
+  | "slate.write_failed"
   // pesistulokset API / poll loop
   | "api.fetching_meta"
   | "api.match"

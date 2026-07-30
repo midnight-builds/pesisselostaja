@@ -153,3 +153,49 @@ test.describe("preflight-portti", () => {
     expect(api.called("POST", "/api/relay/start")).toBe(false);
   });
 });
+
+/** #101: siirtymä ottelusta seuraavaan. Aktivointi torjutaan niin kauan kuin
+ *  edellinen työ pitää lähetyspaikkaa — ja se on tila, ei kaatuminen: sille on
+ *  nappi, ei punaista virheilmoitusta. Osuu hetkeen jossa edellinen peli on
+ *  ohi, seuraava on jo alkanut ja kamera on siirtymässä. */
+test.describe("edellinen työ tukkii lähetyspaikan", () => {
+  test("torjuttu aktivointi tarjoaa napin, ei virhettä", async ({ page, openApp, api }, info) => {
+    api.jobs = [
+      job({ id: "job-edellinen", status: "live", home: "Kuusikon Kipinä", away: "Rantalan Rasti" }),
+      job({ id: "job-seuraava", status: "draft" }),
+    ];
+    await openApp(liveState({ job: job({ id: "job-edellinen", status: "live" }) }));
+    await openJob(page);
+
+    await view(page, "job").locator("select").selectOption("job-seuraava");
+    await page.getByRole("button", { name: "Kirjoita .env.relay" }).click();
+
+    await expect(page.getByText(/on jo lähetyksessä/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Lopeta edellinen ja aktivoi tämä" })).toBeVisible();
+    await shot(page, info, "job-clash");
+  });
+
+  test("nappi vaatii kaksi napautusta ja aktivoi vasta sitten", async ({ page, openApp, api }) => {
+    api.jobs = [
+      job({ id: "job-edellinen", status: "live", home: "Kuusikon Kipinä", away: "Rantalan Rasti" }),
+      job({ id: "job-seuraava", status: "draft" }),
+    ];
+    await openApp(liveState({ job: job({ id: "job-edellinen", status: "live" }) }));
+    await openJob(page);
+
+    await view(page, "job").locator("select").selectOption("job-seuraava");
+    await page.getByRole("button", { name: "Kirjoita .env.relay" }).click();
+
+    const forceButton = page.getByRole("button", { name: "Lopeta edellinen ja aktivoi tämä" });
+    await forceButton.click();
+    // Ensimmäinen napautus vain virittää: mitään ei ole vielä lähetetty.
+    expect(api.calledWith("POST", "/api/jobs/job-seuraava/activate").filter((c) => (c.body as { force?: boolean })?.force).length).toBe(0);
+
+    await page.getByRole("button", { name: "Varmista: lopeta edellinen" }).click();
+    await expect
+      .poll(() => api.calledWith("POST", "/api/jobs/job-seuraava/activate").filter((c) => (c.body as { force?: boolean })?.force === true).length)
+      .toBe(1);
+    // Ja torjuntalaatikko katoaa, koska aktivointi meni läpi.
+    await expect(page.getByText(/on jo lähetyksessä/)).toBeHidden();
+  });
+});

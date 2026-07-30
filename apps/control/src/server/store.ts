@@ -17,11 +17,21 @@ async function ensureStateDir(): Promise<void> {
   await mkdir(CONFIG.stateDir, { recursive: true });
 }
 
+/** Kasvava juokseva numero tmp-tiedostojen nimiin. Kiinteä `.tmp` riittäisi
+ *  vain yhdelle kirjoittajalle: kaksi rinnakkaista kirjoitusta samaan
+ *  tiedostoon osuisivat samaan tmp-nimeen, jolloin toinen kirjoittaisi toisen
+ *  puskurin päälle ennen renamea ja jälkimmäinen rename kaatuisi ENOENTiin. */
+let tmpCounter = 0;
+
 export function createStore<T>(fileName: string, initial: T): Store<T> {
   const filePath = join(CONFIG.stateDir, fileName);
-  // Serializes update() calls so two concurrent read-modify-writes (e.g. two
-  // PATCHes landing close together from the same phone) chain instead of
-  // racing on disk and one silently clobbering the other's change.
+  // Serializes EVERY write to this file — both update()'s read-modify-write
+  // and a bare write() — so two concurrent writers (e.g. an operator's fresh
+  // device-flow login calling write() while the background source-ingest
+  // poller's hourly token refresh is mid-update()) chain instead of racing on
+  // disk and one silently clobbering the other's change. Leaving write()
+  // outside the chain is exactly how a brand-new refresh token gets replaced
+  // by the one the in-flight update() had already read.
   let chain: Promise<unknown> = Promise.resolve();
 
   async function read(): Promise<T> {
@@ -36,9 +46,11 @@ export function createStore<T>(fileName: string, initial: T): Store<T> {
     }
   }
 
-  async function write(value: T): Promise<void> {
+  /** The write itself, WITHOUT the lock — update() already holds it, and
+   *  waiting for its own turn in the chain would deadlock. */
+  async function writeUnlocked(value: T): Promise<void> {
     await ensureStateDir();
-    const tmpPath = `${filePath}.tmp`;
+    const tmpPath = `${filePath}.tmp-${process.pid}-${++tmpCounter}`;
     await writeFile(tmpPath, JSON.stringify(value, null, 2), "utf8");
     // rename() is atomic on the same filesystem: a concurrent reader never
     // observes a half-written file, and a service killed mid-save leaves the
@@ -46,18 +58,27 @@ export function createStore<T>(fileName: string, initial: T): Store<T> {
     await rename(tmpPath, filePath);
   }
 
-  function update(fn: (current: T) => T): Promise<T> {
-    const next = chain.then(async () => {
-      const current = await read();
-      const updated = fn(current);
-      await write(updated);
-      return updated;
-    });
-    // The chain itself must never reject, or every update queued after a
-    // failed one would inherit that rejection forever. The caller of *this*
-    // update still observes the real failure via the returned promise.
+  /** Queues `next` behind everything already in flight. The chain itself must
+   *  never reject, or every write queued after a failed one would inherit that
+   *  rejection forever. The caller of *this* write still observes the real
+   *  failure via the returned promise. */
+  function serialize<R>(fn: () => Promise<R>): Promise<R> {
+    const next = chain.then(fn);
     chain = next.catch(() => undefined);
     return next;
+  }
+
+  function write(value: T): Promise<void> {
+    return serialize(() => writeUnlocked(value));
+  }
+
+  function update(fn: (current: T) => T): Promise<T> {
+    return serialize(async () => {
+      const current = await read();
+      const updated = fn(current);
+      await writeUnlocked(updated);
+      return updated;
+    });
   }
 
   return { read, write, update };

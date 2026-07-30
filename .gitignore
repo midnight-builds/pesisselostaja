@@ -11,6 +11,10 @@ debug.log
 !.claude/skills/
 .claude-remote-control.log
 .claude-remote-control.pid
+# Ajonaikainen roska ja esikatselut MISSÄ TAHANSA run/-hakemistossa. Aiemmin
+# tässä oli vain apps/*/run/, ja repojuuren run/ jäi kattamatta — sinne
+# generoidut katvekuvan esikatselut päätyivät versionhallintaan vahingossa.
+run/
 apps/broadcast/run/
 apps/broadcast/.env.relay
 apps/broadcast/voices/

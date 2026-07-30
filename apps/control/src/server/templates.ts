@@ -10,7 +10,9 @@
  *  1. **Lopputulos ei tule otsikkoon.** Tallenteen katsoja ei halua spoileria
  *     (DESIGN.md "Metatiedot") — siksi mikään tässä ei lue `resultString`ia.
  *  2. **Jaettava viesti alkaa aina tarkalleen `Seuraava live on `.** Se on
- *     leirimallin SKILLin nimenomainen vaatimus, ei tyyliseikka. */
+ *     leirimallin SKILLin nimenomainen vaatimus, ei tyyliseikka. Muotoilu on
+ *     nyt konfiguroitava (#95), mutta oletus on juuri tämä — ja oletus on se
+ *     mitä ilman omaa `run/share-template.json`ia käytetään. */
 
 /** Kaikki käyttäjän näkemät ajat ovat Suomen paikallisaikaa (runbook
  *  "Aikakasittely"). API antaa UTC:tä; muunnos tehdään vain täällä. */
@@ -36,7 +38,56 @@ export const NARRATED_PREFIX = "Selostettu ";
 /** Leirimallin SKILL: viesti aloitetaan aina tällä fraasilla, merkilleen. */
 export const SHARE_MESSAGE_OPENING = "Seuraava live on ";
 
-export const MATCH_URL_BASE = "https://www.pesistulokset.fi/ottelu/";
+/** Monikko. Molemmat muodot vastaavat 200, mutta tulospalvelu itse käyttää
+ *  monikkoa, ja jaettava linkki kuuluu olla samassa muodossa kuin se joka
+ *  vastaanottajalla jo on (vahvistettu 29.7.2026, #95). */
+/** Jaettavan viestin muoto datana. Puhdas tyyppi ja puhdas renderöijä ovat
+ *  täällä; tiedoston luku on shareTemplate.ts:ssä, jotta tämä moduuli pysyy
+ *  levyä koskemattomana. */
+export interface ShareTemplate {
+  /** Ensimmäinen rivi. Paikkamerkit: {time}, {matchup}. */
+  opening: string;
+  /** Linkkirivit. Paikkamerkit: {watchUrl}, {narratedWatchUrl}, {matchUrl}. */
+  lines: string[];
+}
+
+/** 29.7.2026 käytössä vahvistettu muoto (#95). */
+export const DEFAULT_SHARE_TEMPLATE: ShareTemplate = {
+  opening: "Seuraava live on klo {time}: {matchup}. Alla linkit:",
+  lines: [
+    "YouTube: {watchUrl}",
+    "YouTube selostettu: {narratedWatchUrl}",
+    "Tulospalvelu: {matchUrl}",
+  ],
+};
+
+/** Kenttä kerrallaan, koska tiedostoa muokataan käsin: jos joku kirjoittaa
+ *  `opening`in uusiksi ja poistaa `lines`in, hän saa oman aloituksensa ja
+ *  oletuslinkit — ei kaatumista eikä tyhjää viestiä. */
+export function normalizeShareTemplate(raw: unknown): ShareTemplate {
+  const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const opening =
+    typeof obj.opening === "string" && obj.opening.trim() !== ""
+      ? obj.opening
+      : DEFAULT_SHARE_TEMPLATE.opening;
+  const lines =
+    Array.isArray(obj.lines) && obj.lines.length > 0 && obj.lines.every((l) => typeof l === "string")
+      ? (obj.lines as string[])
+      : DEFAULT_SHARE_TEMPLATE.lines;
+  return { opening, lines };
+}
+
+/** Korvaa {nimi}-paikkamerkit. Tuntematon paikkamerkki jätetään näkyviin
+ *  tarkoituksella: se paljastuu esikatselussa, joka on oikea paikka huomata
+ *  kirjoitusvirhe — hiljaa katoava kohta huomattaisiin vasta lähetetystä
+ *  viestistä. */
+export function renderShareTemplate(template: ShareTemplate, values: Record<string, string>): string {
+  const fill = (text: string): string =>
+    text.replace(/\{(\w+)\}/g, (whole, key: string) => values[key] ?? whole);
+  return [template.opening, ...template.lines].map(fill).join("\n");
+}
+
+export const MATCH_URL_BASE = "https://www.pesistulokset.fi/ottelut/";
 
 export const DEFAULT_HASHTAGS = ["#pesäpallo", "#pesäysit", "#live", "#livestream"];
 
@@ -257,7 +308,8 @@ export interface BroadcastTexts {
   localTime: string;
   scheduledLocal: string;
   matchUrl: string;
-  /** Ottelupari muodossa "Koti - Vieras", jaettavaa viestiä varten. */
+  /** Ottelupari otsikon nimillä ("Pesä Ysit F-pojat - IPV"), jaettavaa viestiä
+   *  varten — sama pari jonka otsikkokin saa. */
   matchup: string;
   /** videos.recordingDetails.locationDescription -kenttään. */
   venue: string;
@@ -426,22 +478,27 @@ export interface ShareLinks {
   matchUrl: string;
 }
 
-/** Yhden pelin jaettava viesti. Ensimmäinen rivi alkaa aina merkilleen
- *  `Seuraava live on ` (leirimallin SKILL). Ei stream keytä eikä RTMP-osoitetta:
- *  tämä teksti menee ulkopuolisille — operaattorin omat tiedot ovat
- *  buildBroadcastSummaryssa. */
+/** Yhden pelin jaettava viesti. Ei stream keytä eikä RTMP-osoitetta: tämä
+ *  teksti menee ulkopuolisille — operaattorin omat tiedot ovat
+ *  buildBroadcastSummaryssa.
+ *
+ *  Muotoilu tulee `run/share-template.json`ista (#95), jotta sanamuodon
+ *  vaihtaminen ei vaadi koodimuutosta kesken leiripäivän. Oletus on
+ *  DEFAULT_SHARE_TEMPLATE, eli sama kanoninen muoto kuin ennen. */
 export function buildShareMessage(
   opts: { localTime: string; matchup: string },
-  links: ShareLinks
+  links: ShareLinks,
+  template: ShareTemplate = DEFAULT_SHARE_TEMPLATE
 ): string {
-  const watch = links.watchUrl ?? "<youtube-linkki>";
-  const narrated = links.narratedWatchUrl ?? "<selostettu-youtube-linkki>";
-  return [
-    `${SHARE_MESSAGE_OPENING}klo ${opts.localTime}: ${opts.matchup}. Alla linkit:`,
-    `YouTube: ${watch}`,
-    `YouTube selostettu: ${narrated}`,
-    `Tulospalvelu: ${links.matchUrl}`,
-  ].join("\n");
+  return renderShareTemplate(template, {
+    time: opts.localTime,
+    matchup: opts.matchup,
+    // Ennen luontia linkkejä ei vielä ole. Paikkamerkki näkyy esikatselussa
+    // sellaisenaan, jotta operaattori näkee mikä puuttuu.
+    watchUrl: links.watchUrl ?? "<youtube-linkki>",
+    narratedWatchUrl: links.narratedWatchUrl ?? "<selostettu-youtube-linkki>",
+    matchUrl: links.matchUrl,
+  });
 }
 
 export interface DayShareEntry {
@@ -504,7 +561,10 @@ export function buildBroadcastSummary(input: BroadcastSummaryInput): string {
 
 /** Koko tekstipaketti yhdellä kutsulla: tämä on se mitä esikatselureitti
  *  palauttaa ja mitä createBroadcastPair syö. */
-export function buildBroadcastTexts(input: MatchTemplateInput): BroadcastTexts {
+export function buildBroadcastTexts(
+  input: MatchTemplateInput,
+  shareTemplate: ShareTemplate = DEFAULT_SHARE_TEMPLATE
+): BroadcastTexts {
   const { date, time } = localPartsOf(input);
   const title = buildTitle(input);
   // Ikäluokka luetaan ensisijaisesti OMASTA joukkueesta: vastustajan nimessä
@@ -514,16 +574,18 @@ export function buildBroadcastTexts(input: MatchTemplateInput): BroadcastTexts {
     input.ageGroup ?? resolveAgeGroup(input.teamLabel, ...ownFirst, input.seriesName);
   const playlist = playlistForAgeGroup(ageGroup);
   const matchUrl = matchUrlFor(input.matchId);
-  // Jaettavassa viestissä ottelupari on koti - vieras täysillä nimillä: siinä
-  // ei ole pituusrajaa, ja lukija tunnistaa seurat parhaiten kokonimestä.
-  const matchup = `${input.home} - ${input.away}`;
+  // Sama ottelupari kuin otsikossa (#95): kun operaattori on antanut
+  // teamLabel/opponent-arvot ("Pesä Ysit F-pojat - IPV"), viestin pitää käyttää
+  // niitä eikä tulospalvelun raakoja nimiä — viesti ja otsikko puhuvat samasta
+  // pelistä samoilla nimillä. Lyhennystaso 0: viestissä ei ole pituusrajaa.
+  const matchup = buildMatchupLabel(input, 0);
   const venue = [input.venue, input.city].filter((v): v is string => Boolean(v)).join(", ");
 
   return {
     title,
     narratedTitle: buildNarratedTitle(title),
     description: buildDescription(input),
-    shareMessage: buildShareMessage({ localTime: time, matchup }, { matchUrl }),
+    shareMessage: buildShareMessage({ localTime: time, matchup }, { matchUrl }, shareTemplate),
     playlistId: input.playlistId ?? playlist?.id ?? null,
     playlistName: input.playlistId ? null : (playlist?.name ?? null),
     ageGroup,

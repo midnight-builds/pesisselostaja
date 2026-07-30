@@ -20,6 +20,7 @@ import type {
   NarrationLine,
   PreflightResult,
   RelayProcess,
+  RelayTelemetry,
   SchedulerState,
   SystemState,
 } from "../../src/shared/types";
@@ -193,14 +194,48 @@ export function job(p: Partial<Job> = {}): Job {
 
 export function narration(): NarrationLine[] {
   return [
-    { id: "n1", detectedAt: "2026-07-29T05:29:10.000Z", spokenAt: null, text: "Toinen palo Peikoille." },
     {
-      id: "n2",
+      id: "1:c1",
+      detectedAt: "2026-07-29T05:29:10.000Z",
+      spokenAt: null,
+      muted: false,
+      text: "Toinen palo Peikoille.",
+    },
+    {
+      id: "2:c2",
       detectedAt: "2026-07-29T05:29:30.000Z",
       spokenAt: "2026-07-29T05:29:34.000Z",
+      muted: false,
       text: "Kotiutus! Veikot johtaa 5–3.",
     },
+    // The line nobody heard: spoken as far as the relay's bookkeeping goes,
+    // dropped because ffmpeg was not attached.
+    {
+      id: "3:c3",
+      detectedAt: "2026-07-29T05:29:40.000Z",
+      spokenAt: "2026-07-29T05:29:40.000Z",
+      muted: true,
+      text: "Kolmas palo Peikoille.",
+    },
   ];
+}
+
+export function telemetry(p: Partial<RelayTelemetry> = {}): RelayTelemetry {
+  return {
+    at: NOW,
+    matchId: 999001,
+    startedAt: "2026-07-29T05:29:00.000Z",
+    uptimeSec: 2520,
+    readerAttached: true,
+    pendingClips: 1,
+    respawns: 0,
+    source: { state: "live", detail: "ffmpeg käynnissä" },
+    match: { finished: false, eventCount: 412, lastEventAt: "2026-07-29T05:29:40.000Z" },
+    narration: { detected: 3, spoken: 2, muted: 1, queued: 1 },
+    tts: { engine: "piper", elevenLabsCharsUsed: 0 },
+    lastProblem: null,
+    ...p,
+  };
 }
 
 export function logLines(): LogLine[] {
@@ -223,6 +258,7 @@ export function liveState(p: Partial<LiveState> = {}): LiveState {
     system: systemState(),
     knobs: knobs(),
     job: job(),
+    telemetry: telemetry(),
     narration: narration(),
     log: logLines(),
     ...p,
@@ -338,4 +374,58 @@ export function preflightWithBlockers(): PreflightResult {
     warnings: 1,
     summary: "2 estettä — älä käynnistä relayta.",
   });
+}
+
+/** Tekstipaketti jonka esikatselureitti palauttaa. `matchup` heijastaa
+ *  otsikko-ohitukset, jotta selaintesti näkee menivätkö ne palvelimelle. */
+export function broadcastTexts(p: { teamLabel?: string; opponent?: string; shortVenue?: string } = {}) {
+  const own = p.teamLabel ?? "Kuvitteellisen Kylän Veikot";
+  const opponent = p.opponent ?? "Lapinlahden Peikot";
+  const place = p.shortVenue ?? "Testikenttä 1";
+  const matchup = `${own} - ${opponent}`;
+  return {
+    title: `${matchup}, 29.7.2026 ${place}`,
+    narratedTitle: `Selostettu ${matchup}, 29.7.2026 ${place}`,
+    description: `Ottelu: ${matchup}\nPäivä: 29.7.2026 klo 8:30`,
+    shareMessage: [
+      `Seuraava live on klo 8:30: ${matchup}. Alla linkit:`,
+      "YouTube: <youtube-linkki>",
+      "YouTube selostettu: <selostettu-youtube-linkki>",
+      "Tulospalvelu: https://www.pesistulokset.fi/ottelut/999001",
+    ].join("\n"),
+    playlistId: "PLtesti",
+    playlistName: "Pesä Ysit F 2026",
+    ageGroup: "F" as const,
+    localDate: "29.7.2026",
+    localTime: "8:30",
+    scheduledLocal: "29.7.2026 klo 8:30",
+    matchUrl: "https://www.pesistulokset.fi/ottelut/999001",
+    matchup,
+    venue: place,
+    thumbnailHeadline: matchup,
+    thumbnailDatetime: "29.7.2026 klo 8:30",
+    thumbnailVenue: place,
+  };
+}
+
+/** Luotu lähetyspari — jaettavassa viestissä oikeat linkit paikkamerkkien
+ *  tilalla, aivan kuten oikealla palvelimella. */
+export function createdPair(texts = broadcastTexts()) {
+  const shareMessage = texts.shareMessage
+    .replace("<youtube-linkki>", "https://www.youtube.com/watch?v=NORMAALI")
+    .replace("<selostettu-youtube-linkki>", "https://www.youtube.com/watch?v=SELOSTETTU");
+  return {
+    normal: { watchUrl: "https://www.youtube.com/watch?v=NORMAALI", videoId: "NORMAALI", title: texts.title, rtmpUrl: null, backupUrl: null, streamKey: null },
+    narrated: {
+      watchUrl: "https://www.youtube.com/watch?v=SELOSTETTU",
+      videoId: "SELOSTETTU",
+      title: texts.narratedTitle,
+      rtmpUrl: "rtmp://a.rtmp.youtube.com/live2",
+      backupUrl: "rtmp://b.rtmp.youtube.com/live2?backup=1",
+      streamKey: "cccc-dddd-eeee-ffff",
+    },
+    shareMessage,
+    broadcastSummary: `Normaali: https://www.youtube.com/watch?v=NORMAALI\nStream Key: cccc-dddd-eeee-ffff`,
+    texts,
+  };
 }
