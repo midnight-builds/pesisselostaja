@@ -71,6 +71,30 @@ Aiempi ehdoton muotoilu ("alkuperäistä lähetystä ei kosketa koskaan") on
 korvattu tällä; älä palauta sitä. Sama teksti on `.claude/skills/relay-ottelu/`
 -runbookissa.
 
+## Ottelupäivä: ohjaamo omistaa ketjun
+
+**Ohjaamo on oletus koko ketjulle** — ottelun valinta, molempien YouTube-
+lähetysten luonti, jakoviesti, käynnistys, ajonaikainen ohjaus ja siivous
+(issue #124). Käsityökierros YouTube Studiossa on **poikkeuspolku**, jota
+käytetään vain kun ohjaamo tai sen YouTube-valtuutus ei toimi — ei runbook.
+Ajaminen: `/relay-ottelu` (polku A = ohjaamo, polku B = käsityö).
+
+Kaksi asiaa, jotka ovat menneet väärin nimenomaan tässä:
+
+- **"Ajasta peli" tarkoittaa ajastusta ohjaamon välinein.** Jos jokin handoff
+  tai dokumentti näyttää ohjaavan käsikierrokseen, sano ristiriita ääneen ja
+  kysy — älä korvaa käyttäjän eksplisiittistä pyyntöä hiljaa "vastaavalla"
+  toteutuksella. 30.7.2026 niin tehtiin, ja lähetysten luonti valui takaisin
+  sille ulkopuoliselle palvelulle, jonka korvaaminen on #124:n koko tavoite.
+- **Ketjun termit ovat repon juuren `CONTEXT.md`:ssä** (raakalähetys,
+  selostettu lähetys, tulospalvelun ottelusivu, ajastushetki,
+  käynnistysikkuna). Lue se ennen kuin kirjoitat ketjusta issueen, dokumenttiin
+  tai koodikommenttiin; paljas "lähde-URL" on jo kaatanut kaksi dokumenttia.
+
+Ketjua **ei ole vielä kertaakaan ajettu läpi ohjaamon luomalla lähetysparilla**,
+eikä ajastimen automaattikäynnistystä ole koeteltu livenä. Älä esitä niitä
+varmana; kerro mikä on koeteltu ja mikä ei.
+
 ## TTS pronunciation
 Speech is read aloud by browser TTS or Piper, which mispronounce some terms.
 This is **not** a blanket spell-out rule — most abbreviations (e.g. `IPV`) read fine.

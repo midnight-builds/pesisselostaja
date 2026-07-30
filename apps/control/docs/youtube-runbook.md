@@ -2,6 +2,18 @@
 
 Last updated: 2026-07-17
 
+> **Luettava näin (issue #124, 30.7.2026):** tämä tiedosto on yhä **kanoninen
+> lähde lähetysten SISÄLLÖLLE** — nimeämismallit, kuvaukset, thumbnail-käytäntö,
+> jaettavan viestin muoto, tilit ja aikakäsittely. `src/server/templates.ts` ja
+> `test/templates.test.ts` tarkistavat kaavat tätä vasten, joten älä muuta
+> kaavoja päivittämättä niitä.
+>
+> **TYÖNKULKU sen sijaan on ohjaamon**, ei tämän tiedoston eikä ulkopuolisen
+> palvelun. Alla oleva "Workflow"-osio ja tiedostopolut (`/root/clawd/...`)
+> kuvaavat maailmaa ennen ohjaamoa. Ottelupäivän ajaminen: `/relay-ottelu`
+> (polku A = ohjaamo, polku B = käsityö poikkeuksena). Ketjun termit:
+> repon juuren `CONTEXT.md`.
+
 Tama on kanoninen yhden tiedoston ohje Pesä Ysit -YouTube-ajastuksiin.
 Jos muu ohje on ristiriidassa taman kanssa, noudata tata tiedostoa.
 
