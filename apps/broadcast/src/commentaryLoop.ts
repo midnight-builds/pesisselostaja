@@ -304,10 +304,10 @@ export class CommentaryLoop {
   private deltaBreakerTripped = false;
   /** Monotonic per-run counter behind each clip's telemetry id. */
   private clipSeq = 0;
-  /** Wall clock of the last time a NEW event appeared. The events themselves
-   *  carry only a match-relative `timestamp`, so this is our own observation
-   *  instant — which is the useful one anyway: it answers "is the scorer still
-   *  entering results", not "how far into the match are we". */
+  /** Wall clock of the last time a NEW event appeared — our own observation
+   *  instant, which is the useful one anyway: it answers "is the scorer still
+   *  entering results", not "how far into the match are we". (Events also
+   *  carry a wall-clock `created` field, see LiveEvent; not needed here.) */
   private lastEventSeenAt: string | null = null;
   /** Ottelutiedot, haettu kerran run():n alussa. Talletetaan, jotta katvekuvan
    *  pisterivi osaa joukkueiden nimet ilman toista hakua. */
