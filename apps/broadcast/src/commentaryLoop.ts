@@ -941,12 +941,18 @@ export class CommentaryLoop {
       // least one genuinely new sub-event (not per sub-event), so a later
       // pass can split total delay into API-side publish delay (this delta)
       // vs. our own portion (speak-time minus this log's timestamp).
+      // lastEventSeenAt on terveyssignaali ("kirjaako toimitsija yhä tuloksia")
+      // eikä saa riippua timestampista: tällä syötteellä event.timestamp on
+      // käytännössä aina null, ja vartijan sisällä kenttä jäi ikuisesti
+      // nulliksi (#119).
+      if (hasNewSubEvent) {
+        this.lastEventSeenAt = new Date().toISOString();
+      }
       if (hasNewSubEvent && event.timestamp !== null) {
         const candidateEpochMs = Date.now() - event.timestamp * 1000;
         this.matchEpochMs =
           this.matchEpochMs === null ? candidateEpochMs : Math.min(this.matchEpochMs, candidateEpochMs);
         const deltaS = Math.round((Date.now() - (this.matchEpochMs + event.timestamp * 1000)) / 1000);
-        this.lastEventSeenAt = new Date().toISOString();
         logDebug("api.first_seen", `first-seen: id=${event.id} ts=${event.timestamp} delta=${deltaS}s`);
       }
 
