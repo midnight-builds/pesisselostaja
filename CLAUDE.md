@@ -121,6 +121,24 @@ When integrating anyway:
   are the defects no single PR's tests could have caught.
 
 ## Running
+### Ports on this server — check before you curl
+| Port | What | Unit |
+|---|---|---|
+| 3000 | web app (selostus selaimessa) | `pesisselostaja.service` (user) |
+| 3001 | **another project entirely** — do not touch | `finance-app-api.service` (system) |
+| 3002 | **ohjaamo / control app** | `pesisselostaja-control.service` (user) |
+
+The control app is on **3002**. The address to *use* (and to give the operator) is the
+tailnet HTTPS address published by `tailscale serve` — run `tailscale serve status` to
+get it; it is not written down here because this repo is public. HTTPS is required for
+the iOS home-screen install and push notifications, so prefer it over `IP:3002`, which
+works but is second-best.
+
+Port 3001 has twice been assumed to be the control app: it belongs to an
+unrelated service that answers with its own Fastify `404 Route not found` JSON, so the
+mistake looks like a broken control app rather than a wrong port. `CONTROL_PORT`
+defaults to 3002 in `apps/control/src/server/config.ts` and the unit sets it explicitly.
+
 `apps/server` runs as a systemd **user** unit. Restart with
 `systemctl --user restart pesisselostaja.service` (not `sudo`). UI on :3000 (it serves
 `apps/web/dist` — rebuild the web app for UI changes to show). The broadcast pipeline
