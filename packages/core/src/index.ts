@@ -8,3 +8,4 @@ export * from "./speech.js";
 export * from "./state.js";
 export * from "./pronunciation.js";
 export * from "./numberSpeech.js";
+export * from "./venue.js";

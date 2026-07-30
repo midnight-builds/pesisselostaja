@@ -14,6 +14,7 @@
  *     nyt konfiguroitava (#95), mutta oletus on juuri tämä — ja oletus on se
  *     mitä ilman omaa `run/share-template.json`ia käytetään. */
 
+import { venueDisplayName, type VenueNameOptions } from "@pesisselostaja/core";
 import { watchUrlForVideo } from "./youtubeUrl.js";
 import type { JobShareMessage } from "../shared/types.js";
 
@@ -376,9 +377,15 @@ function localPartsOf(input: MatchTemplateInput): ZonedParts {
 
 /** Rakentaa mallien syötteen tulospalvelun ottelusta. Kaikki mitä API ei tiedä
  *  (tapahtuma, vaihe, lyhyt paikkamuoto) tulee kutsujan overrideista. */
+/** `venueOptions` siivoaa tulospalvelun kenttänimen (#132). Yksi paikka, koska
+ *  kenttänimi haarautuu tästä otsikkoon, kuvaukseen, thumbnailiin ja
+ *  jakoviestiin — siivous myöhemmin tarkoittaisi neljää siivousta. Selostus
+ *  käyttää samaa corea (`stadiumSpeechName`), joten puhuttu ja kirjoitettu
+ *  kenttänimi pysyvät samana. */
 export function templateInputFromMatch(
   match: MatchLike,
-  overrides: Partial<MatchTemplateInput> = {}
+  overrides: Partial<MatchTemplateInput> = {},
+  venueOptions: VenueNameOptions = {}
 ): MatchTemplateInput {
   return {
     matchId: match.id,
@@ -390,7 +397,7 @@ export function templateInputFromMatch(
     awayCode: match.awayCode ?? null,
     startsAt: match.startsAt,
     seriesName: match.seriesName,
-    venue: match.stadium,
+    venue: venueDisplayName(match.stadium, venueOptions) || null,
     ...overrides,
   };
 }

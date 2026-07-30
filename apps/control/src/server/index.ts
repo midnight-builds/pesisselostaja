@@ -64,6 +64,7 @@ import {
   type ShareTemplate,
 } from "./templates.js";
 import { ensureShareTemplateFile, readShareTemplate } from "./shareTemplate.js";
+import { ensureVenueSettingsFile, readVenueSettings } from "./venueSettings.js";
 import { uploadPairThumbnails } from "./broadcastThumbnails.js";
 import type { CreateJobRequest, PatchJobRequest, PatchKnobsRequest } from "../shared/api.js";
 import type { Job, LiveState, NotificationPrefs } from "../shared/types.js";
@@ -160,6 +161,9 @@ async function resolveTemplateContext(body: YoutubeCreateRequest): Promise<Templ
   // Luetaan joka pyynnöllä: operaattorin muokkaus run/share-template.jsoniin
   // näkyy seuraavassa esikatselussa ilman uudelleenkäynnistystä (#95).
   const shareTemplate = await readShareTemplate();
+  // Sama peruste kuin jakoviestin pohjalla: luetaan joka pyynnöllä, jotta
+  // muutos näkyy seuraavassa esikatselussa ilman uudelleenkäynnistystä (#132).
+  const venueOptions = await readVenueSettings();
   let job: Job | null = null;
   if (body.jobId) {
     job = (await listJobs()).find((j) => j.id === body.jobId) ?? null;
@@ -173,7 +177,8 @@ async function resolveTemplateContext(body: YoutubeCreateRequest): Promise<Templ
 
   const input = templateInputFromMatch(
     { ...match, startsAt: job?.startsAt ?? match.startsAt },
-    body.overrides ?? {}
+    body.overrides ?? {},
+    venueOptions
   );
   try {
     return { texts: buildBroadcastTexts(input, shareTemplate), matchId, job, shareTemplate };
@@ -644,6 +649,7 @@ async function main(): Promise<void> {
   // (#95). Failing to write it must not stop the server: the defaults are
   // compiled in and the messages come out the same.
   await ensureShareTemplateFile().catch(() => undefined);
+  await ensureVenueSettingsFile().catch(() => undefined);
 
   // Lähteen tilan polleri käynnistyy ennen aggregaattoria, jotta ensimmäinen
   // koottu tila voi jo sisältää havainnon. Se on porttien takana: ilman

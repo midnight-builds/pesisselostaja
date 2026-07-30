@@ -1,4 +1,5 @@
 import type { LiveEvent, SubEvent, EventTextElement, MatchMetadata, Player } from "./types.js";
+import { venueDisplayName } from "./venue.js";
 import { finnishOrdinal } from "./numberSpeech.js";
 
 export interface PlayerLookup {
@@ -414,10 +415,15 @@ export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): stri
   ]);
 }
 
-/** Kenttänimi puhuttavaksi: camp fields come through as codes with a pipe
- *  qualifier ("12 Tupos B | LEIRITUOTANTO") — speak only the part before it. */
+/** Kenttänimi puhuttavaksi.
+ *
+ *  Delegoi `venueDisplayName`ille (venue.ts), joka siivoaa sekä putkiliitteen
+ *  ("12 Tupos B | LEIRITUOTANTO") että kenttänumeron. Numero oli aiemmin
+ *  mukana, ja puhuttuna se kuului muodossa "nolla viisi viiva Liperin
+ *  kirkonkylän kenttä viisi" (#101). Sama siivous ajaa nyt ohjaamon
+ *  otsikoissa (#132), jotta puhuttu ja kirjoitettu kenttänimi eivät eroa. */
 export function stadiumSpeechName(rawName: string): string {
-  return rawName.split("|")[0].trim();
+  return venueDisplayName(rawName);
 }
 
 /**

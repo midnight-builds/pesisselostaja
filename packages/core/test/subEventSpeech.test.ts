@@ -249,8 +249,15 @@ describe("subEventToSpeech: match end", () => {
 });
 
 describe("formatWelcomeFiller and stadium name", () => {
-  it("truncates a piped camp-field code to its first part", () => {
-    expect(stadiumSpeechName("12 Tupos B | LEIRITUOTANTO")).toBe("12 Tupos B");
+  it("drops both the production qualifier and the field number", () => {
+    // The field number used to survive here, and spoken aloud it came out as
+    // "nolla viisi viiva Liperin kirkonkylän kenttä viisi" (#101). It is an
+    // index in the results service, not part of the field's name, so it is now
+    // dropped along with the pipe qualifier — by the same core function the
+    // control app uses for titles (#132), so what is spoken and what is
+    // written no longer disagree. Rules live in venue.test.ts.
+    expect(stadiumSpeechName("12 Tupos B | LEIRITUOTANTO")).toBe("Tupos B");
+    expect(stadiumSpeechName("05 - Liperin kirkonkylän kenttä 5")).toBe("Liperin kirkonkylän kenttä 5");
     expect(stadiumSpeechName("Hiukkavaaran pesäpallostadion")).toBe("Hiukkavaaran pesäpallostadion");
   });
 
