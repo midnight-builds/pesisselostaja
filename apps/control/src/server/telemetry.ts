@@ -59,7 +59,19 @@ function bool(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-const SOURCE_STATES = ["live", "scheduled", "resolving", "failed", "unknown"] as const;
+/** Jokainen `RelayTelemetry["source"]["state"]`-unionin arvo — `satisfies`
+ *  kaataa käännöksen jos listalla on unioniin kuulumaton arvo, ja
+ *  telemetry.test.ts:n sopimustesti kaatuu jos unionin arvo puuttuu listalta
+ *  (niin kävi `ended`ille ja `no_signal`ille, #117). */
+export const SOURCE_STATES = [
+  "live",
+  "scheduled",
+  "resolving",
+  "failed",
+  "ended",
+  "no_signal",
+  "unknown",
+] as const satisfies readonly RelayTelemetry["source"]["state"][];
 
 function sourceState(value: unknown): RelayTelemetry["source"]["state"] {
   return (SOURCE_STATES as readonly unknown[]).includes(value)
