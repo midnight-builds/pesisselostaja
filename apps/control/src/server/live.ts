@@ -38,6 +38,9 @@ import { getRelayProcess, readKnobs } from "./relay.js";
 import { SOURCE_INGEST_STALE_MS } from "./sourceIngest.js";
 import { getSystemState } from "./system.js";
 import { NarrationTimeline, readRelayStatus } from "./telemetry.js";
+import { transitionBroadcast, type TransitionResult } from "./youtube.js";
+import { parseYouTubeVideoId } from "./youtubeUrl.js";
+import { CONFIG } from "./config.js";
 
 /** systemd, machine vitals and journald: cheap, local, and the things that go
  *  wrong fastest. */
@@ -98,6 +101,16 @@ export interface LiveAggregatorOptions {
    *  polleri pollaa omalla 30 s välillään kiintiön takia, ja tämä vain kysyy
    *  sen viimeisimmän tuloksen jokaisella tikillä. */
   getSourceIngest?: () => { ingest: SourceIngest | null; reason: string | null };
+  /** Hard stopin siivous (#123): lähetyksen lopetus YouTubessa. Injektoitava,
+   *  jotta testi ajaa laskevan reunan koskematta YouTube-API:in. */
+  transitionBroadcast?: (videoId: string) => Promise<TransitionResult>;
+  /** Relayn viimeisin snapshot laskevalla reunalla. Luetaan tiedostosta
+   *  uudestaan eikä muistista, koska relay kirjoittaa `endReason`in vasta
+   *  juuri ennen sammumistaan — muistissa oleva snapshot on yleensä sitä
+   *  vanhempi. */
+  readTelemetry?: (matchId: number) => Promise<RelayTelemetry | null>;
+  /** Saako lähdelähetykseen koskea. Oletus CONFIG.hardStopSource (false). */
+  hardStopSource?: boolean;
 }
 
 // ------------------------------------------------------------ empty defaults
@@ -610,6 +623,9 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
   const readActiveJob = opts.getActiveJob ?? getActiveJob;
   const closeRunningJobFn = opts.closeRunningJob ?? closeRunningJob;
   const markRunStartedFn = opts.markRunStarted ?? markRunStarted;
+  const transitionBroadcastFn = opts.transitionBroadcast ?? ((videoId: string) => transitionBroadcast(videoId));
+  const readTelemetryFn = opts.readTelemetry ?? readRelayStatus;
+  const hardStopSourceEnabled = opts.hardStopSource ?? CONFIG.hardStopSource;
   const subscribers = new Set<(state: LiveState) => void>();
   const errors = new Map<SourceKey, string>();
   let stopped = false;
@@ -697,6 +713,62 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
    *  Falling edge only. "Relay is inactive" on its own is the normal state of a
    *  job that has been armed but not started yet, and closing that would cancel
    *  the next broadcast before it began (#101). */
+  /** Hard stopin siivous (#123). Ajetaan vain kun relayn oma telemetria kertoo
+   *  että se sammutti itsensä takarajan takia (`endReason === "hard_stop"`) —
+   *  siis ottelu oli päättynyt ja lähde oireili. Normaalissa lopetuksessa ei
+   *  tehdä mitään: kohdelähetyksen sulkee YouTuben `enableAutoStop`, ja
+   *  lähdettä ei kosketa lainkaan.
+   *
+   *  Lähteen sammutus on lisäksi lipun takana (CONTROL_HARD_STOP_SOURCE) —
+   *  lähde on toisen ihmisen lähetys.
+   *
+   *  Ei koskaan heitä: kaikki menee errors-Mappiin ja lokiin, jotta työn
+   *  sulkeminen ehtii tapahtua joka tapauksessa. */
+  async function runHardStopCleanup(current: Job): Promise<void> {
+    try {
+      const snapshot = await readTelemetryFn(current.matchId);
+      if (snapshot?.endReason !== "hard_stop") {
+        return; // normaali lopetus (tai vanha deploy joka ei kerro syytä)
+      }
+      const sourceVideoId = parseYouTubeVideoId(current.sourceUrl);
+      const targets: Array<{ label: string; videoId: string | null; allowed: boolean; why: string }> = [
+        { label: "kohde", videoId: current.targetVideoId, allowed: true, why: "" },
+        {
+          label: "lähde",
+          videoId: sourceVideoId,
+          allowed: hardStopSourceEnabled,
+          why: "CONTROL_HARD_STOP_SOURCE ei ole päällä",
+        },
+      ];
+      for (const target of targets) {
+        if (!target.videoId) {
+          console.warn(`[control] hard stop -siivous: ${target.label}lähetyksen video id ei tiedossa, ohitetaan`);
+          continue;
+        }
+        if (!target.allowed) {
+          console.warn(
+            `[control] hard stop -siivous: ${target.label}lähetystä ${target.videoId} EI kosketa — ${target.why}`
+          );
+          continue;
+        }
+        try {
+          const result = await transitionBroadcastFn(target.videoId);
+          console.log(
+            `[control] hard stop -siivous: ${target.label} ${target.videoId} (${result.lifeCycleStatus ?? "?"}) — ${result.reason}`
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[control] hard stop -siivous: ${target.label} ${target.videoId} epäonnistui: ${msg}`);
+          errors.set("target", `hard stop -siivous (${target.label}) epäonnistui: ${msg}`);
+        }
+      }
+    } catch (err) {
+      // Telemetrian luku tai muu odottamaton: siivous jää tekemättä, työ
+      // suljetaan silti.
+      errors.set("target", `hard stop -siivous kaatui: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   let relayWasActive = false;
   async function followRunEdges(): Promise<void> {
     const wasActive = relayWasActive;
@@ -714,6 +786,12 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       }
       // Falling edge: the run is over.
       if (job?.status !== "arming" && job?.status !== "live") return;
+      // Hard stopin siivous ENNEN sulkemista: closeRunningJob nollaa aktiivisen
+      // työn, jolloin sekä targetVideoId että sourceUrl katoavat käsistä. Oma
+      // try/catch, koska siivous ei saa koskaan estää työn sulkemista — muuten
+      // yksi YouTube-virhe jättäisi työn "live"-tilaan ja lukitsisi seuraavan
+      // ottelun.
+      await runHardStopCleanup(job);
       const closed = await closeRunningJobFn();
       if (closed) job = closed;
     } catch (err) {
