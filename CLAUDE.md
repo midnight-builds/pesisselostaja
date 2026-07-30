@@ -21,6 +21,11 @@ not runs. Periods come from `event.period`: 0 = 1. jakso, 1 = 2. jakso, 2 = supe
 3 = kotiutuslyöntikilpailu. See `runValueOfSubEvent` in `packages/core/src/speech.ts`.
 
 ## Terminology
+Broadcast-chain terms (raakalähetys, selostettu lähetys, tulospalvelun
+ottelusivu, ajastushetki, käynnistysikkuna, …) are defined in `CONTEXT.md` at
+the repo root — **read it before writing about the chain** in issues, docs or
+code comments; "lähde-URL" without a qualifier has already caused confusion.
+
 **Palo** = an "out". Palot belong only to the team currently batting (sisävuoro) and
 **reset to zero each period / each turn change**; they are announced with a Finnish
 ordinal ("kolmas palo").
