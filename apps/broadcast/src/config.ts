@@ -48,6 +48,8 @@ export interface RelayConfig {
   /** Delta polling (after= + ETag) on by default; RELAY_DELTA_FETCH=false or
    *  the control file's deltaFetch key flips back to full fetches live. */
   deltaFetch: boolean;
+  /** Lokita jokainen polli erikseen (RELAY_POLL_TRACE). Ks. #120. */
+  pollTrace: boolean;
   announceBatterChanges: boolean;
   dryRun: boolean;
   recordFile?: string;
@@ -195,6 +197,11 @@ export function parseRelayConfig(): RelayConfig {
   // ensimmäisen kokeilun on oltava tietoinen valinta. Kaikki muu koodi on
   // valmiina ja testattuna.
   const noSignalSlate = process.env.RELAY_NO_SIGNAL_SLATE === "true";
+  // Rivi per polli lokiin (#120). EI oletus: 3 s pollausvälillä se täyttäisi
+  // ohjaamon 50 rivin lokikkunan 2,5 minuutissa ja työntäisi ulos ne rivit
+  // joista ohjaamo johtaa tilarivinsä. Oletuksena riittää ikkunoitu yhteenveto
+  // (api.poll_window); tämä on aktiivista jäljitystä varten.
+  const pollTrace = process.env.RELAY_POLL_TRACE === "true";
   // Kynnyksellä on LATTIA, ei pelkkä oletus: 0 tekisi jokaisesta respawnista
   // katvekuvan välähdyksen, mikä on täsmälleen se mitä issue kieltää
   // ("hetkellinen sekunnin blippi ei saa vilkuttaa katvekuvaa").
@@ -261,6 +268,7 @@ export function parseRelayConfig(): RelayConfig {
     noSignalSlateWidth,
     noSignalSlateHeight,
     deltaFetch,
+    pollTrace,
     announceBatterChanges,
     dryRun,
     recordFile,

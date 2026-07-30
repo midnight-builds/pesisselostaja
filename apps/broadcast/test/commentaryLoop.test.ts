@@ -38,6 +38,7 @@ function makeConfig(overrides: Partial<RelayConfig> = {}): RelayConfig {
     finishedFailureWindowMs: 120000,
     hardStopQuietMs: 180000,
     deltaFetch: true,
+    pollTrace: false,
     announceBatterChanges: true,
     dryRun: false,
     apiKey: "test",

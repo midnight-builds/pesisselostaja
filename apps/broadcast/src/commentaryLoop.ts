@@ -43,6 +43,11 @@ import { readFile } from "node:fs/promises";
 import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import type { RelayConfig } from "./config.js";
 
+/** Kuinka usein pollien yhteenveto kirjataan (#120). 20 s on kompromissi:
+ *  tiheämpi täyttäisi ohjaamon 50 rivin lokikkunan, harvempi ei erottelisi
+ *  145900:n kaltaista ~50 sekunnin katvetta. */
+const POLL_SUMMARY_MS = 20_000;
+
 const SUMMARY_EVERY_N = 10;
 /** No speech for this long → break the silence with an idle filler. 90 s
  *  (was 2 min): with the pipeline's own latency on top, a 2 min gap already
@@ -288,6 +293,27 @@ export class CommentaryLoop {
    *  answers are otherwise invisible in the log (the 304 path is deliberately
    *  silent, and reset answers only log once per streak). */
   private pollStats = { polls: 0, deltaMerges: 0, fullFetches: 0, notModified: 0, deltaResets: 0, fetchFailures: 0 };
+  /** Ikkunoitu pollikirjanpito (#120). Kumulatiiviset `pollStats` kertovat
+   *  ajon kokonaisuudesta ja näkyvät sydänäänessä kahden minuutin välein — ne
+   *  eivät kerro mitään siitä, mitä *juuri äsken* tapahtui. Ottelussa 145900
+   *  (30.7.2026) kysymys oli tasan tämä: 08:39:22 ja 08:40:14 välissä ei ole
+   *  yhtään onnistuneen haun riviä, eikä lokista voi päätellä ajettiinko
+   *  pollit lainkaan vai palauttiko API vanhentunutta dataa. Tyhjä polli ei
+   *  jättänyt jälkeä, koska `api.delta_fetch` lokitetaan vain kun uutta
+   *  löytyy. */
+  private pollWindow = {
+    polls: 0,
+    notModified: 0,
+    delta: 0,
+    full: 0,
+    resets: 0,
+    failures: 0,
+    /** Tapahtumien määrä viimeisimmässä 200-vastauksessa. Erottaa "pollit
+     *  eivät ajaneet" tilanteesta "pollit ajoivat ja API vastasi vanhaa". */
+    lastEventCount: null as number | null,
+    newEvents: 0,
+  };
+  private lastPollSummaryAtMs = Date.now();
   /** Consecutive failed poll cycles; reset by the first success. Drives the
    *  alarm threshold (FETCH_FAILURE_ALARM_STREAK) and the streak position on
    *  the failure log line. */
@@ -390,6 +416,55 @@ export class CommentaryLoop {
    *  ole. Välitetään sellaisenaan mikserille; tulkinta kuuluu sinne. */
   get sourceIngest(): SourceIngestObservation | null {
     return this.sourceIngestValue;
+  }
+
+  /** Ikkunoitu yhteenveto jokaisesta pollista (#120).
+   *
+   *  Miksi yhteenveto eikä rivi per polli, jota issue ehdotti: ohjaamo johtaa
+   *  tilarivinsä **50 viimeisestä lokirivistä** (`live.ts`), ja osa niistä on
+   *  debug-tasoisia (sydänääni). 3 s pollausvälillä rivi per polli täyttäisi
+   *  ikkunan 2,5 minuutissa ja työntäisi ulos juuri ne todisteet joita ohjaamo
+   *  lukee — sama vika jonka #102 aiheutti. 20 s välein sama tieto mahtuu
+   *  ikkunaan tunneiksi.
+   *
+   *  Yhteenveto vastaa siihen kysymykseen, joka jäi 145900:ssa auki: ajettiinko
+   *  pollit lainkaan (`polls`), mitä API vastasi (`lastEventCount`) ja millä
+   *  kursorilla (`after`). Jos tarvitaan rivi per polli, `RELAY_POLL_TRACE=true`
+   *  antaa sen — mutta se ei ole oletus, koska hinta maksetaan ohjaamon
+   *  tilarivistä eikä lokitilasta.
+   *
+   *  Kutsutaan pollisilmukasta joka kierroksella; emittoi vain kun ikkuna on
+   *  täynnä JA polleja on ollut. */
+  /** Rivi per polli, vain kun RELAY_POLL_TRACE on päällä (#120). */
+  private tracePoll(detail: string): void {
+    if (!this.config.pollTrace) return;
+    logDebug("api.poll_trace", `Polli: ${detail}, historiassa ${this.history.size}.`);
+  }
+
+  private maybeLogPollWindow(): void {
+    const w = this.pollWindow;
+    if (w.polls === 0) return;
+    const elapsedMs = Date.now() - this.lastPollSummaryAtMs;
+    if (elapsedMs < POLL_SUMMARY_MS) return;
+    const cursor = this.deltaCursor?.after ?? "(ei kursoria — seuraava on täyshaku)";
+    const answered = w.lastEventCount === null ? "ei yhtään 200-vastausta" : `viimeisin vastaus ${w.lastEventCount} tapahtumaa`;
+    logDebug(
+      "api.poll_window",
+      `Pollit ${Math.round(elapsedMs / 1000)} s aikana: ${w.polls} kpl ` +
+        `(304 ${w.notModified}, delta ${w.delta}, täyshaku ${w.full}, reset ${w.resets}, virhe ${w.failures}), ` +
+        `${w.newEvents} uutta tapahtumaa, ${answered}, historiassa ${this.history.size}, kursori ${cursor}.`
+    );
+    this.lastPollSummaryAtMs = Date.now();
+    this.pollWindow = {
+      polls: 0,
+      notModified: 0,
+      delta: 0,
+      full: 0,
+      resets: 0,
+      failures: 0,
+      lastEventCount: null,
+      newEvents: 0,
+    };
   }
 
   get pollStatsSummary(): string {
@@ -652,6 +727,7 @@ export class CommentaryLoop {
         // assumes the full history every poll and stays unchanged. Null =
         // 304, nothing new: skip event processing, keep fillers/state alive.
         const data = await this.fetchEventsForPoll();
+        this.maybeLogPollWindow();
         if (data !== null) {
           const events = this.history.events;
 
@@ -703,6 +779,7 @@ export class CommentaryLoop {
    *  FETCH_FAILURE_ALARM_STREAK+ turns the line alarming. */
   private recordPollFailure(err: unknown, cycleStartedAt: number): void {
     this.pollStats.fetchFailures++;
+    this.pollWindow.failures++;
     const streak = ++this.consecutiveFetchFailures;
     const seconds = ((Date.now() - cycleStartedAt) / 1000).toFixed(1);
     const label = streak >= FETCH_FAILURE_ALARM_STREAK ? "HUOM, hakuvirhesarja" : "Hakuvirhe";
@@ -759,6 +836,8 @@ export class CommentaryLoop {
     this.lastFullFetchAt = Date.now();
     this.deltaCursor = null; // next delta re-bases on the fresh server date
     this.pollStats.fullFetches++;
+    this.pollWindow.full++;
+    this.pollWindow.lastEventCount = res.events.length;
     return res;
   }
 
@@ -782,6 +861,7 @@ export class CommentaryLoop {
     afterMs: number
   ): Promise<LiveEventsResult> {
     this.pollStats.deltaResets++;
+    this.pollWindow.resets++;
     const resetAtMs = typeof res.reset === "string" ? Date.parse(res.reset) : NaN;
     const explained = Number.isFinite(resetAtMs) && resetAtMs >= afterMs;
     const firstOfStreak = this.consecutiveDeltaResets === 0;
@@ -826,6 +906,7 @@ export class CommentaryLoop {
    *  quiet stretches so the ETag can 304. */
   private async fetchEventsForPoll(): Promise<LiveEventsResult | null> {
     this.pollStats.polls++;
+    this.pollWindow.polls++;
     if (!this.deltaFetch) return this.fetchFullEvents();
     // While the local history is empty (match not started / being initialized)
     // the server answers every delta with the reset flag, which made each poll
@@ -850,6 +931,8 @@ export class CommentaryLoop {
     if (res.notModified) {
       this.clearResetStreak();
       this.pollStats.notModified++;
+      this.pollWindow.notModified++;
+      this.tracePoll(`304 (ei muutosta), kursori ${after}`);
       return null;
     }
     if (res.reset) return this.handleResetResponse(res, after, afterMs);
@@ -860,6 +943,12 @@ export class CommentaryLoop {
     }
     this.clearResetStreak();
     this.pollStats.deltaMerges++;
+    this.pollWindow.delta++;
+    this.pollWindow.lastEventCount = res.events.length;
+    this.pollWindow.newEvents += merge.added;
+    this.tracePoll(
+      `200: ${res.events.length} tapahtumaa, ${merge.added} uutta, ${merge.updated} päivittynyttä, kursori ${after}`
+    );
     if (merge.added > 0 || merge.updated > 0) {
       logDebug("api.delta_fetch", `Delta-haku: ${merge.added} uutta, ${merge.updated} päivittynyttä tapahtumaa (historiassa ${this.history.size}).`);
       // Advance the cursor only now: the new base's URL changes, so its ETag

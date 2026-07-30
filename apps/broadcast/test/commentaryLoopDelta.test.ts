@@ -49,7 +49,8 @@ function makeConfig(overrides: Partial<RelayConfig> = {}): RelayConfig {
     urlRefreshMs: 900000, maxFailureWindowMs: 720000, finishedFailureWindowMs: 120000, hardStopQuietMs: 180000,
     noSignalSlate: false, noSignalSlateAfterMs: 8000,
     noSignalSlateWidth: 1920, noSignalSlateHeight: 1080,
-    deltaFetch: true, announceBatterChanges: true, dryRun: false,
+    deltaFetch: true,
+    pollTrace: false, announceBatterChanges: true, dryRun: false,
     apiKey: "test", apiBase: "https://example.invalid/api",
     stateFile: "/tmp/pesis-test-nonexistent-state.json",
     runDir: "/tmp/",
@@ -74,6 +75,8 @@ interface LoopInternals {
   pollIntervalMs: number;
   narrationDelayMs: number;
   pollStatsSummary: string;
+  maybeLogPollWindow(): void;
+  lastPollSummaryAtMs: number;
   recordPollFailure(err: unknown, cycleStartedAt: number): void;
   recordPollSuccess(): void;
 }
@@ -231,6 +234,88 @@ describe("CommentaryLoop poll statistics + failure streaks", () => {
     await loop.fetchEventsForPoll();
 
     expect(loop.pollStatsSummary).toBe("pollit 4 (delta 2, täyshaku 2, 304 1, reset 0, hakuvirheitä 0)");
+  });
+
+  it("kirjaa myös tyhjät pollit ikkunayhteenvetoon (#120)", async () => {
+    // Ottelussa 145900 (30.7.2026) selostus jäi 43 s jälkeen, eikä lokista
+    // voinut päätellä ajettiinko pollit lainkaan: api.delta_fetch lokitetaan
+    // vain kun uutta löytyy, joten hiljainen jakso oli täysin näkymätön.
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const loop = makeLoop();
+      fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+      await loop.fetchFullEvents();
+
+      // Kolme pollia joissa EI tapahdu mitään: kaksi 304:ää ja yksi tyhjä 200.
+      fetchMock.mockResolvedValueOnce({ events: [], notModified: true, etag: 'W/"q"', serverDateMs: T0 });
+      await loop.fetchEventsForPoll();
+      fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])], { etag: 'W/"q"' }));
+      await loop.fetchEventsForPoll();
+      fetchMock.mockResolvedValueOnce({ events: [], notModified: true, etag: 'W/"q"', serverDateMs: T0 });
+      await loop.fetchEventsForPoll();
+
+      // Ikkuna umpeutuu.
+      loop.lastPollSummaryAtMs = Date.now() - 21_000;
+      loop.maybeLogPollWindow();
+
+      const logged = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(logged).toContain("Pollit");
+      expect(logged).toMatch(/3 kpl/);
+      expect(logged).toMatch(/304 2/);
+      // Juuri tämä erottaa "pollit eivät ajaneet" tilanteesta "pollit ajoivat
+      // ja API vastasi vanhaa" — se kysymys jäi 145900:ssa auki.
+      expect(logged).toMatch(/viimeisin vastaus 1 tapahtumaa/);
+      expect(logged).toMatch(/0 uutta tapahtumaa/);
+      expect(logged).toContain("kursori");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("ei kirjaa yhteenvetoa ilman polleja eikä ennen ikkunan umpeutumista (#120)", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const loop = makeLoop();
+      // Ei polleja: hiljaisuus on oikea vastaus, ei rivi joka sanoo "0 pollia".
+      loop.lastPollSummaryAtMs = Date.now() - 60_000;
+      loop.maybeLogPollWindow();
+      expect(logSpy.mock.calls.map((c) => String(c[0])).join("\n")).not.toContain("Pollit");
+
+      // Polleja on, mutta ikkuna ei ole vielä täynnä.
+      fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+      await loop.fetchFullEvents();
+      fetchMock.mockResolvedValueOnce({ events: [], notModified: true, etag: 'W/"q"', serverDateMs: T0 });
+      await loop.fetchEventsForPoll();
+      loop.lastPollSummaryAtMs = Date.now();
+      loop.maybeLogPollWindow();
+      expect(logSpy.mock.calls.map((c) => String(c[0])).join("\n")).not.toContain("Pollit");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("RELAY_POLL_TRACE antaa rivin per polli, oletuksena ei (#120)", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const quiet = makeLoop();
+      fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+      await quiet.fetchFullEvents();
+      fetchMock.mockResolvedValueOnce({ events: [], notModified: true, etag: 'W/"q"', serverDateMs: T0 });
+      await quiet.fetchEventsForPoll();
+      expect(logSpy.mock.calls.map((c) => String(c[0])).join("\n")).not.toContain("Polli:");
+
+      logSpy.mockClear();
+      const traced = makeLoop({ pollTrace: true });
+      fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
+      await traced.fetchFullEvents();
+      fetchMock.mockResolvedValueOnce({ events: [], notModified: true, etag: 'W/"q"', serverDateMs: T0 });
+      await traced.fetchEventsForPoll();
+      const logged = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(logged).toContain("Polli: 304 (ei muutosta)");
+      expect(logged).toContain("kursori");
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 
   it("logs each failure with its duration and streak position, alarming only from the 3rd on", () => {

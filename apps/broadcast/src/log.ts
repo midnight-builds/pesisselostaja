@@ -77,6 +77,8 @@ export type EventCode =
   | "api.delta_reset"
   | "api.delta_inconsistent"
   | "api.delta_fetch"
+  | "api.poll_window"
+  | "api.poll_trace"
   | "api.first_seen"
   // Kokoonpanon elinkaari (#90): puuttuu → muuttui → vakiintui.
   | "api.roster_missing"
