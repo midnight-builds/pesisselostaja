@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { rmSync, writeFileSync } from "node:fs";
 import { CommentaryLoop, type NarrationStatus, type SpeechSink } from "../src/commentaryLoop.js";
 import type { RelayConfig } from "../src/config.js";
-import type { MatchMetadata } from "@pesisselostaja/core";
+import { buildPlayerLookup } from "@pesisselostaja/core";
+import type { LiveEvent, MatchMetadata, PlayerLookup, SubEvent } from "@pesisselostaja/core";
 
 // Fictional teams only — public repo (see feedback-fixtures-fictional-names).
 const META: MatchMetadata = {
@@ -531,5 +532,63 @@ describe("CommentaryLoop sourceIngest passthrough (#104 vaihe 1 -> 2)", () => {
       await slateInternals(loop).refreshRuntimeControls();
       expect(loop.sourceIngest).toBeNull();
     }
+  });
+});
+
+// ------------------------------------------------------------------ issue #119
+// lastEventAt on terveyssignaali ("kirjaako toimitsija yhä tuloksia"). Se oli
+// vahingossa saman vartijan sisällä kuin timestamp-riippuvainen viivemittaus,
+// ja koska tämän syötteen event.timestamp on käytännössä aina null, kenttä jäi
+// ikuisesti nulliksi ja ohjaamon "aika viime tapahtumasta" tyhjäksi.
+describe("CommentaryLoop lastEventAt (#119)", () => {
+  interface ProcessInternals {
+    processEventsLive(
+      events: LiveEvent[],
+      meta: MatchMetadata,
+      lookup: PlayerLookup
+    ): Promise<void>;
+    synthQueue: Promise<void>;
+  }
+
+  const paloSub: SubEvent = {
+    texts: [
+      { type: "event", text: "Palo", base: null },
+      { type: "stat", out: 1 },
+    ],
+  };
+
+  // Fiktiivinen data (julkinen repo): timestamp null, kuten oikeassa syötteessä.
+  function nullTimestampEvent(): LiveEvent {
+    return {
+      id: 1, groupType: "x", period: 0, inning: 0, batTurn: 0, team: 1, hTeam: 1,
+      batter: null, pairIndex: null, hitNumber: null, hit: null,
+      events: [paloSub], timestamp: null, updated: null,
+    };
+  }
+
+  it("stamps our observation instant for a new event whose timestamp is null", async () => {
+    const loop = new CommentaryLoop(makeConfig(), recordingSink());
+    const inner = loop as unknown as ProcessInternals;
+    expect(loop.lastEventAt).toBeNull();
+
+    await inner.processEventsLive([nullTimestampEvent()], META, buildPlayerLookup(META));
+    await inner.synthQueue;
+
+    expect(loop.lastEventAt).not.toBeNull();
+    expect(Number.isFinite(Date.parse(loop.lastEventAt as string))).toBe(true);
+  });
+
+  it("does not move when the replayed history holds nothing new", async () => {
+    const loop = new CommentaryLoop(makeConfig(), recordingSink());
+    const inner = loop as unknown as ProcessInternals;
+    await inner.processEventsLive([nullTimestampEvent()], META, buildPlayerLookup(META));
+    await inner.synthQueue;
+    const first = loop.lastEventAt;
+
+    await new Promise((r) => setTimeout(r, 5));
+    await inner.processEventsLive([nullTimestampEvent()], META, buildPlayerLookup(META));
+    await inner.synthQueue;
+
+    expect(loop.lastEventAt).toBe(first);
   });
 });
