@@ -12,7 +12,13 @@ npm-workspaces monorepo: `packages/core` (pure domain logic: types, API client,
 speech text, scoring, pronunciation substitution — no localStorage/fs/DOM),
 `apps/web` (browser app, localStorage + Web Speech/Piper-WASM adapters),
 `apps/broadcast` (YouTube pipeline, file + native-Piper adapters),
-`apps/server` (static host for the built web app on :3000).
+`apps/server` (static host for the built web app on :3000),
+`apps/control` (ohjaamo — YouTube chain, relay lifecycle, live monitoring on :3002).
+
+**The pesistulokset API surface** — base URL, which paths need the key and which
+don't, and copy-pasteable curl — is in `packages/core/README.md`. Read it before
+reverse-engineering `src/api.ts` again (issue #70). The short version: `/public/**`
+needs `?apikey=`, `/online/**` does not.
 
 ## Scoring
 The API gives no ready scoreboard — per-period scores are derived by counting events.
