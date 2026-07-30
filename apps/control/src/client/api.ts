@@ -116,8 +116,14 @@ export interface CreatedBroadcastPair extends BroadcastPair {
   texts: BroadcastTexts;
   /** Miten thumbnailin asetus meni kummallekin lähetykselle (#130). Erillään
    *  itse luonnista, koska lähetykset ovat olemassa myös silloin kun thumbnail
-   *  epäonnistui — ja epäonnistuminen on kerrottava eikä nieltävä. */
-  thumbnails: ThumbnailOutcomes;
+   *  epäonnistui — ja epäonnistuminen on kerrottava eikä nieltävä.
+   *
+   *  Valinnainen, vaikka palvelin lähettää sen aina: selain voi ajaa vanhempaa
+   *  nidettä kuin palvelin (tai päinvastoin), ja kentän puuttuminen ei saa
+   *  kaataa koko "Luodut lähetykset" -korttia — sen mukana katoaisivat myös
+   *  jakoviesti ja stream key, eli juuri ne kaksi asiaa joita luonnin jälkeen
+   *  tarvitaan. */
+  thumbnails?: ThumbnailOutcomes;
 }
 
 /** Otsikon ja thumbnailin tiedot joita pesistulokset-API ei tunne: oman

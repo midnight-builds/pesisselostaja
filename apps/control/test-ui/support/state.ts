@@ -293,14 +293,24 @@ export function matchOption(p: Partial<MatchOption> = {}): MatchOption {
 }
 
 /** A day with two stadiums and two series, so both filters have something to
- *  actually filter. */
+ *  actually filter.
+ *
+ *  Kickoffs are relative to *now*, not fixed clock times, because the Ottelut
+ *  view hides matches whose kickoff is over an hour past (#128). Fixed times
+ *  would make half these tests pass in the morning and fail in the afternoon.
+ *  The offsets also make the fixture a more honest picture of a tournament day
+ *  in progress: two ahead, one on air, one already played. */
+function kickoffIn(hours: number): string {
+  return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+}
+
 export function dayMatches(date: string): DayMatches {
   const matches: MatchOption[] = [
     matchOption({
       id: 999001,
       home: "Kuvitteellisen Kylän Veikot",
       away: "Lapinlahden Peikot",
-      startsAt: `${date}T09:00:00.000Z`,
+      startsAt: kickoffIn(2),
       stadium: "Testikenttä 1",
       seriesName: "Testisarja",
     }),
@@ -310,7 +320,7 @@ export function dayMatches(date: string): DayMatches {
       away: "Puolukkalan Pesä",
       homeShort: "MUM",
       awayShort: "PUP",
-      startsAt: `${date}T11:00:00.000Z`,
+      startsAt: kickoffIn(4),
       stadium: "Testikenttä 2",
       seriesName: "Testisarja",
     }),
@@ -320,7 +330,8 @@ export function dayMatches(date: string): DayMatches {
       away: "Sammakkosuon Sinkot",
       homeShort: "ANA",
       awayShort: "SAS",
-      startsAt: `${date}T13:00:00.000Z`,
+      // Käynnissä: alkoi puoli tuntia sitten, eikä sitä piiloteta koskaan.
+      startsAt: kickoffIn(-0.5),
       stadium: "Testikenttä 1",
       seriesName: "Juniorileiri",
       status: "live",
@@ -332,7 +343,8 @@ export function dayMatches(date: string): DayMatches {
       away: "Vesiheinän Veto",
       homeShort: "KAK",
       awayShort: "VEV",
-      startsAt: `${date}T07:00:00.000Z`,
+      // Pelattu: piilossa oletuksena, näkyy "Näytä menneet" -kytkimellä.
+      startsAt: kickoffIn(-3),
       stadium: "Testikenttä 2",
       seriesName: "Juniorileiri",
       status: "finished",
@@ -428,5 +440,9 @@ export function createdPair(texts = broadcastTexts()) {
     shareMessage,
     broadcastSummary: `Normaali: https://www.youtube.com/watch?v=NORMAALI\nStream Key: cccc-dddd-eeee-ffff`,
     texts,
+    // Palvelin lähettää tämän aina luonnin jälkeen (#130). Kortti sietää sen
+    // puuttumisen, mutta fikstuuri ei saa olla se joka sietämistä testaa —
+    // muuten onnistumisrivi jää kokonaan kattamatta.
+    thumbnails: { normal: { ok: true }, narrated: { ok: true } },
   };
 }

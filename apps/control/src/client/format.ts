@@ -127,3 +127,29 @@ export function parseMatchId(input: string): number | null {
   // URLs put the id last (…/ottelu/146210, ?matchId=146210).
   return Number(matches[matches.length - 1]);
 }
+
+/** Kuinka kauan ottelu pysyy listalla suunnitellun alkuajan jälkeen (#128).
+ *
+ *  Tunti on tarkoituksella karkea: raja ei voi olla tarkka, koska ottelun kesto
+ *  vaihtelee muodoittain (leirimuodossa yksi jakso, mestaruussarjassa kaksi),
+ *  eikä tulospalvelu kerro päättymistä etukäteen. Liian lyhyt raja piilottaisi
+ *  ottelun jota vielä ajetaan. */
+export const PAST_MATCH_GRACE_MS = 60 * 60 * 1000;
+
+/** Onko ottelun suunniteltu alkuaika mennyt niin kauan sitten, ettei se enää
+ *  kuulu ottelupäivän työlistalle.
+ *
+ *  Tuntematon tai kelvoton alkuaika EI ole mennyt: ottelun piilottaminen tiedon
+ *  puutteen takia on pahempi virhe kuin liian pitkä lista, koska piilotettua
+ *  ei osaa etsiä. `startsAt` kantaa oman vyöhykkeensä (`+03:00`), joten
+ *  `Date.parse` riittää vaikka palvelin on UTC:ssä. */
+export function isPastMatch(
+  startsAt: string | null | undefined,
+  nowMs: number,
+  graceMs: number = PAST_MATCH_GRACE_MS,
+): boolean {
+  if (!startsAt) return false;
+  const startedMs = Date.parse(startsAt);
+  if (!Number.isFinite(startedMs)) return false;
+  return nowMs - startedMs > graceMs;
+}
