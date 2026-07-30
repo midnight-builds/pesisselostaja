@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import type { SourceEndReason } from "@pesisselostaja/core";
 import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import { NarrationFifo } from "./narrationFifo.js";
 import { resolveSourceUrl, SourceEndedError, SourceNotLiveYetError } from "./ytdlpSource.js";
@@ -386,8 +387,13 @@ const HEARTBEAT_MS = 2 * 60 * 1000;
  *  `"exhausted"` = the source stopped answering and never came back.
  *  `"hard_stop"` = the hard stop backstop fired (#123): the match had finished,
  *  the pesistulokset feed had been quiet past the configured window AND the
- *  source showed the dead-tail symptoms — a deliberate cleanup, not a fault. */
-export type SourceEndReason = "ended" | "exhausted" | "hard_stop";
+ *  source showed the dead-tail symptoms — a deliberate cleanup, not a fault.
+ *
+ *  Itse unioni asuu coressa (`packages/core/src/types.ts`), jotta ohjaamo
+ *  lukee samaa tyyppiä eikä sen käsin peilaama kopio pääse ajautumaan erilleen
+ *  — se vikaluokka maksoi jo kerran (#117). Uusi arvo lisätään coreen, jolloin
+ *  molempien puolten käännös kaatuu kunnes arvo on käsitelty. */
+export type { SourceEndReason };
 
 export class SourceExhaustedError extends Error {
   readonly reason: SourceEndReason;
