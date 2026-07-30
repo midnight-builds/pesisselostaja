@@ -107,8 +107,12 @@ async function main(): Promise<void> {
   // status-<ID>.json is rewritten on the poll cadence rather than on every
   // event: the control app polls it, and a snapshot that is at most one poll
   // stale is exactly as fresh as the data behind it.
+  // Why the run ended (#123): stays null while running, set just before
+  // shutdown() so the FINAL snapshot in run/ names the reason.
+  let endReason: SourceEndReason | null = null;
   const writeStatus = () =>
     telemetry.writeStatus({
+      endReason,
       readerAttached: config.dryRun || (mixer?.isReaderAttached ?? false),
       pendingClips: mixer?.pendingClips ?? 0,
       respawns: mixer?.respawnCount ?? 0,
