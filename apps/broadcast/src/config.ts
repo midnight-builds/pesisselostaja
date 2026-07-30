@@ -28,6 +28,10 @@ export interface RelayConfig {
    *  has finished — retrying a dead source for 12 min after "Ottelu päättyi"
    *  only delays cleanup. */
   finishedFailureWindowMs: number;
+  /** Hard stop -takaraja (#123): kuinka pitkä hiljaisuus tulospalvelussa
+   *  (ei uusia tapahtumia) vaaditaan ennen kuin päättynyt ottelu + oireileva
+   *  lähde saa sammuttaa relayn. Ehto 2/3 — ks. FfmpegMixerOptions. */
+  hardStopQuietMs: number;
   /** Katvekuva ("EI SIGNAALIA", issue #104): kun lähdettä ei saada kiinni,
    *  RTMP-työntöä jatketaan still-kuvalla ja selostus jatkuu sen päällä.
    *
@@ -179,6 +183,12 @@ export function parseRelayConfig(): RelayConfig {
     process.env.RELAY_FINISHED_FAILURE_WINDOW_MS ?? String(2 * 60 * 1000),
     10
   );
+  // Hard stop -takaraja (#123): hiljaisuusvaatimus tulospalvelun tapahtumille.
+  // Oletus 3 min — mitoitettu ottelun 145900 datalla (issue #123).
+  const hardStopQuietMs = nonNegativeNumber(
+    process.env.RELAY_HARD_STOP_QUIET_MS,
+    3 * 60 * 1000
+  );
   // Katvekuva (issue #104). Oletus POIS, ja päälle vain täsmällisellä "true":
   // uusi ffmpeg-polku ajaa juuri silloin kun lähetys on jo vaikeuksissa, joten
   // ensimmäisen kokeilun on oltava tietoinen valinta. Kaikki muu koodi on
@@ -244,6 +254,7 @@ export function parseRelayConfig(): RelayConfig {
     urlRefreshMs,
     maxFailureWindowMs,
     finishedFailureWindowMs,
+    hardStopQuietMs,
     noSignalSlate,
     noSignalSlateAfterMs,
     noSignalSlateWidth,

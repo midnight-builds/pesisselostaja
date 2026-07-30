@@ -91,6 +91,15 @@ export interface FfmpegMixerOptions {
   /** Lets the supervisor know the match has ended (the commentary loop owns
    *  that state), for finishedFailureWindowMs. Absent → always false. */
   isMatchFinished?: () => boolean;
+  /** When the newest pesistulokset event was seen (ISO instant), or null when
+   *  no event has been seen at all — the commentary loop owns this. Used only
+   *  by the hard stop check (#123): null means "no information", which is
+   *  deliberately NOT treated as silence. Absent → always null. */
+  lastEventAt?: () => string | null;
+  /** Hard stop (#123): how long the pesistulokset feed must have been quiet
+   *  (no new events) before a finished match + a symptomatic source may shut
+   *  the relay down (default 3 min). */
+  hardStopQuietMs?: number;
   /** Extra fragment appended to the heartbeat line — the commentary loop's
    *  poll statistics, since 304 skips and full-fetch
    *  fallbacks are otherwise invisible in the log. Absent → plain heartbeat. */

@@ -36,6 +36,7 @@ function makeConfig(overrides: Partial<RelayConfig> = {}): RelayConfig {
     noSignalSlateHeight: 1080,
     maxFailureWindowMs: 720000,
     finishedFailureWindowMs: 120000,
+    hardStopQuietMs: 180000,
     deltaFetch: true,
     announceBatterChanges: true,
     dryRun: false,
