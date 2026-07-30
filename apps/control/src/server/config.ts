@@ -32,6 +32,19 @@ export interface ControlConfig {
   stateDir: string;
   clientDist: string;
   assetsDir: string;
+  /** Saako hard stopin siivous (#123) sammuttaa myös LÄHDElähetyksen?
+   *  Oletus false: lähde on toisen ihmisen lähetys, ja väärä katkaisu on
+   *  pahin mahdollinen virhe. Kohdelähetys sammutetaan hard stopissa aina —
+   *  vain lähde on lipun takana, jotta ominaisuus voidaan ottaa käyttöön
+   *  vaiheittain kun luottamus on kertynyt. */
+  hardStopSource: boolean;
+}
+
+/** Sama täsmäparsinta kuin relayn puolella: vain kirjaimellinen "true" on
+ *  päällä. Näin kirjoitusvirhe tai tyhjä arvo ei voi vahingossa aktivoida
+ *  lähteen sammutusta. */
+function envFlag(value: string | undefined): boolean {
+  return value === "true";
 }
 
 /** Every path/unit that a run of this server WRITES to or ACTS on can be
@@ -55,4 +68,5 @@ export const CONFIG: ControlConfig = {
   stateDir: process.env.CONTROL_STATE_DIR ?? join(CONTROL_ROOT, "run/"),
   clientDist: join(CONTROL_ROOT, "dist/client"),
   assetsDir: join(CONTROL_ROOT, "assets"),
+  hardStopSource: envFlag(process.env.CONTROL_HARD_STOP_SOURCE),
 };
