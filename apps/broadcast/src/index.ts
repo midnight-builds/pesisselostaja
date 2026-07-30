@@ -192,6 +192,10 @@ async function main(): Promise<void> {
       // The loop owns the finished state; the supervisor uses it to give up
       // on a dead source quickly once the match has ended.
       isMatchFinished: () => loop.matchFinished,
+      // Hard stop -takaraja (#123): the loop owns the event clock; null means
+      // "no information" and never counts as silence.
+      lastEventAt: () => loop.lastEventAt,
+      hardStopQuietMs: config.hardStopQuietMs,
       heartbeatExtra: () => loop.pollStatsSummary,
       fifoPath,
       recordFile: config.recordFile,
