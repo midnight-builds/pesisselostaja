@@ -271,11 +271,19 @@ export async function reconcileOpenJobs(
 ): Promise<Job[]> {
   const isStale = (j: Job): boolean => {
     if (!isBlocking(j.status)) return false;
-    if (runningMatchId !== null) return j.matchId !== runningMatchId;
-    if (j.status !== "arming") return true;
-    // armedAt is missing on jobs written before #118; createdAt is the only
-    // other timestamp, and for the job this bug was found on it says
-    // "yesterday" — which is the right answer.
+    // Ajossa oleva ottelu omistaa slotin oikeutetusti.
+    if (runningMatchId !== null && j.matchId === runningMatchId) return false;
+    // "live" ilman sitä ajoa: ajo on määritelmän mukaan ohi, koska tähän
+    // päästään vain kun relay on alhaalla settle-ikkunan yli tai ajaa jotain
+    // muuta.
+    if (j.status === "live") return true;
+    // "arming" saa aina armonajan, myös silloin kun relay ajaa jotain muuta.
+    // Muuten seuraavaa ottelua valmisteleva työ peruuntuisi 5 s välein sinä
+    // aikana kun edellinen ottelu on vielä ajossa ilman omaa työtä — ja
+    // työn perumisen sijaan oikea vastaus on ristiriitavaroitus, jonka
+    // sidonta jo nostaa. armedAt puuttuu ennen #118:aa kirjoitetuilta
+    // töiltä; createdAt on ainoa muu aikaleima, ja sillä työllä jolta tämä
+    // vika löytyi se sanoo "eilen" — mikä on oikea vastaus.
     const armed = Date.parse(j.armedAt ?? j.createdAt);
     return !Number.isFinite(armed) || now - armed >= ARMING_STALE_MS;
   };
