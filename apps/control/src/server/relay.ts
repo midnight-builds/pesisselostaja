@@ -138,8 +138,28 @@ const STATUS_FILE = /^status-(\d+)\.json$/;
  *
  *  Tuoreus mtimestä eikä tiedoston sisällöstä: sisältö on relayn sopimusta,
  *  mtime on käyttöjärjestelmän, ja tässä riittää tietää että kirjoituksia yhä
- *  tulee. */
+ *  tulee.
+ *
+ *  HUOM tuoreuden rajasta: relay kirjoittaa statuksen vielä sammuessaan
+ *  (`apps/broadcast/src/index.ts` shutdown), joten päättyneen ajon tiedosto on
+ *  "tuore" vielä minuutin sen jälkeen kun mitään ei enää aja. Kutsuja joka
+ *  tekee tästä päätöksiä ottelun identiteetistä ei siis saa tyytyä tuoreuteen —
+ *  ks. `readRunningStatus` ja sen mtime, jonka live.ts vertaa unitin omaan
+ *  käynnistyshetkeen. */
 export async function readRunningMatchId(nowMs: number = Date.now()): Promise<number | null> {
+  return (await readRunningStatus(nowMs))?.matchId ?? null;
+}
+
+/** Sama havainto kuin readRunningMatchId, mutta mtime mukana: se on ainoa tapa
+ *  erottaa TÄMÄN unit-ajon kirjoittama status edellisen ajon jälkeensä
+ *  jättämästä. */
+export interface RunningStatus {
+  matchId: number;
+  /** Milloin relay viimeksi kirjoitti tämän tiedoston. */
+  mtimeMs: number;
+}
+
+export async function readRunningStatus(nowMs: number = Date.now()): Promise<RunningStatus | null> {
   let names: string[];
   try {
     names = await readdir(CONFIG.relayRunDir);
@@ -164,7 +184,7 @@ export async function readRunningMatchId(nowMs: number = Date.now()): Promise<nu
     if (nowMs - mtimeMs > STATUS_FRESH_MS) continue;
     if (!newest || mtimeMs > newest.mtimeMs) newest = { matchId: Number(m[1]), mtimeMs };
   }
-  return newest?.matchId ?? null;
+  return newest;
 }
 
 async function systemctlVerb(verb: "start" | "stop" | "restart"): Promise<RelayProcess> {
