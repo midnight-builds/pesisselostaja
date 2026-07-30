@@ -146,9 +146,11 @@ export interface LiveEventsResult extends LiveEventsResponse {
    *  conditional request. */
   etag?: string | null;
   /** Server's Date header as ms epoch — the wall clock the `after` parameter
-   *  is judged against server-side. Events carry no per-event wall-clock
-   *  field (verified against real data 2026-07-17), so delta callers derive
-   *  the next `after` from this instead of from event timestamps. */
+   *  is judged against server-side. Events DO carry a wall-clock field
+   *  (`created`, unix seconds — verified against real data 2026-07-30, match
+   *  145900; an earlier 2026-07-17 check missed it), but delta callers still
+   *  derive the next `after` from this header: it is the same clock the server
+   *  compares against, whereas `created` is the scorer's entry time. */
   serverDateMs?: number | null;
 }
 
