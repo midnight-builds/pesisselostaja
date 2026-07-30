@@ -10,6 +10,7 @@ import {
   type PronunciationRule,
 } from "./pronunciation.js";
 import { fetchTodayMatches } from "@pesisselostaja/core";
+import { formatBuildInfo } from "./buildInfo.js";
 import { PIPER_VOICES, piperStored, piperDownload } from "./piper.js";
 import { debugLog } from "./debuglog.js";
 import type { LiveMatchSummary } from "@pesisselostaja/core";
@@ -879,6 +880,11 @@ function settingsSheet(): string {
       <div class="set-foot">
         <a href="${REPO_URL}" target="_blank" rel="noopener">Pesisselostaja GitHubissa</a>
         · <a href="${CREDITS_URL}" target="_blank" rel="noopener">Äänet ja lisenssit</a>
+        <!-- Mistä tarjoiltu build on peräisin (#71). Asetuspaneelissa, koska
+             tätä katsotaan harvoin mutta silloin nimenomaan puhelimella:
+             kerran palvelu jäi pyörittämään haaralta siirrettyä buildia eikä
+             sitä voinut todeta käyttöliittymästä lainkaan. -->
+        <div class="set-build">${esc(formatBuildInfo())}</div>
       </div>
     </div>
   </div>`;

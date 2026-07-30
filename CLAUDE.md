@@ -197,6 +197,25 @@ branch switch mid-broadcast could pull the source out from under a live stream
   deploy, not copied — the TTS cache, resume state and Piper models are shared on
   purpose. Editing `.env.relay` here is what the relay reads.
 
+### Which build is being served
+
+`apps/web`'s build bakes in the commit it came from (issue #71): the branch,
+short SHA, whether the tree was dirty, and the build time. Two places to read
+it, neither needing git:
+
+- **`http://<host>:3000/version.json`** — emitted into `dist/` by the vite
+  plugin, so `apps/server` serves it as an ordinary static file.
+- **The app's Asetukset panel**, bottom line — the one that matters, because it
+  is readable on the phone in the field.
+
+`dirty: true` means the build came from a working tree with uncommitted
+changes, i.e. it corresponds to no commit anywhere. That is the state that once
+went unnoticed: the service kept serving a build carried over from a branch and
+nothing in the UI said so.
+
+Without git available the fields read `unknown` and the UI says "versio
+tuntematon" — deliberately, rather than showing nothing.
+
 ## After completing a feature
 1. Workspace `src/` changes build and commit themselves (hook above) — verify build was clean.
 2. Commit other changes (tests, configs, docs) manually.
