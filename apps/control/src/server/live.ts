@@ -1065,6 +1065,17 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       } catch {
         runningMatchId = null;
       }
+      // Ilman unitin käynnistyshetkeä työtä ei voi sitoa mihinkään, eikä hard
+      // stopin siivousta voi tehdä — mutta kaikki rivit näyttäisivät vihreää.
+      // Ainoa tunnettu syy on ettei systemd:n aikaleima jäsenny (vyöhyke-
+      // lyhenne UTC:n sijaan), ja se on juuri sellainen hiljainen vika jonka
+      // takia tämä koko korjaus tehtiin: sanotaan se ääneen.
+      if (relay.activeState === "active" && relay.uptimeSec === null) {
+        errors.set(
+          "job",
+          "systemd ei kerro relayn käynnistyshetkeä (ActiveEnterTimestamp) — työtä ei voi sitoa ajossa olevaan otteluun"
+        );
+      }
       await followRunEdges();
       if (job) {
         const matchId = job.matchId;
