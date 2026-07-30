@@ -166,6 +166,38 @@ to the control file overrules the breaker and gives delta a fresh streak.
   echo '{"pollIntervalMs": 5000}' > apps/broadcast/run/.control-143280.json  # slower poll
   ```
 
+#### Every poll leaves a trace (issue #120)
+
+`api.delta_fetch` only logs when something *changed*, so a quiet stretch used to
+be invisible. In match 145900 (30.7.2026) narration fell 43 s behind and there
+was no way to tell from the log whether the polls had run at all or whether the
+API had answered with stale data — the 52 s window that mattered held one line,
+a timeout.
+
+Now a windowed summary is written every 20 s whenever at least one poll ran:
+
+```
+api.poll_window: Pollit 20 s aikana: 7 kpl (304 5, delta 2, täyshaku 0, reset 0,
+virhe 0), 0 uutta tapahtumaa, viimeisin vastaus 18 tapahtumaa, historiassa 18,
+kursori 30.7.2026 08:39:22.
+```
+
+That answers the three questions the incident could not: **did the polls run**
+(`7 kpl`), **what did the API return** (`viimeisin vastaus 18 tapahtumaa`), and
+**with which cursor** (`kursori …`).
+
+A summary rather than the line-per-poll the issue asked for, because the control
+app derives its whole status column from the **last 50 log lines** — including
+debug ones such as the heartbeat. At a 3 s poll interval, one line per poll fills
+that window in two and a half minutes and pushes out the evidence the control app
+reads; that is exactly the failure mode of issue #102. At 20 s the same
+information stays in the window for hours.
+
+When you *are* actively hunting, `RELAY_POLL_TRACE=true` adds `api.poll_trace`,
+one line per poll with the cursor and the response size. It is off by default for
+the reason above — the cost is paid in the control app's status row, not in log
+space.
+
 Fetches are aborted on **two different timeouts**, neither ever shorter than the
 current poll interval:
 
