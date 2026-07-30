@@ -5,7 +5,7 @@ import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import { CommentaryLoop } from "./commentaryLoop.js";
 import { PiperTts } from "./piperTts.js";
 import { ElevenLabsTts } from "./elevenLabsTts.js";
-import { FfmpegMixer, SourceExhaustedError } from "./ffmpegMixer.js";
+import { FfmpegMixer, SourceExhaustedError, type SourceEndReason } from "./ffmpegMixer.js";
 import { NoSignalSlate } from "./noSignalSlate.js";
 import { pruneRunDir, DAY_MS } from "./runRetention.js";
 import { Telemetry } from "./telemetry.js";
