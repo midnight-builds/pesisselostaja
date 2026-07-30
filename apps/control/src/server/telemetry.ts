@@ -74,6 +74,13 @@ export const SOURCE_STATES = [
   "unknown",
 ] as const satisfies readonly RelayTelemetry["source"]["state"][];
 
+// Kaatuu käännöksessä, jos unioniin lisätty tila puuttuu SOURCE_STATES-listalta:
+// puuttuva arvo tekee Exclude-tyypistä ei-tyhjän, eikä se enää sovi `never[]`iin.
+export const SOURCE_STATES_COVER_UNION: Exclude<
+  RelayTelemetry["source"]["state"],
+  (typeof SOURCE_STATES)[number]
+>[] = [];
+
 function sourceState(value: unknown): RelayTelemetry["source"]["state"] {
   return (SOURCE_STATES as readonly unknown[]).includes(value)
     ? (value as RelayTelemetry["source"]["state"])
