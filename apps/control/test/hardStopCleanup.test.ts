@@ -84,6 +84,7 @@ vi.mock("../src/server/telemetry.js", () => ({
 }));
 
 const { startLiveAggregator } = await import("../src/server/live.js");
+const { readRelayStatus } = await import("../src/server/telemetry.js");
 
 const SOURCE_VIDEO_ID = "srcVIDEO123";
 const TARGET_VIDEO_ID = "tgtVIDEO456";
@@ -341,5 +342,44 @@ describe("hard stop -siivous: status-tiedoston on kuuluttava tähän ajoon", () 
 
     expect(transition).not.toHaveBeenCalled();
     expect(warn.mock.calls.map((c) => c.join(" ")).join("\n")).toContain("999999");
+  });
+});
+
+/** Oletuspolku. Kaikki yllä oleva injektoi `readTelemetry`n, joten mikään ei
+ *  vielä varmistanut että siivous OIKEASTI lukee `status-<matchId>.json`:n
+ *  oikealla ottelutunnuksella. Väärä argumentti menisi läpi kaikista muista
+ *  testeistä ja jättäisi siivouksen hiljaa tekemättä tuotannossa. */
+describe("hard stop -siivous: oletuspolku lukee statuksen työn ottelutunnuksella", () => {
+  it("kutsuu readRelayStatusia jobin matchId:llä kun readTelemetryä ei injektoida", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const readRelayStatusMock = vi.mocked(readRelayStatus);
+    readRelayStatusMock.mockClear();
+
+    let active: Job | null = job();
+    const closeRunningJob = vi.fn(async () => {
+      const closed: Job = { ...(active as Job), status: "finished" };
+      active = null;
+      return closed;
+    });
+    const transition = vi.fn(async (videoId: string) => ok(videoId));
+
+    relayState = { ...relayState, activeState: "active", active: true };
+    const live = startLiveAggregator({
+      getActiveJob: async () => active,
+      closeRunningJob,
+      markRunStarted: async () => null,
+      transitionBroadcast: transition,
+      // readTelemetry TARKOITUKSELLA injektoimatta.
+    });
+    await tick();
+    relayState = { ...relayState, activeState: "inactive", active: false };
+    await tick();
+    live.stop();
+
+    expect(readRelayStatusMock).toHaveBeenCalledWith(145900);
+    // Mock palauttaa null (ei syytä) → ei siivota, mutta työ suljetaan.
+    expect(transition).not.toHaveBeenCalled();
+    expect(closeRunningJob).toHaveBeenCalledTimes(1);
   });
 });
