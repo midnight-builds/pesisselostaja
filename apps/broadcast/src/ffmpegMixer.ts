@@ -383,8 +383,11 @@ const HEARTBEAT_MS = 2 * 60 * 1000;
  *  the broadcast is over). Nothing is wrong, and the log must not send anyone
  *  looking for a fault — the morning of 29.7.2026 it said "tarkista stream
  *  key" about a target that was working perfectly (issue #103).
- *  `"exhausted"` = the source stopped answering and never came back. */
-export type SourceEndReason = "ended" | "exhausted";
+ *  `"exhausted"` = the source stopped answering and never came back.
+ *  `"hard_stop"` = the hard stop backstop fired (#123): the match had finished,
+ *  the pesistulokset feed had been quiet past the configured window AND the
+ *  source showed the dead-tail symptoms — a deliberate cleanup, not a fault. */
+export type SourceEndReason = "ended" | "exhausted" | "hard_stop";
 
 export class SourceExhaustedError extends Error {
   readonly reason: SourceEndReason;
