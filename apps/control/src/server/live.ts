@@ -277,6 +277,11 @@ function freshTelemetry(snap: Snapshot): RelayTelemetry | null {
   // lähetykseksi — hiljainen väärä data on tässä pahin lopputulos, joten
   // mieluummin ei tietoa kuin toisen ottelun tieto.
   if (snap.job && telemetry.matchId !== snap.job.matchId) return null;
+  // Ja sama sääntö toisin päin: kun työ itse on eri ottelusta kuin ajossa
+  // oleva, työn ottelun telemetria on määritelmän mukaan väärän ottelun —
+  // vaikka se täsmääkin työhön. Ilman tätä ketjurivit piirtäisivät vihreää
+  // edellisen ottelun statuksesta samalla kun otsikko huutaa ristiriitaa.
+  if (matchIdConflict(snap)) return null;
   return telemetry;
 }
 
