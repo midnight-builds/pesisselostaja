@@ -304,10 +304,10 @@ export class CommentaryLoop {
   private deltaBreakerTripped = false;
   /** Monotonic per-run counter behind each clip's telemetry id. */
   private clipSeq = 0;
-  /** Wall clock of the last time a NEW event appeared. The events themselves
-   *  carry only a match-relative `timestamp`, so this is our own observation
-   *  instant — which is the useful one anyway: it answers "is the scorer still
-   *  entering results", not "how far into the match are we". */
+  /** Wall clock of the last time a NEW event appeared — our own observation
+   *  instant, which is the useful one anyway: it answers "is the scorer still
+   *  entering results", not "how far into the match are we". (Events also
+   *  carry a wall-clock `created` field, see LiveEvent; not needed here.) */
   private lastEventSeenAt: string | null = null;
   /** Ottelutiedot, haettu kerran run():n alussa. Talletetaan, jotta katvekuvan
    *  pisterivi osaa joukkueiden nimet ilman toista hakua. */
@@ -941,12 +941,18 @@ export class CommentaryLoop {
       // least one genuinely new sub-event (not per sub-event), so a later
       // pass can split total delay into API-side publish delay (this delta)
       // vs. our own portion (speak-time minus this log's timestamp).
+      // lastEventSeenAt on terveyssignaali ("kirjaako toimitsija yhä tuloksia")
+      // eikä saa riippua timestampista: tällä syötteellä event.timestamp on
+      // käytännössä aina null, ja vartijan sisällä kenttä jäi ikuisesti
+      // nulliksi (#119).
+      if (hasNewSubEvent) {
+        this.lastEventSeenAt = new Date().toISOString();
+      }
       if (hasNewSubEvent && event.timestamp !== null) {
         const candidateEpochMs = Date.now() - event.timestamp * 1000;
         this.matchEpochMs =
           this.matchEpochMs === null ? candidateEpochMs : Math.min(this.matchEpochMs, candidateEpochMs);
         const deltaS = Math.round((Date.now() - (this.matchEpochMs + event.timestamp * 1000)) / 1000);
-        this.lastEventSeenAt = new Date().toISOString();
         logDebug("api.first_seen", `first-seen: id=${event.id} ts=${event.timestamp} delta=${deltaS}s`);
       }
 
