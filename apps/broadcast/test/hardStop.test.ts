@@ -205,4 +205,23 @@ describe("hard stop -takaraja (#123)", () => {
       expect(outcome.err.reason).toBe("exhausted");
     }
   }, 20_000);
+
+  it("hardStopQuietMs=0 tarkoittaa POIS PÄÄLTÄ, ei 'laukea heti'", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const mixer = hardStopMixer({
+      fifoPath: "/tmp/pesis-test-hard-stop-g.pcm",
+      lifetimesMs: [300], // parikuvio + unproductive-oireet päällä
+      finished: true,
+      lastEventAgeMs: 10 * 60 * 1000,
+      hardStopQuietMs: 0,
+      finishedFailureWindowMs: 100,
+    });
+    const outcome = await outcomeOf(mixer, 15_000);
+    expect(outcome.kind).toBe("gave-up");
+    if (outcome.kind === "gave-up") {
+      // Luovutus tuli tavallisesta finished-ikkunasta, ei hard stopista.
+      expect(outcome.err.reason).toBe("exhausted");
+    }
+  }, 20_000);
 });
