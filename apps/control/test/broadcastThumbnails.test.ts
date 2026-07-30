@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { uploadPairThumbnails } from "../src/server/broadcastThumbnails.js";
 import type { BroadcastPair } from "../src/server/youtube.js";
 import type { BroadcastTexts } from "../src/server/templates.js";
+import type { ThumbnailOptions } from "../src/server/thumbnail.js";
 
 /** Issue #130: ajastetut lähetykset jäivät ilman thumbnailia, vaikka
  *  renderöijä, latausfunktio ja reitti olivat kaikki olemassa — luontipolku ei
@@ -28,8 +29,8 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("uploadPairThumbnails (#130)", () => {
   it("renderöi ja lataa molemmille lähetyksille, selostetulle narrated-lipulla", async () => {
-    const render = vi.fn(async () => Buffer.from("png"));
-    const upload = vi.fn(async () => ({}));
+    const render = vi.fn(async (_opts: ThumbnailOptions) => Buffer.from("png"));
+    const upload = vi.fn(async (_videoId: string, _image: Buffer, _type: string) => ({}));
 
     const out = await uploadPairThumbnails(PAIR, TEXTS, { render, upload });
 
@@ -52,11 +53,11 @@ describe("uploadPairThumbnails (#130)", () => {
     // kun tätä kutsutaan: heitetty poikkeus näyttäisi operaattorille punaisen
     // virheen onnistuneesta luonnista, ja seuraava klikkaus loisi TOISEN parin
     // (niin kävi ottelulle 145905 30.7.2026).
-    const render = vi.fn(async (opts: { narrated: boolean }) => {
+    const render = vi.fn(async (opts: ThumbnailOptions) => {
       if (!opts.narrated) throw new Error("komposiitti kaatui");
       return Buffer.from("png");
     });
-    const upload = vi.fn(async () => ({}));
+    const upload = vi.fn(async (_videoId: string, _image: Buffer, _type: string) => ({}));
 
     const out = await uploadPairThumbnails(PAIR, TEXTS, { render, upload });
 
@@ -68,8 +69,8 @@ describe("uploadPairThumbnails (#130)", () => {
   });
 
   it("ei heitä kun lataus epäonnistuu, ja kertoo kumpi kaatui", async () => {
-    const render = vi.fn(async () => Buffer.from("png"));
-    const upload = vi.fn(async (videoId: string) => {
+    const render = vi.fn(async (_opts: ThumbnailOptions) => Buffer.from("png"));
+    const upload = vi.fn(async (videoId: string, _image: Buffer, _type: string) => {
       if (videoId === "vid-narrated") throw new Error("HTTP 403 quotaExceeded");
       return {};
     });
