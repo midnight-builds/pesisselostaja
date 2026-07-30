@@ -73,6 +73,48 @@ later auto-commits in the same session stay on that branch. Work meant to land v
 should still check out a real feature branch *before* editing — the auto-branch is a
 safety net, not a substitute for a properly named branch.
 
+## Parallel PRs: don't let branches diverge on the same seam
+Several long-lived branches editing the same file, none based on the others, is the
+antipattern: **merge/integration debt**, and its failure mode is a **semantic
+conflict** — the merge is textually clean, typecheck passes, every test is green, and
+the meaning is still wrong. That is not a merge you can review by reading conflict
+markers, because there are none.
+
+It has already cost us. On 30.7.2026 nine branches cut from the same `main` were merged
+in one sitting, and three separate defects only existed *between* them: the relay
+gained source states `ended` (#103) and `no_signal` (#104) after the control app's
+telemetry reader (#97) was written, so both fell into a `default` branch and the status
+row read "relay ei kerro lähteen tilaa" exactly when the relay was reporting precisely;
+the same drift appeared again in `RelayTelemetry.source.state`; and the slate loop
+swallowed `SourceEndedError`, which would have left colour bars pushing into an ended
+broadcast for the whole give-up window.
+
+So, in order of preference:
+
+1. **Land the first one before starting the second.** Small PRs merged to `main` the
+   same day beat four branches held open for review.
+2. **If they must overlap, stack them:** branch the second off the *first branch*, not
+   off `main`, and say so in the PR body ("perustuu #112:een"). The second PR's diff
+   then shows only its own change, and there is nothing to reconcile later.
+3. **If they truly are independent, prove it before opening the second PR:**
+   `gh pr list` then compare `git diff --name-only main...` between them. Overlap in a
+   *file* is a warning; overlap in one function, one `switch`, or one union type means
+   go back to option 1 or 2.
+
+When integrating anyway:
+
+- **`git fetch` after every `gh pr merge`.** A "no conflicts" result computed against a
+  stale `origin/main` is meaningless — this happened here, on the one file another PR
+  had just rebuilt.
+- **Merge `origin/main` into the feature branch, not the other way round**, and resolve
+  there. Editing `main` directly trips the auto-commit hook mid-merge.
+- **A green suite is not enough.** After resolving, re-read the seam the other PR
+  changed and ask what the *other* side now expects. Every new enum value, widened
+  union or added state is a contract: find every `switch`, every mirrored type (the
+  control app mirrors `RelayStatus` by hand) and every consumer, in the same PR.
+- **Add a test for each cross-PR defect you find**, named after the interaction. Those
+  are the defects no single PR's tests could have caught.
+
 ## Running
 `apps/server` runs as a systemd **user** unit. Restart with
 `systemctl --user restart pesisselostaja.service` (not `sudo`). UI on :3000 (it serves
