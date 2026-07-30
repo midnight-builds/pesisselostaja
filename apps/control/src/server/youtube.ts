@@ -486,6 +486,73 @@ export async function getStreamStatus(streamId: string): Promise<StreamStatus | 
   };
 }
 
+/** Lopetuksen tulos. Ei heitä "ei ollut liveä" -tapauksissa: kutsuja
+ *  (hard stopin siivous, live.ts) haluaa lokittaa mitä tehtiin ja miksi, eikä
+ *  siivouksen ohitus ole virhe. Aidot API-virheet heitetään yhä
+ *  YouTubeApiErrorina. */
+export interface TransitionResult {
+  videoId: string;
+  /** true = transitio tehtiin nyt. */
+  ok: boolean;
+  /** true = ei tehty mitään, koska ei ollut tarpeen tai mahdollista. */
+  skipped: boolean;
+  /** Ihmisluettava syy, aina täytetty — lokirivin sisältö. */
+  reason: string;
+  /** Tila ennen kutsua, jos lähetys löytyi kanavalta. */
+  lifeCycleStatus: string | null;
+}
+
+/** Lopettaa lähetyksen (`liveBroadcasts.transition` -> `complete`).
+ *
+ *  Idempotentti tarkoituksella: tila luetaan ensin, koska YouTube vastaa
+ *  virheellä jos lähetys ei ole transitoitavassa tilassa, ja siivouksen
+ *  toistuminen (tikki uudestaan, käsin ajettu lopetus) on normaalia.
+ *
+ *  Tyhjä id-haku ei ole virhe vaan tieto: video ei ole omalla kanavalla, joten
+ *  meillä ei ole oikeutta lopettaa sitä. Ainoat tilat joista transitio tehdään
+ *  ovat `live` ja `testing`. */
+export async function transitionBroadcast(
+  videoId: string,
+  broadcastStatus: "complete" = "complete"
+): Promise<TransitionResult> {
+  const found = await listBroadcasts({ id: videoId });
+  const broadcast = found[0];
+  if (!broadcast) {
+    return {
+      videoId,
+      ok: false,
+      skipped: true,
+      reason: "lähetys ei ole tämän kanavan omistama (id-haku palautti tyhjän) — ei oikeutta lopettaa",
+      lifeCycleStatus: null,
+    };
+  }
+  const state = broadcast.lifeCycleStatus;
+  if (state !== "live" && state !== "testing") {
+    return {
+      videoId,
+      ok: false,
+      skipped: true,
+      reason: `lähetys ei ole live (lifeCycleStatus=${state ?? "?"}) — ei lopetettavaa`,
+      lifeCycleStatus: state,
+    };
+  }
+  await ytRequest<LiveBroadcastResource>(
+    "POST",
+    "liveBroadcasts/transition",
+    { id: videoId, broadcastStatus, part: "id,status" },
+    null,
+    "update"
+  );
+  await logCreated({ event: "broadcast.transition", videoId, broadcastStatus, from: state });
+  return {
+    videoId,
+    ok: true,
+    skipped: false,
+    reason: `lopetettu (${state} -> ${broadcastStatus})`,
+    lifeCycleStatus: state,
+  };
+}
+
 export interface PlaylistSummary {
   id: string;
   title: string;
