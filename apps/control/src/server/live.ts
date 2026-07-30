@@ -901,6 +901,8 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
    *  job that has been armed but not started yet, and closing that would cancel
    *  the next broadcast before it began (#101). */
   let relayWasActive = false;
+  /** Työ jonka kanssa relay viimeksi nähtiin ajossa; ks. followRunEdges. */
+  let runningJob: Job | null = null;
   /** Ottelu jonka ristiriidasta on jo varoitettu lokiin. Ilman tätä 5 s tikki
    *  kirjoittaisi saman rivin journaliin 12 kertaa minuutissa. */
   let conflictLoggedFor: number | null = null;
@@ -993,13 +995,22 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     if (relay.active) relayDownSince = null;
     else if (relayDownSince === null) relayDownSince = now;
 
+    // Työ jonka kanssa relay nähtiin ajossa. Laskeva reuna sulkee TÄMÄN eikä
+    // sitä joka sattuu pitämään slottia sulkemishetkellä: force-aktivointi
+    // ("lopeta edellinen ja aktivoi tämä", index.ts) pysäyttää relayn ja
+    // vaihtaa slotin haltijan saman pyynnön sisällä, jolloin reuna ehti perua
+    // juuri armatun SEURAAVAN ottelun työn ennen kuin sitä oli käynnistetty.
+    if (relay.active && (job?.status === "arming" || job?.status === "live")) {
+      runningJob = job;
+    }
+
     try {
       // Falling edge: the run is over. Edge-triggered on purpose — "relay is
       // inactive" on its own is the normal state of a job that has been armed
       // but not started yet, and closing that would cancel the next broadcast
       // before it began (#101).
-      const current = job;
-      if (wasActive && !relay.active && current && (current.status === "arming" || current.status === "live")) {
+      const current = runningJob;
+      if (wasActive && !relay.active && current) {
         // Hard stopin siivous ENNEN sulkemista: closeRunningJob nollaa
         // aktiivisen työn, jolloin sekä targetVideoId että sourceUrl katoavat
         // käsistä. Oma try/catch, koska siivous ei saa koskaan estää työn
@@ -1009,7 +1020,8 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
         // Nimetty työ: poller sulkee sen ajon jota se seurasi, ei sitä joka
         // sattuu olemaan slotissa sulkemishetkellä.
         const closed = await closeRunningJobFn(current.id);
-        if (closed) job = closed;
+        if (closed && job?.id === closed.id) job = closed;
+        runningJob = null;
       }
       await bindArmedJob();
       await reconcileSlot(now);
