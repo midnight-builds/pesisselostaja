@@ -34,7 +34,7 @@ import type {
 import { closeRunningJob, getActiveJob, markRunStarted, reconcileOpenJobs } from "./jobs.js";
 import { readLog } from "./journal.js";
 import { getMatchState } from "./matches.js";
-import { getRelayProcess, readKnobs, readRunningMatchId } from "./relay.js";
+import { getRelayProcess, readKnobs, readRunningStatus, type RunningStatus } from "./relay.js";
 import { SOURCE_INGEST_STALE_MS } from "./sourceIngest.js";
 import { getSystemState } from "./system.js";
 import { NarrationTimeline, readRelayStatus } from "./telemetry.js";
@@ -107,10 +107,11 @@ export interface LiveAggregatorOptions {
    *  edges without a job file on disk. */
   closeRunningJob?: (jobId: string | null) => Promise<Job | null>;
   markRunStarted?: (matchId: number) => Promise<Job | null>;
-  /** Mitä ottelua relay OIKEASTI ajaa (relay.ts:n readRunningMatchId, lähteenä
+  /** Mitä ottelua relay OIKEASTI ajaa (relay.ts:n readRunningStatus, lähteenä
    *  relayn oma status-tiedosto). Tämä on se havainto jota vasten työ sidotaan
-   *  — ilman sitä sidonta oli pelkkä arvaus jonon järjestyksestä (#118). */
-  getRunningMatchId?: () => Promise<number | null>;
+   *  — ilman sitä sidonta oli pelkkä arvaus jonon järjestyksestä (#118).
+   *  mtime kulkee mukana, koska pelkkä tuoreus ei erota tätä ajoa edellisestä. */
+  getRunningStatus?: () => Promise<RunningStatus | null>;
   /** Avointen töiden sovittelu käynnistyksessä ja sen jälkeen. Injektoitava
    *  samasta syystä kuin muutkin työjonon kutsut. */
   reconcileOpenJobs?: (runningMatchId: number | null, now?: number) => Promise<Job[]>;
@@ -686,7 +687,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
   const readActiveJob = opts.getActiveJob ?? getActiveJob;
   const closeRunningJobFn = opts.closeRunningJob ?? closeRunningJob;
   const markRunStartedFn = opts.markRunStarted ?? markRunStarted;
-  const getRunningMatchIdFn = opts.getRunningMatchId ?? (() => readRunningMatchId());
+  const getRunningStatusFn = opts.getRunningStatus ?? (() => readRunningStatus());
   const reconcileOpenJobsFn = opts.reconcileOpenJobs ?? reconcileOpenJobs;
   const transitionBroadcastFn = opts.transitionBroadcast ?? ((videoId: string) => transitionBroadcast(videoId));
   const readTelemetryFn = opts.readTelemetry ?? readRelayStatus;
@@ -735,6 +736,13 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       runningMatchId,
     };
     const { health, headline } = deriveHealth(snap);
+    // Ristiriidassa työ ja ajo ovat eri otteluista, ja BÅDE telemetria että
+    // selostuslista on luettu työn ottelulla (`job.matchId`) — siis väärän.
+    // Selostuslista ohittaa muuten tuoreusvartijan tarkoituksella (mennyt ajo
+    // on historiaa), mutta tässä se piirtäisi toisen ottelun rivit tämän
+    // hetken lähetyksenä ilman mitään merkkiä siitä (#118). Ei tietoa on
+    // parempi kuin väärän ottelun tieto; otsikko kertoo miksi se on tyhjä.
+    const conflicted = matchIdConflict(snap) !== null;
     return {
       // Server time: the phone's clock can be off, and "N s sitten" computed
       // against a wrong clock is worse than no timestamp.
@@ -748,8 +756,8 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       knobs,
       sourceIngest: source.ingest,
       job,
-      telemetry,
-      narration,
+      telemetry: conflicted ? null : telemetry,
+      narration: conflicted ? [] : narration,
       log,
     };
   }
@@ -817,11 +825,15 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
    *  sulkeminen ehtii tapahtua joka tapauksessa. */
   async function runHardStopCleanup(current: Job, now: number): Promise<void> {
     try {
-      // Vain oikeasti käynnissä ollut ajo. `arming` tarkoittaa että relay ei
-      // koskaan päässyt liikkeelle (esim. unit kaatui käynnistyksessä) — sen
-      // ajon hard stopia ei ole olemassa, ja levyllä oleva syy on silloin
-      // väistämättä EDELLISEN ajon.
-      if (current.status !== "live") return;
+      // Vain oikeasti käynnissä ollut ajo. Ehto on `startedAt` eikä status
+      // "live", jotta sama siivous kelpaa myös sovittelun sulkemalle työlle
+      // (joka on jo "finished"): ilman sitä ohjaamon uudelleenkäynnistys
+      // päättyneen hard stopin jälkeen jättäisi kohde- JA lähdelähetyksen
+      // päälle, mikä on juuri se vika jonka #123 poisti. Leimaamaton työ taas
+      // tarkoittaa ettei relay koskaan päässyt liikkeelle — sen ajon hard
+      // stopia ei ole olemassa, ja levyllä oleva syy on silloin väistämättä
+      // EDELLISEN ajon.
+      if (!current.startedAt) return;
       const snapshot = await readTelemetryFn(current.matchId);
       if (snapshot?.endReason !== "hard_stop") {
         return; // normaali lopetus (tai vanha deploy joka ei kerro syytä)
@@ -893,6 +905,26 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
    *  kirjoittaisi saman rivin journaliin 12 kertaa minuutissa. */
   let conflictLoggedFor: number | null = null;
 
+  /** Havainto siitä mitä relay ajaa — mutta vain jos sen kirjoitti TÄMÄ ajo.
+   *
+   *  Relay päivittää status-tiedoston vielä sammuessaan, joten päättyneen ajon
+   *  tiedosto pysyy `readRunningStatus`in tuoreusikkunassa (60 s) minuutin
+   *  ajan sen jälkeen kun mitään ei enää aja. Ilman tätä vartijaa sovittelu
+   *  peruisi juuri aktivoidun SEURAAVAN ottelun työn, koska edellisen ottelun
+   *  status yhä "kertoo" mitä relay muka ajaa — ja sidonta leimaisi työn
+   *  käyntiin relayn ollessa alhaalla. mtime unitin käynnistyshetkeä vasten
+   *  erottaa nämä täsmällisesti.
+   *
+   *  `activating` ei kelvo: ActiveEnterTimestamp osoittaa silloin vielä
+   *  edelliseen ajoon, jolloin vanha tiedosto näyttäisi tämän ajon
+   *  kirjoittamalta. */
+  function trustedRunningMatchId(status: RunningStatus | null): number | null {
+    if (!status) return null;
+    if (relay.activeState !== "active" || relay.uptimeSec === null) return null;
+    const unitStartedMs = Date.now() - relay.uptimeSec * 1000;
+    return status.mtimeMs >= unitStartedMs ? status.matchId : null;
+  }
+
   /** Sitoo armatun työn siihen ajoon jota relay OIKEASTI ajaa.
    *
    *  EI reunalaukaistu, toisin kuin sulkeminen: relay kirjoittaa
@@ -943,6 +975,13 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       console.warn(
         `[control] sovittelu sulki avoimen työn ${c.id} (ottelu ${c.matchId}) tilaan ${c.status}`
       );
+      // Sama siivous kuin laskevalla reunalla: ohjaamon uudelleenkäynnistys ei
+      // saa olla se ero, jäävätkö lähetykset päälle. Ajetaan sulkemisen
+      // JÄLKEEN — siivous ei saa estää slotin vapautumista — ja sen omat
+      // vartijat (oikea ottelu, tuore status, oikea ajo) päättävät edelleen
+      // tehdäänkö mitään. Vanhentunut näyttö tarkoittaa että siivous jää
+      // tekemättä; se on tarkoituksellista, ei unohdus.
+      await runHardStopCleanup(c, now);
       if (job?.id === c.id) job = c;
     }
   }
@@ -1005,7 +1044,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       // eikä sen epäonnistuminen saa estää työn sulkemista — silloin
       // runningMatchId jää nulliksi ja molemmat odottavat näyttöä.
       try {
-        runningMatchId = await getRunningMatchIdFn();
+        runningMatchId = trustedRunningMatchId(await getRunningStatusFn());
       } catch {
         runningMatchId = null;
       }

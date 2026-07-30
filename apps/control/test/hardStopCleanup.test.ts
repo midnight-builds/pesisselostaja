@@ -34,6 +34,7 @@ vi.mock("../src/server/relay.js", () => ({
     pollIntervalMs: 3000,
   })),
   readRunningMatchId: vi.fn(async () => null),
+  readRunningStatus: vi.fn(async () => null),
   writeSourceIngest: vi.fn(async () => undefined),
   readSourceIngest: vi.fn(async () => null),
 }));
@@ -395,5 +396,57 @@ describe("hard stop -siivous: oletuspolku lukee statuksen työn ottelutunnuksell
     // Mock palauttaa null (ei syytä) → ei siivota, mutta työ suljetaan.
     expect(transition).not.toHaveBeenCalled();
     expect(closeRunningJob).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** Laskeva reuna vaatii että ohjaamo oli katsomassa kun relay sammui. Jos
+ *  ohjaamo käynnistetään uudelleen sen jälkeen (deploy, kaatuminen), reunaa ei
+ *  koskaan tule ja ilman tätä polkua kohde- JA lähdelähetys jäisivät päälle —
+ *  siis tasan se vika jonka #123 poisti, palautettuna toista reittiä (#118). */
+describe("hard stop -siivous sovittelun polulla", () => {
+  it("siivoaa myös kun laskevaa reunaa ei koskaan nähty", async () => {
+    const closed: Job = { ...job(), status: "finished", endedAt: isoAgo(0) };
+    const transition = vi.fn(async (videoId: string) => ok(videoId));
+    relayState = { ...relayState, activeState: "inactive", active: false, uptimeSec: null };
+
+    const live = startLiveAggregator({
+      getActiveJob: async () => job(),
+      closeRunningJob: async () => null,
+      markRunStarted: async () => null,
+      // Sovittelu sulkee työn: ohjaamo herää maailmaan jossa relay on jo poissa.
+      reconcileOpenJobs: async () => [closed],
+      transitionBroadcast: transition,
+      readTelemetry: async () => telemetry("hard_stop"),
+      hardStopSource: true,
+    });
+    // Sovittelu odottaa 30 s ennen kuin alhaalla oleva relay tulkitaan
+    // päättyneeksi ajoksi (relayn oma restart kestää sekunteja).
+    for (let i = 0; i < 8; i += 1) await tick();
+
+    expect(transition).toHaveBeenCalledWith(TARGET_VIDEO_ID);
+    expect(transition).toHaveBeenCalledWith(SOURCE_VIDEO_ID);
+    live.stop();
+  });
+
+  it("ei siivoa työtä joka ei koskaan päässyt käyntiin", async () => {
+    // startedAt tyhjä = relay ei liikahtanut, joten levyn "hard_stop" on
+    // väistämättä EDELLISEN ajon syy.
+    const closed: Job = { ...job(), status: "cancelled", startedAt: null, endedAt: isoAgo(0) };
+    const transition = vi.fn(async (videoId: string) => ok(videoId));
+    relayState = { ...relayState, activeState: "inactive", active: false, uptimeSec: null };
+
+    const live = startLiveAggregator({
+      getActiveJob: async () => null,
+      closeRunningJob: async () => null,
+      markRunStarted: async () => null,
+      reconcileOpenJobs: async () => [closed],
+      transitionBroadcast: transition,
+      readTelemetry: async () => telemetry("hard_stop"),
+      hardStopSource: true,
+    });
+    for (let i = 0; i < 8; i += 1) await tick();
+
+    expect(transition).not.toHaveBeenCalled();
+    live.stop();
   });
 });

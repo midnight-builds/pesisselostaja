@@ -50,6 +50,7 @@ const {
   reconcileOpenJobs,
   ARMING_STALE_MS,
   createJob,
+  patchJob,
   getActiveJob,
   listJobs,
   setJobStatus,
@@ -369,5 +370,41 @@ describe("reconciling open jobs", () => {
 
     expect(await reconcileOpenJobs(null)).toEqual([]);
     expect(readFileSync(jobsFile, "utf8")).toBe(before);
+  });
+});
+
+// Slotin voi ottaa myös suoralla PATCHilla — se on operaattorin hätäkeino, ja
+// juuri sillä korjattiin 30.7. väärä sidonta käsin (#118). Jos se ei leimaa
+// armedAt:ia, sovittelu putoaa createdAt:iin, joka on aamulla luodulla työllä
+// jo tunteja vanha, ja työ perutaan heti sen alta.
+describe("armedAt", () => {
+  it("leimautuu myös käsin tehdyssä PATCHissa", async () => {
+    const job = await createJob({ matchId: 1 });
+    await patchJob(job.id, { status: "arming" });
+    expect((await listJobs())[0].armedAt).not.toBeNull();
+  });
+
+  it("leimautuu setJobStatusin kautta", async () => {
+    const job = await createJob({ matchId: 1 });
+    await setJobStatus(job.id, "arming");
+    expect((await listJobs())[0].armedAt).not.toBeNull();
+  });
+
+  it("ei siirry kun työ leimataan käyntiin", async () => {
+    const job = await createJob({ matchId: 1 });
+    await activateJob(job.id);
+    const armed = (await listJobs())[0].armedAt;
+    await markRunStarted(1);
+    expect((await listJobs())[0].armedAt).toBe(armed);
+  });
+
+  it("suojaa PATCHilla armatun työn sovittelulta", async () => {
+    // Vanha työ (createdAt aamulla) armattuna juuri nyt: sovittelu ei saa
+    // perua sitä, vaikka createdAt on jo yli tunnin vanha.
+    const job = await createJob({ matchId: 1 });
+    await patchJob(job.id, { status: "arming" });
+
+    expect(await reconcileOpenJobs(null, Date.now() + 5 * 60_000)).toEqual([]);
+    expect((await listJobs())[0].status).toBe("arming");
   });
 });

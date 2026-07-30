@@ -173,6 +173,33 @@ Jos ajokopio on vanhempi kuin PR #93, telemetriaa ei ole eikä selostuslistalla
 ole mitään näytettävää — lista sanoo sen ääneen sen sijaan että väittäisi
 hiljaisuutta. Korjaus on `npm run relay:deploy`.
 
+### Työ sidotaan ajossa olevaan otteluun (#118)
+
+Työ ja relayn ajo ovat kaksi eri asiaa, ja ohjaamo sitoo ne yhteen **vain
+relayn omalla näytöllä**: `run/status-<ID>.json` kertoo mitä relay ajaa.
+
+- **Sidonta** (`arming` → `live`) tapahtuu vasta kun tuo tiedosto on olemassa
+  ja sen kirjoitti tämä unit-ajo (mtime unitin käynnistyshetkeä myöhemmin).
+  Relay kirjoittaa statuksen vielä sammuessaan, joten päättyneen ajon tiedosto
+  näyttäisi muuten seuraavan ajon todisteelta koko minuutin ajan.
+- **Eri ottelu ⇒ ei sidota lainkaan.** Puuttuva sidonta on parempi kuin väärä:
+  väärään työhön sidottuna operaattorin säätimet kirjoittuvat väärän ottelun
+  `run/.control-<ID>.json`-tiedostoon eikä ajossa oleva relay näe niitä
+  koskaan. Ristiriita nousee otsikkoon ja Relay-riville, ja telemetria sekä
+  selostuslista jätetään näyttämättä — *ei tietoa on parempi kuin väärän
+  ottelun tieto*.
+- **Sovittelu** sulkee slottiin jääneet työt, joihin laskeva reuna ei yllä
+  (ohjaamo käynnistettiin uudelleen relayn sammuttua). Se vaatii aina näytön:
+  relay ajossa ⇒ on tiedettävä mitä; relay alhaalla ⇒ 30 s ennen kuin ajo
+  tulkitaan päättyneeksi, jottei relayn oma restart vapauta slottia kesken
+  lähetyksen. Sovittelu ajaa myös hard stopin siivouksen (#123), jottei
+  ohjaamon uudelleenkäynnistys jättäisi lähetyksiä päälle.
+- **Odottava työ vanhenee tunnissa.** `arming`-tilassa oleva työ, jolle ei ole
+  käynnistetty relayta tuntiin (`ARMING_STALE_MS`, `jobs.ts`), perutaan
+  automaattisesti. Aikaisin armaaminen ja kuvaajan odottelu on siis normaalia,
+  mutta **edellisenä iltana armattu työ ei ole aamulla enää voimassa** — se
+  jäi ennen jumiin ja esti seuraavan ottelun aktivoinnin (#101).
+
 ## Jaettava viesti
 
 Jaettava viesti (WhatsApp-ryhmiin) muodostuu `run/share-template.json`ista.

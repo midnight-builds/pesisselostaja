@@ -96,7 +96,16 @@ function applyPatch(
       nextJobs[clashingIdx] = closeJob(nextJobs[clashingIdx], new Date().toISOString());
     }
   }
-  const job: Job = { ...current, ...patch };
+  // armedAt leimataan täällä eikä activateJobissa, koska slotin voi ottaa myös
+  // suoralla PATCHilla (`{"status":"arming"}`) — se on operaattorin hätäkeino,
+  // ja juuri sillä korjattiin 30.7. väärä sidonta käsin. Ilman leimaa
+  // reconcileOpenJobs putoaisi createdAt:iin, joka on aamulla luodulla työllä
+  // jo tunteja vanha, ja sovittelu perisi työn heti (#118). */
+  const armedAt =
+    nextStatus === "arming" && current.status !== "arming"
+      ? new Date().toISOString()
+      : (patch.armedAt ?? current.armedAt);
+  const job: Job = { ...current, ...patch, armedAt };
   nextJobs = nextJobs.slice();
   nextJobs[idx] = job;
   return { jobs: nextJobs, job };
@@ -165,7 +174,8 @@ export async function patchJob(id: string, patch: PatchJobRequest): Promise<Job>
  *
  *  `force` = the operator answered "lopeta edellinen ja aktivoi tämä". */
 export async function activateJob(id: string, opts: { force?: boolean } = {}): Promise<Job> {
-  return updateJob(id, { status: "arming", armedAt: new Date().toISOString() }, opts);
+  // armedAt: ks. applyPatch — leima tulee sieltä, jotta myös suora PATCH saa sen.
+  return updateJob(id, { status: "arming" }, opts);
 }
 
 /** How long a job may hold the slot in "arming" with no relay running before

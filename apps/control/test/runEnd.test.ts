@@ -29,6 +29,7 @@ vi.mock("../src/server/relay.js", () => ({
   // koko moduulin korvaus, joten puuttuva export kaataa importin — vaikka tämä
   // testi ei pollaria käytäkään.
   readRunningMatchId: vi.fn(async () => null),
+  readRunningStatus: vi.fn(async () => null),
   writeSourceIngest: vi.fn(async () => undefined),
   readSourceIngest: vi.fn(async () => null),
 }));
@@ -83,6 +84,7 @@ vi.mock("../src/server/matches.js", () => ({
 }));
 
 const { startLiveAggregator } = await import("../src/server/live.js");
+const { readRelayStatus } = await import("../src/server/telemetry.js");
 
 function job(overrides: Partial<Job> = {}): Job {
   return {
@@ -107,6 +109,22 @@ function job(overrides: Partial<Job> = {}): Job {
   };
 }
 
+/** Relay ylös/alas. uptimeSec kulkee mukana, koska sidonta vertaa
+ *  status-tiedoston mtimea unitin käynnistyshetkeen — ilman uptimea havainto
+ *  ei kelpaa todisteeksi lainkaan. */
+function relayUp(): void {
+  relayState = { ...relayState, activeState: "active", active: true, uptimeSec: 120 };
+}
+
+function relayDown(): void {
+  relayState = { ...relayState, activeState: "inactive", active: false, uptimeSec: null };
+}
+
+/** Relayn oma status-tiedosto: tämän ajon kirjoittama (mtime = nyt). */
+function runStatus(matchId: number | null) {
+  return matchId === null ? null : { matchId, mtimeMs: Date.now() };
+}
+
 /** One aggregator cycle: the poll interval plus the awaits inside it. */
 async function tick(): Promise<void> {
   await vi.advanceTimersByTimeAsync(5000);
@@ -129,17 +147,17 @@ describe("relay run starting", () => {
       active = { ...active, status: "live", startedAt: "2026-07-29T09:05:00.000Z" };
       return active;
     });
-    relayState = { ...relayState, activeState: "inactive", active: false };
+    relayDown();
 
     const live = startLiveAggregator({
       getActiveJob: async () => active,
       markRunStarted,
-      getRunningMatchId: async () => (relayState.active ? active.matchId : null),
+      getRunningStatus: async () => runStatus(relayState.active ? active.matchId : null),
     });
     await tick();
     expect(markRunStarted).not.toHaveBeenCalled();
 
-    relayState = { ...relayState, activeState: "active", active: true };
+    relayUp();
     await tick();
     expect(markRunStarted).toHaveBeenCalledTimes(1);
     expect(markRunStarted).toHaveBeenCalledWith(144980);
@@ -158,12 +176,12 @@ describe("relay run starting", () => {
   it("refuses to bind an armed job to a run of a different match", async () => {
     const markRunStarted = vi.fn(async () => null);
     const stale = job({ matchId: 145895, status: "arming", startedAt: null });
-    relayState = { ...relayState, activeState: "active", active: true };
+    relayUp();
 
     const live = startLiveAggregator({
       getActiveJob: async () => stale,
       markRunStarted,
-      getRunningMatchId: async () => 145900,
+      getRunningStatus: async () => runStatus(145900),
     });
     await tick();
     await tick();
@@ -188,12 +206,12 @@ describe("relay run starting", () => {
       return active;
     });
     let evidence: number | null = null;
-    relayState = { ...relayState, activeState: "active", active: true };
+    relayUp();
 
     const live = startLiveAggregator({
       getActiveJob: async () => active,
       markRunStarted,
-      getRunningMatchId: async () => evidence,
+      getRunningStatus: async () => runStatus(evidence),
     });
     await tick();
     expect(markRunStarted, "ei näyttöä vielä — ei sidota").not.toHaveBeenCalled();
@@ -202,6 +220,88 @@ describe("relay run starting", () => {
     await tick();
     expect(markRunStarted).toHaveBeenCalledWith(144980);
     live.stop();
+  });
+
+  /** Relay kirjoittaa status-tiedoston vielä sammuessaan, joten PÄÄTTYNEEN ajon
+   *  tiedosto on `readRunningStatus`in tuoreusikkunassa (60 s) vielä minuutin
+   *  sen jälkeen kun mitään ei aja. Se on tasan se ikkuna, jossa operaattori
+   *  aktivoi seuraavan ottelun ja käynnistää relayn — ja jos edellisen ajon
+   *  tiedosto kelpaisi todisteeksi, sovittelu perisi juuri aktivoidun työn
+   *  ennen kuin lähetys ehti alkaa. */
+  it("ei usko edellisen ajon status-tiedostoa tämän ajon todisteeksi", async () => {
+    const markRunStarted = vi.fn(async () => null);
+    const reconcileOpenJobs = vi.fn(async () => []);
+    const armed = job({ matchId: 145900, status: "arming", startedAt: null });
+    relayUp(); // uptimeSec 120 s — unit käynnistyi äsken
+    const previousRunWroteAt = Date.now() - 200_000; // ennen unitin käynnistystä
+
+    const live = startLiveAggregator({
+      getActiveJob: async () => armed,
+      markRunStarted,
+      reconcileOpenJobs,
+      getRunningStatus: async () => ({ matchId: 145895, mtimeMs: previousRunWroteAt }),
+    });
+    await tick();
+    await tick();
+
+    expect(reconcileOpenJobs, "ei perua juuri aktivoitua työtä").not.toHaveBeenCalled();
+    expect(markRunStarted).not.toHaveBeenCalled();
+    // Eikä väärää ristiriitavaroitusta: näyttöä tästä ajosta ei vielä ole.
+    expect(live.current().health).not.toBe("fail");
+    live.stop();
+  });
+
+  it("ei leimaa työtä käyntiin kun relay ei ole ajossa", async () => {
+    // Sama tuore tiedosto, mutta unit on alhaalla: mikään ei aja, joten mitään
+    // ei myöskään ole sidottavana.
+    const markRunStarted = vi.fn(async () => null);
+    const armed = job({ status: "arming", startedAt: null });
+    relayDown();
+
+    const live = startLiveAggregator({
+      getActiveJob: async () => armed,
+      markRunStarted,
+      getRunningStatus: async () => runStatus(144980),
+    });
+    await tick();
+    await tick();
+    expect(markRunStarted).not.toHaveBeenCalled();
+    live.stop();
+  });
+
+  it("ei julkaise toisen ottelun telemetriaa eikä selostuslistaa ristiriidassa", async () => {
+    // Telemetria ja selostuslista luetaan työn ottelulla, joten ristiriidassa
+    // molemmat kuvaavat väärää ottelua. Issue #118: eilisen ottelun rivit
+    // renderöityivät nykyisenä lähetyksenä ilman mitään vanhentumismerkkiä.
+    vi.mocked(readRelayStatus).mockResolvedValue({
+      at: new Date().toISOString(),
+      matchId: 145895,
+      startedAt: new Date().toISOString(),
+      uptimeSec: 60,
+      readerAttached: true,
+      pendingClips: 0,
+      respawns: 0,
+      source: { state: "live", detail: "ffmpeg käynnissä" },
+      match: { finished: false, eventCount: 3, lastEventAt: new Date().toISOString() },
+      narration: { detected: 3, spoken: 3, muted: 0, queued: 0 },
+      tts: { engine: "piper", elevenLabsCharsUsed: 0 },
+      lastProblem: null,
+      endReason: null,
+    });
+    relayUp();
+
+    const live = startLiveAggregator({
+      getActiveJob: async () => job({ matchId: 145895, status: "live" }),
+      markRunStarted: async () => null,
+      closeRunningJob: async () => null,
+      getRunningStatus: async () => runStatus(145900),
+    });
+    await tick();
+
+    expect(live.current().telemetry).toBeNull();
+    expect(live.current().narration).toEqual([]);
+    live.stop();
+    vi.mocked(readRelayStatus).mockResolvedValue(null);
   });
 });
 
@@ -214,13 +314,13 @@ describe("relay run ending", () => {
       return closed;
     });
 
-    relayState = { ...relayState, activeState: "active", active: true };
+    relayUp();
     const live = startLiveAggregator({ getActiveJob: async () => active, closeRunningJob });
     await tick();
     expect(closeRunningJob, "ei suljeta mitään niin kauan kuin relay on ajossa").not.toHaveBeenCalled();
 
     // The relay self-shuts down: unit goes inactive without anyone asking.
-    relayState = { ...relayState, activeState: "inactive", active: false };
+    relayDown();
     await tick();
     expect(closeRunningJob).toHaveBeenCalledTimes(1);
     // Nimetty työ: poller sulkee sen ajon jota se seurasi (#118).
@@ -240,7 +340,7 @@ describe("relay run ending", () => {
     // The normal pre-broadcast state: .env.relay written, unit not started yet.
     // Closing here would cancel the next broadcast before it began.
     const closeRunningJob = vi.fn(async () => null);
-    relayState = { ...relayState, activeState: "inactive", active: false };
+    relayDown();
 
     const live = startLiveAggregator({
       getActiveJob: async () => job({ status: "arming", startedAt: null }),
@@ -254,14 +354,14 @@ describe("relay run ending", () => {
 
   it("does not close anything when the job is already finished", async () => {
     const closeRunningJob = vi.fn(async () => null);
-    relayState = { ...relayState, activeState: "active", active: true };
+    relayUp();
 
     const live = startLiveAggregator({
       getActiveJob: async () => job({ status: "finished" }),
       closeRunningJob,
     });
     await tick();
-    relayState = { ...relayState, activeState: "inactive", active: false };
+    relayDown();
     await tick();
     expect(closeRunningJob).not.toHaveBeenCalled();
     live.stop();
@@ -279,12 +379,12 @@ describe("reconciling the broadcast slot", () => {
 
   it("waits out a short relay restart before treating the slot as stale", async () => {
     const reconcileOpenJobs = vi.fn(async () => []);
-    relayState = { ...relayState, activeState: "inactive", active: false };
+    relayDown();
 
     const live = startLiveAggregator({
       getActiveJob: async () => null,
       reconcileOpenJobs,
-      getRunningMatchId: async () => null,
+      getRunningStatus: async () => null,
     });
     // A relay restart takes about four seconds; reconciling inside that window
     // would take the operator's controls away mid-broadcast.
@@ -298,12 +398,12 @@ describe("reconciling the broadcast slot", () => {
 
   it("closes jobs for other matches as soon as it knows what the relay runs", async () => {
     const reconcileOpenJobs = vi.fn(async () => []);
-    relayState = { ...relayState, activeState: "active", active: true };
+    relayUp();
 
     const live = startLiveAggregator({
       getActiveJob: async () => null,
       reconcileOpenJobs,
-      getRunningMatchId: async () => 145900,
+      getRunningStatus: async () => runStatus(145900),
     });
     await tick();
     // No settling needed here: a running relay is positive evidence about which
@@ -314,12 +414,12 @@ describe("reconciling the broadcast slot", () => {
 
   it("never reconciles while the relay is up but silent about its match", async () => {
     const reconcileOpenJobs = vi.fn(async () => []);
-    relayState = { ...relayState, activeState: "active", active: true };
+    relayUp();
 
     const live = startLiveAggregator({
       getActiveJob: async () => null,
       reconcileOpenJobs,
-      getRunningMatchId: async () => null,
+      getRunningStatus: async () => null,
     });
     await ticks(8);
     expect(reconcileOpenJobs, "ilman näyttöä ei kosketa mihinkään").not.toHaveBeenCalled();
