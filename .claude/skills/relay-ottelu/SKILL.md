@@ -40,7 +40,8 @@ Ole rehellinen käyttäjälle tästä; älä esitä koettelematonta varmana.
 |---|---|
 | Relay + selostus | Koeteltu useassa lähetyksessä |
 | Ohjaamon ottelulista, työjono, preflight, käsikäynnistys | Koeteltu |
-| **Ohjaamon luoma lähetyspari päästä päähän** | **EI koeteltu** (#124 vaihe 1) — 30.7.2026 kierros meni Studion kautta |
+| Ohjaamon lähetysparin **luonti** | Ajettu 30.7.2026 (ottelu 145905, kaksikin kertaa). Toimi; puutteet kirjattu #130–#132 |
+| **Ohjaamon luoma pari päästä päähän** (StreamLabs poimii raakalähetyksen → relay ajaa sen) | **EI koeteltu** (#124 vaihe 1) — aamun kierros meni Studion kautta, ja päivän ohjaamolla luodut työt päätyivät `cancelled`-tilaan |
 | **Ajastimen automaattinen käynnistys** | **EI koeteltu livenä**, oletuksena pois (#124 vaihe 2) |
 | **Itsesammutus ja hard stopin siivous** | **EI koeteltu livenä** (#121, #122, #123 korjattu koodissa) |
 
