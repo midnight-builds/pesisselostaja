@@ -771,6 +771,10 @@ export class FfmpegMixer {
       session.failureSide === "target"
         ? " (ffmpegin virheet viittasivat KOHTEESEEN, ei lähteeseen — tarkista stream key)"
         : "";
+    // Hard stop (#123) is checked before the give-up window: with the
+    // symptoms confirmed there is no reason to keep pushing a dead tail for
+    // the rest of finishedFailureWindowMs.
+    this.maybeHardStop(finished, pairSymptom);
     this.noteUnproductiveAttempt(
       (mins) =>
         `Yritykset ovat kuolleet alle ${Math.round(this.minProductiveRunMs / 1000)} sekunnissa ` +
