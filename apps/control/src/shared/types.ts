@@ -108,6 +108,19 @@ export interface RelayTelemetry {
     elevenLabsCharsUsed: number;
   };
   lastProblem: { at: string; level: LogLine["level"]; code: string | null; msg: string } | null;
+  /** Miksi relay lopetti — peilaa relayn `RelayStatus.endReason`ia
+   *  (`apps/broadcast/src/telemetry.ts`, unioni `SourceEndReason`
+   *  ffmpegMixer.ts:ssä). Sama vartiointi kuin `source.state`illa: arvot on
+   *  lueteltava myös telemetry.ts:n `END_REASON_SET`issä, jonka `Record`-tyyppi
+   *  kaataa käännöksen jos tämä unioni ja se erkanevat. Ilman sitä uusi
+   *  lopetussyy putoaisi hiljaa pois, kuten kävi `ended`ille (#103) ja
+   *  `no_signal`ille (#104).
+   *
+   *  `undefined`/puuttuva = relay ei kertonut (vanha deploy, tai ajossa yhä).
+   *  `"hard_stop"` on ainoa arvo, joka oikeuttaa hard stopin siivouksen
+   *  (#123) — normaalissa lopetuksessa YouTuben `enableAutoStop` hoitaa
+   *  kohteen, eikä lähteeseen kosketa. */
+  endReason?: "ended" | "exhausted" | "hard_stop" | null;
 }
 
 export interface LogLine {
