@@ -179,7 +179,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
-  activateJob: (id: string) => postJson<Job>(`/api/jobs/${encodeURIComponent(id)}/activate`),
+  /** `force` = "lopeta edellinen ja aktivoi tämä": closes the job that holds
+   *  the broadcast slot (and stops the relay if it is still running) before
+   *  taking the slot. Only ever sent from an explicit, confirmed tap. */
+  activateJob: (id: string, opts: { force?: boolean } = {}) =>
+    postJson<Job>(`/api/jobs/${encodeURIComponent(id)}/activate`, opts.force ? { force: true } : undefined),
   preflight: () => postJson<PreflightResult>("/api/preflight"),
   relay: (action: "start" | "stop" | "restart") => postJson<RelayProcess>(`/api/relay/${action}`),
   knobs: (payload: PatchKnobsRequest) => postJson<ControlKnobs>("/api/knobs", payload),

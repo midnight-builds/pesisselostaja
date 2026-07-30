@@ -479,6 +479,14 @@ body {
 .narration__row--queued {
   color: var(--faint);
 }
+/* Muted = the relay said it while ffmpeg was not attached. Nobody heard it, so
+   it must not look like the spoken lines around it. */
+.narration__row--muted {
+  color: var(--ink);
+  background: rgba(255, 90, 61, 0.12);
+  text-decoration: line-through;
+  text-decoration-color: rgba(255, 90, 61, 0.7);
+}
 .narration__time {
   flex: none;
   font-size: 12px;
@@ -498,6 +506,10 @@ body {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 2px 6px;
+}
+.narration__tag--muted {
+  color: var(--fail-ink);
+  border-color: var(--fail-ink);
 }
 
 /* ── Buttons ─────────────────────────────────────────────── */
@@ -802,6 +814,23 @@ select.field__input {
 .warnbox strong {
   color: var(--warn);
   letter-spacing: 0.04em;
+}
+
+/* Aktivointi torjuttiin, koska edellinen työ pitää yhä lähetyspaikkaa. Tila,
+   ei virhe — siksi huomioväri ja oma nappi, ei punainen toast (#101). */
+.clash {
+  margin-top: 12px;
+  border: 1px solid rgba(240, 166, 47, 0.5);
+  background: rgba(240, 166, 47, 0.12);
+  border-radius: 12px;
+  padding: 11px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.clash__text {
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 /* Ajastimen päällä/pois-rivi. Päällä oleva ajastin saa käynnistää lähetyksen

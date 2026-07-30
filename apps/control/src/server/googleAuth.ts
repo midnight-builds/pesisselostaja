@@ -421,6 +421,29 @@ export function clearAccessTokenCache(): void {
   cachedAccessToken = null;
 }
 
+/** Sormenjälki tallennetusta tokenista: `null` kun tokenia ei ole, muuten
+ *  merkkijono joka MUUTTUU kun operaattori kirjautuu uudelleen. Halpa
+ *  tiedostoluku, ei yhtään verkkokutsua.
+ *
+ *  Kaksi tehtävää taustapollauksessa. `null` estää sen kutsumasta
+ *  getAccessTokenia 30 s välein tilassa joka on tämän repon oletus (OAuth-
+ *  clientia ei ole pakko olla) — jokainen kutsu heittäisi ja loki täyttyisi
+ *  virheistä joita kukaan ei voi korjata muuten kuin kirjautumalla. Ja koska
+ *  uusi laitevirtakirjautuminen ylikirjoittaa tiedoston käymättä nollan kautta,
+ *  pelkkä olemassaolo ei erottaisi korjattua yhteyttä kuolleesta: `obtainedAt`
+ *  on juuri se leima jonka onnistunut kirjautuminen kirjoittaa uusiksi —
+ *  access tokenin uusinta ei koske siihen. */
+export async function getTokenFingerprint(): Promise<string | null> {
+  return (await tokenStore.read())?.obtainedAt ?? null;
+}
+
+/** Kiintiöstä jäljellä olevat yksiköt ohjaamon OMAN laskurin mukaan (YouTube ei
+ *  kerro tätä missään). Paikallinen tiedostoluku, ei verkkokutsua — halpa myös
+ *  taustasilmukasta. */
+export async function getQuotaRemaining(nowMs: number = Date.now()): Promise<number> {
+  return Math.max(0, quotaLimit() - (await getQuota(nowMs)).units);
+}
+
 /** Voimassa oleva access token, tarvittaessa refresh_tokenilla uusittuna.
  *  Onnistunut uusinta päivittää `lastRefreshAt`in — se on terveysraportin
  *  tärkein yksittäinen tieto. */
@@ -621,6 +644,43 @@ export function buildAuthHealth(input: AuthHealthInput): AuthHealth {
     );
     health = worse(health, "warn");
     headline = `Google-yhteys vanhenemassa: ${round1(daysSinceSuccess)} vrk ilman onnistunutta päivitystä.`;
+  }
+
+  // Tokenin IKÄ myöntämisestä, ei viimeisestä käytöstä. Tämä tarkistus on
+  // pakollinen siitä hetkestä kun ohjaamo alkoi pollata lähteen tilaa
+  // taustalla: pollaus uusii access tokenin noin tunnin välein, jolloin
+  // daysSinceSuccess ei enää koskaan kasva — mutta Testing-tilan refresh token
+  // kuolee silti 7 vrk myöntämisestä.
+  //
+  // Sääntö on tarkoituksella ENINTÄÄN warn, ei koskaan fail. 7 vrk:n
+  // vanheneminen koskee vain Testing-tilaa; kun sovellus julkaistaan — juuri
+  // mitä tämä varoitus neuvoo tekemään — refresh token ei enää vanhene, mutta
+  // tokenAgeDays kasvaa loputtomiin. Failinä terveysnäkymä olisi päivästä 7
+  // eteenpäin pysyvästi punainen, ja aina päällä oleva punainen peittää
+  // alleen oikean vian. Aito katkeaminen näkyy yhä failina yllä olevan
+  // daysSinceSuccess-säännön kautta: kun refresh lakkaa onnistumasta,
+  // lastRefreshAt lakkaa päivittymästä.
+  //
+  // Ikävaroitus jätetään pois kun tokenAgeDays ja daysSinceSuccess ovat
+  // käytännössä sama luku (laitevirta kirjoittaa molemmat leimat samalla
+  // hetkellä): silloin yllä oleva sääntö on jo sanonut saman asian.
+  const ageSaysTheSameThing =
+    tokenAgeDays !== null && daysSinceSuccess !== null && Math.abs(tokenAgeDays - daysSinceSuccess) < 0.1;
+  if (!ageSaysTheSameThing && tokenAgeDays !== null && tokenAgeDays >= TOKEN_WARN_AGE_DAYS) {
+    const pastTestingLimit = tokenAgeDays >= TOKEN_FAIL_AGE_DAYS;
+    warnings.push(
+      pastTestingLimit
+        ? `Tokenin myöntämisestä on ${round1(tokenAgeDays)} vrk. Jos OAuth-sovellus on yhä Testing-tilassa, refresh token on jo vanhentunut — julkaise sovellus (Publishing status: In production) tai kirjaudu uudelleen laitevirralla. Julkaistulla sovelluksella pelkkä ikä ei vanhenna tokenia, joten tämä on varoitus eikä vika.`
+        : `Tokenin myöntämisestä on ${round1(tokenAgeDays)} vrk. Jos OAuth-sovellus on yhä Testing-tilassa, refresh token vanhenee 7 vuorokautta myöntämisestä, ei viimeisestä käytöstä — uusi yhteys nyt, älä kesken lähetyksen.`
+    );
+    // Otsikon saa vaihtaa vain ankarin löydös; jos jokin aiempi sääntö on jo
+    // nostanut tilan failiin, sen otsikko jää voimaan.
+    if (HEALTH_RANK.warn > HEALTH_RANK[health]) {
+      headline = pastTestingLimit
+        ? `Google-yhteys voi olla vanhentunut: token myönnetty ${round1(tokenAgeDays)} vrk sitten.`
+        : `Google-yhteys vanhenemassa: token myönnetty ${round1(tokenAgeDays)} vrk sitten.`;
+    }
+    health = worse(health, "warn");
   }
 
   if (quota.remaining <= 0) {

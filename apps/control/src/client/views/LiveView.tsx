@@ -82,7 +82,7 @@ export function LiveView({ live, connection, notify }: Props) {
       />
       <StatusGrid chain={live.chain} />
       <ScorePanel match={live.match} />
-      <NarrationList lines={live.narration} />
+      <NarrationList lines={live.narration} telemetry={live.telemetry} relay={live.relay} />
 
       <LiveControls
         relay={live.relay}

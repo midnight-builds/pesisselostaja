@@ -47,7 +47,35 @@ describe("createStore", () => {
     const { readdirSync } = await import("node:fs");
     const files = readdirSync(tmpDir);
     expect(files).toContain("atomic2.json");
-    expect(files.some((f) => f.endsWith(".tmp"))).toBe(false);
+    // Tmp-nimi on yksilöllinen (.tmp-<pid>-<n>), joten pelkkä endsWith ei riitä.
+    expect(files.some((f) => f.includes(".tmp"))).toBe(false);
+  });
+
+  // google-token.json on ensimmäinen tiedosto jolla on kaksi kirjoittajaa:
+  // taustapollerin tunnin välein uusiva update() ja operaattorin
+  // uudelleenkirjautumisen write(). Ketjun ulkopuolinen write() ehtisi levylle
+  // kesken update()n lue-muokkaa-kirjoita-jaksoa, ja update() kirjoittaisi
+  // juuri saadun refresh tokenin päälle sen vanhan jonka se itse luki.
+  it("serializes write() through the same chain as update(), so neither clobbers the other", async () => {
+    for (let round = 0; round < 10; round++) {
+      const store = createStore<{ from: string }>(`mixed-${round}.json`, { from: "initial" });
+      await store.write({ from: "initial" });
+      await Promise.all([
+        store.update(() => ({ from: "update" })),
+        store.write({ from: "write" }),
+      ]);
+      // Kutsujärjestys ratkaisee: write() jonottui update()n jälkeen.
+      expect(await store.read()).toEqual({ from: "write" });
+    }
+  });
+
+  it("a failed write does not poison the chain for later writers", async () => {
+    const store = createStore<{ n: number }>("poison.json", { n: 0 });
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    await expect(store.write(circular as unknown as { n: number })).rejects.toThrow();
+    await store.write({ n: 7 });
+    await expect(store.read()).resolves.toEqual({ n: 7 });
   });
 
   it("serializes concurrent update() calls instead of losing writes to a race", async () => {

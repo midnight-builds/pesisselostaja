@@ -37,6 +37,7 @@ import {
   type PronunciationRule,
 } from "./nodePronunciation.js";
 import type { LiveEvent, MatchMetadata } from "@pesisselostaja/core";
+import type { SlateSituation, SourceIngestObservation } from "./ffmpegMixer.js";
 import { writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { logDebug, logError, logInfo, logWarn } from "./log.js";
@@ -113,6 +114,39 @@ const DELTA_RESET_BREAKER_STREAK = 5;
  *  caught up) — so only a streak deserves attention (HANDOFF.md 17.7.). */
 const FETCH_FAILURE_ALARM_STREAK = 3;
 
+/** Jakson nimi katvekuvan tilanneriville. Erillään core'n `periodName`ista,
+ *  joka tuottaa puhuttavan muodon ("ensimmäinen jakso"); ruudulle mahtuu ja
+ *  luetaan nopeammin lyhyt "1. jakso". Jaksonumerointi on sama kuin kaikkialla
+ *  muualla: 0 = 1. jakso, 2 = supervuoro, 3 = kotiutuslyöntikilpailu. */
+function slatePeriodName(period: number): string {
+  switch (period) {
+    case 0: return "1. jakso";
+    case 1: return "2. jakso";
+    case 2: return "supervuoro";
+    case 3: return "kotiutuslyöntikilpailu";
+    default: return `${period + 1}. jakso`;
+  }
+}
+
+/** Jäsentää control-tiedoston `sourceIngest`-avaimen. Palauttaa null kaikesta
+ *  mikä ei ole täydellinen havainto: puuttuva, rikkinäinen tai vieraan
+ *  muotoinen arvo tarkoittaa "ei tietoa", ei "lähde poikki". */
+function parseSourceIngest(raw: unknown): SourceIngestObservation | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const rec = raw as Record<string, unknown>;
+  if (typeof rec.observedAt !== "string" || !Number.isFinite(Date.parse(rec.observedAt))) return null;
+  if (typeof rec.videoId !== "string") return null;
+  const optional = (key: string): string | null => (typeof rec[key] === "string" ? (rec[key] as string) : null);
+  return {
+    observedAt: rec.observedAt,
+    videoId: rec.videoId,
+    lifeCycleStatus: optional("lifeCycleStatus"),
+    streamStatus: optional("streamStatus"),
+    healthStatus: optional("healthStatus"),
+    error: optional("error"),
+  };
+}
+
 export type SpeechSink = (spokenText: string, readableText: string) => Promise<void>;
 
 /** Lets the loop see the narration output stage so it can decide whether a
@@ -144,6 +178,34 @@ export interface NarrationStatus {
 export interface NarrationObserver {
   detected(clip: { id: string; text: string }): void;
   spoken(clip: { id: string; text: string }, muted: boolean): void;
+}
+
+/** How often the roster is re-read while it can still change (issue #90).
+ *  The lineup is published late — `away.players` can still be empty minutes
+ *  before the first pitch — and it can change between the relay starting and
+ *  the scorer opening the match. Once a minute is often enough to catch that
+ *  without adding meaningful load to an API we don't own. */
+const ROSTER_REFRESH_MS = 60_000;
+
+/** Both teams have at least one player. Until then a name cannot be resolved
+ *  at all, so there is no point settling on the lookup we have. */
+function rostersPopulated(meta: MatchMetadata): boolean {
+  return meta.home.players.length > 0 && meta.away.players.length > 0;
+}
+
+/** Jersey number -> surname, per team, as one comparable string. Compared
+ *  rather than counted, because the failure this guards against is a number
+ *  pointing at a DIFFERENT player, not a shorter list. */
+function rosterSignature(meta: MatchMetadata): string {
+  return [meta.home, meta.away]
+    .map((team) => `${team.id}:${team.players.map((p) => `${p.number}=${p.last_name}`).sort().join(",")}`)
+    .join("|");
+}
+
+/** The names the narration speaks, and the metadata they came from. */
+interface RosterSnapshot {
+  meta: MatchMetadata;
+  lookup: PlayerLookup;
 }
 
 /** Standalone ~6s poll loop that reproduces WatcherController's announcement
@@ -183,6 +245,10 @@ export class CommentaryLoop {
   /** True if any speech was suppressed pre-latch, so the latch moment knows
    *  to speak one fresh catch-up recap instead of the stale suppressed clips. */
   private suppressedBeforeAttach = false;
+  /** Roster refresh bookkeeping (issue #90). See maybeRefreshRoster. */
+  private rosterRefreshedAt = 0;
+  private rosterRefreshedAfterStart = false;
+  private rosterSettled = false;
   /** False until the match has produced any event — the endpoint always
    *  returns the full history, so an empty history means the game genuinely
    *  hasn't started and the loop speaks welcome fillers instead of recaps. */
@@ -243,6 +309,15 @@ export class CommentaryLoop {
    *  instant — which is the useful one anyway: it answers "is the scorer still
    *  entering results", not "how far into the match are we". */
   private lastEventSeenAt: string | null = null;
+  /** Ottelutiedot, haettu kerran run():n alussa. Talletetaan, jotta katvekuvan
+   *  pisterivi osaa joukkueiden nimet ilman toista hakua. */
+  private meta: MatchMetadata | null = null;
+  /** Viimeisin control-tiedostosta luettu `sourceIngest`-havainto (ohjaamo
+   *  kirjoittaa sen, PR #112), tai null kun avainta ei ole tai se ei jäsenny.
+   *  Loop ei tee sillä mitään itse — se vain välittää sen mikserille, joka
+   *  päättää. Luetaan täällä, koska tämä on ainoa paikka joka lukee
+   *  control-tiedostoa. */
+  private sourceIngestValue: SourceIngestObservation | null = null;
 
   constructor(
     private config: RelayConfig,
@@ -283,6 +358,40 @@ export class CommentaryLoop {
    *  "pollit 118 (delta 102, täyshaku 9, 304 5, hakuvirheitä 2)". A tripped
    *  delta breaker is appended so every later heartbeat still says why the
    *  delta count stopped moving — the one-off trip line scrolls away. */
+  /** Katvekuvan ("EI SIGNAALIA") kaksi tekstiriviä VALMIIKSI muotoiltuina.
+   *  Mikseri vain näyttää nämä eikä laske pisteitä tai paloja itse — se ei saa
+   *  joutua tuntemaan pesäpallon sääntöjä. Ennen ottelun ensimmäistä
+   *  tapahtumaa molemmat ovat tyhjiä, jolloin kuvassa on pelkkä "EI
+   *  SIGNAALIA" + alatunniste; se on kelvollinen lopputulos.
+   *
+   *  Näyttömuoto, ei puhemuoto: `periodName` tuottaa selostukseen sopivan
+   *  "ensimmäinen jakso", kun kuvassa lukee lyhyempi "1. jakso".
+   *
+   *  Muoto on **nimi–pisteet-pareina** ("Kotipesä 12 – Lyöntilä 1"), ei
+   *  issuen sommittelussa ehdotettu "koti 12 - 1 vieras". Syy on luettavuus:
+   *  keskitetyllä tekstirivillä ilman värilaatikoita vierasjoukkueen luku
+   *  tarttuu visuaalisesti sen nimeen, ja ensimmäinen ihminen joka näki
+   *  esikatselukuvan luki "1 Lyöntilä" joukkueen nimenä. Pari kerrallaan
+   *  lukutapa on yksikäsitteinen.
+   *
+   *  Pisteet ovat KULUVAN JAKSON pisteet, eivät ottelun yhteispisteitä — se on
+   *  pesäpallon oikea lukema, ja tilannerivi kertoo minkä jakson (CLAUDE.md). */
+  get slateSituation(): SlateSituation {
+    if (!this.meta || !this.matchStarted) return { score: "", situation: "" };
+    const cur = getPeriodScore(this.state, this.state.currentPeriod);
+    const outs = this.state.currentOuts;
+    return {
+      score: `${this.meta.home.name} ${cur.home} – ${this.meta.away.name} ${cur.away}`,
+      situation: `${slatePeriodName(this.state.currentPeriod)}, ${outs === 1 ? "1 palo" : `${outs} paloa`}`,
+    };
+  }
+
+  /** Ohjaamon viimeisin havainto lähteen syötteestä, tai null kun tietoa ei
+   *  ole. Välitetään sellaisenaan mikserille; tulkinta kuuluu sinne. */
+  get sourceIngest(): SourceIngestObservation | null {
+    return this.sourceIngestValue;
+  }
+
   get pollStatsSummary(): string {
     const s = this.pollStats;
     const breaker = this.deltaBreakerTripped ? ", delta POIS (katkaisija)" : "";
@@ -311,6 +420,64 @@ export class CommentaryLoop {
     } catch (err) {
       logWarn("control.write_failed", `Control-tiedoston kirjoitus epäonnistui: ${err instanceof Error ? err.message : err}`);
     }
+  }
+
+  /** Re-reads the roster while it can still change, and hands back the names
+   *  the narration should use from now on (issue #90).
+   *
+   *  The lineup is fetched once at startup, and `online/{id}/events` carries no
+   *  names at all — only a jersey number and a team id. So if the lineup is
+   *  edited between the relay starting and the scorer opening the match, every
+   *  name is wrong for the whole broadcast, while the scores, palot and turns
+   *  stay perfectly right. That is what happened live on 28.7.2026: the only
+   *  reason it was caught is that a viewer knew the players by sight.
+   *
+   *  Refreshed until it cannot change any more: the match has started AND both
+   *  rosters carry players. After that the numbers stop moving (substitutions
+   *  arrive as events, from a lineup that is already published), so the polling
+   *  stops rather than running all game against someone else's API. */
+  private async maybeRefreshRoster(current: RosterSnapshot, now = Date.now()): Promise<RosterSnapshot> {
+    if (this.rosterSettled) return current;
+    const dueByTime = now - this.rosterRefreshedAt >= ROSTER_REFRESH_MS;
+    // The moment the match opens is the one worth an immediate re-read: that
+    // is when the final lineup appears.
+    const dueByStart = this.matchStarted && !this.rosterRefreshedAfterStart;
+    if (!dueByTime && !dueByStart) return current;
+    this.rosterRefreshedAt = now;
+
+    let meta: MatchMetadata;
+    try {
+      meta = await fetchMatchMetadata(this.config.matchId, {
+        apiBase: this.config.apiBase,
+        apiKey: this.config.apiKey,
+        timeoutMs: this.apiTimeoutMs("small"),
+      });
+    } catch (err) {
+      // Keep the names we have and try again next interval: a failed refresh
+      // must never be worse than not refreshing at all.
+      logWarn("api.roster_refresh_failed", `Kokoonpanon päivitys epäonnistui: ${err instanceof Error ? err.message : err}`);
+      return current;
+    }
+    if (this.matchStarted) this.rosterRefreshedAfterStart = true;
+
+    if (rosterSignature(meta) !== rosterSignature(current.meta)) {
+      // warn, not info: every name spoken before this instant may have been
+      // wrong, and that is exactly what an operator needs to see in the log.
+      logWarn(
+        "api.roster_changed",
+        `Kokoonpano muuttui haun jälkeen — nimet päivitetty (${current.meta.home.players.length}+${current.meta.away.players.length} → ${meta.home.players.length}+${meta.away.players.length} pelaajaa).`
+      );
+    }
+
+    if (this.rosterRefreshedAfterStart && rostersPopulated(meta)) {
+      this.rosterSettled = true;
+      logInfo("api.roster_settled", "Kokoonpano on julkaistu ja ottelu alkanut — nimet eivät enää muutu, päivitys lopetetaan.");
+    }
+    // Myös this.meta päivitetään: katvekuvan pisterivi lukee joukkuenimet
+    // sieltä (#104), ja kaksi eri metaa samassa luokassa on juuri se
+    // kahden totuuden tilanne jota vältetään.
+    this.meta = meta;
+    return { meta, lookup: buildPlayerLookup(meta) };
   }
 
   /** Re-reads the control file each poll and applies a changed setting live.
@@ -352,6 +519,13 @@ export class CommentaryLoop {
       }
       logInfo("control.delta_fetch", `Delta-haku vaihdettu ajon aikana: ${this.deltaFetch ? "PÄÄLLÄ" : "POIS (täyshaut)"} (control-tiedostosta).`);
     }
+    // Ohjaamon julkaisema havainto lähteen syötteestä (#104 vaihe 1). Luetaan
+    // täällä, koska tämä on ainoa control-tiedoston lukija; loop ei tee sillä
+    // itse mitään, mikseri päättää. Puuttuva avain jättää edellisen havainnon
+    // paikoilleen — mikseri hylkää vanhentuneen joka tapauksessa.
+    if (parsed.sourceIngest !== undefined) {
+      this.sourceIngestValue = parseSourceIngest(parsed.sourceIngest);
+    }
     // Poll cadence live; clamped to the floor so a typo can't hammer the API.
     if (typeof parsed.pollIntervalMs === "number" && Number.isFinite(parsed.pollIntervalMs)) {
       const next = Math.max(MIN_POLL_INTERVAL_MS, Math.round(parsed.pollIntervalMs));
@@ -374,13 +548,25 @@ export class CommentaryLoop {
     );
 
     logInfo("api.fetching_meta", `Haetaan ottelutietoja (ID: ${this.config.matchId})…`);
-    const meta = await fetchMatchMetadata(this.config.matchId, {
+    let meta = await fetchMatchMetadata(this.config.matchId, {
       apiBase: this.config.apiBase,
       apiKey: this.config.apiKey,
       timeoutMs: this.apiTimeoutMs("small"),
     });
-    const lookup = buildPlayerLookup(meta);
+    this.meta = meta;
+    let lookup = buildPlayerLookup(meta);
+    this.rosterRefreshedAt = Date.now();
     logInfo("api.match", `${meta.home.name} vs ${meta.away.name}`);
+    if (!rostersPopulated(meta)) {
+      // Normal when the relay is started early: the lineup is published late,
+      // sometimes minutes before the first pitch (issue #90). Said out loud
+      // because the alternative — silently speaking wrong names for a whole
+      // match — is the failure this refresh exists to prevent.
+      logWarn(
+        "api.roster_missing",
+        `Kokoonpanoa ei ole vielä julkaistu (${meta.home.players.length}+${meta.away.players.length} pelaajaa) — nimet päivitetään kun se ilmestyy.`
+      );
+    }
 
     logInfo("api.skip_history", "Ohitetaan historialliset tapahtumat…");
     // Full fetch — also seeds the local history + delta cursor (see
@@ -451,6 +637,9 @@ export class CommentaryLoop {
       if (signal.aborted) break;
       nextPollAt = Math.max(nextPollAt + this.pollIntervalMs, Date.now());
       await this.refreshRuntimeControls();
+      // Names before speech: a roster published since the last poll must be in
+      // use for THIS poll's events, not the next one's.
+      ({ meta, lookup } = await this.maybeRefreshRoster({ meta, lookup }));
       // Checked before processing so a latch-moment catch-up recap enters the
       // synth queue ahead of any events found in this same poll — the recap
       // covers the suppressed past, the events then narrate the present.

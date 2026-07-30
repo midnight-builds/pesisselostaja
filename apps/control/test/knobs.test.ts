@@ -2,12 +2,20 @@
 // (run/.control-<matchId>.json, re-read by the live relay every poll — see
 // apps/control/src/server/relay.ts). CONFIG.relayRunDir is redirected to a
 // temp dir for every test, never the real apps/broadcast/run/.
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CONFIG } from "../src/server/config.js";
-import { controlFilePath, nudgeDelay, readKnobs, writeKnobs } from "../src/server/relay.js";
+import {
+  controlFilePath,
+  nudgeDelay,
+  readKnobs,
+  readRunningMatchId,
+  readSourceIngest,
+  writeKnobs,
+  writeSourceIngest,
+} from "../src/server/relay.js";
 import { DEFAULT_NARRATION_DELAY_MS } from "../../broadcast/src/config.js";
 
 const MATCH_ID = 12345;
@@ -114,5 +122,169 @@ describe("nudgeDelay", () => {
   it("starts from the default delay when nudging with no control file yet", async () => {
     const result = await nudgeDelay(MATCH_ID, 500);
     expect(result.narrationDelayMs).toBe(DEFAULT_NARRATION_DELAY_MS + 500);
+  });
+});
+
+// --------------------------------------------------- lähteen tila (issue #104)
+//
+// Sama tiedosto, kaksi kirjoittajaa: operaattorin klikkaus (writeKnobs) ja
+// ohjaamon 30 s välein kirjoittava lähteen tilan polleri (writeSourceIngest).
+// Molempien on säilytettävä toisen avaimet — myös silloin kun kirjoitukset
+// lähtevät samalla hetkellä.
+describe("writeSourceIngest / readSourceIngest", () => {
+  const INGEST = {
+    observedAt: "2026-07-29T15:00:00.000Z",
+    videoId: "SOURCEID123",
+    lifeCycleStatus: "live",
+    streamStatus: "active",
+    healthStatus: "good",
+    error: null,
+  };
+
+  it("säilyttää säätöavaimet ja relayn omat tuntemattomat avaimet", async () => {
+    writeControlFile({ announceBatterChanges: false, narrationDelayMs: 4000, mute: true });
+    await writeSourceIngest(MATCH_ID, INGEST);
+    const raw = readControlFile();
+    expect(raw.announceBatterChanges).toBe(false);
+    expect(raw.narrationDelayMs).toBe(4000);
+    expect(raw.mute).toBe(true);
+    expect(raw.sourceIngest).toEqual(INGEST);
+  });
+
+  it("writeKnobs ei pudota sourceIngestiä", async () => {
+    await writeSourceIngest(MATCH_ID, INGEST);
+    await writeKnobs(MATCH_ID, { pollIntervalMs: 5000 });
+    const raw = readControlFile();
+    expect(raw.sourceIngest).toEqual(INGEST);
+    expect(raw.pollIntervalMs).toBe(5000);
+  });
+
+  it("rinnakkaiset kirjoitukset eivät hukkaa päivitystä", async () => {
+    // Ilman sarjallistusta molemmat lukisivat saman tyhjän tiedoston ja
+    // jälkimmäinen rename pyyhkisi ensimmäisen avaimen kokonaan.
+    await Promise.all([
+      writeKnobs(MATCH_ID, { narrationDelayMs: 4500 }),
+      writeSourceIngest(MATCH_ID, INGEST),
+    ]);
+    const raw = readControlFile();
+    expect(raw.narrationDelayMs).toBe(4500);
+    expect(raw.sourceIngest).toEqual(INGEST);
+  });
+
+  it("rinnakkaiset nudget lasketaan yhteen eikä lähtöarvoa lueta kahdesti", async () => {
+    await writeKnobs(MATCH_ID, { narrationDelayMs: 4000 });
+    await Promise.all([nudgeDelay(MATCH_ID, 500), nudgeDelay(MATCH_ID, 500)]);
+    expect((await readKnobs(MATCH_ID)).narrationDelayMs).toBe(5000);
+  });
+
+  it("lukee kirjoitetun havainnon takaisin", async () => {
+    await writeSourceIngest(MATCH_ID, INGEST);
+    expect(await readSourceIngest(MATCH_ID)).toEqual(INGEST);
+  });
+
+  // Relayn käynnistyskirjoitus ei ole atominen (commentaryLoop.ts kirjoittaa
+  // suoraan kohteeseen), joten pollerin luku voi osua katkaisun ja kirjoituksen
+  // väliin. Merge tyhjästä jättäisi tiedostoon PELKÄN sourceIngestin: readKnobs
+  // palauttaisi oletukset, UI näyttäisi väärät säätöarvot ja nudgeDelay laskisi
+  // väärästä perustasosta.
+  it("ei ylikirjoita rikkinäistä control-tiedostoa vaan kertoo syyn", async () => {
+    const puolikas = '{ "announceBatterChanges": false, "narrationDel';
+    writeFileSync(controlFilePath(MATCH_ID), puolikas);
+
+    await expect(writeSourceIngest(MATCH_ID, INGEST)).rejects.toThrow(/ei jäsenny/);
+    expect(readFileSync(controlFilePath(MATCH_ID), "utf8")).toBe(puolikas);
+  });
+
+  it("mutta rikkinäinen tiedosto ei estä operaattorin komentoa", async () => {
+    // writeKnobs on tahallinen komento kesken lähetyksen ("selostus pois").
+    // Sen on mentävä läpi, vaikka tiedoston entinen sisältö olisi lukukelvoton.
+    writeFileSync(controlFilePath(MATCH_ID), "{ katkennut");
+    await writeKnobs(MATCH_ID, { announceBatterChanges: false });
+    expect(readControlFile().announceBatterChanges).toBe(false);
+  });
+
+  it("yksi rikkinäinen kirjoitus ei riko sarjallistusketjua pysyvästi", async () => {
+    writeFileSync(controlFilePath(MATCH_ID), "{ katkennut");
+    await expect(writeSourceIngest(MATCH_ID, INGEST)).rejects.toThrow();
+
+    // Relay ehti kirjoittaa tiedoston loppuun: seuraava kierros onnistuu.
+    writeControlFile({ announceBatterChanges: true });
+    await writeSourceIngest(MATCH_ID, INGEST);
+    expect(readControlFile().sourceIngest).toEqual(INGEST);
+  });
+
+  it("puuttuva, väärän tyyppinen tai rikkinäinen havainto on null, ei virhe", async () => {
+    expect(await readSourceIngest(MATCH_ID)).toBeNull();
+
+    writeControlFile({ announceBatterChanges: true });
+    expect(await readSourceIngest(MATCH_ID)).toBeNull();
+
+    writeControlFile({ sourceIngest: "ei objekti" });
+    expect(await readSourceIngest(MATCH_ID)).toBeNull();
+
+    // observedAt/videoId ovat pakolliset; ilman niitä havaintoa ei voi
+    // tuoreuttaa eikä kohdistaa oikeaan videoon.
+    writeControlFile({ sourceIngest: { videoId: "SOURCEID123" } });
+    expect(await readSourceIngest(MATCH_ID)).toBeNull();
+
+    // Aikaleima jota ei voi jäsentää ei kelpaa havainnoksi: tuoreutta ei voi
+    // arvioida, ja jäsentymätön arvo läpäisisi vertailut "ei vanha" -tulkinnalla.
+    writeControlFile({ sourceIngest: { ...INGEST, observedAt: "eilen joskus" } });
+    expect(await readSourceIngest(MATCH_ID)).toBeNull();
+  });
+
+  it("täydentää puuttuvat tilakentät nulliksi eikä keksi arvoja", async () => {
+    writeControlFile({ sourceIngest: { observedAt: INGEST.observedAt, videoId: INGEST.videoId } });
+    expect(await readSourceIngest(MATCH_ID)).toEqual({
+      observedAt: INGEST.observedAt,
+      videoId: INGEST.videoId,
+      lifeCycleStatus: null,
+      streamStatus: null,
+      healthStatus: null,
+      error: null,
+    });
+  });
+});
+
+// ------------------------------------------------ mitä relay ajaa (issue #104)
+//
+// systemd kertoo vain että JOKIN ajaa, ja .env.relay kertoo mitä relaylle on
+// tarkoitus antaa — se kirjoitetaan jo aktivoinnissa, ennen relayn
+// uudelleenkäynnistystä. Ainoa havainto siitä mitä relay oikeasti ajaa on sen
+// oma telemetria.
+describe("readRunningMatchId", () => {
+  const NOW = Date.parse("2026-07-29T15:00:00.000Z");
+
+  function statusFile(matchId: number, ageMs: number): void {
+    const path = join(tmpDir, `status-${matchId}.json`);
+    writeFileSync(path, JSON.stringify({ matchId }));
+    utimesSync(path, new Date(NOW - ageMs), new Date(NOW - ageMs));
+  }
+
+  it("palauttaa tuoreimman telemetriatiedoston ottelun", async () => {
+    statusFile(146210, 40_000);
+    statusFile(146211, 5_000);
+    expect(await readRunningMatchId(NOW)).toBe(146211);
+  });
+
+  it("ei näytä vanhaa telemetriaa ajossa olevana ottelluna", async () => {
+    // Edellisen ottelun jäljet run/-hakemistossa eivät saa kelvata todisteeksi:
+    // juuri niiden varassa polleri pollaisi väärää ottelua.
+    statusFile(146210, 61_000);
+    expect(await readRunningMatchId(NOW)).toBeNull();
+  });
+
+  it("kestää kellon siirtymisen: tulevaisuudessa oleva mtime on tuore", async () => {
+    statusFile(146210, -30_000);
+    expect(await readRunningMatchId(NOW)).toBe(146210);
+  });
+
+  it("ei osumaa eikä hakemistoa: null, ei poikkeusta", async () => {
+    expect(await readRunningMatchId(NOW)).toBeNull();
+    writeFileSync(join(tmpDir, ".state-146210.json"), "{}");
+    expect(await readRunningMatchId(NOW)).toBeNull();
+
+    CONFIG.relayRunDir = join(tmpDir, "ei-olemassa");
+    expect(await readRunningMatchId(NOW)).toBeNull();
   });
 });
