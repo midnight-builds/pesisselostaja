@@ -36,28 +36,68 @@ function isBlocking(status: JobStatus): boolean {
   return status === "arming" || status === "live";
 }
 
-function clashError(clashing: Job): Error {
-  const verb = clashing.status === "live" ? "lähetyksessä" : "valmistelussa";
-  return new Error(
-    `${clashing.home} vastaan ${clashing.away} on jo ${verb} — lopeta se ensin, ennen kuin tämä työ voi käynnistyä.`
-  );
+/** Thrown when activating a job would put a second one in the broadcast slot.
+ *
+ *  Its own type, and it carries the offending job, because this is a STATE
+ *  conflict, not a server fault: the HTTP layer answers 409 and the UI offers
+ *  "lopeta edellinen ja aktivoi tämä". As a bare Error it fell through to the
+ *  generic 500 handler, and the operator's only way out was a hand-written
+ *  PATCH — at the exact moment the next match had already started (#101). */
+export class JobClashError extends Error {
+  readonly clashing: Job;
+
+  constructor(clashing: Job) {
+    const verb = clashing.status === "live" ? "lähetyksessä" : "valmistelussa";
+    super(
+      `${clashing.home} vastaan ${clashing.away} on jo ${verb} — lopeta se ensin, ennen kuin tämä työ voi käynnistyä.`
+    );
+    this.name = "JobClashError";
+    this.clashing = clashing;
+  }
+}
+
+/** How a run that is over should be recorded. A job that never got as far as
+ *  starting the relay was cancelled, not finished — "finished" on a broadcast
+ *  that never happened would put a phantom run in the post-match reports. */
+function closedStatus(job: Job): JobStatus {
+  return job.startedAt ? "finished" : "cancelled";
+}
+
+function closeJob(job: Job, at: string): Job {
+  return { ...job, status: closedStatus(job), endedAt: job.endedAt ?? at };
 }
 
 /** Applies a patch to one job inside the full list, enforcing the
  *  single-active-job invariant whenever the patch would newly put a job into
  *  "arming"/"live". Centralized so patchJob, activateJob and setJobStatus —
- *  the three paths that can change `status` — can't disagree on the rule. */
-function applyPatch(jobs: Job[], id: string, patch: Partial<Job>): { jobs: Job[]; job: Job } {
+ *  the three paths that can change `status` — can't disagree on the rule.
+ *
+ *  `force` closes the clashing job instead of refusing. It is only ever set by
+ *  an explicit operator action ("lopeta edellinen ja aktivoi tämä"); nothing
+ *  automatic may use it, because a running broadcast is never cut on its own
+ *  (DESIGN.md: uptime first). */
+function applyPatch(
+  jobs: Job[],
+  id: string,
+  patch: Partial<Job>,
+  opts: { force?: boolean } = {}
+): { jobs: Job[]; job: Job } {
   const idx = jobs.findIndex((j) => j.id === id);
   if (idx === -1) throw new Error(`Työtä ${id} ei löytynyt.`);
   const current = jobs[idx];
   const nextStatus = patch.status ?? current.status;
+  let nextJobs = jobs.slice();
   if (isBlocking(nextStatus) && nextStatus !== current.status) {
-    const clashing = jobs.find((j) => j.id !== id && isBlocking(j.status));
-    if (clashing) throw clashError(clashing);
+    const clashingIdx = nextJobs.findIndex((j) => j.id !== id && isBlocking(j.status));
+    if (clashingIdx !== -1) {
+      if (!opts.force) throw new JobClashError(nextJobs[clashingIdx]);
+      // Same array, same write: the slot is never momentarily held by two jobs
+      // and never momentarily held by none.
+      nextJobs[clashingIdx] = closeJob(nextJobs[clashingIdx], new Date().toISOString());
+    }
   }
   const job: Job = { ...current, ...patch };
-  const nextJobs = jobs.slice();
+  nextJobs = nextJobs.slice();
   nextJobs[idx] = job;
   return { jobs: nextJobs, job };
 }
@@ -67,10 +107,14 @@ function applyPatch(jobs: Job[], id: string, patch: Partial<Job>): { jobs: Job[]
  *  return the array to persist — applyPatch's thrown errors (not-found,
  *  invariant violation) propagate out of the reducer, so the store is never
  *  written on a rejected change. */
-async function updateJob(id: string, patch: Partial<Job>): Promise<Job> {
+async function updateJob(
+  id: string,
+  patch: Partial<Job>,
+  opts: { force?: boolean } = {}
+): Promise<Job> {
   let job!: Job;
   await store.update((jobs) => {
-    const result = applyPatch(jobs, id, patch);
+    const result = applyPatch(jobs, id, patch, opts);
     job = result.job;
     return result.jobs;
   });
@@ -116,9 +160,59 @@ export async function patchJob(id: string, patch: PatchJobRequest): Promise<Job>
 
 /** Marks a job as the one about to go live. Deliberately does not touch
  *  .env.relay — DESIGN.md's routing splits that out to relay.ts's
- *  writeRelayEnv, called by the HTTP route once activation here succeeds. */
-export async function activateJob(id: string): Promise<Job> {
-  return updateJob(id, { status: "arming" });
+ *  writeRelayEnv, called by the HTTP route once activation here succeeds.
+ *
+ *  `force` = the operator answered "lopeta edellinen ja aktivoi tämä". */
+export async function activateJob(id: string, opts: { force?: boolean } = {}): Promise<Job> {
+  return updateJob(id, { status: "arming" }, opts);
+}
+
+/** Stamps the armed job as actually running, and returns it — or null if there
+ *  was nothing waiting to start.
+ *
+ *  The relay can be started from the UI, from the scheduler, or by hand with
+ *  systemctl, and only the first two ever told the job store about it. So a job
+ *  could sit in "arming" through a whole broadcast, `startedAt` stayed null,
+ *  and the run had no start time at all in the post-match report. The observer
+ *  that watches the unit does this instead, so every route is covered by one
+ *  rule. */
+export async function markRunStarted(): Promise<Job | null> {
+  let started: Job | null = null;
+  await store.update((jobs) => {
+    const idx = jobs.findIndex((j) => j.status === "arming");
+    if (idx === -1) return jobs;
+    const next = jobs.slice();
+    next[idx] = {
+      ...jobs[idx],
+      status: "live",
+      // Kept if already set: a relay that flaps must not keep resetting the
+      // run's start time.
+      startedAt: jobs[idx].startedAt ?? new Date().toISOString(),
+    };
+    started = next[idx];
+    return next;
+  });
+  return started;
+}
+
+/** Closes whichever job holds the broadcast slot, and returns it — or null if
+ *  the slot was already free.
+ *
+ *  Called when the relay is no longer running: an operator's stop, or the
+ *  relay's own shutdown once the source ended. Without this the job stays
+ *  "arming" forever and the NEXT match cannot be activated at all, which is
+ *  exactly the moment nobody has time to debug it (#101). */
+export async function closeRunningJob(): Promise<Job | null> {
+  let closed: Job | null = null;
+  await store.update((jobs) => {
+    const idx = jobs.findIndex((j) => isBlocking(j.status));
+    if (idx === -1) return jobs;
+    const next = jobs.slice();
+    next[idx] = closeJob(jobs[idx], new Date().toISOString());
+    closed = next[idx];
+    return next;
+  });
+  return closed;
 }
 
 export async function getActiveJob(): Promise<Job | null> {

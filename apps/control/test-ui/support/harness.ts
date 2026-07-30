@@ -201,9 +201,25 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
     }
     const activate = /^\/api\/jobs\/([^/]+)\/activate$/.exec(path);
     if (activate && method === "POST") {
-      const updated = api.jobs.map((j) => (j.id === activate[1] ? { ...j, status: "arming" as const } : j));
-      api.jobs = updated;
-      return void (await send(updated.find((j) => j.id === activate[1]) ?? api.jobs[0]));
+      const forced = ((body ?? {}) as { force?: boolean }).force === true;
+      // The server refuses (409) while another job holds the broadcast slot,
+      // unless the operator forced it — the real invariant, mirrored here so
+      // the UI's recovery path can be tested end to end (#101).
+      const clashing = api.jobs.find(
+        (j) => j.id !== activate[1] && (j.status === "arming" || j.status === "live")
+      );
+      if (clashing && !forced) {
+        return void (await send(
+          { error: `${clashing.home} vastaan ${clashing.away} on jo lähetyksessä — lopeta se ensin, ennen kuin tämä työ voi käynnistyä.` },
+          409
+        ));
+      }
+      api.jobs = api.jobs.map((j) =>
+        j.id === activate[1] ? { ...j, status: "arming" as const }
+        : j.id === clashing?.id ? { ...j, status: "finished" as const }
+        : j
+      );
+      return void (await send(api.jobs.find((j) => j.id === activate[1]) ?? api.jobs[0]));
     }
     const jobId = /^\/api\/jobs\/([^/]+)$/.exec(path);
     if (jobId && method === "PATCH") {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Job, LiveState, PreflightResult } from "../../shared/types";
-import { DEFAULT_RTMP_URL, api } from "../api";
+import { ApiRequestError, DEFAULT_RTMP_URL, api } from "../api";
+import { ConfirmButton } from "../components/ConfirmButton";
 import { Field } from "../components/Field";
 import { SchedulerCard } from "../components/SchedulerCard";
 import { fiDate, fiTime } from "../format";
@@ -30,6 +31,11 @@ export function JobView({ live, notify, reloadToken }: Props) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [preflight, setPreflight] = useState<PreflightResult | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Set when activation was refused because another job still holds the
+   *  broadcast slot. Carries the server's own sentence, and turns the recovery
+   *  into a button instead of a hand-written PATCH in the middle of a match
+   *  changeover (#101). */
+  const [clash, setClash] = useState<string | null>(null);
 
   const activeId = live?.job?.id ?? null;
 
@@ -79,6 +85,27 @@ export function JobView({ live, notify, reloadToken }: Props) {
     } catch (err) {
       notify("error", err instanceof Error ? err.message : String(err));
       return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Activation, with the clash answer separated from real failures: a
+   *  conflict is a state with a next step, not an error to shout about. */
+  const activate = async (target: Job, force: boolean) => {
+    setBusy(true);
+    try {
+      await saveForm(target);
+      await api.activateJob(target.id, { force });
+      setClash(null);
+      await loadJobs();
+      notify("ok", force ? "Edellinen lopetettu, .env.relay kirjoitettu" : ".env.relay kirjoitettu");
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.status === 409) {
+        setClash(err.message);
+      } else {
+        notify("error", err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setBusy(false);
     }
@@ -186,17 +213,25 @@ export function JobView({ live, notify, reloadToken }: Props) {
             type="button"
             className="btn btn--primary"
             disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                await saveForm(job);
-                await api.activateJob(job.id);
-                await loadJobs();
-              }, ".env.relay kirjoitettu")
-            }
+            onClick={() => void activate(job, false)}
           >
             Kirjoita .env.relay
           </button>
         </div>
+
+        {clash && (
+          <div className="clash">
+            <p className="clash__text">{clash}</p>
+            {/* Two taps: this ends a broadcast that may still be on air. */}
+            <ConfirmButton
+              className="btn--wide"
+              label="Lopeta edellinen ja aktivoi tämä"
+              confirmLabel="Varmista: lopeta edellinen"
+              disabled={busy}
+              onConfirm={() => void activate(job, true)}
+            />
+          </div>
+        )}
       </section>
 
       <section className="card">

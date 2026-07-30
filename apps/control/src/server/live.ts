@@ -31,7 +31,7 @@ import type {
   SourceIngest,
   SystemState,
 } from "../shared/types.js";
-import { getActiveJob } from "./jobs.js";
+import { closeRunningJob, getActiveJob, markRunStarted } from "./jobs.js";
 import { readLog } from "./journal.js";
 import { getMatchState } from "./matches.js";
 import { getRelayProcess, readKnobs } from "./relay.js";
@@ -90,6 +90,10 @@ export interface LiveAggregator {
  *  file on disk, and so index.ts can hand in the store it already imported. */
 export interface LiveAggregatorOptions {
   getActiveJob?: () => Promise<Job | null>;
+  /** Same reason as getActiveJob: a test drives the run-start and run-end
+   *  edges without a job file on disk. */
+  closeRunningJob?: () => Promise<Job | null>;
+  markRunStarted?: () => Promise<Job | null>;
   /** Lähteen tilan polleri (sourceIngest.ts). Aggregaattori ei omista sitä:
    *  polleri pollaa omalla 30 s välillään kiintiön takia, ja tämä vain kysyy
    *  sen viimeisimmän tuloksen jokaisella tikillä. */
@@ -599,6 +603,8 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
 
 export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggregator {
   const readActiveJob = opts.getActiveJob ?? getActiveJob;
+  const closeRunningJobFn = opts.closeRunningJob ?? closeRunningJob;
+  const markRunStartedFn = opts.markRunStarted ?? markRunStarted;
   const subscribers = new Set<(state: LiveState) => void>();
   const errors = new Map<SourceKey, string>();
   let stopped = false;
@@ -678,6 +684,40 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     }
   }
 
+  /** The relay shuts ITSELF down when the source ends — we never cut it short
+   *  (uptime first), so a broadcast routinely finishes with nobody calling
+   *  /api/relay/stop. This poller is the only always-on observer of that
+   *  moment, so it is the one that lets go of the broadcast slot.
+   *
+   *  Falling edge only. "Relay is inactive" on its own is the normal state of a
+   *  job that has been armed but not started yet, and closing that would cancel
+   *  the next broadcast before it began (#101). */
+  let relayWasActive = false;
+  async function followRunEdges(): Promise<void> {
+    const wasActive = relayWasActive;
+    relayWasActive = relay.active;
+    if (wasActive === relay.active) return;
+    try {
+      // Rising edge: the unit came up, whoever started it. The job stops being
+      // "about to run" and gets its start time — the UI, the health rules and
+      // the post-match report all read those.
+      if (relay.active) {
+        if (job?.status !== "arming") return;
+        const started = await markRunStartedFn();
+        if (started) job = started;
+        return;
+      }
+      // Falling edge: the run is over.
+      if (job?.status !== "arming" && job?.status !== "live") return;
+      const closed = await closeRunningJobFn();
+      if (closed) job = closed;
+    } catch (err) {
+      // Surfaced on the relay row rather than swallowed: a job stuck in
+      // "arming" blocks the next match, and the operator has to know now.
+      errors.set("job", err instanceof Error ? err.message : String(err));
+    }
+  }
+
   let fastBusy = false;
   async function tickFast(): Promise<void> {
     if (stopped || fastBusy) return; // a slow systemctl must not stack up calls
@@ -697,6 +737,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       await track("job", readActiveJob, (value) => {
         job = value;
       });
+      await followRunEdges();
       if (job) {
         const matchId = job.matchId;
         await track("knobs", () => readKnobs(matchId), (value) => {
