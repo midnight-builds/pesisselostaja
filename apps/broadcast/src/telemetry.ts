@@ -53,7 +53,12 @@ export interface RelayStatus {
   /** ffmpeg restarts so far this run. */
   respawns: number;
   source: {
-    state: "live" | "scheduled" | "resolving" | "failed" | "ended" | "unknown";
+    /** `no_signal` = katvekuvaa ("EI SIGNAALIA") työnnetään juuri nyt, koska
+     *  lähdettä ei ole saatu kiinni kynnysaikaan mennessä (issue #104).
+     *  Oma arvonsa eikä `failed`in variantti, jotta ohjaamo voi näyttää
+     *  operaattorille sujuvalta näyttävän lähetyksen TAKANA olevan ongelman —
+     *  `detail` kertoo yhä miksi lähde puuttuu. */
+    state: "live" | "scheduled" | "resolving" | "failed" | "ended" | "unknown" | "no_signal";
     detail: string | null;
   };
   match: {

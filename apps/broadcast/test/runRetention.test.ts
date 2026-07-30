@@ -72,6 +72,38 @@ describe("pruneRunDir (issue #39)", () => {
       expect(existsSync(join(runDir, "status-143277.json.tmp"))).toBe(false);
     });
 
+    /** Katvekuvan tiedostot (issue #104): taustakuva ja kaksi tekstitiedostoa,
+     *  joita ffmpeg lukee drawtextin `reload`illa. Ilman allowlist-riviä ne
+     *  jäisivät run/iin ikuisesti — 1920x1080-png per ottelu. */
+    it("sweeps stale no-signal-slate files too", async () => {
+      file("slate-143277.png", 60_000, daysAgo(40));
+      file("slate-score-143277.txt", 30, daysAgo(40));
+      file("slate-status-143277.txt", 60, daysAgo(40));
+      // …ja keskeytyneen atomisen kirjoituksen jäljet.
+      file("slate-score-143277.txt.tmp", 30, daysAgo(40));
+      file("slate-status-143277.txt.tmp", 60, daysAgo(40));
+
+      const result = await pruneRunDir(runDir, { maxAgeMs: 30 * DAY_MS, ttsCacheMaxBytes: 0, now: NOW });
+
+      expect(result.removed).toHaveLength(5);
+      expect(existsSync(join(runDir, "slate-143277.png"))).toBe(false);
+      expect(existsSync(join(runDir, "slate-score-143277.txt"))).toBe(false);
+      expect(existsSync(join(runDir, "slate-status-143277.txt.tmp"))).toBe(false);
+    });
+
+    it("never sweeps the running match's slate, however long the match", async () => {
+      file("slate-146210.png", 60_000, daysAgo(400));
+      file("slate-status-146210.txt", 60, daysAgo(400));
+      const result = await pruneRunDir(runDir, {
+        maxAgeMs: 30 * DAY_MS,
+        ttsCacheMaxBytes: 0,
+        keepMatchIds: [146210],
+        now: NOW,
+      });
+      expect(result.removed).toEqual([]);
+      expect(existsSync(join(runDir, "slate-146210.png"))).toBe(true);
+    });
+
     it("never sweeps the running match's telemetry, however long the match", async () => {
       file("status-146210.json", 800, daysAgo(400));
       file("timeline-146210.ndjson", 5000, daysAgo(400));
@@ -123,6 +155,10 @@ describe("pruneRunDir (issue #39)", () => {
         file("live-test-143277.mp4", 9000, daysAgo(365)),
         file("live-test-143277-partial-40s.mp4", 9000, daysAgo(365)),
         file("HANDOFF-notes.md", 10, daysAgo(365)),
+        // Katvekuvakokeiluja käsin — nimessä ei ole ottelu-ID:tä, joten ne
+        // eivät ole relayn omia eivätkä siis siivouksen piirissä.
+        file("slate-demo.png", 60_000, daysAgo(365)),
+        file("no-signal-demo/A2-data.png", 60_000, daysAgo(365)),
         file(".env.relay", 10, daysAgo(365)),
       ];
 

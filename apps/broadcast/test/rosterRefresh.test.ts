@@ -55,6 +55,8 @@ function makeConfig(): RelayConfig {
     matchId: 900001,
     youtubeUrl: "https://example.invalid/live",
     rtmpUrl: "", streamKey: "",
+    noSignalSlate: false, noSignalSlateAfterMs: 8000,
+    noSignalSlateWidth: 1920, noSignalSlateHeight: 1080,
     voice: "harri-medium", piperBin: "piper",
     pollInterval: 3000, narrationGain: 1.3, narrationDelayMs: 0, firstSpeechDelayMs: 0,
     urlRefreshMs: 900000, maxFailureWindowMs: 720000, finishedFailureWindowMs: 120000,
