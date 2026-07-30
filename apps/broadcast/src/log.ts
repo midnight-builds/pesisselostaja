@@ -40,6 +40,8 @@ export type EventCode =
   | "relay.source_gone"
   // Lähde päätettiin hallitusti — ei vika (#103).
   | "relay.source_ended"
+  // Hard stop -takaraja (#123): ottelu päättynyt + hiljaisuus + oireileva lähde.
+  | "relay.hard_stop"
   // yt-dlp sanoi lähetyksen päättyneen, mutta sitä ei ole vielä vahvistettu (#103).
   | "source.ended_unconfirmed"
   // yt-dlp source resolution

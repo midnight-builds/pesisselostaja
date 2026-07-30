@@ -91,6 +91,15 @@ export interface FfmpegMixerOptions {
   /** Lets the supervisor know the match has ended (the commentary loop owns
    *  that state), for finishedFailureWindowMs. Absent → always false. */
   isMatchFinished?: () => boolean;
+  /** When the newest pesistulokset event was seen (ISO instant), or null when
+   *  no event has been seen at all — the commentary loop owns this. Used only
+   *  by the hard stop check (#123): null means "no information", which is
+   *  deliberately NOT treated as silence. Absent → always null. */
+  lastEventAt?: () => string | null;
+  /** Hard stop (#123): how long the pesistulokset feed must have been quiet
+   *  (no new events) before a finished match + a symptomatic source may shut
+   *  the relay down (default 3 min). */
+  hardStopQuietMs?: number;
   /** Extra fragment appended to the heartbeat line — the commentary loop's
    *  poll statistics, since 304 skips and full-fetch
    *  fallbacks are otherwise invisible in the log. Absent → plain heartbeat. */
@@ -374,8 +383,11 @@ const HEARTBEAT_MS = 2 * 60 * 1000;
  *  the broadcast is over). Nothing is wrong, and the log must not send anyone
  *  looking for a fault — the morning of 29.7.2026 it said "tarkista stream
  *  key" about a target that was working perfectly (issue #103).
- *  `"exhausted"` = the source stopped answering and never came back. */
-export type SourceEndReason = "ended" | "exhausted";
+ *  `"exhausted"` = the source stopped answering and never came back.
+ *  `"hard_stop"` = the hard stop backstop fired (#123): the match had finished,
+ *  the pesistulokset feed had been quiet past the configured window AND the
+ *  source showed the dead-tail symptoms — a deliberate cleanup, not a fault. */
+export type SourceEndReason = "ended" | "exhausted" | "hard_stop";
 
 export class SourceExhaustedError extends Error {
   readonly reason: SourceEndReason;
@@ -464,6 +476,16 @@ export class FfmpegMixer {
   /** Set while a kill we requested ourselves (URL refresh) is in flight, so
    *  the resulting short session isn't mistaken for a dying source. */
   private refreshKillRequested = false;
+  /** Hard stop (#123), symptom a: duration of the previous short code=0
+   *  session, or null when the previous session wasn't one. Two consecutive
+   *  short clean exits with near-identical durations is the signature of
+   *  replaying a finished broadcast's leftover tail (the 34s/34s/34s pattern
+   *  of match 145900, #121). Reset by any productive run. */
+  private lastShortCleanRunMs: number | null = null;
+  /** Hard stop (#123), symptom b: how many times ffmpeg.unproductive has
+   *  fired while the match was already finished. Reset by a productive run —
+   *  a source that produced real broadcast again is not dead. */
+  private unproductiveWhileFinished = 0;
   /** Counts spawn attempts so recordFile can be indexed per session. */
   private sessionIndex = 0;
   /** True only while an ffmpeg session is attached as a FIFO reader (between a
@@ -623,6 +645,10 @@ export class FfmpegMixer {
         this.sourceStateValue = "failed";
         this.sourceDetailValue = err instanceof Error ? err.message : String(err);
         logError("ffmpeg.start_failed", `ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
+        // Käynnistysvirhe katkaisee code=0-parikuvion: "kaksi peräkkäistä
+        // lähes samanmittaista sessiota" ei saa muodostua sessioista joiden
+        // välissä lähde ei auennut lainkaan (#123, adversaarilöydös).
+        this.lastShortCleanRunMs = null;
         this.noteUnproductiveAttempt((mins) => `Lähde ei ole vastannut ${mins} minuuttiin`);
       }
       if (this.stopped) break;
@@ -709,9 +735,30 @@ export class FfmpegMixer {
     if (session.ranMs >= this.minProductiveRunMs) {
       this.failingSince = null;
       this.backoffMs = 1000; // fresh backoff after a healthy run
+      // A real run means the source is alive: the hard stop symptoms (#123)
+      // start over from scratch.
+      this.lastShortCleanRunMs = null;
+      this.unproductiveWhileFinished = 0;
       return;
     }
     if (session.refreshKill) return;
+    const finished = this.opts.isMatchFinished?.() ?? false;
+    if (finished) this.unproductiveWhileFinished++;
+    // Symptom a (#121): two consecutive clean short exits with near-identical
+    // durations (±20 %) — the shape of ffmpeg reading the same finished tail
+    // over and over rather than a live source.
+    let pairSymptom: string | null = null;
+    if (session.exitCode === 0) {
+      const prev = this.lastShortCleanRunMs;
+      if (prev !== null && Math.abs(prev - session.ranMs) <= 0.2 * Math.max(prev, session.ranMs)) {
+        pairSymptom =
+          `kaksi peräkkäistä code=0-sessiota lähes samalla lyhyellä kestolla ` +
+          `(${Math.round(prev / 1000)} s ja ${Math.round(session.ranMs / 1000)} s)`;
+      }
+      this.lastShortCleanRunMs = session.ranMs;
+    } else {
+      this.lastShortCleanRunMs = null;
+    }
     logWarn(
       "ffmpeg.unproductive",
       `ffmpeg kuoli alle ${Math.round(this.minProductiveRunMs / 1000)} s käynnistyksestä — ` +
@@ -728,10 +775,59 @@ export class FfmpegMixer {
       session.failureSide === "target"
         ? " (ffmpegin virheet viittasivat KOHTEESEEN, ei lähteeseen — tarkista stream key)"
         : "";
+    // Hard stop (#123) is checked before the give-up window: with the
+    // symptoms confirmed there is no reason to keep pushing a dead tail for
+    // the rest of finishedFailureWindowMs.
+    this.maybeHardStop(finished, pairSymptom);
     this.noteUnproductiveAttempt(
       (mins) =>
         `Yritykset ovat kuolleet alle ${Math.round(this.minProductiveRunMs / 1000)} sekunnissa ` +
         `${mins} minuutin ajan${sideNote}`
+    );
+  }
+
+  /** Hard stop -takaraja (#123). Sammuttaa relayn kun KAIKKI kolme ehtoa
+   *  täyttyvät samaan aikaan:
+   *   1. ottelu on päättynyt tulospalvelun mukaan (ehdoton portti — tämä ei
+   *      voi koskaan katkaista kesken ottelun),
+   *   2. uusia tapahtumia ei ole tullut hardStopQuietMs:ään (null = ei tietoa
+   *      = ehto EI täyty),
+   *   3. lähde oireilee: joko code=0-parikuvio (symptom a, annettu
+   *      parametrina) tai ffmpeg.unproductive on lauennut vähintään kahdesti
+   *      ottelun päätyttyä (symptom b).
+   *  Heittää SourceExhaustedErrorin reasonilla "hard_stop"; index.ts kääntää
+   *  sen siistiksi sammutukseksi. Terve lähde (pitkät sessiot) ei koskaan
+   *  päädy tänne, koska kutsu tulee vain epätuottavan session jälkeen. */
+  private maybeHardStop(finished: boolean, pairSymptom: string | null): void {
+    if (!finished) return;
+    const lastEventAt = this.opts.lastEventAt?.() ?? null;
+    if (lastEventAt === null) return; // ei tietoa ≠ hiljaisuus
+    const eventEpoch = Date.parse(lastEventAt);
+    if (!Number.isFinite(eventEpoch)) return;
+    // Wall clock on purpose: lastEventAt is an external ISO instant, so a
+    // monotonic clock has nothing to compare it against.
+    const quietMs = Date.now() - eventEpoch;
+    const quietLimitMs = this.opts.hardStopQuietMs ?? 3 * 60 * 1000;
+    // 0 (tai negatiivinen) = hard stop pois päältä. Ilman tätä 0 tarkoittaisi
+    // "laukea heti" — täsmälleen päinvastaista kuin arvon asettaja tarkoittaa.
+    if (quietLimitMs <= 0) return;
+    if (quietMs < quietLimitMs) return;
+    const symptom =
+      pairSymptom ??
+      (this.unproductiveWhileFinished >= 2
+        ? `ffmpeg.unproductive lauennut ${this.unproductiveWhileFinished} kertaa ottelun päätyttyä`
+        : null);
+    if (symptom === null) return;
+    this.stopped = true;
+    const quietMin = Math.round(quietMs / 60000);
+    logInfo(
+      "relay.hard_stop",
+      `Hard stop -takaraja: ottelu on päättynyt, uusia tapahtumia ei ${quietMin} minuuttiin ` +
+        `(raja ${Math.round(quietLimitMs / 60000)} min) ja lähde oireilee (${symptom}) — sammutetaan relay.`
+    );
+    throw new SourceExhaustedError(
+      `Hard stop: ottelu päättynyt, ${quietMin} min ilman tapahtumia ja ${symptom} — lopetetaan siististi.`,
+      "hard_stop"
     );
   }
 

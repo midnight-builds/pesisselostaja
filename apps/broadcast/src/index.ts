@@ -5,7 +5,7 @@ import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import { CommentaryLoop } from "./commentaryLoop.js";
 import { PiperTts } from "./piperTts.js";
 import { ElevenLabsTts } from "./elevenLabsTts.js";
-import { FfmpegMixer, SourceExhaustedError } from "./ffmpegMixer.js";
+import { FfmpegMixer, SourceExhaustedError, type SourceEndReason } from "./ffmpegMixer.js";
 import { NoSignalSlate } from "./noSignalSlate.js";
 import { pruneRunDir, DAY_MS } from "./runRetention.js";
 import { Telemetry } from "./telemetry.js";
@@ -107,8 +107,12 @@ async function main(): Promise<void> {
   // status-<ID>.json is rewritten on the poll cadence rather than on every
   // event: the control app polls it, and a snapshot that is at most one poll
   // stale is exactly as fresh as the data behind it.
+  // Why the run ended (#123): stays null while running, set just before
+  // shutdown() so the FINAL snapshot in run/ names the reason.
+  let endReason: SourceEndReason | null = null;
   const writeStatus = () =>
     telemetry.writeStatus({
+      endReason,
       readerAttached: config.dryRun || (mixer?.isReaderAttached ?? false),
       pendingClips: mixer?.pendingClips ?? 0,
       respawns: mixer?.respawnCount ?? 0,
@@ -188,6 +192,10 @@ async function main(): Promise<void> {
       // The loop owns the finished state; the supervisor uses it to give up
       // on a dead source quickly once the match has ended.
       isMatchFinished: () => loop.matchFinished,
+      // Hard stop -takaraja (#123): the loop owns the event clock; null means
+      // "no information" and never counts as silence.
+      lastEventAt: () => loop.lastEventAt,
+      hardStopQuietMs: config.hardStopQuietMs,
       heartbeatExtra: () => loop.pollStatsSummary,
       fifoPath,
       recordFile: config.recordFile,
@@ -203,17 +211,29 @@ async function main(): Promise<void> {
       // A deliberately ended source is not a fault, so it must not put an
       // ERROR line in the journal at all — an operator reading "päättyi
       // virheeseen" goes looking for a problem that does not exist (#103).
-      const endedCleanly = err instanceof SourceExhaustedError && err.reason === "ended";
+      // "ended" and "hard_stop" are both deliberate finishes, not faults —
+      // neither may put an ERROR line in the journal (#103, #123).
+      const endedCleanly =
+        err instanceof SourceExhaustedError && (err.reason === "ended" || err.reason === "hard_stop");
       if (!endedCleanly) {
         logError("ffmpeg.supervisor_failed", `ffmpeg-valvoja päättyi virheeseen: ${err instanceof Error ? err.message : err}`);
       }
       if (err instanceof SourceExhaustedError) {
+        endReason = err.reason;
         // "ended" = the broadcast was finished on purpose; nothing is broken,
         // and the log must not send anyone hunting for a fault (issue #103).
-        if (err.reason === "ended") {
-          logInfo("relay.source_ended", "Lähde on päättynyt — sammutetaan relay siististi.");
-        } else {
-          logError("relay.source_gone", "Alkuperäinen lähde ei palautunut — sammutetaan koko relay.");
+        switch (err.reason) {
+          case "ended":
+            logInfo("relay.source_ended", "Lähde on päättynyt — sammutetaan relay siististi.");
+            break;
+          case "hard_stop":
+            // The mixer already logged WHICH conditions fired (relay.hard_stop
+            // in maybeHardStop); this line marks the shutdown decision itself.
+            logInfo("relay.hard_stop", `Hard stop -takaraja laukesi: ${err.message}`);
+            break;
+          case "exhausted":
+            logError("relay.source_gone", "Alkuperäinen lähde ei palautunut — sammutetaan koko relay.");
+            break;
         }
         shutdown();
       }

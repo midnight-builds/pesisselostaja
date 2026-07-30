@@ -59,7 +59,7 @@ function makeConfig(): RelayConfig {
     noSignalSlateWidth: 1920, noSignalSlateHeight: 1080,
     voice: "harri-medium", piperBin: "piper",
     pollInterval: 3000, narrationGain: 1.3, narrationDelayMs: 0, firstSpeechDelayMs: 0,
-    urlRefreshMs: 900000, maxFailureWindowMs: 720000, finishedFailureWindowMs: 120000,
+    urlRefreshMs: 900000, maxFailureWindowMs: 720000, finishedFailureWindowMs: 120000, hardStopQuietMs: 180000,
     deltaFetch: true, announceBatterChanges: true, dryRun: true,
     apiKey: "test", apiBase: "https://example.invalid/api",
     stateFile: "/tmp/pesis-test-nonexistent-state.json",
