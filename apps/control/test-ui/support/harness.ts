@@ -39,6 +39,15 @@ export class ApiMock {
   jobs: Job[] = [fixture.job()];
   knobs: ControlKnobs = fixture.knobs();
   preflight: PreflightResult = fixture.preflightResult();
+  /** Pysyväisasetukset (#133). Mutatoituu PATCHista, jotta testi voi tarkistaa
+   *  että osittainen päivitys ei nollaa toista korttia. */
+  settings = {
+    shareTemplate: {
+      opening: "Seuraava live on klo {time}: {matchup}. Alla linkit:",
+      lines: ["YouTube: {watchUrl}", "YouTube selostettu: {narratedWatchUrl}", "Tulokset: {matchUrl}"],
+    },
+    venueCleanup: { stripFieldNumber: true, stripQualifier: true },
+  };
   log: LogLine[] = fixture.logLines();
   day: (date: string) => DayMatches = (date) => fixture.dayMatches(date);
   /** Google-yhteyden tila. Ilman yhteyttä palvelin vastaa 409:llä jokaiseen
@@ -254,6 +263,16 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
       return void (await send({ broken: true, autoFix: true, startup: true, ended: true }));
     }
     if (path.startsWith("/api/push/")) return void (await send({}));
+
+    // ── Asetukset (#133) ─────────────────────────────────────────────────
+    if (path === "/api/settings" && method === "GET") return void (await send(api.settings));
+    if (path === "/api/settings" && method === "PATCH") {
+      const patch = (body ?? {}) as Partial<typeof api.settings>;
+      // Osittainen, kuten palvelimella: koskematon osa säilyy.
+      if (patch.shareTemplate) api.settings.shareTemplate = patch.shareTemplate;
+      if (patch.venueCleanup) api.settings.venueCleanup = patch.venueCleanup;
+      return void (await send(api.settings));
+    }
 
     // ── Ajastin ──────────────────────────────────────────────────────────
     if (path === "/api/scheduler" && method === "GET") return void (await send(api.scheduler));

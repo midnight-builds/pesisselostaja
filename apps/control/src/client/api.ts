@@ -7,6 +7,7 @@ import type { ApiError, CreateJobRequest, PatchJobRequest, PatchKnobsRequest } f
 import { DEFAULT_RTMP_URL } from "../shared/api";
 import type {
   ControlKnobs,
+  ControlSettings,
   DayMatches,
   Job,
   LiveState,
@@ -200,6 +201,11 @@ export const api = {
    *  Toimii työn koko elinkaaren ajan, myös ennen lähetysten luontia — silloin
    *  `linksReady` on false ja viestissä on paikkamerkit. */
   jobShare: (id: string) => request<JobShareMessage>(`/api/jobs/${encodeURIComponent(id)}/share`),
+  /** Pysyväisasetukset (#133). PATCH on osittainen: lähetä vain muuttunut osa,
+   *  jottei toisen kortin arvo nollaudu sivutuotteena. */
+  settings: () => request<ControlSettings>("/api/settings"),
+  patchSettings: (payload: Partial<ControlSettings>) =>
+    request<ControlSettings>("/api/settings", { method: "PATCH", body: JSON.stringify(payload) }),
   preflight: () => postJson<PreflightResult>("/api/preflight"),
   relay: (action: "start" | "stop" | "restart") => postJson<RelayProcess>(`/api/relay/${action}`),
   knobs: (payload: PatchKnobsRequest) => postJson<ControlKnobs>("/api/knobs", payload),
