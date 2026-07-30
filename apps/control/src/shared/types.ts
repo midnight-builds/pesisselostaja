@@ -132,6 +132,22 @@ export interface RelayTelemetry {
   endReason?: SourceEndReason | null;
 }
 
+/** Ohjaamon pysyväisasetukset (#133).
+ *
+ *  Vain sellaista, mikä säilyy ottelusta toiseen: jakoviestin sanamuoto ja
+ *  kenttänimen siivous. Relayn ottelunaikaiset säätimet (selostus päälle/pois,
+ *  viive, pollausväli) EIVÄT ole täällä — ne ovat Live-näkymässä ja menevät
+ *  relayn control-tiedostoon, koska ne ovat ohjausta eivätkä asetuksia.
+ *
+ *  Jokainen kenttä vastaa yhtä `run/`-hakemiston JSON-tiedostoa, joita
+ *  operaattori voi hätätilassa yhä korjata tiedostoselaimella. */
+export interface ControlSettings {
+  /** run/share-template.json (#95). */
+  shareTemplate: { opening: string; lines: string[] };
+  /** run/venue-cleanup.json (#132). */
+  venueCleanup: { stripFieldNumber: boolean; stripQualifier: boolean };
+}
+
 /** GET /api/jobs/:id/share — katsojille jaettava viesti (#131).
  *
  *  Muodostetaan pyynnöstä työn linkeistä eikä talleteta luontihetkellä:

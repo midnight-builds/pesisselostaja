@@ -225,6 +225,29 @@ joten mallin vaihtaminen kesken leiripäivän näkyy myös jo luoduissa töissä
 Ennen lähetysten luontia viestissä on paikkamerkit ja `linksReady` on `false` —
 käyttöliittymä sanoo silloin "älä jaa sitä vielä".
 
+## Asetukset-välilehti
+
+Pysyväisasetukset yhdessä paikassa (#133): `GET /api/settings` ja osittainen
+`PATCH /api/settings`. Talletus jakautuu samoihin `run/`-tiedostoihin kuin
+ennenkin, joten hätätilassa ne voi yhä korjata tiedostoselaimella — sivu on
+normaali tie, ei ainoa tie.
+
+| Kortti | Tiedosto |
+|---|---|
+| Jaettava viesti (aloitusrivi + linkkirivit) | `run/share-template.json` |
+| Kenttänimen siivous (kaksi kytkintä) | `run/venue-cleanup.json` |
+
+**PATCH on osittainen**, ja se on tarkoituksellista: käyttöliittymä lähettää
+vain sen kortin jota operaattori muokkasi. Muuten kesken jäänyt muokkaus
+toisessa kortissa tallentuisi sivutuotteena, kun hän painaa tallenna toisessa.
+
+**Mikä EI ole täällä:** relayn ottelunaikaiset säätimet (selostus päälle/pois,
+viive, pollausväli). Ne ovat Live-välilehdellä ja menevät relayn
+control-tiedostoon, koska ne ovat *ohjausta kesken lähetyksen* eivätkä
+asetuksia. Sama rajaus on issuessa. Lähetysten näkyvyys ja soittolista taas
+valitaan luonnin yhteydessä, koska ne ovat lähetyskohtaisia valintoja.
+Käynnistysikkunan pituus (`NEAR_WINDOW_MS`) on yhä koodivakio.
+
 ## Kenttänimen siivous
 
 Tulospalvelun kenttänimi on sisäisessä muodossaan: `01 - Viinijärven

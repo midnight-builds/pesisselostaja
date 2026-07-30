@@ -12,6 +12,8 @@
  *  GET  /api/jobs/:id/share       -> JobShareMessage  (jakoviesti, muodostetaan aina uudelleen)
  *  POST /api/preflight            -> PreflightResult
  *  POST /api/relay/start|stop|restart  -> RelayProcess
+ *  GET  /api/settings             -> ControlSettings   (pysyväisasetukset, #133)
+ *  PATCH /api/settings            {Partial<ControlSettings>} -> ControlSettings
  *  GET  /api/scheduler            -> SchedulerState
  *  POST /api/scheduler/enable     {enabled: boolean} -> SchedulerState
  *                                  (ajastin on oletuksena POIS PÄÄLTÄ)

@@ -28,3 +28,11 @@ export async function readShareTemplate(): Promise<ShareTemplate> {
 export async function ensureShareTemplateFile(): Promise<ShareTemplate> {
   return await store.update((current) => normalizeShareTemplate(current));
 }
+
+/** Korvaa pohjan Asetukset-sivulta tulevalla arvolla (#133). Normalisointi
+ *  ajetaan kirjoitettavaan arvoon: käyttöliittymä lähettää tekstikenttiä, ja
+ *  tyhjä `lines` tai puuttuva `opening` palautuu kanoniseen oletukseen sen
+ *  sijaan että jakoviesti hajoaisi kesken leiripäivän. */
+export async function writeShareTemplate(next: unknown): Promise<ShareTemplate> {
+  return await store.update(() => normalizeShareTemplate(next));
+}

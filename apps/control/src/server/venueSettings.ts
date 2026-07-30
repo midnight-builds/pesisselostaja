@@ -45,3 +45,8 @@ export async function readVenueSettings(): Promise<Required<VenueNameOptions>> {
 export async function ensureVenueSettingsFile(): Promise<Required<VenueNameOptions>> {
   return await store.update((current) => normalizeVenueSettings(current));
 }
+
+/** Korvaa siivousasetukset Asetukset-sivulta tulevalla arvolla (#133). */
+export async function writeVenueSettings(next: unknown): Promise<Required<VenueNameOptions>> {
+  return await store.update(() => normalizeVenueSettings(next));
+}

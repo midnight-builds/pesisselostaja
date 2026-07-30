@@ -8,6 +8,7 @@ import { LiveView } from "./views/LiveView";
 import { LogView } from "./views/LogView";
 import { MatchesView } from "./views/MatchesView";
 import { YouTubeView } from "./views/YouTubeView";
+import { SettingsView } from "./views/SettingsView";
 
 /** App shell: one SSE-backed LiveState for the whole UI, plus tab state.
  *  No router — five tabs do not justify a dependency, and a URL-less shell is
@@ -79,6 +80,9 @@ export function App() {
         </TabPanel>
         <TabPanel id="log" active={tab === "log"}>
           <LogView lines={live?.log ?? []} notify={notify} />
+        </TabPanel>
+        <TabPanel id="settings" active={tab === "settings"}>
+          <SettingsView notify={notify} />
         </TabPanel>
       </main>
 

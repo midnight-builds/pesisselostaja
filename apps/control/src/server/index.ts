@@ -63,11 +63,11 @@ import {
   type MatchTemplateInput,
   type ShareTemplate,
 } from "./templates.js";
-import { ensureShareTemplateFile, readShareTemplate } from "./shareTemplate.js";
-import { ensureVenueSettingsFile, readVenueSettings } from "./venueSettings.js";
+import { ensureShareTemplateFile, readShareTemplate, writeShareTemplate } from "./shareTemplate.js";
+import { ensureVenueSettingsFile, readVenueSettings, writeVenueSettings } from "./venueSettings.js";
 import { uploadPairThumbnails } from "./broadcastThumbnails.js";
 import type { CreateJobRequest, PatchJobRequest, PatchKnobsRequest } from "../shared/api.js";
-import type { Job, LiveState, NotificationPrefs } from "../shared/types.js";
+import type { ControlSettings, Job, LiveState, NotificationPrefs } from "../shared/types.js";
 
 type LiveAggregator = {
   subscribe(fn: (state: LiveState) => void): () => void;
@@ -189,6 +189,14 @@ async function resolveTemplateContext(body: YoutubeCreateRequest): Promise<Templ
   }
 }
 
+/** Kokoaa pysyväisasetukset yhteen vastaukseen (#133). Luetaan tiedostoista
+ *  joka pyynnöllä, kuten kaikki muukin run/-tila: käsin tehty korjaus näkyy
+ *  käyttöliittymässä ilman uudelleenkäynnistystä. */
+async function readControlSettings(): Promise<ControlSettings> {
+  const [shareTemplate, venueCleanup] = await Promise.all([readShareTemplate(), readVenueSettings()]);
+  return { shareTemplate, venueCleanup };
+}
+
 async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggregator): Promise<void> {
   const method = req.method ?? "GET";
   const rawUrl = req.url ?? "/";
@@ -293,6 +301,24 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
 
   // --- Ajastin. Kaksi reittiä: tila ulos, kytkin sisään. Käynnistystä ei voi
   // pyytää tästä — ajastin päättää itse, ja käsikäynnistys on /api/relay/start.
+  // Pysyväisasetukset (#133). Yksi reitti, koska operaattorin kannalta kyse on
+  // yhdestä sivusta — mutta talletus jakautuu samoihin run/-tiedostoihin kuin
+  // ennenkin, joten hätätilassa ne voi yhä korjata tiedostoselaimella.
+  if (pathname === "/api/settings" && method === "GET") {
+    sendJson(res, 200, await readControlSettings());
+    return;
+  }
+  if (pathname === "/api/settings" && method === "PATCH") {
+    const body = await readJsonBody<Partial<ControlSettings>>(req);
+    // Osittainen: koskematon osa säilyy. Käyttöliittymä lähettää vain sen
+    // kortin jota operaattori muokkasi, eikä toisen kortin arvo saa nollautua
+    // sivutuotteena.
+    if (body.shareTemplate !== undefined) await writeShareTemplate(body.shareTemplate);
+    if (body.venueCleanup !== undefined) await writeVenueSettings(body.venueCleanup);
+    sendJson(res, 200, await readControlSettings());
+    return;
+  }
+
   if (pathname === "/api/scheduler" && method === "GET") {
     sendJson(res, 200, await getSchedulerState());
     return;
