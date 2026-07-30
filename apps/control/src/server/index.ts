@@ -57,6 +57,7 @@ import {
 } from "./youtube.js";
 import {
   buildBroadcastTexts,
+  buildJobShareMessage,
   templateInputFromMatch,
   type BroadcastTexts,
   type MatchTemplateInput,
@@ -423,6 +424,30 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
     );
     return;
   }
+  // Jakoviesti milloin tahansa työn elinkaaren aikana (#131). Luontivastaus
+  // sisältää saman tekstin, mutta se näkyy vain kerran: jos operaattori ei
+  // kopioinut sitä heti — tai sivu latautui uudelleen — viestiä ei saanut enää
+  // mistään. Katsojia tulee kanaville kesken ottelunkin ja viesti jaetaan
+  // useaan ryhmään eri aikoina, joten se on muodostettava uudelleen eikä
+  // talletettava luontihetkellä. Kaikki tarvittava on työssä ja ottelussa.
+  const jobShareMatch = pathname.match(/^\/api\/jobs\/([^/]+)\/share$/);
+  if (jobShareMatch && method === "GET") {
+    const resolved = await resolveTemplateContext({ jobId: jobShareMatch[1] });
+    if ("error" in resolved) {
+      sendError(res, resolved.status, resolved.error);
+      return;
+    }
+    const { texts, job, shareTemplate } = resolved;
+    // resolveTemplateContext palauttaa työn vain kun jobId annettiin, ja se
+    // annettiin — mutta tyyppi sallii nullin, joten se tarkistetaan.
+    if (!job) {
+      sendError(res, 404, `Työtä ${jobShareMatch[1]} ei löytynyt.`);
+      return;
+    }
+    sendJson(res, 200, buildJobShareMessage(job, texts, shareTemplate));
+    return;
+  }
+
   if (pathname === "/api/youtube/broadcasts" && method === "POST") {
     const body = await readJsonBody<YoutubeCreateRequest>(req);
     const resolved = await resolveTemplateContext(body);

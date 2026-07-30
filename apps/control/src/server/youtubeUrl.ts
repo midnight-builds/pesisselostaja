@@ -59,3 +59,14 @@ export function parseYouTubeVideoId(url: string | null | undefined): string | nu
 
   return null;
 }
+
+/** Katselu-URL videoId:stä — `parseYouTubeVideoId`in käänteisoperaatio.
+ *
+ *  Tässä eikä youtube.ts:ssä, koska tämä moduuli on jo URL-muodon koti ja
+ *  koska muodolle tuli toinen kutsuja: jakoviestin uudelleenmuodostus työstä
+ *  (#131) tarvitsee selostetun lähetyksen linkin, ja youtube.ts:n oma
+ *  `watchUrlFor` oli sisäinen. Kaksi kopiota samasta merkkijonosta olisi
+ *  ollut juuri se hiljainen ero, jota `parseYouTubeVideoId` ei huomaisi. */
+export function watchUrlForVideo(videoId: string): string {
+  return `https://www.youtube.com/watch?v=${videoId}`;
+}

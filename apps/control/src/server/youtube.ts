@@ -28,6 +28,7 @@
  *  vahvistuksen; ilman sitä ne heittävät ConfirmationRequiredErrorin, jonka
  *  HTTP-kerros kääntää 400:ksi. */
 import { readFile } from "node:fs/promises";
+import { watchUrlForVideo } from "./youtubeUrl.js";
 import { extname } from "node:path";
 import { appendNdjson } from "./store.js";
 import { getAccessToken, recordQuota, type QuotaOp } from "./googleAuth.js";
@@ -202,9 +203,7 @@ export interface BroadcastPair {
   broadcastSummary: string;
 }
 
-function watchUrlFor(videoId: string): string {
-  return `https://www.youtube.com/watch?v=${videoId}`;
-}
+
 
 async function logCreated(row: Record<string, unknown>): Promise<void> {
   await appendNdjson(CREATED_LOG, { createdAtUtc: new Date().toISOString(), ...row });
@@ -248,7 +247,7 @@ async function createOne(
 
   const videoId = created.id;
   if (!videoId) throw new Error("YouTube ei palauttanut lähetykselle id:tä.");
-  const watchUrl = watchUrlFor(videoId);
+  const watchUrl = watchUrlForVideo(videoId);
 
   // Kirjataan heti kun id on tiedossa: jos jokin seuraavista vaiheista
   // kaatuu, lokista näkee silti mitä kanavalle jäi.
@@ -456,7 +455,7 @@ export async function listBroadcasts(
     .map((item) => ({
       videoId: item.id,
       title: item.snippet?.title ?? "",
-      watchUrl: watchUrlFor(item.id),
+      watchUrl: watchUrlForVideo(item.id),
       scheduledStartTime: item.snippet?.scheduledStartTime ?? null,
       actualStartTime: item.snippet?.actualStartTime ?? null,
       lifeCycleStatus: item.status?.lifeCycleStatus ?? null,

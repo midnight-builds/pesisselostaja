@@ -9,6 +9,7 @@
  *  GET  /api/jobs                 -> Job[]
  *  PATCH /api/jobs/:id            {Partial<Job>}      -> Job
  *  POST /api/jobs/:id/activate    -> Job              (writes .env.relay for this job)
+ *  GET  /api/jobs/:id/share       -> JobShareMessage  (jakoviesti, muodostetaan aina uudelleen)
  *  POST /api/preflight            -> PreflightResult
  *  POST /api/relay/start|stop|restart  -> RelayProcess
  *  GET  /api/scheduler            -> SchedulerState

@@ -132,6 +132,20 @@ export interface RelayTelemetry {
   endReason?: SourceEndReason | null;
 }
 
+/** GET /api/jobs/:id/share — katsojille jaettava viesti (#131).
+ *
+ *  Muodostetaan pyynnöstä työn linkeistä eikä talleteta luontihetkellä:
+ *  luontivastaus näkyi vain kerran, joten viesti katosi jos sitä ei kopioinut
+ *  heti tai sivu latautui uudelleen. Katsojia tulee kanaville kesken
+ *  ottelunkin ja viesti jaetaan useaan ryhmään eri aikoina. */
+export interface JobShareMessage {
+  shareMessage: string;
+  /** False ennen lähetysten luontia: viestissä on silloin paikkamerkit
+   *  oikeiden linkkien sijaan. Kelvollinen vastaus, mutta käyttöliittymän on
+   *  sanottava se — muuten ryhmään jaetaan "<youtube-linkki>". */
+  linksReady: boolean;
+}
+
 /** Miten thumbnailin asetus yhdelle videolle päättyi (#130).
  *
  *  Oma tyyppinsä eikä pelkkä `boolean`, koska epäonnistuminen on tässä

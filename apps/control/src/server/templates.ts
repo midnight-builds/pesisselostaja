@@ -14,6 +14,9 @@
  *     nyt konfiguroitava (#95), mutta oletus on juuri tämä — ja oletus on se
  *     mitä ilman omaa `run/share-template.json`ia käytetään. */
 
+import { watchUrlForVideo } from "./youtubeUrl.js";
+import type { JobShareMessage } from "../shared/types.js";
+
 /** Kaikki käyttäjän näkemät ajat ovat Suomen paikallisaikaa (runbook
  *  "Aikakasittely"). API antaa UTC:tä; muunnos tehdään vain täällä. */
 export const HELSINKI = "Europe/Helsinki";
@@ -499,6 +502,33 @@ export function buildShareMessage(
     narratedWatchUrl: links.narratedWatchUrl ?? "<selostettu-youtube-linkki>",
     matchUrl: links.matchUrl,
   });
+}
+
+/** Jakoviesti työn tiedoista (#131).
+ *
+ *  Erillään `buildShareMessage`ista, koska tämä vastaa toiseen kysymykseen:
+ *  *voiko viestin jo jakaa*. Ennen lähetysten luontia viestin saa yhä, mutta
+ *  linkkien tilalla on paikkamerkit — ja se tieto on kuljetettava mukana, tai
+ *  käyttöliittymä näyttää operaattorille jaettavalta näyttävän tekstin, jossa
+ *  lukee "<youtube-linkki>".
+ *
+ *  Muodostetaan pyynnöstä eikä talleteta luontihetkellä: luontivastaus näkyi
+ *  vain kerran, ja työllä on kaikki tarvittava (`sourceUrl`, `targetVideoId`,
+ *  `matchId`) pysyvästi. */
+export function buildJobShareMessage(
+  job: { sourceUrl: string | null; targetVideoId: string | null },
+  texts: { localTime: string; matchup: string; matchUrl: string },
+  template?: ShareTemplate
+): JobShareMessage {
+  const narratedWatchUrl = job.targetVideoId ? watchUrlForVideo(job.targetVideoId) : null;
+  return {
+    shareMessage: buildShareMessage(
+      { localTime: texts.localTime, matchup: texts.matchup },
+      { watchUrl: job.sourceUrl, narratedWatchUrl, matchUrl: texts.matchUrl },
+      template
+    ),
+    linksReady: Boolean(job.sourceUrl && narratedWatchUrl),
+  };
 }
 
 export interface DayShareEntry {
