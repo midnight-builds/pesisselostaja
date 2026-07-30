@@ -9,6 +9,12 @@ Wants=network-online.target
 # käynnissä olevaa lähetystä, joten sitä saa päivittää myös ottelun aikana.
 WorkingDirectory=/home/codexuser/projects/pesistulokset-voice-watcher
 Environment=CONTROL_PORT=3002
+# Hard stopin siivous saa sammuttaa MYÖS lähdelähetyksen (#123). Käyttöönotettu
+# 30.7.2026 operaattorin päätöksellä: jos kuvaajan puhelimen akku loppuu, lähde
+# ei pääty siististi vaan jää live-tilaan ilman dataa (#121). Sammutus tapahtuu
+# vain kun ottelu on päättynyt JA relay on tehnyt hard stopin — ei koskaan
+# kesken ottelun.
+Environment=CONTROL_HARD_STOP_SOURCE=true
 # Kuuntelee kaikkia rajapintoja, mutta pääsy tulee käytännössä vain
 # tailscale serven kautta (tailnetin *.ts.net-osoite). Ei Funnelia.
 ExecStart=/home/codexuser/projects/pesistulokset-voice-watcher/node_modules/.bin/tsx apps/control/src/server/index.ts
