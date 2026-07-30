@@ -60,6 +60,11 @@ const LOG_LINES = 50;
  *  cycle". Past this we fall back to outside evidence instead of showing a
  *  stopped relay's last good state as current. */
 const TELEMETRY_STALE_MS = 90_000;
+/** Kuinka paljon relayn oma aloitushetki saa olla työn aloitushetkeä aiempi
+ *  ennen kuin status tulkitaan eri ajoksi (#123:n siivouksen tuoreusvartija).
+ *  Relay käynnistyy ja kirjoittaa ensimmäisen statuksensa sekunteja ennen kuin
+ *  ohjaamo ehtii leimata työn käyntiin, joten pieni pelivara on normaalia. */
+const RUN_START_TOLERANCE_MS = 30_000;
 /** Grace before "ffmpeg is not attached" counts against the headline. The
  *  reader attaches a second or two after ffmpeg spawns, and a warning that
  *  fires on every single start is a warning nobody reads. */
@@ -711,6 +716,33 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     }
   }
 
+  /** Miksi status-tiedoston `hard_stop` EI kelpaa tämän ajon syyksi, tai null
+   *  kun se kelpaa. Erillinen funktio, jotta jokainen hylkäysperuste on
+   *  testattavissa ja näkyy lokissa omalla nimellään. */
+  function hardStopSnapshotStaleReason(
+    snapshot: RelayTelemetry,
+    current: Job,
+    now: number
+  ): string | null {
+    if (snapshot.matchId !== current.matchId) {
+      return `status kertoo ottelusta ${snapshot.matchId}, työ on ottelusta ${current.matchId}`;
+    }
+    const writtenAt = Date.parse(snapshot.at);
+    if (!Number.isFinite(writtenAt)) return "statuksen aikaleima ei jäsenny";
+    if (now - writtenAt > TELEMETRY_STALE_MS) {
+      return `status on ${Math.round((now - writtenAt) / 1000)} s vanha`;
+    }
+    // Relayn oma aloitushetki ennen työn aloitushetkeä = eri ajo.
+    const jobStartedAt = current.startedAt ? Date.parse(current.startedAt) : null;
+    const runStartedAt = Date.parse(snapshot.startedAt);
+    if (jobStartedAt !== null && Number.isFinite(jobStartedAt) && Number.isFinite(runStartedAt)) {
+      if (runStartedAt < jobStartedAt - RUN_START_TOLERANCE_MS) {
+        return "status on työtä vanhemmasta ajosta";
+      }
+    }
+    return null;
+  }
+
   /** Hard stopin siivous (#123). Ajetaan vain kun relayn oma telemetria kertoo
    *  että se sammutti itsensä takarajan takia (`endReason === "hard_stop"`) —
    *  siis ottelu oli päättynyt ja lähde oireili. Normaalissa lopetuksessa ei
@@ -722,11 +754,31 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
    *
    *  Ei koskaan heitä: kaikki menee errors-Mappiin ja lokiin, jotta työn
    *  sulkeminen ehtii tapahtua joka tapauksessa. */
-  async function runHardStopCleanup(current: Job): Promise<void> {
+  async function runHardStopCleanup(current: Job, now: number): Promise<void> {
     try {
+      // Vain oikeasti käynnissä ollut ajo. `arming` tarkoittaa että relay ei
+      // koskaan päässyt liikkeelle (esim. unit kaatui käynnistyksessä) — sen
+      // ajon hard stopia ei ole olemassa, ja levyllä oleva syy on silloin
+      // väistämättä EDELLISEN ajon.
+      if (current.status !== "live") return;
       const snapshot = await readTelemetryFn(current.matchId);
       if (snapshot?.endReason !== "hard_stop") {
         return; // normaali lopetus (tai vanha deploy joka ei kerro syytä)
+      }
+      // Tuoreusvartija. Relay kirjoittaa statuksen kokonaan yli heti
+      // käynnistyessään, joten normaali uusi ajo nollaa vanhan syyn — mutta jos
+      // relay ei koskaan ehdi kirjoittaa (kaatuu ExecStartissa, config heittää),
+      // levylle jää edellisen ajon "hard_stop". Ilman tätä vartijaa ohjaamo
+      // sammuttaisi sen perusteella lähetykset, jotka ovat vasta alkamassa —
+      // pahimmillaan toisen ihmisen lähdelähetyksen. Vaaditaan siis että
+      // snapshot kuuluu TÄHÄN ajoon: oikea ottelu, tuore kirjoitus, ja relayn
+      // oma aloitushetki vähintään työn aloitushetkestä.
+      const staleReason = hardStopSnapshotStaleReason(snapshot, current, now);
+      if (staleReason) {
+        console.warn(
+          `[control] hard stop -siivous ohitettu: status-tiedoston syy ei kuulu tähän ajoon (${staleReason})`
+        );
+        return;
       }
       const sourceVideoId = parseYouTubeVideoId(current.sourceUrl);
       const targets: Array<{ label: string; videoId: string | null; allowed: boolean; why: string }> = [
@@ -797,7 +849,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       // try/catch, koska siivous ei saa koskaan estää työn sulkemista — muuten
       // yksi YouTube-virhe jättäisi työn "live"-tilaan ja lukitsisi seuraavan
       // ottelun.
-      await runHardStopCleanup(job);
+      await runHardStopCleanup(job, Date.now());
       const closed = await closeRunningJobFn();
       if (closed) job = closed;
     } catch (err) {
