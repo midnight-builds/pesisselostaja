@@ -266,6 +266,15 @@ body {
   font-size: calc(12px * var(--ts)); margin-top: 20px; line-height: 1.6;
 }
 .voice-credits { color: var(--muted); }
+/* Buildin alkuperä (#71): luettavissa mutta ei huomiota vievä — tätä katsotaan
+   harvoin ja vain kun epäillään että tarjolla on väärä build. */
+.set-build {
+  margin-top: 6px;
+  font-size: calc(11px * var(--ts));
+  color: var(--faint, var(--muted));
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
 
 /* ════════════════════════════════════════════════════════════
    LIVE MATCH SCREEN
