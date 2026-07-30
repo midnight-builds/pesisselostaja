@@ -42,6 +42,10 @@ import {
 } from "./templates.js";
 
 const API_BASE = "https://www.googleapis.com/youtube/v3/";
+/** Kokonaisaikaraja yhdelle YouTube-kutsulle. Kaikki kutsujat ovat joko
+ *  operaattorin odottamia pyyntöjä tai aggregaattorin tikillä ajavia, eikä
+ *  kummassakaan ole varaa odottaa loputtomiin. */
+const YT_REQUEST_TIMEOUT_MS = 10_000;
 const UPLOAD_THUMBNAIL_URL = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set";
 
 /** Ainoa tiedosto, josta näkee mitä kanavalle on tämän sovelluksen kautta
@@ -98,6 +102,11 @@ async function ytRequest<T>(
       accept: "application/json",
     },
     body: body ? JSON.stringify(body) : undefined,
+    // Ilman aikarajaa yksi roikkuva kutsu jäädyttää kutsujan. Hard stopin
+    // siivous (#123) ajetaan aggregaattorin nopealla tikillä ennen työn
+    // sulkemista, joten roikkuva kutsu pysäyttäisi koko ohjaamon näkymän ja
+    // jättäisi työn "live"-tilaan lukitsemaan seuraavan ottelun (#101).
+    signal: AbortSignal.timeout(YT_REQUEST_TIMEOUT_MS),
   });
   // Kiintiö kuluu myös epäonnistuneesta kutsusta, joten kirjaus tehdään ennen
   // virheen heittoa.
