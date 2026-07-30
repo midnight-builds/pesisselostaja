@@ -31,10 +31,10 @@ import type {
   SourceIngest,
   SystemState,
 } from "../shared/types.js";
-import { closeRunningJob, getActiveJob, markRunStarted } from "./jobs.js";
+import { closeRunningJob, getActiveJob, markRunStarted, reconcileOpenJobs } from "./jobs.js";
 import { readLog } from "./journal.js";
 import { getMatchState } from "./matches.js";
-import { getRelayProcess, readKnobs } from "./relay.js";
+import { getRelayProcess, readKnobs, readRunningMatchId } from "./relay.js";
 import { SOURCE_INGEST_STALE_MS } from "./sourceIngest.js";
 import { getSystemState } from "./system.js";
 import { NarrationTimeline, readRelayStatus } from "./telemetry.js";
@@ -65,6 +65,11 @@ const TELEMETRY_STALE_MS = 90_000;
  *  Relay käynnistyy ja kirjoittaa ensimmäisen statuksensa sekunteja ennen kuin
  *  ohjaamo ehtii leimata työn käyntiin, joten pieni pelivara on normaalia. */
 const RUN_START_TOLERANCE_MS = 30_000;
+/** Kuinka kauan relayn on oltava alhaalla ennen kuin avoin työ tulkitaan
+ *  päättyneen ajon jäänteeksi (#118:n sovittelu). Relayn oma uudelleen-
+ *  käynnistys kestää muutaman sekunnin, ja sen aikana slotin vapauttaminen
+ *  veisi operaattorilta säätimet kesken lähetyksen. */
+const RECONCILE_SETTLE_MS = 30_000;
 /** Grace before "ffmpeg is not attached" counts against the headline. The
  *  reader attaches a second or two after ffmpeg spawns, and a warning that
  *  fires on every single start is a warning nobody reads. */
@@ -100,8 +105,15 @@ export interface LiveAggregatorOptions {
   getActiveJob?: () => Promise<Job | null>;
   /** Same reason as getActiveJob: a test drives the run-start and run-end
    *  edges without a job file on disk. */
-  closeRunningJob?: () => Promise<Job | null>;
-  markRunStarted?: () => Promise<Job | null>;
+  closeRunningJob?: (jobId: string | null) => Promise<Job | null>;
+  markRunStarted?: (matchId: number) => Promise<Job | null>;
+  /** Mitä ottelua relay OIKEASTI ajaa (relay.ts:n readRunningMatchId, lähteenä
+   *  relayn oma status-tiedosto). Tämä on se havainto jota vasten työ sidotaan
+   *  — ilman sitä sidonta oli pelkkä arvaus jonon järjestyksestä (#118). */
+  getRunningMatchId?: () => Promise<number | null>;
+  /** Avointen töiden sovittelu käynnistyksessä ja sen jälkeen. Injektoitava
+   *  samasta syystä kuin muutkin työjonon kutsut. */
+  reconcileOpenJobs?: (runningMatchId: number | null, now?: number) => Promise<Job[]>;
   /** Lähteen tilan polleri (sourceIngest.ts). Aggregaattori ei omista sitä:
    *  polleri pollaa omalla 30 s välillään kiintiön takia, ja tämä vain kysyy
    *  sen viimeisimmän tuloksen jokaisella tikillä. */
@@ -228,6 +240,19 @@ export interface Snapshot {
   sourceIngest?: SourceIngest | null;
   /** Pollerin syy sille ettei havaintoa juuri nyt ole. */
   sourceIngestReason?: string | null;
+  /** Ottelu jota relay oikeasti ajaa, relayn oman status-tiedoston mukaan.
+   *  null = ei näyttöä (relay alhaalla, tai juuri käynnistynyt eikä ole vielä
+   *  ehtinyt kirjoittaa). Erottelu on olennainen: "ei tiedetä" ei ole sama asia
+   *  kuin "ajaa väärää ottelua". */
+  runningMatchId?: number | null;
+}
+
+/** Onko ohjaamon työ ja relayn oikea ajo eri otteluista. Vaatii NÄYTÖN
+ *  molemmista: ilman havaintoa (null) ei väitetä ristiriitaa. */
+function matchIdConflict(snap: Snapshot): { job: number; running: number } | null {
+  const running = snap.runningMatchId ?? null;
+  if (!snap.job || running === null) return null;
+  return running === snap.job.matchId ? null : { job: snap.job.matchId, running };
 }
 
 function minutes(sec: number | null): string {
@@ -246,6 +271,11 @@ function freshTelemetry(snap: Snapshot): RelayTelemetry | null {
   if (!telemetry || !snap.relay.active) return null;
   const at = Date.parse(telemetry.at);
   if (!Number.isFinite(at) || snap.now - at > TELEMETRY_STALE_MS) return null;
+  // Kolmas vartija (#118): oikean ottelun snapshot. Väärään työhön sidottuna
+  // ohjaamo luki toisen ottelun status-tiedostoa ja piirsi sen tämän hetken
+  // lähetykseksi — hiljainen väärä data on tässä pahin lopputulos, joten
+  // mieluummin ei tietoa kuin toisen ottelun tieto.
+  if (snap.job && telemetry.matchId !== snap.job.matchId) return null;
   return telemetry;
 }
 
@@ -279,6 +309,18 @@ export function deriveHealth(snap: Snapshot): { health: Health; headline: string
     return {
       health: "fail",
       headline: `Relay ei ole käynnissä (${relay.activeState}) vaikka lähetyksen pitäisi olla ajossa`,
+    };
+  }
+
+  // 3b. Ohjaamon työ ja relayn oikea ajo ovat eri otteluista (#118). Sama
+  //     luokka hiljaista vikaa kuin sääntö 3, ja pahempi seurauksiltaan: rivit
+  //     näyttävät vihreää, mutta säätimet kirjoittuvat väärän ottelun
+  //     control-tiedostoon eikä ajossa oleva relay näe niitä koskaan.
+  const conflict = matchIdConflict(snap);
+  if (conflict) {
+    return {
+      health: "fail",
+      headline: `Relay ajaa ottelua ${conflict.running}, ohjaamon työ on ottelusta ${conflict.job} — säätimet eivät mene perille`,
     };
   }
 
@@ -531,8 +573,18 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
     errors.get("job") ??
     errors.get("knobs") ??
     errors.get("telemetry");
+  const relayConflict = matchIdConflict(snap);
   if (relayError) {
     rows.push(chainRow("relay", "Relay", "fail", relayError));
+  } else if (relayConflict) {
+    rows.push(
+      chainRow(
+        "relay",
+        "Relay",
+        "fail",
+        `ajaa ottelua ${relayConflict.running}, työ on ottelusta ${relayConflict.job}`
+      )
+    );
   } else if (relay.active && respawns >= RESPAWN_WARN_COUNT) {
     rows.push(chainRow("relay", "Relay", "warn", `${respawns} ffmpeg-respawnia viime minuutteina`));
   } else if (relay.active) {
@@ -634,6 +686,8 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
   const readActiveJob = opts.getActiveJob ?? getActiveJob;
   const closeRunningJobFn = opts.closeRunningJob ?? closeRunningJob;
   const markRunStartedFn = opts.markRunStarted ?? markRunStarted;
+  const getRunningMatchIdFn = opts.getRunningMatchId ?? (() => readRunningMatchId());
+  const reconcileOpenJobsFn = opts.reconcileOpenJobs ?? reconcileOpenJobs;
   const transitionBroadcastFn = opts.transitionBroadcast ?? ((videoId: string) => transitionBroadcast(videoId));
   const readTelemetryFn = opts.readTelemetry ?? readRelayStatus;
   const hardStopSourceEnabled = opts.hardStopSource ?? CONFIG.hardStopSource;
@@ -648,6 +702,12 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
   let knobs: ControlKnobs | null = null;
   let log: LogLine[] = [];
   let telemetry: RelayTelemetry | null = null;
+  /** Relayn oma näyttö siitä mitä se ajaa. Luetaan joka nopealla tikillä. */
+  let runningMatchId: number | null = null;
+  /** Milloin relay nähtiin ensimmäisen kerran alhaalla yhtäjaksoisesti. null =
+   *  relay on ajossa. Sovittelu odottaa tätä, jotta relayn oma uudelleen-
+   *  käynnistys (~4 s) ei näytä päättyneeltä ajolta. */
+  let relayDownSince: number | null = null;
   /** Tail of the running match's timeline. Recreated when the job's match
    *  changes; null when there is no job to read one for. */
   let timeline: NarrationTimeline | null = null;
@@ -672,6 +732,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       errors,
       sourceIngest: source.ingest,
       sourceIngestReason: source.reason,
+      runningMatchId,
     };
     const { health, headline } = deriveHealth(snap);
     return {
@@ -828,30 +889,91 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
    *  job that has been armed but not started yet, and closing that would cancel
    *  the next broadcast before it began (#101). */
   let relayWasActive = false;
+  /** Ottelu jonka ristiriidasta on jo varoitettu lokiin. Ilman tätä 5 s tikki
+   *  kirjoittaisi saman rivin journaliin 12 kertaa minuutissa. */
+  let conflictLoggedFor: number | null = null;
+
+  /** Sitoo armatun työn siihen ajoon jota relay OIKEASTI ajaa.
+   *
+   *  EI reunalaukaistu, toisin kuin sulkeminen: relay kirjoittaa
+   *  `run/status-<matchId>.json`:nsa vasta sekunteja unitin aktivoitumisen
+   *  jälkeen, joten reunahetkellä näyttöä ei yleensä vielä ole. Kertalaukaus
+   *  jättäisi työn pysyvästi "arming"-tilaan ilman `startedAt`ia — siksi
+   *  yritetään joka tikillä, kunnes näyttö löytyy tai relay sammuu.
+   *
+   *  Ennen tätä valinta oli "ensimmäinen arming-työ tiedostojärjestyksessä",
+   *  joka 30.7.2026 sitoi ottelun 145900 ajon edellisen illan työhön (#118). */
+  async function bindArmedJob(): Promise<void> {
+    const current = job;
+    if (current?.status !== "arming") return;
+    if (runningMatchId === null) return; // ei näyttöä vielä — uusi yritys seuraavalla tikillä
+    if (runningMatchId !== current.matchId) {
+      // Puuttuva sidonta on parempi kuin väärä: ristiriita näkyy otsikossa ja
+      // Relay-rivillä, ja operaattori näkee mitä relay oikeasti ajaa.
+      if (conflictLoggedFor !== runningMatchId) {
+        conflictLoggedFor = runningMatchId;
+        console.warn(
+          `[control] työtä ei sidota: relay ajaa ottelua ${runningMatchId}, avoin työ on ottelusta ${current.matchId}`
+        );
+      }
+      return;
+    }
+    conflictLoggedFor = null;
+    const started = await markRunStartedFn(runningMatchId);
+    if (started) job = started;
+  }
+
+  /** Sulkee slotissa olevat työt jotka eivät ole se ajo joka oikeasti tapahtuu.
+   *
+   *  Tämä on lääke tilaan johon laskeva reuna ei koskaan yllä: reuna vaatii
+   *  että ohjaamo oli katsomassa kun relay sammui, joten ohjaamon
+   *  uudelleenkäynnistyksen yli jäänyt työ on sille ikuisesti näkymätön (#118,
+   *  #101). Näyttöä vaaditaan aina — arvaus tässä sulkisi käynnissä olevan
+   *  lähetyksen työn. */
+  async function reconcileSlot(now: number): Promise<void> {
+    let closed: Job[];
+    if (relay.active) {
+      if (runningMatchId === null) return; // ajossa, mutta ei tiedetä mitä
+      closed = await reconcileOpenJobsFn(runningMatchId, now);
+    } else {
+      if (relayDownSince === null || now - relayDownSince < RECONCILE_SETTLE_MS) return;
+      closed = await reconcileOpenJobsFn(null, now);
+    }
+    for (const c of closed) {
+      console.warn(
+        `[control] sovittelu sulki avoimen työn ${c.id} (ottelu ${c.matchId}) tilaan ${c.status}`
+      );
+      if (job?.id === c.id) job = c;
+    }
+  }
+
   async function followRunEdges(): Promise<void> {
+    const now = Date.now();
     const wasActive = relayWasActive;
     relayWasActive = relay.active;
-    if (wasActive === relay.active) return;
+    if (relay.active) relayDownSince = null;
+    else if (relayDownSince === null) relayDownSince = now;
+
     try {
-      // Rising edge: the unit came up, whoever started it. The job stops being
-      // "about to run" and gets its start time — the UI, the health rules and
-      // the post-match report all read those.
-      if (relay.active) {
-        if (job?.status !== "arming") return;
-        const started = await markRunStartedFn();
-        if (started) job = started;
-        return;
+      // Falling edge: the run is over. Edge-triggered on purpose — "relay is
+      // inactive" on its own is the normal state of a job that has been armed
+      // but not started yet, and closing that would cancel the next broadcast
+      // before it began (#101).
+      const current = job;
+      if (wasActive && !relay.active && current && (current.status === "arming" || current.status === "live")) {
+        // Hard stopin siivous ENNEN sulkemista: closeRunningJob nollaa
+        // aktiivisen työn, jolloin sekä targetVideoId että sourceUrl katoavat
+        // käsistä. Oma try/catch, koska siivous ei saa koskaan estää työn
+        // sulkemista — muuten yksi YouTube-virhe jättäisi työn "live"-tilaan ja
+        // lukitsisi seuraavan ottelun.
+        await runHardStopCleanup(current, now);
+        // Nimetty työ: poller sulkee sen ajon jota se seurasi, ei sitä joka
+        // sattuu olemaan slotissa sulkemishetkellä.
+        const closed = await closeRunningJobFn(current.id);
+        if (closed) job = closed;
       }
-      // Falling edge: the run is over.
-      if (job?.status !== "arming" && job?.status !== "live") return;
-      // Hard stopin siivous ENNEN sulkemista: closeRunningJob nollaa aktiivisen
-      // työn, jolloin sekä targetVideoId että sourceUrl katoavat käsistä. Oma
-      // try/catch, koska siivous ei saa koskaan estää työn sulkemista — muuten
-      // yksi YouTube-virhe jättäisi työn "live"-tilaan ja lukitsisi seuraavan
-      // ottelun.
-      await runHardStopCleanup(job, Date.now());
-      const closed = await closeRunningJobFn();
-      if (closed) job = closed;
+      await bindArmedJob();
+      await reconcileSlot(now);
     } catch (err) {
       // Surfaced on the relay row rather than swallowed: a job stuck in
       // "arming" blocks the next match, and the operator has to know now.
@@ -878,6 +1000,15 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       await track("job", readActiveJob, (value) => {
         job = value;
       });
+      // Mitä relay oikeasti ajaa. Luetaan ENNEN reunoja, koska sekä sidonta
+      // että sovittelu tarvitsevat sen. Oma vartija: tämä on hakemistoluku,
+      // eikä sen epäonnistuminen saa estää työn sulkemista — silloin
+      // runningMatchId jää nulliksi ja molemmat odottavat näyttöä.
+      try {
+        runningMatchId = await getRunningMatchIdFn();
+      } catch {
+        runningMatchId = null;
+      }
       await followRunEdges();
       if (job) {
         const matchId = job.matchId;

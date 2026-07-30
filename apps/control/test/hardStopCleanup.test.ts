@@ -37,6 +37,19 @@ vi.mock("../src/server/relay.js", () => ({
   writeSourceIngest: vi.fn(async () => undefined),
   readSourceIngest: vi.fn(async () => null),
 }));
+// Sama vartija kuin runEnd.test.ts:ssä: oikea työjono osoittaa kehityskoneen
+// run/-hakemistoon, ja sovittelu sulkee töitä. Kaikki injektoidaan optioina.
+vi.mock("../src/server/jobs.js", () => {
+  const forbidden = (name: string) => async () => {
+    throw new Error(`jobs.js:n ${name} ei saa ajaa testissä — injektoi se optioissa`);
+  };
+  return {
+    getActiveJob: vi.fn(forbidden("getActiveJob")),
+    closeRunningJob: vi.fn(forbidden("closeRunningJob")),
+    markRunStarted: vi.fn(forbidden("markRunStarted")),
+    reconcileOpenJobs: vi.fn(async () => []),
+  };
+});
 vi.mock("../src/server/journal.js", () => ({ readLog: vi.fn(async () => []) }));
 vi.mock("../src/server/system.js", () => ({
   getSystemState: vi.fn(async () => ({
@@ -112,6 +125,7 @@ function job(overrides: Partial<Job> = {}): Job {
     targetStreamKey: "key",
     targetRtmpUrl: "rtmp://a.rtmp.youtube.com/live2",
     targetVideoId: TARGET_VIDEO_ID,
+    armedAt: null,
     startedAt: isoAgo(60 * 60 * 1000),
     endedAt: null,
     note: null,

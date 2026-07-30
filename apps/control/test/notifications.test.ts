@@ -89,6 +89,7 @@ function baseJob(): Job {
     targetStreamKey: "avain",
     targetRtmpUrl: "rtmp://example.invalid/live2",
     targetVideoId: null,
+    armedAt: null,
     startedAt: null,
     endedAt: null,
     note: null,

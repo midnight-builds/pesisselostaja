@@ -92,6 +92,7 @@ function job(overrides: Partial<Job> = {}): Job {
     targetStreamKey: "avain",
     targetRtmpUrl: "rtmp://example.invalid/live2",
     targetVideoId: null,
+    armedAt: null,
     startedAt: null,
     endedAt: null,
     note: null,
@@ -164,6 +165,9 @@ function build(opts: {
     runPreflight: vi.fn(async () => opts.preflight ?? preflight(0)),
     activateJob: vi.fn(async (id: string) => job({ id, status: "arming" })),
     setJobStatus: vi.fn(async (id: string, status: Job["status"]) => job({ id, status })),
+    markRunStarted: vi.fn(async (matchId: number): Promise<Job | null> =>
+      job({ id: "job-a", matchId, status: "live", startedAt: new Date(NOW).toISOString() })
+    ),
     startRelay: vi.fn(async () => {
       if (opts.startThrows) throw opts.startThrows;
       return undefined;
@@ -185,6 +189,7 @@ function writes(calls: ReturnType<typeof build>["calls"]) {
     ...calls.writeRelayEnv.mock.calls,
     ...calls.activateJob.mock.calls,
     ...calls.setJobStatus.mock.calls,
+    ...calls.markRunStarted.mock.calls,
     ...calls.startRelay.mock.calls,
     ...calls.notify.mock.calls,
   ];
@@ -258,8 +263,40 @@ describe("ajastin päällä", () => {
     expect(calls.runPreflight).toHaveBeenCalledOnce();
     expect(calls.activateJob).toHaveBeenCalledWith("job-a");
     expect(calls.startRelay).toHaveBeenCalledOnce();
-    expect(calls.setJobStatus).toHaveBeenCalledWith("job-a", "live");
+    expect(calls.markRunStarted).toHaveBeenCalledWith(146210);
     expect(state.lastAction).toMatchObject({ decision: "start", applied: true });
+  });
+
+  // #118: the scheduler used to flip the status itself with setJobStatus, which
+  // never sets startedAt. The poller's own stamping then found no "arming" job
+  // and gave up, so a run that really happened had no start time — and when it
+  // ended, closedStatus read the empty startedAt and filed it as "cancelled".
+  it("leimaa ajon käyntiin samalla funktiolla kuin poller, jotta startedAt ei jää tyhjäksi", async () => {
+    const { scheduler, calls } = build({ jobs: [job()], source: SOURCE.liveFull });
+    await scheduler.setEnabled(true);
+
+    await scheduler.tick();
+
+    expect(calls.setJobStatus, "ei omaa oikopolkua tilakoneeseen").not.toHaveBeenCalledWith(
+      "job-a",
+      "live"
+    );
+    expect(calls.markRunStarted.mock.results[0].value).resolves.toMatchObject({
+      status: "live",
+      startedAt: expect.any(String),
+    });
+  });
+
+  it("ei kaada käynnistystä vaikka leimaus ei löytäisi työtä — relay on jo ajossa", async () => {
+    const { scheduler, calls } = build({ jobs: [job()], source: SOURCE.liveFull });
+    calls.markRunStarted.mockImplementationOnce(async () => null);
+    await scheduler.setEnabled(true);
+
+    const state = await scheduler.tick();
+
+    expect(state.lastAction).toMatchObject({ decision: "start", applied: true });
+    // Eikä palauteta jonoon: relay ajaa, ja pollerin sidonta yrittää uudelleen.
+    expect(calls.setJobStatus).not.toHaveBeenCalledWith("job-a", "scheduled");
   });
 
   it("ilmoittaa käynnistyksestä, koska kukaan ei katso ruutua sillä hetkellä", async () => {

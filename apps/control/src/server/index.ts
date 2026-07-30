@@ -508,7 +508,9 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
       // slot. Without this the next match cannot be activated at all, and the
       // operator finds that out at the worst possible moment (#101). Restart is
       // deliberately NOT included: the same job keeps running.
-      await closeRunningJob();
+      // null = "whichever job holds the slot": an operator's stop frees the
+      // slot itself, it does not end one particular run (#118).
+      await closeRunningJob(null);
     } else await restartRelay();
     // Ask systemd fresh rather than trust whatever start/stop/restart
     // returned — the response should reflect reality even if the unit

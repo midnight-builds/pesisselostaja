@@ -32,6 +32,7 @@ function baseJob(overrides: Partial<Job> = {}): Job {
     targetStreamKey: "stream-key-xyz",
     targetRtmpUrl: DEFAULT_RTMP_URL,
     targetVideoId: null,
+    armedAt: null,
     startedAt: null,
     endedAt: null,
     note: null,
