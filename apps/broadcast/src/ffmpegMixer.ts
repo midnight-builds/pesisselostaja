@@ -476,6 +476,16 @@ export class FfmpegMixer {
   /** Set while a kill we requested ourselves (URL refresh) is in flight, so
    *  the resulting short session isn't mistaken for a dying source. */
   private refreshKillRequested = false;
+  /** Hard stop (#123), symptom a: duration of the previous short code=0
+   *  session, or null when the previous session wasn't one. Two consecutive
+   *  short clean exits with near-identical durations is the signature of
+   *  replaying a finished broadcast's leftover tail (the 34s/34s/34s pattern
+   *  of match 145900, #121). Reset by any productive run. */
+  private lastShortCleanRunMs: number | null = null;
+  /** Hard stop (#123), symptom b: how many times ffmpeg.unproductive has
+   *  fired while the match was already finished. Reset by a productive run —
+   *  a source that produced real broadcast again is not dead. */
+  private unproductiveWhileFinished = 0;
   /** Counts spawn attempts so recordFile can be indexed per session. */
   private sessionIndex = 0;
   /** True only while an ffmpeg session is attached as a FIFO reader (between a
