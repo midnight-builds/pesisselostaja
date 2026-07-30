@@ -99,6 +99,57 @@ test.describe("lähetysten luonti", () => {
     await shot(page, info, "youtube-preview-overrides");
   });
 
+  test("esikatselu mahtuu puhelimen ruudulle — tekstit rivittyvät, kuvat skaalautuvat (#129)", async ({
+    page,
+    openApp,
+    api,
+  }, info) => {
+    // Tämä on se aukko, jonka takia vika pääsi kentälle: asettelutesti kiertää
+    // kaikki välilehdet, mutta EI avaa esikatselua, joten sen sisältöä ei ollut
+    // koskaan mitattu 393 px:n ruudulla. Operaattori raportoi molemmat ("tekstit
+    // eivät rivity", "kuvat eivät mahdu ruutuun") ensimmäisestä ohjaamolla
+    // tehdystä ajastuksesta.
+    api.authHealth = fixture.authHealthConnected();
+    await openApp();
+    await page.getByRole("button", { name: "YouTube", exact: true }).click();
+    await page.getByRole("button", { name: "Esikatsele tekstit" }).click();
+    await expect(page.getByRole("heading", { name: "Luo lähetykset" })).toBeVisible();
+
+    // Mitataan elementin OMAA ylivuotoa (scrollWidth vs clientWidth) eikä
+    // dokumentin vieritystä: `<pre>`:n rivittymätön sisältö jää `.scroll`
+    // -säiliön sisään, joten sivu ei vierrä vaakaan vaikka teksti on katkennut
+    // ruudun reunaan. Juuri sen operaattori näkee.
+    const measured = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll<HTMLElement>(".textblock, .textline")].map((el) => ({
+        kind: el.className,
+        overflow: el.scrollWidth - el.clientWidth,
+        text: (el.textContent ?? "").slice(0, 30),
+      }));
+      const images = [...document.querySelectorAll<HTMLImageElement>(".thumb__img")].map((el) => ({
+        width: el.getBoundingClientRect().width,
+      }));
+      return { rows, images, viewport: document.documentElement.clientWidth };
+    });
+
+    expect(measured.rows.length, "esikatselussa pitää olla tekstilaatikoita mitattavaksi").toBeGreaterThan(0);
+    for (const row of measured.rows) {
+      expect(row.overflow, `"${row.text}…" ei rivity ruudulle`).toBeLessThanOrEqual(1);
+    }
+    expect(measured.images.length, "esikatselussa pitää olla thumbnailit").toBeGreaterThan(0);
+    for (const img of measured.images) {
+      // Kaksi suuntaa, koska mock palauttaa 1×1-pikselin eikä oikeaa 1280 px:n
+      // komposiittia: yläraja kiinnittää oikean maailman ylivuodon, alaraja
+      // todistaa että skaalaussääntö on ylipäätään voimassa — ilman sitä
+      // 1-pikselinen kuva menisi läpi vaikka oikea kuva vuotaisi ruudun yli.
+      expect(img.width, "thumbnail ei mahdu ruudulle").toBeLessThanOrEqual(measured.viewport);
+      expect(img.width, "thumbnailia ei skaalata säiliön leveyteen").toBeGreaterThan(
+        measured.viewport * 0.5,
+      );
+    }
+
+    await shot(page, info, "youtube-preview-mobile");
+  });
+
   test("luonnin jälkeen jaettava viesti on kokonaisuudessaan kopioitavissa", async ({ page, openApp, api }, info) => {
     api.authHealth = fixture.authHealthConnected();
     await openApp();
