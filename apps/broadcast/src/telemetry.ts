@@ -53,7 +53,7 @@ export interface RelayStatus {
   /** ffmpeg restarts so far this run. */
   respawns: number;
   source: {
-    state: "live" | "scheduled" | "resolving" | "failed" | "unknown";
+    state: "live" | "scheduled" | "resolving" | "failed" | "ended" | "unknown";
     detail: string | null;
   };
   match: {
