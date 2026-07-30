@@ -63,6 +63,7 @@ import {
   type ShareTemplate,
 } from "./templates.js";
 import { ensureShareTemplateFile, readShareTemplate } from "./shareTemplate.js";
+import { uploadPairThumbnails } from "./broadcastThumbnails.js";
 import type { CreateJobRequest, PatchJobRequest, PatchKnobsRequest } from "../shared/api.js";
 import type { Job, LiveState, NotificationPrefs } from "../shared/types.js";
 
@@ -456,7 +457,8 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
         sourceUrl: pair.normal.watchUrl,
       });
     }
-    sendJson(res, 201, { ...pair, texts });
+    const thumbnails = await uploadPairThumbnails(pair, texts);
+    sendJson(res, 201, { ...pair, texts, thumbnails });
     return;
   }
   if (pathname === "/api/youtube/playlists" && method === "GET") {
