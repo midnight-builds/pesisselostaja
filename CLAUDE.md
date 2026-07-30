@@ -57,6 +57,20 @@ singular is therefore not always accurate.
 When a pesäpallo detail is not written down here, **ask the user** rather than
 inferring it. Getting this wrong ships to every broadcast.
 
+## Lähdelähetykseen kirjoittaminen
+
+**Lähdettä (`RELAY_YOUTUBE_URL`, puhelimen alkuperäinen live) ei kosketa ottelun
+ollessa kesken.** Ainoa sallittu kirjoitus on hard stopin siivous päättyneen
+ottelun jälkeen (issue #123), ja sekin vain kun `CONTROL_HARD_STOP_SOURCE` on
+päällä (oletus pois). Siivouksen tekee ohjaamo laskevalla reunalla, kun relayn
+oma telemetria kertoo `endReason === "hard_stop"`. Kohdelähetys transitoidaan
+`complete`ksi vain samassa tilanteessa — normaalissa lopetuksessa luotetaan
+YouTuben `enableAutoStop`iin.
+
+Aiempi ehdoton muotoilu ("alkuperäistä lähetystä ei kosketa koskaan") on
+korvattu tällä; älä palauta sitä. Sama teksti on `.claude/skills/relay-ottelu/`
+-runbookissa.
+
 ## TTS pronunciation
 Speech is read aloud by browser TTS or Piper, which mispronounce some terms.
 This is **not** a blanket spell-out rule — most abbreviations (e.g. `IPV`) read fine.

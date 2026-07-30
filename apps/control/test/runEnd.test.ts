@@ -33,6 +33,20 @@ vi.mock("../src/server/relay.js", () => ({
   readSourceIngest: vi.fn(async () => null),
 }));
 vi.mock("../src/server/journal.js", () => ({ readLog: vi.fn(async () => []) }));
+// Telemetria mockataan, jottei tikki tee oikeaa levyluentaa: fake-timerit eivät
+// odota oikeaa I/O:ta, ja kesken jäänyt tikki estää fastBusy-vahdin takia
+// seuraavan — tämä on ollut tämän tiedoston ajoittaisen herkkyyden syy, ja
+// #123:n laskevan reunan telemetrialuku teki siitä pysyvän. null = relay ei
+// kerro lopetussyytä, joten hard stop -siivous ei laukea täällä.
+vi.mock("../src/server/telemetry.js", () => ({
+  readRelayStatus: vi.fn(async () => null),
+  NarrationTimeline: class {
+    async poll(): Promise<void> {}
+    lines(): [] {
+      return [];
+    }
+  },
+}));
 vi.mock("../src/server/system.js", () => ({
   getSystemState: vi.fn(async () => ({
     diskFreeBytes: 10 * 1024 ** 3,

@@ -14,7 +14,10 @@ description: >
 Tämä skill ajaa relayn koko elinkaaren: **aloitus → ajonaikainen ohjaus →
 lopetus**. Relay lukee puhelimen jo julkaiseman YouTube-livelähetyksen takaisin,
 miksaa siihen selostuksen ja julkaisee tuloksen **toisena, erillisenä**
-YouTube-lähetyksenä. Alkuperäistä lähetystä ei kosketa koskaan.
+YouTube-lähetyksenä. **Alkuperäistä lähetystä ei kosketa ottelun ollessa
+kesken.** Ainoa sallittu kirjoitus lähteeseen on hard stopin siivous
+päättyneen ottelun jälkeen (issue #123), ja sekin vain kun ohjaamon
+`CONTROL_HARD_STOP_SOURCE` on päällä.
 
 Toimi järjestyksessä. Älä oleta arvoja — kysy puuttuvat. Tulosta ajonaikaiset
 ohjeet käyttäjälle suoraan (kohta "AJON AIKANA"), älä vain viittaa niihin.
@@ -50,7 +53,9 @@ lähetys on luotu (kohta 2), joten ohjaa käyttäjä tekemään se ensin.
 
 > **⚠️ LÄHDE vs. KOHDE — älä sekoita näitä.**
 > - **LÄHDE** = `RELAY_YOUTUBE_URL` = puhelimen alkuperäinen live, jota
->   **LUETAAN**. Vain katselu, ei koskaan kirjoiteta.
+>   **LUETAAN**. Ottelun aikana vain katselu — ei kirjoituksia. Ainoa
+>   poikkeus on hard stopin siivous ottelun päätyttyä (#123), jonka ohjaamo
+>   tekee itse ja vain kun `CONTROL_HARD_STOP_SOURCE=true`.
 > - **KOHDE** = videoId + stream key = se toinen, selostettu lähetys, johon
 >   **PUSHATAAN**.
 >

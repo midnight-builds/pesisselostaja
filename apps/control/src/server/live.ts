@@ -38,6 +38,9 @@ import { getRelayProcess, readKnobs } from "./relay.js";
 import { SOURCE_INGEST_STALE_MS } from "./sourceIngest.js";
 import { getSystemState } from "./system.js";
 import { NarrationTimeline, readRelayStatus } from "./telemetry.js";
+import { transitionBroadcast, type TransitionResult } from "./youtube.js";
+import { parseYouTubeVideoId } from "./youtubeUrl.js";
+import { CONFIG } from "./config.js";
 
 /** systemd, machine vitals and journald: cheap, local, and the things that go
  *  wrong fastest. */
@@ -57,6 +60,11 @@ const LOG_LINES = 50;
  *  cycle". Past this we fall back to outside evidence instead of showing a
  *  stopped relay's last good state as current. */
 const TELEMETRY_STALE_MS = 90_000;
+/** Kuinka paljon relayn oma aloitushetki saa olla työn aloitushetkeä aiempi
+ *  ennen kuin status tulkitaan eri ajoksi (#123:n siivouksen tuoreusvartija).
+ *  Relay käynnistyy ja kirjoittaa ensimmäisen statuksensa sekunteja ennen kuin
+ *  ohjaamo ehtii leimata työn käyntiin, joten pieni pelivara on normaalia. */
+const RUN_START_TOLERANCE_MS = 30_000;
 /** Grace before "ffmpeg is not attached" counts against the headline. The
  *  reader attaches a second or two after ffmpeg spawns, and a warning that
  *  fires on every single start is a warning nobody reads. */
@@ -98,6 +106,16 @@ export interface LiveAggregatorOptions {
    *  polleri pollaa omalla 30 s välillään kiintiön takia, ja tämä vain kysyy
    *  sen viimeisimmän tuloksen jokaisella tikillä. */
   getSourceIngest?: () => { ingest: SourceIngest | null; reason: string | null };
+  /** Hard stopin siivous (#123): lähetyksen lopetus YouTubessa. Injektoitava,
+   *  jotta testi ajaa laskevan reunan koskematta YouTube-API:in. */
+  transitionBroadcast?: (videoId: string) => Promise<TransitionResult>;
+  /** Relayn viimeisin snapshot laskevalla reunalla. Luetaan tiedostosta
+   *  uudestaan eikä muistista, koska relay kirjoittaa `endReason`in vasta
+   *  juuri ennen sammumistaan — muistissa oleva snapshot on yleensä sitä
+   *  vanhempi. */
+  readTelemetry?: (matchId: number) => Promise<RelayTelemetry | null>;
+  /** Saako lähdelähetykseen koskea. Oletus CONFIG.hardStopSource (false). */
+  hardStopSource?: boolean;
 }
 
 // ------------------------------------------------------------ empty defaults
@@ -562,7 +580,13 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
   // it needs Google auth, which is phase B — until then we can only report what
   // we configured and what ffmpeg blamed when it died.
   const targetBlamed = lastMatching(snap.log, PHRASE.targetBlamed);
-  if (!job) {
+  const targetError = errors.get("target");
+  if (targetError) {
+    // Hard stopin siivous epäonnistui (#123). Tämä on juuri se tilanne jossa
+    // kohde voi jäädä työntämään roskaa, joten se ei saa jäädä pelkkään
+    // journaliin — operaattorin on tiedettävä että lopetus on kesken.
+    rows.push(chainRow("target", "Kohde", "fail", targetError));
+  } else if (!job) {
     rows.push(chainRow("target", "Kohde", "idle", "ei aktiivista työtä"));
   } else if (!job.targetStreamKey) {
     rows.push(chainRow("target", "Kohde", "fail", "stream key puuttuu — ei mihin pushata"));
@@ -610,6 +634,9 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
   const readActiveJob = opts.getActiveJob ?? getActiveJob;
   const closeRunningJobFn = opts.closeRunningJob ?? closeRunningJob;
   const markRunStartedFn = opts.markRunStarted ?? markRunStarted;
+  const transitionBroadcastFn = opts.transitionBroadcast ?? ((videoId: string) => transitionBroadcast(videoId));
+  const readTelemetryFn = opts.readTelemetry ?? readRelayStatus;
+  const hardStopSourceEnabled = opts.hardStopSource ?? CONFIG.hardStopSource;
   const subscribers = new Set<(state: LiveState) => void>();
   const errors = new Map<SourceKey, string>();
   let stopped = false;
@@ -689,6 +716,109 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     }
   }
 
+  /** Miksi status-tiedoston `hard_stop` EI kelpaa tämän ajon syyksi, tai null
+   *  kun se kelpaa. Erillinen funktio, jotta jokainen hylkäysperuste on
+   *  testattavissa ja näkyy lokissa omalla nimellään. */
+  function hardStopSnapshotStaleReason(
+    snapshot: RelayTelemetry,
+    current: Job,
+    now: number
+  ): string | null {
+    if (snapshot.matchId !== current.matchId) {
+      return `status kertoo ottelusta ${snapshot.matchId}, työ on ottelusta ${current.matchId}`;
+    }
+    const writtenAt = Date.parse(snapshot.at);
+    if (!Number.isFinite(writtenAt)) return "statuksen aikaleima ei jäsenny";
+    if (now - writtenAt > TELEMETRY_STALE_MS) {
+      return `status on ${Math.round((now - writtenAt) / 1000)} s vanha`;
+    }
+    // Relayn oma aloitushetki ennen työn aloitushetkeä = eri ajo.
+    const jobStartedAt = current.startedAt ? Date.parse(current.startedAt) : null;
+    const runStartedAt = Date.parse(snapshot.startedAt);
+    if (jobStartedAt !== null && Number.isFinite(jobStartedAt) && Number.isFinite(runStartedAt)) {
+      if (runStartedAt < jobStartedAt - RUN_START_TOLERANCE_MS) {
+        return "status on työtä vanhemmasta ajosta";
+      }
+    }
+    return null;
+  }
+
+  /** Hard stopin siivous (#123). Ajetaan vain kun relayn oma telemetria kertoo
+   *  että se sammutti itsensä takarajan takia (`endReason === "hard_stop"`) —
+   *  siis ottelu oli päättynyt ja lähde oireili. Normaalissa lopetuksessa ei
+   *  tehdä mitään: kohdelähetyksen sulkee YouTuben `enableAutoStop`, ja
+   *  lähdettä ei kosketa lainkaan.
+   *
+   *  Lähteen sammutus on lisäksi lipun takana (CONTROL_HARD_STOP_SOURCE) —
+   *  lähde on toisen ihmisen lähetys.
+   *
+   *  Ei koskaan heitä: kaikki menee errors-Mappiin ja lokiin, jotta työn
+   *  sulkeminen ehtii tapahtua joka tapauksessa. */
+  async function runHardStopCleanup(current: Job, now: number): Promise<void> {
+    try {
+      // Vain oikeasti käynnissä ollut ajo. `arming` tarkoittaa että relay ei
+      // koskaan päässyt liikkeelle (esim. unit kaatui käynnistyksessä) — sen
+      // ajon hard stopia ei ole olemassa, ja levyllä oleva syy on silloin
+      // väistämättä EDELLISEN ajon.
+      if (current.status !== "live") return;
+      const snapshot = await readTelemetryFn(current.matchId);
+      if (snapshot?.endReason !== "hard_stop") {
+        return; // normaali lopetus (tai vanha deploy joka ei kerro syytä)
+      }
+      // Tuoreusvartija. Relay kirjoittaa statuksen kokonaan yli heti
+      // käynnistyessään, joten normaali uusi ajo nollaa vanhan syyn — mutta jos
+      // relay ei koskaan ehdi kirjoittaa (kaatuu ExecStartissa, config heittää),
+      // levylle jää edellisen ajon "hard_stop". Ilman tätä vartijaa ohjaamo
+      // sammuttaisi sen perusteella lähetykset, jotka ovat vasta alkamassa —
+      // pahimmillaan toisen ihmisen lähdelähetyksen. Vaaditaan siis että
+      // snapshot kuuluu TÄHÄN ajoon: oikea ottelu, tuore kirjoitus, ja relayn
+      // oma aloitushetki vähintään työn aloitushetkestä.
+      const staleReason = hardStopSnapshotStaleReason(snapshot, current, now);
+      if (staleReason) {
+        console.warn(
+          `[control] hard stop -siivous ohitettu: status-tiedoston syy ei kuulu tähän ajoon (${staleReason})`
+        );
+        return;
+      }
+      const sourceVideoId = parseYouTubeVideoId(current.sourceUrl);
+      const targets: Array<{ label: string; videoId: string | null; allowed: boolean; why: string }> = [
+        { label: "kohde", videoId: current.targetVideoId, allowed: true, why: "" },
+        {
+          label: "lähde",
+          videoId: sourceVideoId,
+          allowed: hardStopSourceEnabled,
+          why: "CONTROL_HARD_STOP_SOURCE ei ole päällä",
+        },
+      ];
+      for (const target of targets) {
+        if (!target.videoId) {
+          console.warn(`[control] hard stop -siivous: ${target.label}lähetyksen video id ei tiedossa, ohitetaan`);
+          continue;
+        }
+        if (!target.allowed) {
+          console.warn(
+            `[control] hard stop -siivous: ${target.label}lähetystä ${target.videoId} EI kosketa — ${target.why}`
+          );
+          continue;
+        }
+        try {
+          const result = await transitionBroadcastFn(target.videoId);
+          console.log(
+            `[control] hard stop -siivous: ${target.label} ${target.videoId} (${result.lifeCycleStatus ?? "?"}) — ${result.reason}`
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[control] hard stop -siivous: ${target.label} ${target.videoId} epäonnistui: ${msg}`);
+          errors.set("target", `hard stop -siivous (${target.label}) epäonnistui: ${msg}`);
+        }
+      }
+    } catch (err) {
+      // Telemetrian luku tai muu odottamaton: siivous jää tekemättä, työ
+      // suljetaan silti.
+      errors.set("target", `hard stop -siivous kaatui: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   /** The relay shuts ITSELF down when the source ends — we never cut it short
    *  (uptime first), so a broadcast routinely finishes with nobody calling
    *  /api/relay/stop. This poller is the only always-on observer of that
@@ -714,6 +844,12 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       }
       // Falling edge: the run is over.
       if (job?.status !== "arming" && job?.status !== "live") return;
+      // Hard stopin siivous ENNEN sulkemista: closeRunningJob nollaa aktiivisen
+      // työn, jolloin sekä targetVideoId että sourceUrl katoavat käsistä. Oma
+      // try/catch, koska siivous ei saa koskaan estää työn sulkemista — muuten
+      // yksi YouTube-virhe jättäisi työn "live"-tilaan ja lukitsisi seuraavan
+      // ottelun.
+      await runHardStopCleanup(job, Date.now());
       const closed = await closeRunningJobFn();
       if (closed) job = closed;
     } catch (err) {

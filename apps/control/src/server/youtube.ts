@@ -42,6 +42,10 @@ import {
 } from "./templates.js";
 
 const API_BASE = "https://www.googleapis.com/youtube/v3/";
+/** Kokonaisaikaraja yhdelle YouTube-kutsulle. Kaikki kutsujat ovat joko
+ *  operaattorin odottamia pyyntöjä tai aggregaattorin tikillä ajavia, eikä
+ *  kummassakaan ole varaa odottaa loputtomiin. */
+const YT_REQUEST_TIMEOUT_MS = 10_000;
 const UPLOAD_THUMBNAIL_URL = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set";
 
 /** Ainoa tiedosto, josta näkee mitä kanavalle on tämän sovelluksen kautta
@@ -98,6 +102,11 @@ async function ytRequest<T>(
       accept: "application/json",
     },
     body: body ? JSON.stringify(body) : undefined,
+    // Ilman aikarajaa yksi roikkuva kutsu jäädyttää kutsujan. Hard stopin
+    // siivous (#123) ajetaan aggregaattorin nopealla tikillä ennen työn
+    // sulkemista, joten roikkuva kutsu pysäyttäisi koko ohjaamon näkymän ja
+    // jättäisi työn "live"-tilaan lukitsemaan seuraavan ottelun (#101).
+    signal: AbortSignal.timeout(YT_REQUEST_TIMEOUT_MS),
   });
   // Kiintiö kuluu myös epäonnistuneesta kutsusta, joten kirjaus tehdään ennen
   // virheen heittoa.
@@ -483,6 +492,73 @@ export async function getStreamStatus(streamId: string): Promise<StreamStatus | 
     streamId,
     streamStatus: item.status?.streamStatus ?? null,
     healthStatus: item.status?.healthStatus?.status ?? null,
+  };
+}
+
+/** Lopetuksen tulos. Ei heitä "ei ollut liveä" -tapauksissa: kutsuja
+ *  (hard stopin siivous, live.ts) haluaa lokittaa mitä tehtiin ja miksi, eikä
+ *  siivouksen ohitus ole virhe. Aidot API-virheet heitetään yhä
+ *  YouTubeApiErrorina. */
+export interface TransitionResult {
+  videoId: string;
+  /** true = transitio tehtiin nyt. */
+  ok: boolean;
+  /** true = ei tehty mitään, koska ei ollut tarpeen tai mahdollista. */
+  skipped: boolean;
+  /** Ihmisluettava syy, aina täytetty — lokirivin sisältö. */
+  reason: string;
+  /** Tila ennen kutsua, jos lähetys löytyi kanavalta. */
+  lifeCycleStatus: string | null;
+}
+
+/** Lopettaa lähetyksen (`liveBroadcasts.transition` -> `complete`).
+ *
+ *  Idempotentti tarkoituksella: tila luetaan ensin, koska YouTube vastaa
+ *  virheellä jos lähetys ei ole transitoitavassa tilassa, ja siivouksen
+ *  toistuminen (tikki uudestaan, käsin ajettu lopetus) on normaalia.
+ *
+ *  Tyhjä id-haku ei ole virhe vaan tieto: video ei ole omalla kanavalla, joten
+ *  meillä ei ole oikeutta lopettaa sitä. Ainoat tilat joista transitio tehdään
+ *  ovat `live` ja `testing`. */
+export async function transitionBroadcast(
+  videoId: string,
+  broadcastStatus: "complete" = "complete"
+): Promise<TransitionResult> {
+  const found = await listBroadcasts({ id: videoId });
+  const broadcast = found[0];
+  if (!broadcast) {
+    return {
+      videoId,
+      ok: false,
+      skipped: true,
+      reason: "lähetys ei ole tämän kanavan omistama (id-haku palautti tyhjän) — ei oikeutta lopettaa",
+      lifeCycleStatus: null,
+    };
+  }
+  const state = broadcast.lifeCycleStatus;
+  if (state !== "live" && state !== "testing") {
+    return {
+      videoId,
+      ok: false,
+      skipped: true,
+      reason: `lähetys ei ole live (lifeCycleStatus=${state ?? "?"}) — ei lopetettavaa`,
+      lifeCycleStatus: state,
+    };
+  }
+  await ytRequest<LiveBroadcastResource>(
+    "POST",
+    "liveBroadcasts/transition",
+    { id: videoId, broadcastStatus, part: "id,status" },
+    null,
+    "update"
+  );
+  await logCreated({ event: "broadcast.transition", videoId, broadcastStatus, from: state });
+  return {
+    videoId,
+    ok: true,
+    skipped: false,
+    reason: `lopetettu (${state} -> ${broadcastStatus})`,
+    lifeCycleStatus: state,
   };
 }
 

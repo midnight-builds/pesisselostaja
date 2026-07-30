@@ -105,3 +105,15 @@ export interface LiveMatchSummary {
   startTime: string | null;
   seriesName?: string;
 }
+
+/** Miksi relayn lähdeajo päättyi. Tämä asuu coressa eikä relayssä, jotta
+ *  ohjaamo voi vartioida kattavuutta käännösaikana: ohjaamo peilaa relayn
+ *  telemetriaa käsin, ja juuri sellainen peilaus ajautui erilleen `ended`- ja
+ *  `no_signal`-lähdetiloissa (#117). Kun molemmat puolet lukevat TÄTÄ tyyppiä,
+ *  uusi arvo kaataa käännöksen molemmissa eikä putoa hiljaa defaulttiin.
+ *
+ *  - `ended`     — lähde päättyi hallitusti (kuvaaja lopetti).
+ *  - `exhausted` — luovutusikkuna umpeutui tuloksettomien yritysten jälkeen.
+ *  - `hard_stop` — takarajatarkastus sammutti ajon: ottelu päättynyt, ei uusia
+ *                  tapahtumia ja lähde oireili (#123). */
+export type SourceEndReason = "ended" | "exhausted" | "hard_stop";

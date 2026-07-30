@@ -2,6 +2,8 @@
  *  purpose: both sides import it, so a shape change breaks the typecheck
  *  instead of the phone at 8:30. */
 
+import type { SourceEndReason } from "@pesisselostaja/core";
+
 export type Health = "ok" | "warn" | "fail" | "idle";
 
 /** One line of the ffmpeg/relay chain, rendered as a dot in the status grid. */
@@ -108,6 +110,18 @@ export interface RelayTelemetry {
     elevenLabsCharsUsed: number;
   };
   lastProblem: { at: string; level: LogLine["level"]; code: string | null; msg: string } | null;
+  /** Miksi relay lopetti. Toisin kuin `source.state`, tämä EI ole käsin
+   *  peilattu unioni vaan sama `SourceEndReason` jota relay itse käyttää,
+   *  luettuna coresta — jolloin relayn uusi lopetussyy kaataa ohjaamon
+   *  käännöksen (`END_REASON_SET` telemetry.ts:ssä) sen sijaan että putoaisi
+   *  hiljaa pois. Käsin peilaaminen tuotti täsmälleen sen vian `ended`ille
+   *  (#103) ja `no_signal`ille (#104), ks. #117.
+   *
+   *  `undefined`/puuttuva = relay ei kertonut (vanha deploy, tai ajossa yhä).
+   *  `"hard_stop"` on ainoa arvo, joka oikeuttaa hard stopin siivouksen
+   *  (#123) — normaalissa lopetuksessa YouTuben `enableAutoStop` hoitaa
+   *  kohteen, eikä lähteeseen kosketa. */
+  endReason?: SourceEndReason | null;
 }
 
 export interface LogLine {

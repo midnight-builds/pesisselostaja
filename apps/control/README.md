@@ -30,6 +30,25 @@ status` kertoo (osoite on käyttöönottokohtainen).
 HTTPS ei ole koristetta: ilman sitä iOS ei anna asentaa sovellusta
 kotivalikkoon eikä salli push-ilmoituksia.
 
+### Ympäristömuuttujat
+
+Polut ja unit-nimi tulevat `src/server/config.ts`:stä ja ovat kaikki
+ohitettavissa (`CONTROL_PORT`, `CONTROL_HOST`, `CONTROL_RELAY_ENV`,
+`CONTROL_RELAY_RUN_DIR`, `CONTROL_RELAY_UNIT`, `CONTROL_DEPLOY_DIR`,
+`CONTROL_STATE_DIR`). Näiden lisäksi:
+
+| Muuttuja | Oletus | Mitä tekee |
+|---|---|---|
+| `CONTROL_HARD_STOP_SOURCE` | `false` | Saako hard stopin siivous (#123) lopettaa myös **lähdelähetyksen**. Kohdelähetys lopetetaan hard stopissa aina; lähde on lipun takana, koska se on toisen ihmisen lähetys. Vain kirjaimellinen `"true"` on päällä. |
+
+**Hard stopin siivous** laukeaa vain kun relay sammutti itsensä takarajan takia
+(telemetrian `endReason === "hard_stop"`, ks. issue #123): ottelu oli päättynyt
+tulospalvelun mukaan ja lähde oireili. Normaalissa lopetuksessa ohjaamo ei
+transitoi mitään — kohteen sulkee YouTuben `enableAutoStop`, eikä lähteeseen
+kosketa. Siivous lokittaa mitkä lähetykset olivat live ja mitä tehtiin tai
+jätettiin tekemättä ja miksi; sen epäonnistuminen ei koskaan estä työn
+sulkemista.
+
 ## Testit
 
 ```bash

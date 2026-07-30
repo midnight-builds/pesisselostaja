@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync, appendFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { NarrationTimeline, parseRelayStatus, SOURCE_STATES } from "../src/server/telemetry.js";
+import { END_REASONS, NarrationTimeline, parseRelayStatus, SOURCE_STATES } from "../src/server/telemetry.js";
 let dir: string;
 let path: string;
 
@@ -210,6 +210,9 @@ describe("parseRelayStatus", () => {
     narration: { detected: 90, spoken: 88, muted: 1, queued: 1 },
     tts: { engine: "piper", elevenLabsCharsUsed: 0 },
     lastProblem: null,
+    // #123: relay kertoo miksi se lopetti. Ajossa oleva relay ei ole
+    // lopettanut, joten null on normaali arvo.
+    endReason: null,
   };
 
   it("reads a full snapshot back verbatim", () => {
@@ -243,5 +246,23 @@ describe("parseRelayStatus", () => {
   it.each(SOURCE_STATES)("preserves source state %j verbatim", (state) => {
     const status = parseRelayStatus(JSON.stringify({ ...full, source: { state } }));
     expect(status?.source.state).toBe(state);
+  });
+
+  // Sama sopimus endReasonille (#123). Kattavuuden vartioi END_REASON_SET
+  // käännösaikana; tämä varmistaa että jokainen arvo myös läpäisee jäsentimen.
+  it.each(END_REASONS)("preserves end reason %j verbatim", (reason) => {
+    const status = parseRelayStatus(JSON.stringify({ ...full, endReason: reason }));
+    expect(status?.endReason).toBe(reason);
+  });
+
+  it("an unknown end reason degrades to null instead of taking down the snapshot", () => {
+    const status = parseRelayStatus(JSON.stringify({ ...full, endReason: "tuntematon_syy" }));
+    expect(status).not.toBeNull();
+    expect(status?.endReason).toBeNull();
+  });
+
+  it("a missing end reason is null — an old deploy simply does not report it", () => {
+    const status = parseRelayStatus(JSON.stringify({ at: full.at }));
+    expect(status?.endReason).toBeNull();
   });
 });

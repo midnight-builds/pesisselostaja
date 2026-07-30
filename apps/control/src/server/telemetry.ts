@@ -82,6 +82,29 @@ function sourceState(value: unknown): RelayTelemetry["source"]["state"] {
     : "unknown";
 }
 
+/** Sama vartiointi kuin SOURCE_STATE_SETillä, `RelayTelemetry["endReason"]`ille:
+ *  relayn `SourceEndReason` (apps/broadcast/src/ffmpegMixer.ts) on peilattu
+ *  käsin shared/types.ts:ään, ja `Record` pitää listat samoina käännösaikana.
+ *  `null` on mukana koska kenttä on nullable; se ei ole relayn arvo eikä siksi
+ *  koskaan jäsenny tiedostosta. */
+const END_REASON_SET: Record<NonNullable<RelayTelemetry["endReason"]>, true> = {
+  ended: true,
+  exhausted: true,
+  hard_stop: true,
+};
+
+export const END_REASONS = Object.keys(END_REASON_SET) as NonNullable<
+  RelayTelemetry["endReason"]
+>[];
+
+/** Tuntematon arvo (uudempi relay-deploy kuin tämä ohjaamo) → null, ei heittoa:
+ *  lopetussyy on lisätieto, eikä sen takia saa menettää koko snapshottia. */
+function endReason(value: unknown): RelayTelemetry["endReason"] {
+  return (END_REASONS as readonly unknown[]).includes(value)
+    ? (value as NonNullable<RelayTelemetry["endReason"]>)
+    : null;
+}
+
 function level(value: unknown): "debug" | "info" | "warn" | "error" {
   return value === "debug" || value === "info" || value === "warn" || value === "error"
     ? value
@@ -113,6 +136,7 @@ export function parseRelayStatus(text: string): RelayTelemetry | null {
     pendingClips: num(raw.pendingClips),
     respawns: num(raw.respawns),
     source: { state: sourceState(source.state), detail: str(source.detail) },
+    endReason: endReason(raw.endReason),
     match: {
       finished: bool(match.finished),
       eventCount: num(match.eventCount),
