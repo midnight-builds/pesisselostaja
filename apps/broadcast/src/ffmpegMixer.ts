@@ -755,7 +755,6 @@ export class FfmpegMixer {
     } else {
       this.lastShortCleanRunMs = null;
     }
-    this.maybeHardStop(finished, pairSymptom);
     logWarn(
       "ffmpeg.unproductive",
       `ffmpeg kuoli alle ${Math.round(this.minProductiveRunMs / 1000)} s käynnistyksestä — ` +
