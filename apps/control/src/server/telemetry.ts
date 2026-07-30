@@ -59,27 +59,22 @@ function bool(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-/** Jokainen `RelayTelemetry["source"]["state"]`-unionin arvo. Kattavuus on
- *  vartioitu molempiin suuntiin käännösaikana: `satisfies` kaataa käännöksen
- *  jos listalla on unioniin kuulumaton arvo, ja alla oleva `AssertNever` jos
- *  unionin arvo puuttuu listalta (niin kävi `ended`ille ja `no_signal`ille,
- *  #117 — pelkkä ajonaikainen testi ei olisi huomannut puutosta). */
-export const SOURCE_STATES = [
-  "live",
-  "scheduled",
-  "resolving",
-  "failed",
-  "ended",
-  "no_signal",
-  "unknown",
-] as const satisfies readonly RelayTelemetry["source"]["state"][];
+/** Jokainen `RelayTelemetry["source"]["state"]`-unionin arvo. `Record`-tyyppi
+ *  vartioi kattavuuden molempiin suuntiin käännösaikana: unioniin lisätty tila
+ *  joka puuttuu tästä kaataa käännöksen, samoin unioniin kuulumaton avain.
+ *  Näin uusi lähdetila ei voi enää pudota hiljaa "unknown"iin, kuten kävi
+ *  `ended`ille ja `no_signal`ille (#117). */
+const SOURCE_STATE_SET: Record<RelayTelemetry["source"]["state"], true> = {
+  live: true,
+  scheduled: true,
+  resolving: true,
+  failed: true,
+  ended: true,
+  no_signal: true,
+  unknown: true,
+};
 
-// Kaatuu käännöksessä, jos unioniin lisätty tila puuttuu SOURCE_STATES-listalta:
-// puuttuva arvo tekee Exclude-tyypistä ei-tyhjän, eikä se enää sovi `never[]`iin.
-export const SOURCE_STATES_COVER_UNION: Exclude<
-  RelayTelemetry["source"]["state"],
-  (typeof SOURCE_STATES)[number]
->[] = [];
+export const SOURCE_STATES = Object.keys(SOURCE_STATE_SET) as RelayTelemetry["source"]["state"][];
 
 function sourceState(value: unknown): RelayTelemetry["source"]["state"] {
   return (SOURCE_STATES as readonly unknown[]).includes(value)
