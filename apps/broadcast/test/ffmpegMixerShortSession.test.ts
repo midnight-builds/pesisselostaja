@@ -1,30 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { spawn, type ChildProcess } from "node:child_process";
 import { unlink } from "node:fs/promises";
 import { FfmpegMixer, SourceExhaustedError } from "../src/ffmpegMixer.js";
-
-/** Stand-in for ffmpeg (see docs/adr/0002-ffmpeg-mixer-process-seam.md): opens
- *  the narration FIFO as a reader — which is what completes FfmpegMixer's
- *  handshake and makes the attempt count as "started" — stays up for
- *  `lifetimeMs`, then exits with code 0. That is exactly the shape of the
- *  issue #45 incident: the spawn succeeds, ffmpeg dies cleanly seconds later. */
-function fakeFfmpeg(fifoPath: string, lifetimeMs: number, stderrLine?: string): ChildProcess {
-  // Dies on SIGTERM too (that is how a scheduled URL refresh ends a session),
-  // taking the FIFO reader with it so no stray `cat` survives the test.
-  // `stderrLine` lets a test reproduce what ffmpeg prints when the TARGET
-  // refuses the push (issue #51); stderr is piped only then, so the other
-  // tests stay quiet.
-  const emit = stderrLine ? `printf '%s\\n' "$2" >&2; ` : "";
-  const script =
-    emit +
-    `cat "$1" > /dev/null & reader=$!; ` +
-    `trap 'kill $reader 2>/dev/null; exit 0' TERM; ` +
-    `sleep ${lifetimeMs / 1000} & sleeper=$!; wait $sleeper; ` +
-    `kill $reader 2>/dev/null; exit 0`;
-  return spawn("sh", ["-c", script, "sh", fifoPath, stderrLine ?? ""], {
-    stdio: ["ignore", "ignore", stderrLine ? "pipe" : "ignore"],
-  });
-}
+import { fakeFfmpeg } from "./fakeFfmpeg.js";
 
 interface SessionMixerOpts {
   fifoPath: string;
@@ -35,6 +12,9 @@ interface SessionMixerOpts {
   maxFailureWindowMs?: number;
   urlRefreshMs?: number;
   stderrLine?: string;
+  /** Exit code of every fake session; 0 (clean EOF) unless a test says
+   *  otherwise. See fakeFfmpeg. */
+  exitCode?: number;
   sessions: number[];
 }
 
@@ -57,7 +37,7 @@ function sessionMixer(o: SessionMixerOpts): FfmpegMixer {
     spawnMixerProcess: () => {
       const lifetime = o.lifetimesMs[Math.min(index, o.lifetimesMs.length - 1)]!;
       index++;
-      return fakeFfmpeg(o.fifoPath, lifetime, o.stderrLine);
+      return fakeFfmpeg(o.fifoPath, lifetime, o.stderrLine, o.exitCode ?? 0);
     },
     onSessionEnd: (_at, ranMs) => o.sessions.push(ranMs),
   });
@@ -177,6 +157,9 @@ describe("FfmpegMixer give-up window when ffmpeg starts but dies immediately (is
         minProductiveRunMs: 10_000,
         finishedFailureWindowMs: 50,
         stderrLine: "[rtmp @ 0x55f1a0] Server error: Authentication Failed.",
+        // Non-zero, because that is what a refused push does. Held at 0 this
+        // test would now (correctly, #122) get no verdict at all.
+        exitCode: 1,
         sessions: [],
       }).start().then(() => null, (e) => e);
 

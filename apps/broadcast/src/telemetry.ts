@@ -59,7 +59,21 @@ export interface RelayStatus {
      *  Oma arvonsa eikä `failed`in variantti, jotta ohjaamo voi näyttää
      *  operaattorille sujuvalta näyttävän lähetyksen TAKANA olevan ongelman —
      *  `detail` kertoo yhä miksi lähde puuttuu. */
-    state: "live" | "scheduled" | "resolving" | "failed" | "ended" | "unknown" | "no_signal";
+    /** `reconnecting` = ffmpeg ei ole juuri nyt käynnissä: edellinen sessio
+     *  päättyi ja valvoja odottaa seuraavaa yritystä (#122). Ennen tätä sama
+     *  hetki raportoitiin `live`nä detailillä "ffmpeg käynnissä", eli
+     *  telemetria väitti ffmpegin käyvän silloin kun se oli juuri kuollut
+     *  kolmatta kertaa. Erillinen arvo eikä `failed`, koska tavallinen
+     *  osoitteenkierrätyksen respawn kulkee myös tästä eikä ole vika. */
+    state:
+      | "live"
+      | "scheduled"
+      | "resolving"
+      | "failed"
+      | "ended"
+      | "unknown"
+      | "no_signal"
+      | "reconnecting";
     detail: string | null;
   };
   match: {

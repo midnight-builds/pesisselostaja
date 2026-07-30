@@ -91,7 +91,15 @@ export interface RelayTelemetry {
      *  tilarivi sanoo "relay ei kerro lähteen tilaa" juuri silloin kun relay
      *  kertoo sen tarkasti. Niin kävi `ended`ille (#103) ja `no_signal`ille
      *  (#104), jotka lisättiin relaylle tämän tyypin jo olemassa ollessa. */
-    state: "live" | "scheduled" | "resolving" | "failed" | "ended" | "unknown" | "no_signal";
+    state:
+      | "live"
+      | "scheduled"
+      | "resolving"
+      | "failed"
+      | "ended"
+      | "unknown"
+      | "no_signal"
+      | "reconnecting";
     detail: string | null;
   };
   match: {

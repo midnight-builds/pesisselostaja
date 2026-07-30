@@ -502,7 +502,21 @@ export class FfmpegMixer {
    *  picture is stuttering", which is otherwise only visible by reading the
    *  log. */
   private respawns = 0;
-  private sourceStateValue: "live" | "scheduled" | "resolving" | "failed" | "ended" | "unknown" = "unknown";
+  /** True once ffmpeg has been spawned at least once this run, so the NEXT
+   *  spawn is by definition a respawn.
+   *
+   *  #122: this used to be inferred from `sessionIndex > 0 || respawns > 0 ||
+   *  sourceStateValue === "live"`, and every one of those three inferences
+   *  failed in production at the same time. `sessionIndex` only increments when
+   *  RELAY_RECORD_FILE is set (it indexes recordings), which it is not on the
+   *  relay; `respawns > 0` can only hold once the counter has already moved;
+   *  and `sourceStateValue` is overwritten with "resolving" by resolveSource()
+   *  on the way into every spawn. So the counter sat at 0 for the whole run
+   *  while the log showed three respawns (match 145900, 30.7.2026) — and it
+   *  read correctly in the tests only because the test seam returned before
+   *  the "resolving" assignment. A plain flag cannot drift like that. */
+  private everSpawned = false;
+  private sourceStateValue: "live" | "scheduled" | "resolving" | "failed" | "ended" | "unknown" | "reconnecting" = "unknown";
   private sourceDetailValue: string | null = null;
   /** True only while a katve (no-signal slate) ffmpeg session is pushing.
    *  Kept separate from sourceStateValue so telemetry can show the katve
@@ -568,7 +582,15 @@ export class FfmpegMixer {
    *  korvaa sourceDetailia, joka kertoo yhä miksi lähde puuttuu. `ended` =
    *  lähde on päätetty hallitusti (#103), ja se voittaa katveen: päättyneen
    *  lähetyksen päälle ei jäädä työntämään väripalkkeja. */
-  get sourceState(): "live" | "scheduled" | "resolving" | "failed" | "ended" | "unknown" | "no_signal" {
+  get sourceState():
+    | "live"
+    | "scheduled"
+    | "resolving"
+    | "failed"
+    | "ended"
+    | "unknown"
+    | "no_signal"
+    | "reconnecting" {
     return this.slateActive ? "no_signal" : this.sourceStateValue;
   }
 
@@ -775,10 +797,15 @@ export class FfmpegMixer {
     // same short sessions as a dead phone — and since the give-up window now
     // counts those, the relay would shut down blaming the source. The verdict
     // itself is unchanged; only the wording learns to name the other suspect.
-    const hint = describeFailureSide(session.failureSide, session.weakTarget);
+    const hint = describeFailureSide(session.failureSide, session.weakTarget, session.exitCode);
     if (hint) logWarn("ffmpeg.failure_side", hint);
+    // A clean exit is never the target's doing (#122): describeFailureSide has
+    // already refused to name a side, and the give-up message must not go on
+    // naming one either — this sentence is what the operator reads when the
+    // relay finally shuts down, and it sent them to the stream key twice on
+    // 30.7.2026 while the phone was the thing that had stopped.
     const sideNote =
-      session.failureSide === "target"
+      session.exitCode !== 0 && session.failureSide === "target"
         ? " (ffmpegin virheet viittasivat KOHTEESEEN, ei lähteeseen — tarkista stream key)"
         : "";
     // Hard stop (#123) is checked before the give-up window: with the
@@ -890,10 +917,16 @@ export class FfmpegMixer {
   private async resolveSource(): Promise<string> {
     this.probingSource = true;
     this.refreshSlateText();
+    // Before the test seam, not after (#122): the seam used to return while
+    // `sourceStateValue` still said whatever the previous session left behind,
+    // so the tests ran a state machine production never sees. That is why the
+    // respawn counter's old inference read correctly under test and never
+    // incremented on the relay. The seam replaces yt-dlp, not the bookkeeping
+    // around it.
+    this.sourceStateValue = "resolving";
     try {
       if (this.opts.resolveTestSource) return await this.opts.resolveTestSource();
       logInfo("source.resolving", "Haetaan lähdeosoite yt-dlp:llä…");
-      this.sourceStateValue = "resolving";
       return (await resolveSourceUrl(this.opts.youtubeUrl)).url;
     } finally {
       this.probingSource = false;
@@ -909,7 +942,8 @@ export class FfmpegMixer {
     // blocks until ffmpeg attaches as a reader) — see narrationFifo.ts.
     await this.fifo.prepare();
 
-    if (this.sessionIndex > 0 || this.respawns > 0 || this.sourceStateValue === "live") this.respawns++;
+    if (this.everSpawned) this.respawns++;
+    this.everSpawned = true;
     this.sourceStateValue = "live";
     this.sourceDetailValue = "ffmpeg käynnissä";
     logInfo("ffmpeg.starting", "Käynnistetään ffmpeg…");
@@ -992,6 +1026,16 @@ export class FfmpegMixer {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     const ranMs = monoNow() - startedAt;
     const detail = result.error ? result.error.message : `code=${result.code}, signal=${result.signal}`;
+    // ffmpeg is gone: say so (#122). Until this, the snapshot kept claiming
+    // `live` / "ffmpeg käynnissä" for the whole backoff — so the operator's
+    // status row stayed green through three respawns of a dead tail, and the
+    // one field that could have contradicted it (readerAttached, already false)
+    // sat next to it in the same snapshot. The next spawnOnce overwrites this
+    // with `live` again, so a healthy respawn shows it for at most one poll.
+    this.sourceStateValue = "reconnecting";
+    this.sourceDetailValue =
+      `ffmpeg ei ole käynnissä — edellinen sessio päättyi (${detail}) ` +
+      `${Math.round(ranMs / 1000)} s jälkeen, odotetaan seuraavaa yritystä`;
     logInfo("ffmpeg.exit", `ffmpeg päättyi (${detail}), ajoaika ${Math.round(ranMs / 1000)}s`);
     this.opts.onSessionEnd?.(Date.now(), ranMs);
     const failureSide = classifyFfmpegFailure(stderrTail.text());

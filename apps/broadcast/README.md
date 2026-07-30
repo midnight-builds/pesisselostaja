@@ -230,6 +230,21 @@ that window is heard by nobody. `narration.muted` counts exactly those clips.
 That is not hypothetical — see the poll bug described under "Starting before
 the source goes live".
 
+Two fields are only as useful as they are honest, and issue #122 found both
+lying at once in match 145900:
+
+- **`respawns`** is the clearest single number for "the picture is stuttering",
+  and it read `0` through three logged respawns. It was inferred from state
+  that is unavailable in the production configuration (the session index only
+  moves when `RELAY_RECORD_FILE` is set); it is now a plain flag set on the
+  first spawn.
+- **`source.state`** gained `reconnecting`: ffmpeg is not running right now and
+  the supervisor is waiting to try again. Before this the snapshot kept saying
+  `live` / "ffmpeg käynnissä" for the whole backoff — contradicting the
+  `readerAttached: false` sitting next to it in the same file. An ordinary URL
+  rotation passes through `reconnecting` too, for a poll at most; the control
+  app renders it yellow, because at that instant nothing is reaching the target.
+
 Both files are covered by the `run/` retention sweep, and the running match's
 own files are never swept regardless of age.
 
@@ -299,12 +314,22 @@ one extra line naming the suspect, and a target verdict is carried into the
 shutdown message.
 
 It only claims a side when **exactly one** side produced connection-level
-errors. Two deliberate silences:
+errors. Three deliberate silences:
 
 - `av_interleaved_write_frame(): Broken pipe` and friends are **not** a target
   verdict on their own — ffmpeg says that whenever the output goes away,
   including when it goes away because the input ended. Counting it would label
-  every dead phone a stream-key problem.
+  every dead phone a stream-key problem. Since issue #122 the FLV muxer's
+  `Failed to update header with correct duration/filesize` is in that same
+  category: it is printed while the *output is closed*, which happens on every
+  teardown including the ordinary one where the input ended first.
+- **A `code=0` exit names nobody at all** (issue #122). Exiting 0 means ffmpeg
+  read its input to EOF; a target that refuses or drops the push makes it exit
+  non-zero. So on a clean exit the tail can only hold teardown noise, and the
+  log says "syöte loppui" instead of pointing anywhere. This was not a
+  hypothetical: on 30.7.2026 two matches (145900 and 145905) ended with a
+  `code=0` exit whose only stderr was the FLV line, and both told the operator
+  to go check a stream key that was fine while the phone had stopped sending.
 - If both sides errored, cause and consequence are indistinguishable, so it
   says so instead of guessing.
 
