@@ -104,6 +104,8 @@ export interface StatusProbe {
   lastEventAt: string | null;
   ttsEngine: string;
   elevenLabsCharsUsed: number;
+  /** null while running; set once the run's end reason is known (#123). */
+  endReason?: SourceEndReason | null;
 }
 
 export interface TelemetryOptions {
