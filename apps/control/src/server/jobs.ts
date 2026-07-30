@@ -96,7 +96,18 @@ function applyPatch(
       nextJobs[clashingIdx] = closeJob(nextJobs[clashingIdx], new Date().toISOString());
     }
   }
-  const job: Job = { ...current, ...patch };
+  // armedAt leimataan täällä eikä activateJobissa, koska slotin voi ottaa myös
+  // suoralla PATCHilla (`{"status":"arming"}`) — se on operaattorin hätäkeino,
+  // ja juuri sillä korjattiin 30.7. väärä sidonta käsin. Ilman leimaa
+  // reconcileOpenJobs putoaisi createdAt:iin, joka on aamulla luodulla työllä
+  // jo tunteja vanha, ja sovittelu perisi työn heti (#118). */
+  // Leima uusitaan aina kun patch nimenomaisesti asettaa "arming"in, myös
+  // uudelleenaktivoinnissa: operaattori kosketti työtä, joten armonaika alkaa
+  // alusta. Ulkopuolelta annettua armedAt:ia ei kelpuuteta — PatchJobRequest ei
+  // sisällä sitä, ja käsin kirjoitettu runko tekisi työstä joko ikuisen tai
+  // heti vanhentuneen.
+  const armedAt = patch.status === "arming" ? new Date().toISOString() : current.armedAt;
+  const job: Job = { ...current, ...patch, armedAt };
   nextJobs = nextJobs.slice();
   nextJobs[idx] = job;
   return { jobs: nextJobs, job };
@@ -146,6 +157,7 @@ export async function createJob(req: CreateJobRequest): Promise<Job> {
     targetStreamKey: req.targetStreamKey ?? null,
     targetRtmpUrl: req.targetRtmpUrl ?? DEFAULT_RTMP_URL,
     targetVideoId: req.targetVideoId ?? null,
+    armedAt: null,
     startedAt: null,
     endedAt: null,
     note: req.note ?? null,
@@ -164,8 +176,16 @@ export async function patchJob(id: string, patch: PatchJobRequest): Promise<Job>
  *
  *  `force` = the operator answered "lopeta edellinen ja aktivoi tämä". */
 export async function activateJob(id: string, opts: { force?: boolean } = {}): Promise<Job> {
+  // armedAt: ks. applyPatch — leima tulee sieltä, jotta myös suora PATCH saa sen.
   return updateJob(id, { status: "arming" }, opts);
 }
+
+/** How long a job may hold the slot in "arming" with no relay running before
+ *  the reconciler treats it as abandoned. Generous on purpose: arming early and
+ *  waiting for the camera operator is normal, and cancelling a job somebody is
+ *  about to start is worse than leaving a dead one an hour longer. The case
+ *  this exists for was a job left arming OVERNIGHT (#118). */
+export const ARMING_STALE_MS = 60 * 60_000;
 
 /** Stamps the armed job as actually running, and returns it — or null if there
  *  was nothing waiting to start.
@@ -176,18 +196,26 @@ export async function activateJob(id: string, opts: { force?: boolean } = {}): P
  *  and the run had no start time at all in the post-match report. The observer
  *  that watches the unit does this instead, so every route is covered by one
  *  rule. */
-export async function markRunStarted(): Promise<Job | null> {
+export async function markRunStarted(matchId: number): Promise<Job | null> {
   let started: Job | null = null;
   await store.update((jobs) => {
-    const idx = jobs.findIndex((j) => j.status === "arming");
+    const idx = jobs.findIndex((j) => j.matchId === matchId && isBlocking(j.status));
     if (idx === -1) return jobs;
+    const current = jobs[idx];
+    // Idempotent: the scheduler stamps the job it just started, and the poller
+    // stamps whatever the relay turns out to be running. Both paths run for a
+    // scheduler start, and the second one must not write.
+    if (current.status === "live" && current.startedAt) {
+      started = current;
+      return jobs;
+    }
     const next = jobs.slice();
     next[idx] = {
-      ...jobs[idx],
+      ...current,
       status: "live",
       // Kept if already set: a relay that flaps must not keep resetting the
       // run's start time.
-      startedAt: jobs[idx].startedAt ?? new Date().toISOString(),
+      startedAt: current.startedAt ?? new Date().toISOString(),
     };
     started = next[idx];
     return next;
@@ -195,22 +223,92 @@ export async function markRunStarted(): Promise<Job | null> {
   return started;
 }
 
-/** Closes whichever job holds the broadcast slot, and returns it — or null if
+/** Closes the job that holds the broadcast slot, and returns it — or null if
  *  the slot was already free.
  *
  *  Called when the relay is no longer running: an operator's stop, or the
  *  relay's own shutdown once the source ended. Without this the job stays
  *  "arming" forever and the NEXT match cannot be activated at all, which is
- *  exactly the moment nobody has time to debug it (#101). */
-export async function closeRunningJob(): Promise<Job | null> {
+ *  exactly the moment nobody has time to debug it (#101).
+ *
+ *  `jobId` names the job the caller has been tracking, so a poller that watched
+ *  one run cannot close a different one that took the slot meanwhile. `null` =
+ *  "whichever holds it", which is what an operator's explicit stop means: they
+ *  are freeing the slot, not ending a particular run. */
+export async function closeRunningJob(jobId: string | null = null): Promise<Job | null> {
   let closed: Job | null = null;
   await store.update((jobs) => {
-    const idx = jobs.findIndex((j) => isBlocking(j.status));
+    const idx = jobs.findIndex((j) => isBlocking(j.status) && (jobId === null || j.id === jobId));
     if (idx === -1) return jobs;
     const next = jobs.slice();
     next[idx] = closeJob(jobs[idx], new Date().toISOString());
     closed = next[idx];
     return next;
+  });
+  return closed;
+}
+
+/** Closes every job that holds the broadcast slot without being the run that is
+ *  actually happening, and returns what it closed.
+ *
+ *  This is the cure for the state the falling edge can never reach. The edge
+ *  only fires if the control app was watching when the relay went down; a job
+ *  left open across a control-app restart is invisible to it forever, and on
+ *  30.7.2026 exactly that job — armed the previous evening — swallowed the next
+ *  morning's run (#118) and blocked the match after it (#101).
+ *
+ *  Evidence, not guesswork:
+ *  - `runningMatchId` set = the relay demonstrably runs that match, so any OTHER
+ *    blocking job is stale no matter how young it is: it cannot start, the slot
+ *    is taken.
+ *  - `runningMatchId` null = nothing is running. A "live" job is then over by
+ *    definition. An "arming" one is only abandoned once ARMING_STALE_MS has
+ *    passed — before that it is a job somebody is about to start by hand.
+ *
+ *  The caller owns the "is the relay really down" judgement; passing null while
+ *  the relay is merely restarting would close a running broadcast's job. */
+export async function reconcileOpenJobs(
+  runningMatchId: number | null,
+  now: number = Date.now()
+): Promise<Job[]> {
+  const isStale = (j: Job): boolean => {
+    if (!isBlocking(j.status)) return false;
+    // Ajossa oleva ottelu omistaa slotin oikeutetusti.
+    if (runningMatchId !== null && j.matchId === runningMatchId) return false;
+    // "live" ilman sitä ajoa: ajo on määritelmän mukaan ohi, koska tähän
+    // päästään vain kun relay on alhaalla settle-ikkunan yli tai ajaa jotain
+    // muuta.
+    if (j.status === "live") return true;
+    // "arming" saa aina armonajan, myös silloin kun relay ajaa jotain muuta.
+    // Muuten seuraavaa ottelua valmisteleva työ peruuntuisi 5 s välein sinä
+    // aikana kun edellinen ottelu on vielä ajossa ilman omaa työtä — ja
+    // työn perumisen sijaan oikea vastaus on ristiriitavaroitus, jonka
+    // sidonta jo nostaa. armedAt puuttuu ennen #118:aa kirjoitetuilta
+    // töiltä; createdAt on ainoa muu aikaleima, ja sillä työllä jolta tämä
+    // vika löytyi se sanoo "eilen" — mikä on oikea vastaus.
+    const armed = Date.parse(j.armedAt ?? j.createdAt);
+    return !Number.isFinite(armed) || now - armed >= ARMING_STALE_MS;
+  };
+
+  // Read first so the common case (nothing to do, every tick) writes nothing.
+  // The reducer re-checks, so a job that changes in between is still judged on
+  // its current state.
+  const current = await store.read();
+  if (!current.some(isStale)) return [];
+
+  const closed: Job[] = [];
+  await store.update((jobs) => {
+    const at = new Date(now).toISOString();
+    closed.length = 0;
+    let changed = false;
+    const next = jobs.map((j) => {
+      if (!isStale(j)) return j;
+      changed = true;
+      const done = closeJob(j, at);
+      closed.push(done);
+      return done;
+    });
+    return changed ? next : jobs;
   });
   return closed;
 }

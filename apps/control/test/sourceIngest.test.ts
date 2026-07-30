@@ -43,6 +43,7 @@ function job(overrides: Partial<Job> = {}): Job {
     targetStreamKey: "avain",
     targetRtmpUrl: "rtmp://example.invalid/live2",
     targetVideoId: TARGET_ID,
+    armedAt: null,
     startedAt: null,
     endedAt: null,
     note: null,

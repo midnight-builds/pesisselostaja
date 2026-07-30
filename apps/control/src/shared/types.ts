@@ -256,6 +256,11 @@ export interface Job {
   targetStreamKey: string | null;
   targetRtmpUrl: string;
   targetVideoId: string | null;
+  /** Set when the job took the broadcast slot ("arming"). Distinct from
+   *  createdAt because a job is routinely created hours before it is armed, and
+   *  the reconciler has to tell "armed a minute ago, relay about to start" from
+   *  "armed yesterday, nobody ever started it" (#118). */
+  armedAt: string | null;
   /** Set when the relay ran, for the post-run report. */
   startedAt: string | null;
   endedAt: string | null;

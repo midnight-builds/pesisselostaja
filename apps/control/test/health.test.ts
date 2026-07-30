@@ -76,6 +76,7 @@ function baseJob(overrides: Partial<Job> = {}): Job {
     targetStreamKey: "key",
     targetRtmpUrl: "rtmp://a.rtmp.youtube.com/live2",
     targetVideoId: null,
+    armedAt: null,
     startedAt: null,
     endedAt: null,
     note: null,
@@ -472,5 +473,66 @@ describe("buildChain: lähde-rivi ja YouTube-havainto", () => {
   it("ilman työtä pollerin syytä ei toisteta riville", () => {
     const row = sourceRow({ job: null, sourceIngest: null, sourceIngestReason: "ei aktiivista työtä" });
     expect(row.detail).toBe("ei aktiivista työtä");
+  });
+});
+
+/** #118: the run was bound to the previous evening's job, so every row on the
+ *  screen described match 145895 while the relay narrated 145900. Nothing said
+ *  so — and the operator's knobs were being written to a control file the
+ *  running relay never reads. "Ei tietoa" beats "toisen ottelun tieto". */
+describe("työ ja ajossa oleva ottelu ovat eri", () => {
+  it("nostaa ristiriidan otsikkoon ja kertoo kumpi on kumpi", () => {
+    const { health, headline } = deriveHealth(
+      snapshot({ job: baseJob({ matchId: 145895, status: "live" }), runningMatchId: 145900 })
+    );
+    expect(health).toBe("fail");
+    expect(headline).toContain("145900");
+    expect(headline).toContain("145895");
+  });
+
+  it("merkitsee Relay-rivin punaiseksi vaikka unit olisi pystyssä", () => {
+    const rows = buildChain(
+      snapshot({ job: baseJob({ matchId: 145895, status: "live" }), runningMatchId: 145900 }),
+      null
+    );
+    expect(rows.find((r) => r.key === "relay")).toMatchObject({ health: "fail" });
+  });
+
+  it("ei väitä ristiriitaa kun relay ei kerro mitä se ajaa", () => {
+    // Näytön puute ei ole näyttö: relay ei ole ehtinyt kirjoittaa statustaan.
+    const { health } = deriveHealth(
+      snapshot({ job: baseJob({ matchId: 145895, status: "live" }), runningMatchId: null })
+    );
+    expect(health).not.toBe("fail");
+  });
+
+  it("ei renderöi toisen ottelun telemetriaa tämän hetken lähetyksenä", () => {
+    // Ilman matchId-vartijaa lähde-rivi luki eilisen ottelun status-tiedostoa
+    // ja näytti sen vihreänä.
+    const rows = buildChain(
+      snapshot({
+        job: baseJob({ matchId: 145900, status: "live" }),
+        telemetry: baseTelemetry({
+          matchId: 145895,
+          source: { state: "live", detail: "ffmpeg käynnissä" },
+        }),
+      }),
+      null
+    );
+    expect(rows.find((r) => r.key === "source")?.detail).not.toContain("ffmpeg käynnissä");
+
+    // Kontrolli: sama snapshot oikealla ottelulla menee läpi, joten väite yllä
+    // mittaa vartijaa eikä jotain muuta joka pudottaisi telemetrian.
+    const sameMatch = buildChain(
+      snapshot({
+        job: baseJob({ matchId: 145895, status: "live" }),
+        telemetry: baseTelemetry({
+          matchId: 145895,
+          source: { state: "live", detail: "ffmpeg käynnissä" },
+        }),
+      }),
+      null
+    );
+    expect(sameMatch.find((r) => r.key === "source")?.detail).toContain("ffmpeg käynnissä");
   });
 });

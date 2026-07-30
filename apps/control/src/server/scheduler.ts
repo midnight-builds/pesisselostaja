@@ -35,7 +35,7 @@ import type {
   SchedulerState,
   SystemState,
 } from "../shared/types.js";
-import { activateJob, listJobs, setJobStatus } from "./jobs.js";
+import { activateJob, listJobs, markRunStarted, setJobStatus } from "./jobs.js";
 import { notifySchedulerAction } from "./notifications.js";
 import { runControlPreflight } from "./preflight.js";
 import { startRelay, writeRelayEnv } from "./relay.js";
@@ -204,6 +204,9 @@ export interface SchedulerDeps {
   runPreflight(): Promise<PreflightResult>;
   activateJob(id: string): Promise<Job>;
   setJobStatus(id: string, status: Job["status"]): Promise<Job>;
+  /** Sama funktio jota poller käyttää — ei omaa `setJobStatus(…, "live")`
+   *  -oikopolkua, joka jätti `startedAt`in tyhjäksi (#118). */
+  markRunStarted(matchId: number): Promise<Job | null>;
   startRelay(): Promise<unknown>;
   notify(tag: string, title: string, body: string): Promise<unknown>;
 }
@@ -218,6 +221,7 @@ function defaultDeps(): SchedulerDeps {
     runPreflight: runControlPreflight,
     activateJob,
     setJobStatus,
+    markRunStarted,
     startRelay,
     notify: notifySchedulerAction,
   };
@@ -410,7 +414,20 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
       // that landed between plan() and here.
       await deps.activateJob(job.id);
       await deps.startRelay();
-      await deps.setJobStatus(job.id, "live");
+      // markRunStarted, ei setJobStatus: pelkkä tilan kääntäminen jätti
+      // `startedAt`in tyhjäksi, jolloin pollerin oma sidonta ei enää löytänyt
+      // armattua työtä eikä työ saanut aloitushetkeä lainkaan — ja ajon
+      // päätyttyä se kirjautui `cancelled`ksi vaikka lähetys oli oikeasti
+      // ajettu (#118). Ottelu on tässä varma: sen `.env.relay` juuri
+      // kirjoitettiin ja sillä ottelulla relay käynnistettiin.
+      const started = await deps.markRunStarted(job.matchId);
+      if (!started) {
+        // Ei kaadeta ajoa tähän: relay on jo käynnissä, ja pollerin sidonta
+        // yrittää uudelleen relayn oman status-tiedoston perusteella.
+        console.warn(
+          `[scheduler] työtä ${job.id} (ottelu ${job.matchId}) ei saatu leimattua käyntiin — poller yrittää uudelleen`
+        );
+      }
       await deps.notify(
         `started:${job.id}`,
         "Ajastin käynnisti lähetyksen",

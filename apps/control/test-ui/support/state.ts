@@ -185,6 +185,7 @@ export function job(p: Partial<Job> = {}): Job {
     targetStreamKey: "aaaa-bbbb-cccc-dddd",
     targetRtmpUrl: "rtmp://a.rtmp.youtube.com/live2",
     targetVideoId: null,
+    armedAt: null,
     startedAt: "2026-07-29T05:29:00.000Z",
     endedAt: null,
     note: null,
