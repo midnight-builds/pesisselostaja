@@ -211,17 +211,29 @@ async function main(): Promise<void> {
       // A deliberately ended source is not a fault, so it must not put an
       // ERROR line in the journal at all — an operator reading "päättyi
       // virheeseen" goes looking for a problem that does not exist (#103).
-      const endedCleanly = err instanceof SourceExhaustedError && err.reason === "ended";
+      // "ended" and "hard_stop" are both deliberate finishes, not faults —
+      // neither may put an ERROR line in the journal (#103, #123).
+      const endedCleanly =
+        err instanceof SourceExhaustedError && (err.reason === "ended" || err.reason === "hard_stop");
       if (!endedCleanly) {
         logError("ffmpeg.supervisor_failed", `ffmpeg-valvoja päättyi virheeseen: ${err instanceof Error ? err.message : err}`);
       }
       if (err instanceof SourceExhaustedError) {
+        endReason = err.reason;
         // "ended" = the broadcast was finished on purpose; nothing is broken,
         // and the log must not send anyone hunting for a fault (issue #103).
-        if (err.reason === "ended") {
-          logInfo("relay.source_ended", "Lähde on päättynyt — sammutetaan relay siististi.");
-        } else {
-          logError("relay.source_gone", "Alkuperäinen lähde ei palautunut — sammutetaan koko relay.");
+        switch (err.reason) {
+          case "ended":
+            logInfo("relay.source_ended", "Lähde on päättynyt — sammutetaan relay siististi.");
+            break;
+          case "hard_stop":
+            // The mixer already logged WHICH conditions fired (relay.hard_stop
+            // in maybeHardStop); this line marks the shutdown decision itself.
+            logInfo("relay.hard_stop", `Hard stop -takaraja laukesi: ${err.message}`);
+            break;
+          case "exhausted":
+            logError("relay.source_gone", "Alkuperäinen lähde ei palautunut — sammutetaan koko relay.");
+            break;
         }
         shutdown();
       }
