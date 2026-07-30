@@ -117,6 +117,45 @@ test.describe("live-näkymän ohjaimet", () => {
     // Only the unspoken line carries the queue tag.
     await expect(page.getByText("jonossa", { exact: true })).toHaveCount(1);
   });
+
+  // Match 145889: the relay narrated for five minutes while ffmpeg was not
+  // attached, and every one of those lines looked exactly like a spoken one.
+  test("vaimennettu rivi erottuu puhutusta — se ei kuulunut kenellekään", async ({
+    page,
+    openApp,
+  }, info) => {
+    await openApp();
+
+    const muted = page.locator(".narration__row--muted");
+    await expect(muted).toHaveCount(1);
+    await expect(muted).toContainText("Kolmas palo Peikoille.");
+    await expect(muted.getByText("ei kuulunut")).toBeVisible();
+    await shot(page, info, "narration-muted");
+  });
+
+  test("uusin selostus on ylimpänä relayn omassa järjestyksessä", async ({ page, openApp }) => {
+    await openApp();
+
+    // Sama sekunti eri riveillä ei saa sekoittaa järjestystä (#98): lista
+    // näytetään siinä järjestyksessä jossa relay ne päätti, ei aikaleiman
+    // mukaan lajiteltuna.
+    const texts = await page.locator(".narration__row .narration__text").allInnerTexts();
+    expect(texts).toEqual([
+      "Kolmas palo Peikoille.",
+      "Kotiutus! Veikot johtaa 5–3.",
+      "Toinen palo Peikoille.",
+    ]);
+  });
+
+  test("ilman relayn telemetriaa lista kertoo syyn eikä väitä hiljaisuutta", async ({
+    page,
+    openApp,
+  }) => {
+    await openApp(liveState({ telemetry: null, narration: [] }));
+
+    await expect(page.getByText(/Relay ei julkaise telemetriaa/)).toBeVisible();
+    await expect(page.getByText("Ei selostuksia vielä.")).toBeHidden();
+  });
 });
 
 test.describe("SSE-yhteyden katkeaminen", () => {
