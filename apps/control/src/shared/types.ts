@@ -132,6 +132,21 @@ export interface RelayTelemetry {
   endReason?: SourceEndReason | null;
 }
 
+/** Miten thumbnailin asetus yhdelle videolle päättyi (#130).
+ *
+ *  Oma tyyppinsä eikä pelkkä `boolean`, koska epäonnistuminen on tässä
+ *  *odotettu* lopputulos jonka operaattorin on nähtävä: lähetykset ovat jo
+ *  olemassa siinä vaiheessa kun thumbnailia yritetään, eikä niitä voi luoda
+ *  uudelleen. Hiljainen `false` olisi täsmälleen se vika josta #130 kirjoitti
+ *  ("hiljainen epäonnistuminen olisi pahempi, koska luonti raportoi
+ *  onnistuneensa"). */
+export type ThumbnailOutcome = { ok: true } | { ok: false; error: string };
+
+export interface ThumbnailOutcomes {
+  normal: ThumbnailOutcome;
+  narrated: ThumbnailOutcome;
+}
+
 export interface LogLine {
   ts: string;
   level: "debug" | "info" | "warn" | "error";

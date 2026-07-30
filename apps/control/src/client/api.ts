@@ -25,6 +25,7 @@ import type {
  *  rather than copied into a second, drifting definition. */
 import type { AuthHealth, DeviceFlowPoll, DeviceFlowStart } from "../server/googleAuth";
 import type { BroadcastPair, BroadcastSummary, PlaylistSummary, PrivacyStatus } from "../server/youtube";
+import type { ThumbnailOutcomes } from "../shared/types";
 import type { BroadcastTexts } from "../server/templates";
 
 export { DEFAULT_RTMP_URL };
@@ -112,6 +113,10 @@ export interface TemplatePreview {
 /** POST /api/youtube/broadcasts — luotu pari + tekstit joilla se luotiin. */
 export interface CreatedBroadcastPair extends BroadcastPair {
   texts: BroadcastTexts;
+  /** Miten thumbnailin asetus meni kummallekin lähetykselle (#130). Erillään
+   *  itse luonnista, koska lähetykset ovat olemassa myös silloin kun thumbnail
+   *  epäonnistui — ja epäonnistuminen on kerrottava eikä nieltävä. */
+  thumbnails: ThumbnailOutcomes;
 }
 
 /** Otsikon ja thumbnailin tiedot joita pesistulokset-API ei tunne: oman

@@ -365,6 +365,31 @@ function CreatedResult({ created }: { created: CreatedBroadcastPair }) {
           </button>
           <CopyButton text={created.broadcastSummary} label="Kopioi tekniset tiedot" />
         </div>
+        {/* Thumbnail on ainoa osa luontia joka voi epäonnistua ILMAN että
+            luonti epäonnistuu: lähetykset ovat jo olemassa. Siksi tulos
+            näytetään erikseen eikä pääteltävissä muusta kortista — #130
+            löytyi juuri siitä, että thumbnail jäi asettamatta ja luonti
+            raportoi silti onnistuneensa. */}
+        <dl className="kv">
+          <div className="kv__row">
+            <dt>Thumbnailit</dt>
+            <dd data-testid="thumbnail-outcome">
+              {created.thumbnails.normal.ok && created.thumbnails.narrated.ok
+                ? "Asetettu molempiin"
+                : [
+                    created.thumbnails.normal.ok ? null : `normaali: ${created.thumbnails.normal.error}`,
+                    created.thumbnails.narrated.ok ? null : `selostettu: ${created.thumbnails.narrated.error}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+            </dd>
+          </div>
+        </dl>
+        {(!created.thumbnails.normal.ok || !created.thumbnails.narrated.ok) && (
+          <p className="field__hint is-fail">
+            Lähetykset on silti luotu — älä luo niitä uudelleen. Thumbnailin voi asettaa Studiossa.
+          </p>
+        )}
         <p className="field__hint">
           Työn kohdetiedot päivittyivät automaattisesti — .env.relay kirjoitetaan Työ-välilehdeltä.
         </p>
