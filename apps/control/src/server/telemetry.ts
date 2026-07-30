@@ -71,6 +71,7 @@ const SOURCE_STATE_SET: Record<RelayTelemetry["source"]["state"], true> = {
   failed: true,
   ended: true,
   no_signal: true,
+  reconnecting: true,
   unknown: true,
 };
 

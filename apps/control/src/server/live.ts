@@ -514,6 +514,17 @@ function sourceFromTelemetry(telemetry: RelayTelemetry): { health: Health; detai
         return { health: "warn", detail: detail ?? "lähde päättyi kesken ottelun" };
       }
       return { health: "ok", detail: detail ?? "lähde päättyi — lähetys lopetetaan siististi" };
+    case "reconnecting":
+      // ffmpeg ei ole juuri nyt käynnissä (#122). Keltainen eikä vihreä,
+      // koska tällä hetkellä kohteeseen ei työnnetä mitään — juuri tämä hetki
+      // näytti ennen vihreältä ("ffmpeg kiinni lähteessä") koko sen ajan kun
+      // sama 34 s häntä respawnattiin kolmesti ottelussa 145900.
+      //
+      // Terve osoitteenkierrätys käy myös tästä, mutta sen katko kestää
+      // sekunteja: ohjaamo ehtii nähdä sen korkeintaan yhden pollin ajan, ja
+      // silloinkin rivi lukee mitä oikeasti tapahtuu. Väärä vihreä maksaa
+      // enemmän kuin ohimenevä keltainen.
+      return { health: "warn", detail: detail ?? "ffmpeg ei ole käynnissä — yhdistetään uudelleen" };
     case "no_signal":
       // Katvekuva päällä (#104): RTMP-työntö jatkuu ja selostus kuuluu, mutta
       // KUVA ON POIKKI. Tämän on näkyttävä keltaisena, koska juuri tässä

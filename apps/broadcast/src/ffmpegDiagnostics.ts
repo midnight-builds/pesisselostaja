@@ -21,7 +21,6 @@ const TARGET_PATTERNS: readonly RegExp[] = [
   /Connection to tcp:\/\/[^\s]* failed/i,
   /rtmp:\/\/[^\s]*: (Connection refused|Operation not permitted|Input\/output error|Broken pipe)/i,
   /\[rtmp[^\]]*\][^\n]*(failed|error|refused|denied)/i,
-  /\[flv[^\]]*\][^\n]*(Failed to|error)/i,
   /Error opening output file rtmp:/i,
   /Could not write header for output file/i,
   /Server error/i,
@@ -45,11 +44,19 @@ const SOURCE_PATTERNS: readonly RegExp[] = [
  *  input ended and ffmpeg is tearing the whole graph down. They appear in
  *  perfectly ordinary end-of-source shutdowns, so counting them would label
  *  every dead phone a target problem. They only reinforce a verdict that a
- *  connection-level pattern already established. */
+ *  connection-level pattern already established.
+ *
+ *  `[flv] Failed to update header with correct duration/filesize` was a TARGET
+ *  pattern until #122. It is printed by the MUXER while it closes the output,
+ *  which it does on every teardown — including the ordinary one where the input
+ *  ended first. Live on 30.7.2026 it was the only "error" in the tail twice
+ *  (matches 145900 and 145905) and both times it sent the operator to check a
+ *  stream key that was fine while the phone was the thing that had stopped. */
 const WEAK_TARGET_PATTERNS: readonly RegExp[] = [
   /av_interleaved_write_frame\(\)/i,
   /Broken pipe/i,
   /Connection reset by peer/i,
+  /\[flv[^\]]*\][^\n]*(Failed to|error)/i,
 ];
 
 /** Best-effort read of which side failed, from ffmpeg's own stderr tail.
@@ -74,8 +81,26 @@ export function hasWeakTargetSignal(stderrTail: string): boolean {
 
 /** One operator-facing sentence about where to look, or null when the tail
  *  doesn't justify pointing anywhere. Phrased as a suspicion, not a finding:
- *  it is read off ffmpeg's error text, not measured. */
-export function describeFailureSide(side: FfmpegFailureSide, weakTarget: boolean): string | null {
+ *  it is read off ffmpeg's error text, not measured.
+ *
+ *  `exitCode` overrides the tail (#122). ffmpeg exiting 0 means it read its
+ *  input to EOF and shut the graph down cleanly — a target that refuses or
+ *  drops our push makes it exit non-zero. So on a clean exit the tail can only
+ *  contain teardown noise, and naming a side from it is guessing: the two live
+ *  cases on 30.7.2026 both blamed the target on a code=0 exit whose real cause
+ *  was the phone. Pass `null` for a spawn error, where there is no exit code
+ *  and the tail is all we have. */
+export function describeFailureSide(
+  side: FfmpegFailureSide,
+  weakTarget: boolean,
+  exitCode: number | null = null
+): string | null {
+  if (exitCode === 0) {
+    return (
+      "ffmpeg poistui koodilla 0 eli luki syötteensä loppuun — syöte loppui. " +
+      "Tämä ei kerro kohteesta mitään, joten stream keytä ei ole syytä epäillä."
+    );
+  }
   if (side === "target") {
     return (
       "ffmpegin virheet tulivat KOHTEEN puolelta (RTMP) — tarkista stream key, " +
