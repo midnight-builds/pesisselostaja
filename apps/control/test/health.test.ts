@@ -12,6 +12,7 @@ import type {
   LogLine,
   MatchState,
   RelayProcess,
+  RelayTelemetry,
   SourceIngest,
   SystemState,
 } from "../src/shared/types.js";
@@ -99,8 +100,30 @@ function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
     relay: baseRelay(),
     match: baseMatch(),
     system: baseSystem(),
+    // Null by default: most rules must hold for a relay that publishes no
+    // telemetry at all (an older deploy), and the rules that read it say so.
+    telemetry: null,
     log: [],
     errors: new Map(),
+    ...overrides,
+  };
+}
+
+/** A relay reporting a healthy, attached, live run. */
+function baseTelemetry(overrides: Partial<RelayTelemetry> = {}): RelayTelemetry {
+  return {
+    at: new Date().toISOString(),
+    matchId: 1,
+    startedAt: new Date(Date.now() - 600_000).toISOString(),
+    uptimeSec: 600,
+    readerAttached: true,
+    pendingClips: 1,
+    respawns: 0,
+    source: { state: "live", detail: "ffmpeg käynnissä" },
+    match: { finished: false, eventCount: 5, lastEventAt: new Date().toISOString() },
+    narration: { detected: 10, spoken: 9, muted: 0, queued: 1 },
+    tts: { engine: "piper", elevenLabsCharsUsed: 0 },
+    lastProblem: null,
     ...overrides,
   };
 }
@@ -210,6 +233,65 @@ describe("deriveHealth", () => {
     expect(health).toBe("ok");
     expect(headline).toMatch(/sammuu itse/);
   });
+
+  // Match 145889, 29.7.2026: the relay ran, the feed advanced, every clip was
+  // counted — and ffmpeg was not attached, so five minutes of narration
+  // including two runs were never heard. The old view called that "kunnossa".
+  it("a live source with no ffmpeg reader is a warning, not a healthy broadcast", () => {
+    const { health, headline } = deriveHealth(
+      snapshot({
+        job: baseJob({ status: "live" }),
+        telemetry: baseTelemetry({
+          readerAttached: false,
+          uptimeSec: 300,
+          narration: { detected: 12, spoken: 0, muted: 12, queued: 0 },
+        }),
+      })
+    );
+    expect(health).toBe("warn");
+    expect(headline).toMatch(/ei ole kytkeytynyt/);
+    expect(headline).toMatch(/12/);
+  });
+
+  it("the first minute of a run is not yet a warning — the reader attaches a moment after ffmpeg starts", () => {
+    const { health } = deriveHealth(
+      snapshot({
+        job: baseJob({ status: "live" }),
+        telemetry: baseTelemetry({ readerAttached: false, uptimeSec: 20 }),
+      })
+    );
+    expect(health).toBe("ok");
+  });
+
+  it("waiting for a scheduled source is not a missing reader — nothing is supposed to be playing yet", () => {
+    const { health } = deriveHealth(
+      snapshot({
+        job: baseJob({ status: "live" }),
+        telemetry: baseTelemetry({
+          readerAttached: false,
+          uptimeSec: 900,
+          source: { state: "scheduled", detail: "alkaa noin 8 min kuluttua" },
+        }),
+      })
+    );
+    expect(health).toBe("ok");
+  });
+
+  it("a stale snapshot from a relay that stopped reporting is not believed", () => {
+    const now = Date.now();
+    const { health } = deriveHealth(
+      snapshot({
+        now,
+        job: baseJob({ status: "live" }),
+        telemetry: baseTelemetry({
+          at: new Date(now - 10 * 60_000).toISOString(),
+          readerAttached: false,
+          uptimeSec: 900,
+        }),
+      })
+    );
+    expect(health).toBe("ok");
+  });
 });
 
 // --------------------------------------------------------- Lähde-rivi + #104
@@ -247,6 +329,28 @@ describe("buildChain: lähde-rivi ja YouTube-havainto", () => {
     return row;
   }
 
+  it("kertoo hallitusti päättyneen lähteen terveenä, ei telemetrian puutteena (#103)", () => {
+    const row = sourceRow({
+      telemetry: baseTelemetry({ source: { state: "ended", detail: "yt-dlp: live_status=post_live" } }),
+    });
+    // Kuvaaja lopetti lähteen: normaali lopputila, ei vika josta herätetään.
+    expect(row.health).toBe("ok");
+    expect(row.detail).not.toMatch(/ei kerro lähteen tilaa/);
+  });
+
+  it("näyttää katvekuvan KELTAISENA — se ei saa peittää poikki olevaa kuvaa (#104)", () => {
+    const row = sourceRow({
+      telemetry: baseTelemetry({ source: { state: "no_signal", detail: "kuvayhteys katkesi" } }),
+    });
+    // Juuri tässä tilassa lähetys näyttää ulospäin sujuvalta: RTMP-työntö
+    // jatkuu ja selostus kuuluu, mutta kamera on poissa. Issuen oma rajaus on
+    // ettei katve saa peittää ongelmaa operaattorilta.
+    expect(row.health).toBe("warn");
+    expect(row.detail).toMatch(/katvekuva päällä/);
+    expect(row.detail).toMatch(/selostus jatkuu/);
+    expect(row.detail).not.toMatch(/ei kerro lähteen tilaa/);
+  });
+
   it("aktiivinen syöte säilyttää terveyden ja mainitaan detailissa", () => {
     const row = sourceRow({ sourceIngest: ingest() });
     expect(row.health).toBe("ok");
@@ -272,7 +376,10 @@ describe("buildChain: lähde-rivi ja YouTube-havainto", () => {
     // saa korjata sitä vihreäksi.
     const row = sourceRow({ log: [], sourceIngest: ingest() });
     expect(row.health).toBe("warn");
-    expect(row.detail).toMatch(/ei havaintoa lähteestä lokissa/);
+    // Lokivarapolun oma sanamuoto säilyy, ja havainto tulee sen PERÄÄN — se ei
+    // korvaa relayn omaa havaintoa eikä nosta riviä vihreäksi.
+    expect(row.detail).toMatch(/havaintoa lähteestä/);
+    expect(row.detail).toMatch(/syöte aktiivinen/);
   });
 
   it("idle-rivi pysyy idlenä vaikka syöte ei virtaisi — relay ei edes lue lähdettä", () => {

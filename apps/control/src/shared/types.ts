@@ -46,14 +46,68 @@ export interface MatchState {
   lastEventAt: string | null;
 }
 
+/** One narration clip as the RELAY reported it, read from
+ *  `run/timeline-<matchId>.ndjson`. Never reconstructed here: the control app
+ *  cannot know which speech variant was picked, which roster the relay had, or
+ *  what the score was at the moment the line was decided (issue #97). */
 export interface NarrationLine {
+  /** Unique within one match. The relay's own clip id restarts at `c1` on every
+   *  relay restart, so the timeline record's running number is prefixed. */
   id: string;
-  /** Wall clock when the event was detected in the feed. */
+  /** The relay's clock when it decided to say this. */
   detectedAt: string;
-  /** Set once the relay actually spoke it — phase B telemetry. Until then the
-   *  line renders as "queued". */
+  /** When the clip reached the mixer. Null while it is still queued. */
   spokenAt: string | null;
+  /** True when the clip was produced while ffmpeg was not attached: the relay's
+   *  bookkeeping ran, but NOBODY HEARD IT. This is the five silent minutes of
+   *  match 145889 made visible. */
+  muted: boolean;
   text: string;
+}
+
+/** The relay's own snapshot of itself, read from `run/status-<matchId>.json`.
+ *  A faithful mirror of apps/broadcast's RelayStatus — deliberately re-declared
+ *  rather than imported, because this is the client contract and the relay
+ *  writing it may be an older deploy (~/relay-deploy moves only on
+ *  `npm run relay:deploy`). Everything is parsed defensively on the way in. */
+export interface RelayTelemetry {
+  /** When the relay wrote this snapshot. The client compares it against
+   *  LiveState.now: a stale snapshot is a relay that stopped reporting. */
+  at: string;
+  matchId: number;
+  startedAt: string;
+  uptimeSec: number;
+  /** ffmpeg is attached and draining the narration FIFO — i.e. narration is
+   *  actually reaching viewers. */
+  readerAttached: boolean;
+  pendingClips: number;
+  respawns: number;
+  source: {
+    /** Peilaa relayn omaa `RelayStatus.source.state`-unionia
+     *  (`apps/broadcast/src/telemetry.ts`). Kun relay saa uuden tilan, se on
+     *  lisättävä myös tänne — muuten arvo putoaa ohjaamon defaulttiin ja
+     *  tilarivi sanoo "relay ei kerro lähteen tilaa" juuri silloin kun relay
+     *  kertoo sen tarkasti. Niin kävi `ended`ille (#103) ja `no_signal`ille
+     *  (#104), jotka lisättiin relaylle tämän tyypin jo olemassa ollessa. */
+    state: "live" | "scheduled" | "resolving" | "failed" | "ended" | "unknown" | "no_signal";
+    detail: string | null;
+  };
+  match: {
+    finished: boolean;
+    eventCount: number;
+    lastEventAt: string | null;
+  };
+  narration: {
+    detected: number;
+    spoken: number;
+    muted: number;
+    queued: number;
+  };
+  tts: {
+    engine: string;
+    elevenLabsCharsUsed: number;
+  };
+  lastProblem: { at: string; level: LogLine["level"]; code: string | null; msg: string } | null;
 }
 
 export interface LogLine {
@@ -127,6 +181,10 @@ export interface LiveState {
    *  state.ts) saa rikkoutua siitä että ohjaamo alkoi julkaista sen. */
   sourceIngest?: SourceIngest | null;
   job: Job | null;
+  /** What the relay says about itself, or null when it has published nothing
+   *  for this match (not started, or a deploy older than PR #93). */
+  telemetry: RelayTelemetry | null;
+  /** Read from the relay's timeline, oldest first. */
   narration: NarrationLine[];
   log: LogLine[];
 }
