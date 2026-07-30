@@ -59,10 +59,11 @@ function bool(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-/** Jokainen `RelayTelemetry["source"]["state"]`-unionin arvo — `satisfies`
- *  kaataa käännöksen jos listalla on unioniin kuulumaton arvo, ja
- *  telemetry.test.ts:n sopimustesti kaatuu jos unionin arvo puuttuu listalta
- *  (niin kävi `ended`ille ja `no_signal`ille, #117). */
+/** Jokainen `RelayTelemetry["source"]["state"]`-unionin arvo. Kattavuus on
+ *  vartioitu molempiin suuntiin käännösaikana: `satisfies` kaataa käännöksen
+ *  jos listalla on unioniin kuulumaton arvo, ja alla oleva `AssertNever` jos
+ *  unionin arvo puuttuu listalta (niin kävi `ended`ille ja `no_signal`ille,
+ *  #117 — pelkkä ajonaikainen testi ei olisi huomannut puutosta). */
 export const SOURCE_STATES = [
   "live",
   "scheduled",
