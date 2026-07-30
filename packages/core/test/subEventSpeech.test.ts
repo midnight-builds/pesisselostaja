@@ -273,25 +273,32 @@ describe("source attribution variants", () => {
   });
 });
 
-describe("idle filler: light stat-style variant with the batting team (HANDOFF.md 16.7. kohta 4)", () => {
-  it("sometimes reports the score home-first with the batting team, in both tie and lead states", () => {
+describe("idle filler: the batting team is in EVERY variant (issue #100)", () => {
+  it("reports the score home-first and names the batting team, in both tie and lead states", () => {
     // Away leads (2–4) but the score is still spoken home-first; Sudet (200) bat.
     const lead = ctxWith({ periodHomeRuns: 2, periodAwayRuns: 4, currentBatTeamId: 200 });
     const leadOutputs = new Set<string>();
     for (let i = 0; i < 60; i++) leadOutputs.add(formatIdleSummary(meta, lead));
-    expect(leadOutputs).toContain("Tilasto kertoo tilanteeksi 2, 4, Sudet johtaa, ja sisävuorossa on Sudet.");
+    expect(leadOutputs).toContain("Tilasto kertoo tilanteeksi 2, 4, Sudet johtaa niukasti, ja sisävuorossa on Sudet.");
+    for (const o of leadOutputs) expect(o).toContain("ja sisävuorossa on Sudet.");
 
     const tie = ctxWith({ periodHomeRuns: 3, periodAwayRuns: 3, currentBatTeamId: 100 });
     const tieOutputs = new Set<string>();
     for (let i = 0; i < 60; i++) tieOutputs.add(formatIdleSummary(meta, tie));
     expect(tieOutputs).toContain("Tilasto kertoo tilanteeksi tasan 3, 3, ja sisävuorossa on Ketut.");
+    for (const o of tieOutputs) expect(o).toContain("ja sisävuorossa on Ketut.");
   });
 
   it("drops the batting clause cleanly when the batting team is unknown", () => {
     const ctx = ctxWith({ periodHomeRuns: 2, periodAwayRuns: 4, currentBatTeamId: null });
     const outputs = new Set<string>();
     for (let i = 0; i < 60; i++) outputs.add(formatIdleSummary(meta, ctx));
-    expect(outputs).toContain("Tilasto kertoo tilanteeksi 2, 4, Sudet johtaa.");
+    expect(outputs).toContain("Tilasto kertoo tilanteeksi 2, 4, Sudet johtaa niukasti.");
+    // No variant may end mid-clause once the optional part is gone.
+    for (const o of outputs) {
+      expect(o).not.toContain("sisävuorossa");
+      expect(o.endsWith(".")).toBe(true);
+    }
   });
 });
 

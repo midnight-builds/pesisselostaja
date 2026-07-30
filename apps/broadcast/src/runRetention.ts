@@ -21,6 +21,12 @@ const RUN_ARTIFACT_PATTERNS: readonly RegExp[] = [
   /^status-(\d+)\.json$/, // telemetry snapshot
   /^status-(\d+)\.json\.tmp$/, // …and a snapshot whose rename never happened
   /^timeline-(\d+)\.ndjson$/, // telemetry timeline
+  // Katvekuva ("EI SIGNAALIA", issue #104): taustakuva ja kaksi tekstitiedostoa
+  // joita ffmpeg lukee drawtextin `reload`illa. Tekstit kirjoitetaan atomisesti,
+  // joten keskeytynyt kirjoitus jättää `.tmp`:n jälkeensä — samasta syystä kuin
+  // status-<id>.json.tmp on listalla. Ilman näitä ne jäisivät run/iin ikuisesti.
+  /^slate-(\d+)\.png(?:\.tmp)?$/,
+  /^slate-(?:score|status)-(\d+)\.txt(?:\.tmp)?$/,
 ];
 
 const TTS_CACHE_DIR = "tts-cache";
