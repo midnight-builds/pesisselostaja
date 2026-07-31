@@ -725,6 +725,14 @@ export class CommentaryLoop {
         `(vaihda ajon aikana: ${this.config.controlFile})`
     );
 
+    // Ennen hakuja, ei niiden jälkeen: `matchFinished` lukee tätä ja mikseri
+    // lukee sitä (`isMatchFinished`). Tilatiedostosta palautunut `finished:
+    // true` lyhentäisi mikserin luovutusikkunan 12 minuutista 2:een juuri sinä
+    // aikana kun käynnistyshaku yrittää uudelleen (#158) — eli uudelleenyritys
+    // voisi itse tappaa relayn, jonka suojelemiseksi se lisättiin. Rivi
+    // toistuu alempana muun tilan nollauksen kanssa; molemmat ovat halpoja.
+    this.state.finished = false;
+
     logInfo("api.fetching_meta", `Haetaan ottelutietoja (ID: ${this.config.matchId})…`);
     const startupMeta = await this.startupFetch(
       "Ottelutietojen haku",
