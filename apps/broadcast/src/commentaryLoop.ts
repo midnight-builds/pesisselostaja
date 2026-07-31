@@ -69,16 +69,32 @@ const WELCOME_FILLER_MS = 90 * 1000;
  *  decide whether the relay gives up. */
 const FULL_FETCH_TIMEOUT_MS = 10_000;
 /** Timeout for the small responses: the delta poll and the one-off metadata
- *  fetch (issue #81).
+ *  fetch (issue #81, retuned in #156).
  *
- *  Deliberately the pre-#47 value, because #47's reasoning does not carry over:
- *  a delta returns only the new events (a 304 not even that), so it has no
- *  growing body to be patient about, and it is the fetch that runs EVERY poll —
- *  i.e. the one that decides how fast a hung API is noticed at all. Inheriting
- *  the full fetch's 10 s here would only delay detection (and recovery) by ~6 s
- *  per poll. Aborting a delta costs nothing: the next poll retries immediately
- *  and the 60 s resync closes any gap. */
-const SMALL_FETCH_TIMEOUT_MS = 4_000;
+ *  #47's "be patient, the body grows" reasoning does not carry over here: a
+ *  delta returns only the new events (a 304 not even that), and it is the fetch
+ *  that runs EVERY poll — the one that decides how fast a hung API is noticed.
+ *
+ *  1 s, not the earlier 4 s. Measured 31.7.2026 against FOUR simultaneously
+ *  live matches under camp-day load, 120 samples: p50 96 ms, p99 169 ms, max
+ *  303 ms, nothing above 1 s. The old 4 s was 24x the observed maximum.
+ *
+ *  The earlier comment here claimed "aborting a delta costs nothing". That is
+ *  true of CORRECTNESS — nothing is lost, the retry re-fetches and the 60 s
+ *  resync backstops it — but false of LATENCY, and repeating it led to the
+ *  wrong conclusion once. run() resumes the cadence from now
+ *  (`Math.max(nextPollAt + interval, Date.now())`), so the retry fires
+ *  IMMEDIATELY and an abort costs exactly this timeout in dead waiting, at the
+ *  head of the speech chain (fetch -> state -> TTS -> speak). Match 145918 spent
+ *  31 x 4 s on that, every single retry succeeding on the first attempt — i.e.
+ *  the connections were stuck, not slow, so waiting longer never helped.
+ *
+ *  Because the retry is immediate and costs ~100 ms, a shorter timeout is
+ *  cheaper even in the bad case where the aborted fetch would have completed.
+ *  The guard against going too far is `consecutiveFetchFailures` /
+ *  FETCH_FAILURE_ALARM_STREAK, and `api.poll_window` now logs the duration
+ *  spread so the next retune has the relay's own numbers rather than curl's. */
+const SMALL_FETCH_TIMEOUT_MS = 1_000;
 /** Delta polling: events carry no per-event
  *  wall-clock field (verified against real data 2026-07-17 — only the
  *  match-epoch-relative `timestamp`), so the `after=` value is derived from
