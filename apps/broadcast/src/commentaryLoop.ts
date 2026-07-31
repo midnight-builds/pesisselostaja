@@ -909,6 +909,45 @@ export class CommentaryLoop {
    *
    *  "small" covers the delta poll and the startup metadata fetch; "full" the
    *  whole-history fetch. Why they differ: SMALL_FETCH_TIMEOUT_MS (#81). */
+  /** Runs a startup fetch that must not be allowed to kill the process (#158).
+   *
+   *  By the time `run()` starts, ffmpeg is already pushing picture to the
+   *  commentated broadcast. An unhandled rejection here would propagate to
+   *  `main().catch()` → `process.exit(1)`, and `Restart=on-failure` +
+   *  `RestartSec=10` + `KillMode=control-group` would take ffmpeg down with it:
+   *  a ≥10 s hole in a live broadcast, repeating for as long as the API is
+   *  slow. Retrying costs a few seconds of late narration instead.
+   *
+   *  Retries until it succeeds or the loop is aborted; on abort it resolves to
+   *  `null` and the caller returns without narrating. Same reasoning as
+   *  `maybeRefreshRoster`'s catch, applied where the price is a black screen
+   *  rather than a stale name.
+   *
+   *  Deliberately unbounded: giving up would mean either crashing (the thing
+   *  being fixed) or running a broadcast that can never narrate. A genuinely
+   *  wrong match id is preflight's job, and it is loud in the log here. */
+  private async startupFetch<T>(what: string, fn: () => Promise<T>, signal: AbortSignal): Promise<T | null> {
+    for (let attempt = 1; ; attempt++) {
+      if (signal.aborted) return null;
+      try {
+        const value = await fn();
+        if (attempt > 1) {
+          logInfo("api.startup_fetch_recovered", `${what} onnistui ${attempt}. yrityksellä.`);
+        }
+        return value;
+      } catch (err) {
+        if (signal.aborted) return null;
+        const waitMs = STARTUP_RETRY_DELAYS_MS[Math.min(attempt - 1, STARTUP_RETRY_DELAYS_MS.length - 1)];
+        const message =
+          `${what} epäonnistui (${attempt}. yritys): ${err instanceof Error ? err.message : err} — ` +
+          `yritetään uudelleen ${waitMs} ms:n kuluttua. Lähetys jatkuu, selostus alkaa myöhässä.`;
+        if (attempt >= STARTUP_RETRY_ERROR_AFTER) logError("api.startup_fetch_failed", message);
+        else logWarn("api.startup_fetch_failed", message);
+        await this.sleepAbortable(waitMs, signal);
+      }
+    }
+  }
+
   private apiTimeoutMs(size: "small" | "full"): number {
     const base = size === "full" ? FULL_FETCH_TIMEOUT_MS : SMALL_FETCH_TIMEOUT_MS;
     return Math.max(base, this.pollIntervalMs);
