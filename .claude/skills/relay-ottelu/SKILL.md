@@ -41,9 +41,10 @@ Ole rehellinen käyttäjälle tästä; älä esitä koettelematonta varmana.
 | Relay + selostus | Koeteltu useassa lähetyksessä |
 | Ohjaamon ottelulista, työjono, preflight, käsikäynnistys | Koeteltu |
 | Ohjaamon lähetysparin **luonti** | Ajettu 30.7.2026 (ottelu 145905, kaksikin kertaa). Toimi; puutteet kirjattu #130–#132 |
-| **Ohjaamon luoma pari päästä päähän** (StreamLabs poimii raakalähetyksen → relay ajaa sen) | **EI koeteltu** (#124 vaihe 1) — aamun kierros meni Studion kautta, ja päivän ohjaamolla luodut työt päätyivät `cancelled`-tilaan |
+| **Ohjaamon luoma pari päästä päähän** (StreamLabs poimii raakalähetyksen → relay ajaa sen) | **Koeteltu kerran**: 31.7.2026, ottelu 145918. Toimi. Löydöt: #154, #155 |
 | **Ajastimen automaattinen käynnistys** | **EI koeteltu livenä**, oletuksena pois (#124 vaihe 2) |
-| **Itsesammutus ja hard stopin siivous** | **EI koeteltu livenä** (#121, #122, #123 korjattu koodissa) |
+| **Itsesammutus** normaalilla `ended`-polulla | **Koeteltu 31.7.2026**: ffmpeg code=0 → respawn ajastettu → lähde päättynyt havaittu → siisti sammutus 3 s kuluttua. Ohjaamo sulki työn (`finished`) ja YouTuben AutoStop sulki molemmat lähetykset |
+| **Hard stopin siivous** | **EI koeteltu livenä** (#123 korjattu koodissa) — 31.7. lopetus tuli normaalina polkuna, ei hard stopina |
 
 Kun jokin näistä ajetaan ensi kertaa, **kirjaa mikä takkuaa** — se on #124:n
 vaiheen 1 koko sisältö.
