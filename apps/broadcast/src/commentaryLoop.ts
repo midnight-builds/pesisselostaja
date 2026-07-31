@@ -75,26 +75,30 @@ const FULL_FETCH_TIMEOUT_MS = 10_000;
  *  delta returns only the new events (a 304 not even that), and it is the fetch
  *  that runs EVERY poll — the one that decides how fast a hung API is noticed.
  *
- *  1 s, not the earlier 4 s. Measured 31.7.2026 against FOUR simultaneously
- *  live matches under camp-day load, 120 samples: p50 96 ms, p99 169 ms, max
- *  303 ms, nothing above 1 s. The old 4 s was 24x the observed maximum.
+ *  STILL 4 s — #156 measured but deliberately did not retune. What that
+ *  measurement found, so the next attempt starts from facts:
  *
- *  The earlier comment here claimed "aborting a delta costs nothing". That is
- *  true of CORRECTNESS — nothing is lost, the retry re-fetches and the 60 s
- *  resync backstops it — but false of LATENCY, and repeating it led to the
- *  wrong conclusion once. run() resumes the cadence from now
- *  (`Math.max(nextPollAt + interval, Date.now())`), so the retry fires
- *  IMMEDIATELY and an abort costs exactly this timeout in dead waiting, at the
- *  head of the speech chain (fetch -> state -> TTS -> speak). Match 145918 spent
- *  31 x 4 s on that, every single retry succeeding on the first attempt — i.e.
- *  the connections were stuck, not slow, so waiting longer never helped.
+ *  - The value here is NOT the effective timeout. `apiTimeoutMs()` floors it at
+ *    `pollIntervalMs` (3 s by default), so shipped behaviour is
+ *    `max(4000, 3000) = 4000` — and lowering this constant to 1 s would have
+ *    produced 3 s, not 1 s. Any retune must decide about that floor first.
+ *  - The earlier comment here claimed "aborting a delta costs nothing". True of
+ *    CORRECTNESS — the retry re-fetches and the 60 s resync backstops it — but
+ *    false of LATENCY. run() resumes the cadence from now
+ *    (`Math.max(nextPollAt + interval, Date.now())`), so the retry fires
+ *    IMMEDIATELY and an abort costs the whole timeout in dead waiting, at the
+ *    head of the speech chain (fetch -> state -> TTS -> speak). Match 145918
+ *    (31.7.2026) spent 31 x 4 s there, every retry succeeding on the first
+ *    attempt — stuck connections, not slow ones, so waiting never helped.
+ *  - Response times are nowhere near this: 120 samples against four
+ *    simultaneously live matches under camp-day load gave p50 96 ms, p99
+ *    169 ms, max 303 ms; a cold TCP+TLS+DNS connection measured 173 ms.
  *
- *  Because the retry is immediate and costs ~100 ms, a shorter timeout is
- *  cheaper even in the bad case where the aborted fetch would have completed.
- *  The guard against going too far is `consecutiveFetchFailures` /
- *  FETCH_FAILURE_ALARM_STREAK, and `api.poll_window` now logs the duration
- *  spread so the next retune has the relay's own numbers rather than curl's. */
-const SMALL_FETCH_TIMEOUT_MS = 1_000;
+ *  Not retuned yet because those samples are curl's, and this constant also
+ *  governs `fetchMatchMetadata` — including the unguarded startup call whose
+ *  timeout can kill a live broadcast (#158). `api.poll_window` now reports the
+ *  relay's own per-size spread; retune from that, after #158. */
+const SMALL_FETCH_TIMEOUT_MS = 4_000;
 
 /** Yhden pollausikkunan onnistuneiden hakujen kestot yhdeksi luettavaksi
  *  palaseksi (#156).
