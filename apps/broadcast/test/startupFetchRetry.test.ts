@@ -138,4 +138,41 @@ describe("startup fetch retry (#158)", () => {
     expect(rejected).toBeNull();
     expect(metaMock.mock.calls.length).toBeGreaterThan(1);
   });
+
+  it("run() survives a failing startup history fetch too", async () => {
+    const loop = makeLoop();
+    metaMock.mockResolvedValue(META);
+    eventsMock.mockRejectedValueOnce(new Error("The operation was aborted due to timeout"));
+    eventsMock.mockResolvedValue({ events: [], team: null, period: null } as never);
+
+    let rejected: unknown = null;
+    const run = loop.run().catch((err: unknown) => {
+      rejected = err;
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+    loop.stop();
+    await vi.runAllTimersAsync();
+    await run;
+
+    expect(rejected).toBeNull();
+    expect(eventsMock.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  /** The retry window must not make the mixer think the match is over: a
+   *  restored `finished: true` from the state file halves the give-up window
+   *  (finishedFailureWindowMs), so a long retry could get the whole relay shut
+   *  down — by the very mechanism added to protect it. */
+  it("does not report matchFinished while the startup fetch is retrying", async () => {
+    const loop = makeLoop();
+    (loop as unknown as { state: { finished: boolean } }).state.finished = true;
+    metaMock.mockRejectedValue(new Error("API on nurin"));
+
+    const run = loop.run().catch(() => {});
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect((loop as unknown as { matchFinished: boolean }).matchFinished).toBe(false);
+
+    loop.stop();
+    await vi.runAllTimersAsync();
+    await run;
+  });
 });
