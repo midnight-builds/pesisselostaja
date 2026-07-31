@@ -1181,12 +1181,12 @@ select.field__input {
 /* --- Esikatselun tekstit ja kuvat (#129) -----------------------------------
  *
  * Nämä luokat olivat käytössä mutta täysin tyylittelemättä, ja se näkyi vasta
- * puhelimella: `<pre>` ei rivity oletuksena, joten kuvaus ja jaettava viesti
+ * operaattorin puhelimella: `<pre>` ei rivity oletuksena, joten kuvaus ja jaettava viesti
  * työnsivät sivun vaakavieritykseen, ja thumbnail-esikatselu renderöityi
  * luonnollisessa 1280 px:n leveydessään. Asettelutesti ei paljastanut kumpaakaan,
  * koska se ei avaa esikatselua — se aukko on nyt paikattu (youtube.spec.ts).
  *
- * Ohjaamoa käytetään ensisijaisesti puhelimella kentän laidalla, joten
+ * Ohjaamoa käytetään ensisijaisesti operaattorin puhelimella kentän laidalla, joten
  * vaakavieritys ei ole kauneusvirhe vaan estää tarkistamisen jota juuri tässä
  * kohtaa pyydetään ("Olen tarkistanut tekstit ja kuvat"). */
 .textline {
@@ -1212,7 +1212,7 @@ select.field__input {
 }
 .thumbs {
   display: grid;
-  /* Allekkain puhelimella: 16:9-kuva 393 px:n ruudulla on jo vain ~200 px
+  /* Allekkain operaattorin puhelimella: 16:9-kuva 393 px:n ruudulla on jo vain ~200 px
      korkea, ja vierekkäin niistä ei erottaisi juuri sitä mitä pitää tarkistaa
      (otsikon rivitys ja merkki). */
   grid-template-columns: 1fr;

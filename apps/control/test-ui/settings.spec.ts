@@ -1,7 +1,7 @@
 /** Asetukset-välilehti (#133): ohjaamon pysyväisasetukset yhdessä paikassa.
  *
  *  Ennen tätä säädettävä oli hajallaan `run/`-tiedostoissa, joita pääsi
- *  muokkaamaan vain tiedostoselaimella — eli ei puhelimella kentän laidalla. */
+ *  muokkaamaan vain tiedostoselaimella — eli ei operaattorin puhelimella kentän laidalla. */
 
 import { expect, test, shot } from "./support/harness";
 

@@ -240,7 +240,7 @@ Tässä polussa operaattori luo lähetykset itse ja arvot kirjoitetaan käsin
 | Arvo | Mistä | Env-avain |
 |------|-------|-----------|
 | **Ottelu-ID** | tulospalvelun ottelusivu | `RELAY_MATCH_ID` |
-| **Raakalähetyksen URL** | puhelimen oman liven katselu-URL | `RELAY_YOUTUBE_URL` |
+| **Raakalähetyksen URL** | raakalähetyksen katselu-URL | `RELAY_YOUTUBE_URL` |
 | **Stream key** | **selostetun** lähetyksen ingest-avain, Studiosta | `RELAY_STREAM_KEY` |
 | RTMP-URL | oletus `rtmp://a.rtmp.youtube.com/live2` käy lähes aina | `RELAY_RTMP_URL` |
 

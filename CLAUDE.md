@@ -65,7 +65,7 @@ inferring it. Getting this wrong ships to every broadcast.
 
 ## Lähdelähetykseen kirjoittaminen
 
-**Lähdettä (`RELAY_YOUTUBE_URL`, puhelimen alkuperäinen live) ei kosketa ottelun
+**Lähdettä (`RELAY_YOUTUBE_URL`, raakalähetys johon kuvauspuhelin työntää) ei kosketa ottelun
 ollessa kesken.** Ainoa sallittu kirjoitus on hard stopin siivous päättyneen
 ottelun jälkeen (issue #123), ja sekin vain kun `CONTROL_HARD_STOP_SOURCE` on
 päällä (oletus pois). Siivouksen tekee ohjaamo laskevalla reunalla, kun relayn

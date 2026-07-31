@@ -167,7 +167,7 @@ export interface BroadcastJobInput {
   timeZone?: string;
   sourceMatchUrl?: string | null;
   /** DESIGN.md "YouTube-ketju": uusi stream key per lähetys, myös normaalille
-   *  versiolle — puhelimen Streamlabs tarvitsee oman avaimen, eikä
+   *  versiolle — kuvauspuhelimen Streamlabs tarvitsee oman avaimen, eikä
    *  uudelleenkäytettävä striimi saa sotkeutua selostetun kanssa. Aseta
    *  false, jos halutaan runbookin alkuperäinen malli, jossa normaali
    *  lähetys nojaa kanavan oletusavaimeen. */

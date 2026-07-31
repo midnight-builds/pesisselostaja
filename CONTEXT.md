@@ -4,12 +4,33 @@ Yksi lähetysketju: ohjaamo ajastaa YouTube-lähetykset, relay miksaa selostukse
 katsojat saavat linkit. Tämä sanasto määrittelee ketjun käsitteet niin, ettei
 "lähde" tai "ajastus" tarkoita eri asiaa eri dokumentissa.
 
+## Laitteet
+
+Ketjussa on **kaksi puhelinta**, ja ne ovat eri ihmisen kädessä eri paikassa.
+Paljas "puhelin" ei siksi kerro mitään — käytä aina jompaakumpaa näistä.
+
+**Kuvauspuhelin**:
+Kentällä kolmen metrin tolpan päässä oleva puhelin, jonka StreamLabs työntää
+raakalähetystä. **Ei operoitavissa ottelun aikana** — kaikki mitä siltä
+tarvitaan on tehtävä ennen kuin se nousee tolppaan.
+_Vältä_: paljas "puhelin"/"kännykkä", "kuvaajan puhelin" (kuvaaja ei ole sen
+luona ottelun aikana).
+
+**Operaattorin puhelin**:
+Operaattorin oma laite, jolla ohjaamoa käytetään: ajastus, relayn käynnistys ja
+ohjaus, live-valvonta, push-ilmoitukset. Kun dokumentti sanoo "ohjaamoa
+käytetään puhelimella kentän laidalla", se tarkoittaa tätä.
+_Vältä_: paljas "puhelin"/"kännykkä".
+
 ## Lähetykset ja linkit
 
 **Raakalähetys**:
-Kuvaajan puhelimesta (StreamLabs) tuleva YouTube-lähetys sellaisenaan, ilman
+Kuvauspuhelimen StreamLabsista tuleva YouTube-lähetys sellaisenaan, ilman
 selostusta. Jaetaan katsojille siinä missä selostettukin. Relay lukee videonsa
 tästä.
+_Huom_: ohjaamopolulla raakalähetyksen **luo ohjaamo**, ei kuvauspuhelin —
+StreamLabs vain poimii sen kanavan lähetyslistasta ja työntää siihen. "Puhelimen
+oma live" on siksi harhaanjohtava kuvaus.
 _Vältä_: "lähdelähetys", "lähde-URL", pelkkä "lähde" ilman määrettä,
 "piilotettu lähetys" (väärin — linkki jaetaan katsojille).
 

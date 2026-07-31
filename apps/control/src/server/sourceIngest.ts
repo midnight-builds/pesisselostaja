@@ -50,7 +50,7 @@ const BACKOFF_STEPS = [30_000, 60_000, 120_000, MAX_INTERVAL_MS];
 export const SOURCE_INGEST_STALE_MS = 120_000;
 
 /** `YouTubeApiError`in viesti sisältää koko JSON-virherungon. Se ei mahdu
- *  tiedostoon jonka relay jäsentää joka pollilla, eikä puhelimen tilariville. */
+ *  tiedostoon jonka relay jäsentää joka pollilla, eikä operaattorin puhelimen tilariville. */
 const MAX_ERROR_LENGTH = 200;
 
 /** Kun token on vanhentunut (needsReauth), pollaus vaikenee kunnes tunnukset

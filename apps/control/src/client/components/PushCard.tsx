@@ -30,7 +30,7 @@ const STATUS_TEXT: Record<PushStatus, string> = {
   on: "Ilmoitukset ovat käytössä tällä puhelimella.",
   off: "Ilmoitukset eivät ole vielä käytössä tällä puhelimella.",
   blocked:
-    "Ilmoitukset on estetty. Salli ne puhelimen asetuksista (Asetukset → Ilmoitukset → Ohjaamo) ja palaa tänne.",
+    "Ilmoitukset on estetty. Salli ne tämän puhelimen asetuksista (Asetukset → Ilmoitukset → Ohjaamo) ja palaa tänne.",
   "needs-install":
     "Lisää Koti-valikkoon ensin. iOS sallii ilmoitukset vain kotivalikkoon asennetulle sovellukselle: Safarissa Jaa-painike → “Lisää koti­valikkoon”, ja avaa sovellus sen jälkeen kotivalikon kuvakkeesta.",
   unsupported: "Tämä selain ei tue push-ilmoituksia.",

@@ -1,7 +1,7 @@
 # @pesisselostaja/control — Ohjaamo
 
 Mobiilikäyttöinen (iPhone Safari) ohjaussovellus, jolla koko broadcast-tuotanto
-hoidetaan puhelimesta: ottelun valinta, relayn elinkaari, live-valvonta ja
+hoidetaan operaattorin puhelimesta: ottelun valinta, relayn elinkaari, live-valvonta ja
 YouTube-ketju. Suunnitelma ja päätösten perustelut: `DESIGN.md`.
 
 ## Miksi tämä on oma palvelunsa

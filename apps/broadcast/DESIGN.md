@@ -19,13 +19,13 @@ alkuperäistä ääntä ei poisteta, selostus vain lisätään sen päälle.
 
 Kaksi vaihtoehtoa punnittiin:
 
-- **A (valittu):** kännykkä striimaa YouTubeen kuten ennenkin; relay hakee
+- **A (valittu):** kuvauspuhelin striimaa YouTubeen kuten ennenkin; relay hakee
   striimin suoran HLS-osoitteen (`yt-dlp -g`), miksaa äänen ja julkaisee
   tuloksen toisena lähetyksenä. Alkuperäinen lähetys säilyy täysin
   koskemattomana — vaikka relay kaatuisi, alkuperäinen live jatkuu. Hintana
   kertautuva viive (alkuperäisen striimin viive + oma käsittely + toisen
   lähetyksen ingest-viive, arviolta **30–90 s**), joka hyväksyttiin tietoisesti.
-- **B (hylätty):** kännykkä striimaisi ensin omalle relepalvelimelle (esim.
+- **B (hylätty):** kuvauspuhelin striimaisi ensin omalle relepalvelimelle (esim.
   MediaMTX), joka miksaisi ja työntäisi YouTubeen vain kerran. Pienempi viive
   ja vankempi, mutta alkuperäinen live olisi riippuvainen relaystä — käyttäjä
   valitsi A:n nimenomaan siksi, että originaali lähetys säilyy itsenäisenä.

@@ -108,7 +108,7 @@ export function describeFailureSide(
     );
   }
   if (side === "source") {
-    return "ffmpegin virheet tulivat LÄHTEEN puolelta — tarkista puhelimen lähetys.";
+    return "ffmpegin virheet tulivat LÄHTEEN puolelta — tarkista kuvauspuhelimen lähetys.";
   }
   if (weakTarget) {
     return (

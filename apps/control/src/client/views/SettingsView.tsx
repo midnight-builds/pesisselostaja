@@ -13,7 +13,7 @@ import { ToggleRow } from "../components/ToggleRow";
  *
  *  Jokainen kortti tallennetaan erikseen. PATCH on osittainen, joten toisen
  *  kortin kesken jäänyt muokkaus ei voi nollata toista — leiripäivänä
- *  puhelimella tehty tallennus ei saa olla sivuvaikutuksellinen. */
+ *  operaattorin puhelimella tehty tallennus ei saa olla sivuvaikutuksellinen. */
 
 interface Props {
   notify: (kind: "ok" | "error", text: string) => void;
