@@ -354,18 +354,32 @@ export class CommentaryLoop {
      *  eivät ajaneet" tilanteesta "pollit ajoivat ja API vastasi vanhaa". */
     lastEventCount: null as number | null,
     newEvents: 0,
-    /** ONNISTUNEIDEN hakujen kestot ikkunan ajalta, millisekunteina (#156).
+    /** ONNISTUNEIDEN hakujen kestot ikkunan ajalta, millisekunteina, ERIKSEEN
+     *  kummallekin aikakatkaisulle (#156).
      *
      *  Ennen tätä kesto kirjattiin vain epäonnistuneesta hausta
      *  (`api.fetch_failed`), eli pelkästä jakauman hännästä. Aikakatkaisuja on
      *  siksi viritetty kahdesti (#47, #81) ilman että keskiosaa on kertaakaan
-     *  mitattu, ja #156:ssa se johti väärään päätelmään: 4 s luultiin
-     *  perustelluksi, koska kuorman oletettiin selittävän hitaat haut.
+     *  mitattu.
      *
-     *  Epäonnistuneita EI lasketa tähän: niiden kesto on määritelmällisesti
+     *  Kaksi syytä pitää ne erillään, ja molemmat opittiin kantapään kautta:
+     *
+     *  1. Niitä säätelee ERI raja (`FULL_FETCH_TIMEOUT_MS` 10 s vs.
+     *     `SMALL_FETCH_TIMEOUT_MS` 4 s). Yhteen taulukkoon sekoitettuna
+     *     raportoitu maksimi voi olla haku, jota arvioitava raja ei koske —
+     *     ja koko #156 on olemassa siksi, ettei rajaa perusteltaisi väärällä
+     *     joukolla. Sekoitus olisi ollut sama kehäpäätelmä uudessa muodossa.
+     *  2. Ne ovat oikeasti eri kokoisia: täyshaku palauttaa koko historian
+     *     (mitattu ~32 kt ottelun lopussa), delta vain uudet tapahtumat.
+     *
+     *  "small" kattaa delta-pollin JA molemmat `fetchMatchMetadata`-kutsut,
+     *  koska sama raja säätelee niitä — käynnistyksen haku mukaan lukien, joka
+     *  on juuri se kutsu jonka aikakatkaisu voi tappaa lähetyksen (#158).
+     *
+     *  Epäonnistuneita EI lasketa: niiden kesto on määritelmällisesti
      *  aikakatkaisu, joten ne vetäisivät jakauman kohti sitä rajaa, jota tällä
      *  on tarkoitus arvioida. Ne näkyvät erikseen `virhe`-lukumääränä. */
-    fetchMs: [] as number[],
+    fetchMs: { small: [] as number[], full: [] as number[] },
   };
   private lastPollSummaryAtMs = Date.now();
   /** Consecutive failed poll cycles; reset by the first success. Drives the
@@ -507,7 +521,8 @@ export class CommentaryLoop {
       `Pollit ${Math.round(elapsedMs / 1000)} s aikana: ${w.polls} kpl ` +
         `(304 ${w.notModified}, delta ${w.delta}, täyshaku ${w.full}, reset ${w.resets}, virhe ${w.failures}), ` +
         `${w.newEvents} uutta tapahtumaa, ${answered}, historiassa ${this.history.size}, ` +
-        `kestot ${formatFetchDurations(w.fetchMs)}, kursori ${cursor}.`
+        `kestot pieni ${formatFetchDurations(w.fetchMs.small)} / täys ${formatFetchDurations(w.fetchMs.full)}, ` +
+        `kursori ${cursor}.`
     );
     this.lastPollSummaryAtMs = Date.now();
     this.pollWindow = {
@@ -519,7 +534,7 @@ export class CommentaryLoop {
       failures: 0,
       lastEventCount: null,
       newEvents: 0,
-      fetchMs: [],
+      fetchMs: { small: [], full: [] },
     };
   }
 
@@ -528,10 +543,12 @@ export class CommentaryLoop {
    *  Kutsutaan haun ympäriltä eikä `fetchEventsForPoll`in ympäriltä, jotta luku
    *  on API:n vasteaika eikä sisällä paikallista yhdistelyä — juuri sitä lukua
    *  vasten aikakatkaisu asetetaan. */
-  private async timedFetch<T>(fetch: () => Promise<T>): Promise<T> {
+  private async timedFetch<T>(size: "small" | "full", fetch: () => Promise<T>): Promise<T> {
     const startedAt = Date.now();
     const result = await fetch();
-    this.pollWindow.fetchMs.push(Date.now() - startedAt);
+    // Vasta onnistumisen jälkeen: heitto ohittaa tämän rivin, eikä
+    // aikakatkaistu haku päädy otokseen. Tarkoituksella EI `finally`.
+    this.pollWindow.fetchMs[size].push(Date.now() - startedAt);
     return result;
   }
 
@@ -590,11 +607,13 @@ export class CommentaryLoop {
 
     let meta: MatchMetadata;
     try {
-      meta = await fetchMatchMetadata(this.config.matchId, {
-        apiBase: this.config.apiBase,
-        apiKey: this.config.apiKey,
-        timeoutMs: this.apiTimeoutMs("small"),
-      });
+      meta = await this.timedFetch("small", () =>
+        fetchMatchMetadata(this.config.matchId, {
+          apiBase: this.config.apiBase,
+          apiKey: this.config.apiKey,
+          timeoutMs: this.apiTimeoutMs("small"),
+        })
+      );
     } catch (err) {
       // Keep the names we have and try again next interval: a failed refresh
       // must never be worse than not refreshing at all.
@@ -691,11 +710,13 @@ export class CommentaryLoop {
     );
 
     logInfo("api.fetching_meta", `Haetaan ottelutietoja (ID: ${this.config.matchId})…`);
-    let meta = await fetchMatchMetadata(this.config.matchId, {
-      apiBase: this.config.apiBase,
-      apiKey: this.config.apiKey,
-      timeoutMs: this.apiTimeoutMs("small"),
-    });
+    let meta = await this.timedFetch("small", () =>
+      fetchMatchMetadata(this.config.matchId, {
+        apiBase: this.config.apiBase,
+        apiKey: this.config.apiKey,
+        timeoutMs: this.apiTimeoutMs("small"),
+      })
+    );
     this.meta = meta;
     let lookup = buildPlayerLookup(meta);
     this.rosterRefreshedAt = Date.now();
@@ -881,7 +902,7 @@ export class CommentaryLoop {
    *  cursor. Used at startup, when delta polling is off, for the periodic
    *  resync, and as the fallback whenever a delta looks untrustworthy. */
   private async fetchFullEvents(): Promise<LiveEventsResult> {
-    const res = await this.timedFetch(() =>
+    const res = await this.timedFetch("full", () =>
       fetchLiveEvents(this.config.matchId, {
         apiBase: this.config.apiBase,
         timeoutMs: this.apiTimeoutMs("full"),
@@ -991,7 +1012,7 @@ export class CommentaryLoop {
     }
     const afterMs = this.deltaCursor?.afterMs ?? this.lastServerDateMs - AFTER_MARGIN_MS;
     const after = this.deltaCursor?.after ?? formatHelsinkiTimestamp(new Date(afterMs));
-    const res = await this.timedFetch(() =>
+    const res = await this.timedFetch("small", () =>
       fetchLiveEvents(this.config.matchId, {
         apiBase: this.config.apiBase,
         timeoutMs: this.apiTimeoutMs("small"),

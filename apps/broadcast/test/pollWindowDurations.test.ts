@@ -7,7 +7,7 @@ vi.mock("@pesisselostaja/core", async (importOriginal) => {
 });
 
 import { fetchLiveEvents } from "@pesisselostaja/core";
-import type { LiveEventsResult } from "@pesisselostaja/core";
+import type { LiveEvent, LiveEventsResult } from "@pesisselostaja/core";
 import { CommentaryLoop, formatFetchDurations } from "../src/commentaryLoop.js";
 import type { RelayConfig } from "../src/config.js";
 
@@ -45,15 +45,30 @@ function makeConfig(overrides: Partial<RelayConfig> = {}): RelayConfig {
 
 interface LoopInternals {
   fetchFullEvents(): Promise<LiveEventsResult>;
-  pollWindow: { fetchMs: number[]; failures: number };
+  fetchEventsForPoll(): Promise<LiveEventsResult | null>;
+  maybeLogPollWindow(): void;
+  lastPollSummaryAtMs: number;
+  lastServerDateMs: number | null;
+  lastFullFetchAt: number;
+  history: { size: number };
+  pollWindow: { fetchMs: { small: number[]; full: number[] }; failures: number };
 }
 
 function makeLoop(): LoopInternals {
   return new CommentaryLoop(makeConfig(), async () => {}) as unknown as LoopInternals;
 }
 
-function result(): LiveEventsResult {
-  return { events: [], notModified: false, etag: null, serverDateMs: Date.parse("2026-07-31T10:00:00Z") };
+// Fictional data only (public repo).
+function ev(id: number): LiveEvent {
+  return {
+    id, groupType: "x", period: 0, inning: 0, batTurn: 0, team: 100, hTeam: 100,
+    batter: null, pairIndex: null, hitNumber: null, hit: null,
+    events: [], timestamp: 10, updated: null,
+  };
+}
+
+function result(events: LiveEvent[] = []): LiveEventsResult {
+  return { events, notModified: false, etag: null, serverDateMs: Date.parse("2026-07-31T10:00:00Z") };
 }
 
 beforeEach(() => fetchMock.mockReset());
@@ -94,8 +109,10 @@ describe("pollWindow.fetchMs (#156)", () => {
     const loop = makeLoop();
     fetchMock.mockResolvedValueOnce(result());
     await loop.fetchFullEvents();
-    expect(loop.pollWindow.fetchMs).toHaveLength(1);
-    expect(loop.pollWindow.fetchMs[0]).toBeGreaterThanOrEqual(0);
+    expect(loop.pollWindow.fetchMs.full).toHaveLength(1);
+    expect(loop.pollWindow.fetchMs.full[0]).toBeGreaterThanOrEqual(0);
+    // Täyshaku EI saa päätyä pieneen otokseen: sitä säätelee eri raja.
+    expect(loop.pollWindow.fetchMs.small).toEqual([]);
   });
 
   it("EI kirjaa epäonnistunutta hakua otokseen", async () => {
@@ -106,7 +123,8 @@ describe("pollWindow.fetchMs (#156)", () => {
     const loop = makeLoop();
     fetchMock.mockRejectedValueOnce(new Error("This operation was aborted"));
     await expect(loop.fetchFullEvents()).rejects.toThrow("aborted");
-    expect(loop.pollWindow.fetchMs).toEqual([]);
+    expect(loop.pollWindow.fetchMs.full).toEqual([]);
+    expect(loop.pollWindow.fetchMs.small).toEqual([]);
   });
 
   it("kerää useamman haun samaan ikkunaan", async () => {
@@ -115,6 +133,47 @@ describe("pollWindow.fetchMs (#156)", () => {
     await loop.fetchFullEvents();
     await loop.fetchFullEvents();
     await loop.fetchFullEvents();
-    expect(loop.pollWindow.fetchMs).toHaveLength(3);
+    expect(loop.pollWindow.fetchMs.full).toHaveLength(3);
+  });
+
+  it("mittaa DELTA-haun ja kirjaa sen pieneen otokseen", async () => {
+    // Adversariaalinen katselmus 31.7.2026 huomautti, että alkuperäiset testit
+    // ajoivat vain fetchFullEventsia: timedFetchin olisi voinut poistaa
+    // delta-kutsusta ja sarja olisi pysynyt vihreänä — vaikka lähes kaikki
+    // näytteet tulevat juuri sieltä (tyypillinen ikkuna: 304 5, delta 2,
+    // täyshaku 0).
+    const loop = makeLoop();
+    // Delta vaatii palvelimen Date-leiman JA epätyhjän historian; ilman niitä
+    // fetchEventsForPoll putoaa täyshakuun (ks. sen oma ehto). Historia
+    // täytetään oikealla täyshaulla, koska `size` on vain getter.
+    fetchMock.mockResolvedValueOnce(result([ev(1)]));
+    await loop.fetchFullEvents();
+    expect(loop.history.size).toBe(1);
+    loop.lastFullFetchAt = Date.now();
+    const fullBefore = loop.pollWindow.fetchMs.full.length;
+
+    fetchMock.mockResolvedValueOnce({ ...result(), notModified: true });
+    await loop.fetchEventsForPoll();
+
+    expect(loop.pollWindow.fetchMs.small).toHaveLength(1);
+    expect(loop.pollWindow.fetchMs.full).toHaveLength(fullBefore);
+  });
+
+  it("nollaa otoksen kun ikkuna raportoidaan, jottei se kasva ottelun mitassa", async () => {
+    // Ajetaan fetchEventsForPollin kautta: maybeLogPollWindow palaa heti jos
+    // `polls === 0`, ja laskuri kasvaa vain siellä. Suoraan fetchFullEventsia
+    // kutsumalla nollausta ei testattaisi lainkaan.
+    const loop = makeLoop();
+    fetchMock.mockResolvedValue(result([ev(1)]));
+    await loop.fetchEventsForPoll();
+    await loop.fetchEventsForPoll();
+    expect(loop.pollWindow.fetchMs.full.length + loop.pollWindow.fetchMs.small.length).toBeGreaterThan(0);
+
+    // Pakota yhteenveto erääntymään.
+    loop.lastPollSummaryAtMs = Date.now() - 60_000;
+    loop.maybeLogPollWindow();
+
+    expect(loop.pollWindow.fetchMs.full).toEqual([]);
+    expect(loop.pollWindow.fetchMs.small).toEqual([]);
   });
 });
