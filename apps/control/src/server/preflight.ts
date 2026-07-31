@@ -12,8 +12,10 @@
  *  source, and preflight.ts's own dependency (@pesisselostaja/core) is already a
  *  dependency of this app — so no package.json change is needed. */
 
-import { runPreflight, summarize, type Check } from "../../../broadcast/src/preflight.js";
-import type { PreflightCheck, PreflightResult } from "../shared/types.js";
+import { readFile } from "node:fs/promises";
+
+import { parseEnvFile, runPreflight, summarize, type Check } from "../../../broadcast/src/preflight.js";
+import type { Job, PreflightCheck, PreflightResult } from "../shared/types.js";
 import { CONFIG } from "./config.js";
 import { notifyPreflightBlockers } from "./notifications.js";
 
@@ -37,10 +39,88 @@ function summaryLine(checks: Check[]): string {
   return lines[lines.length - 1] ?? "";
 }
 
-export async function runControlPreflight(): Promise<PreflightResult> {
+/** The keys `.env.relay` binds to one job (mirrors MATCH_SCOPED_ENV_KEYS in
+ *  relay.ts) and what the job says each of them should be. */
+function expectedBinding(job: Job): Record<string, string | null> {
+  return {
+    RELAY_MATCH_ID: String(job.matchId),
+    RELAY_YOUTUBE_URL: job.sourceUrl,
+    RELAY_STREAM_KEY: job.targetStreamKey,
+    RELAY_RTMP_URL: job.targetRtmpUrl,
+  };
+}
+
+/** Human name for each bound key, for the one line the operator reads. */
+const BINDING_LABEL: Record<string, string> = {
+  RELAY_MATCH_ID: "ottelu",
+  RELAY_YOUTUBE_URL: "raakalähetys",
+  RELAY_STREAM_KEY: "kohteen stream key",
+  RELAY_RTMP_URL: "kohteen RTMP-osoite",
+};
+
+/** Does `.env.relay` point at the job the operator is looking at? (#155)
+ *
+ *  Every other check reads the env file and reports what it finds there —
+ *  truthfully, and about whatever match the file happens to name. On 31.7.2026
+ *  that produced four green rows describing YESTERDAY's match, minutes before
+ *  a new one, because "Kirjoita .env.relay" had not been run. A green preflight
+ *  about the wrong match is worse than no preflight: it confirms a wrong
+ *  assumption at the exact moment the operator is looking for confirmation.
+ *
+ *  Exported pure so the comparison can be tested without a filesystem, an API
+ *  or systemd — the rest of runPreflight() is untestable for exactly those
+ *  reasons.
+ *
+ *  Precedence mirrors runPreflight(): `process.env` wins over the file, because
+ *  that is what the relay itself would see. A value the job has not got yet
+ *  (`null` — no broadcast created) is not a mismatch; it is simply not bound
+ *  yet, and the existing rows already say what is missing. */
+export function checkJobBinding(
+  job: Job,
+  fileEnv: Record<string, string>,
+  processEnv: NodeJS.ProcessEnv = process.env
+): Check {
+  const expected = expectedBinding(job);
+  const wrong: string[] = [];
+  for (const [key, want] of Object.entries(expected)) {
+    if (want == null) continue;
+    const actual = processEnv[key] || fileEnv[key] || "";
+    if (actual !== want) {
+      wrong.push(
+        actual
+          ? `${BINDING_LABEL[key]} on ${key === "RELAY_STREAM_KEY" ? "eri" : actual}, pitäisi olla ${key === "RELAY_STREAM_KEY" ? "työn oma" : want}`
+          : `${BINDING_LABEL[key]} puuttuu`
+      );
+    }
+  }
+  if (wrong.length === 0) {
+    return { name: "Työn sidonta", status: "ok", detail: `.env.relay osoittaa valittuun työhön (ottelu ${job.matchId})` };
+  }
+  return {
+    name: "Työn sidonta",
+    status: "fail",
+    detail: `.env.relay ei vastaa valittua työtä: ${wrong.join("; ")} — aja "Kirjoita .env.relay" ensin.`,
+  };
+}
+
+/** @param job the job the operator has open, when there is one. Omitted by
+ *  callers that have no job to compare against (the CLI is deliberately
+ *  path-based); given one, the binding check goes first, because every row
+ *  below it is only meaningful if it holds. */
+export async function runControlPreflight(job?: Job | null): Promise<PreflightResult> {
   // The same env file systemd hands the unit — see the runbook: preflight has
   // to check what the service would actually run, not what the UI thinks.
   const checks = await runPreflight(CONFIG.relayEnvPath);
+  if (job) {
+    let fileEnv: Record<string, string> = {};
+    try {
+      fileEnv = parseEnvFile(await readFile(CONFIG.relayEnvPath, "utf8"));
+    } catch {
+      // No file at all: every bound key reads as missing, which is exactly the
+      // blocker the operator needs to see.
+    }
+    checks.unshift(checkJobBinding(job, fileEnv));
+  }
   const result: PreflightResult = {
     ranAt: new Date().toISOString(),
     checks: checks.map(toWireCheck),
