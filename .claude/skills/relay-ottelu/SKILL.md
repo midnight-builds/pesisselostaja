@@ -27,7 +27,7 @@ kirjoita "lähde-URL" ilman määrettä: se on kaatanut kaksi dokumenttia.
    kirjoitus on hard stopin siivous päättyneen ottelun jälkeen (#123), ja sekin
    vain kun ohjaamon `CONTROL_HARD_STOP_SOURCE` on päällä. Siivouksen tekee
    ohjaamo itse; sinä et transitoi lähetyksiä käsin.
-2. **Uptime voittaa siisteyden.** Ottelun ollessa kesken kuollut lähde voi
+2. **Uptime voittaa siisteyden.** Ottelun ollessa kesken kuollut raakalähetys voi
    palata — älä pysäytä relayta.
 3. **Levytila alle 2 Gt → pysäytä kaikki kirjoittavat operaatiot heti** ja
    ilmoita käyttäjälle (globaali sääntö).
@@ -41,9 +41,10 @@ Ole rehellinen käyttäjälle tästä; älä esitä koettelematonta varmana.
 | Relay + selostus | Koeteltu useassa lähetyksessä |
 | Ohjaamon ottelulista, työjono, preflight, käsikäynnistys | Koeteltu |
 | Ohjaamon lähetysparin **luonti** | Ajettu 30.7.2026 (ottelu 145905, kaksikin kertaa). Toimi; puutteet kirjattu #130–#132 |
-| **Ohjaamon luoma pari päästä päähän** (StreamLabs poimii raakalähetyksen → relay ajaa sen) | **EI koeteltu** (#124 vaihe 1) — aamun kierros meni Studion kautta, ja päivän ohjaamolla luodut työt päätyivät `cancelled`-tilaan |
+| **Ohjaamon luoma pari päästä päähän** (StreamLabs poimii raakalähetyksen → relay ajaa sen) | **Koeteltu kerran**: 31.7.2026, ottelu 145918. Toimi. Löydöt: #154, #155 |
 | **Ajastimen automaattinen käynnistys** | **EI koeteltu livenä**, oletuksena pois (#124 vaihe 2) |
-| **Itsesammutus ja hard stopin siivous** | **EI koeteltu livenä** (#121, #122, #123 korjattu koodissa) |
+| **Itsesammutus** normaalilla `ended`-polulla | **Koeteltu 31.7.2026**: ffmpeg code=0 → respawn ajastettu → lähde päättynyt havaittu → siisti sammutus 3 s kuluttua. Ohjaamo sulki työn (`finished`) ja YouTuben AutoStop sulki molemmat lähetykset |
+| **Hard stopin siivous** | **EI koeteltu livenä** (#123 korjattu koodissa) — 31.7. lopetus tuli normaalina polkuna, ei hard stopina |
 
 Kun jokin näistä ajetaan ensi kertaa, **kirjaa mikä takkuaa** — se on #124:n
 vaiheen 1 koko sisältö.
@@ -203,13 +204,13 @@ katsojat ehtivät paikalle.
 
 Kun ottelu on ohi, lopetuksen pitäisi tapahtua itsestään:
 
-- Relay sammuttaa itsensä, kun lähde päättyy (`ended`), tai hard stopin
-  takarajalla (#123): ottelu päättynyt **ja** hiljaisuutta **ja** lähde
+- Relay sammuttaa itsensä, kun raakalähetys päättyy (`ended`), tai hard stopin
+  takarajalla (#123): ottelu päättynyt **ja** hiljaisuutta **ja** raakalähetys
   oireilee. Ottelu päättyneenä on ehdoton portti — hard stop ei voi laueta
   kesken ottelun.
 - Ohjaamo sulkee työn laskevalla reunalla, ja tekee hard stopin siivouksen
-  (kohde ja — lipun ollessa päällä — raakalähetys) vain kun telemetria kertoo
-  `endReason === "hard_stop"`. Normaalissa lopetuksessa kohteen sulkee YouTuben
+  (selostettu lähetys ja — lipun ollessa päällä — raakalähetys) vain kun telemetria
+  kertoo `endReason === "hard_stop"`. Normaalissa lopetuksessa selostetun sulkee YouTuben
   `enableAutoStop`, eikä raakalähetykseen kosketa.
 
 > **Tarkista silti itse, että ajo todella loppui.** Mitään tästä ketjusta ei ole
@@ -240,7 +241,7 @@ Tässä polussa operaattori luo lähetykset itse ja arvot kirjoitetaan käsin
 | Arvo | Mistä | Env-avain |
 |------|-------|-----------|
 | **Ottelu-ID** | tulospalvelun ottelusivu | `RELAY_MATCH_ID` |
-| **Raakalähetyksen URL** | puhelimen oman liven katselu-URL | `RELAY_YOUTUBE_URL` |
+| **Raakalähetyksen URL** | raakalähetyksen katselu-URL | `RELAY_YOUTUBE_URL` |
 | **Stream key** | **selostetun** lähetyksen ingest-avain, Studiosta | `RELAY_STREAM_KEY` |
 | RTMP-URL | oletus `rtmp://a.rtmp.youtube.com/live2` käy lähes aina | `RELAY_RTMP_URL` |
 

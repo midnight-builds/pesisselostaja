@@ -43,7 +43,7 @@ export const BUILD_INFO: BuildInfo =
  *  Haara mukaan aina, myös kun se on `main`: koko vian ydin oli se, että
  *  tarjolla oli haaralta siirretty build eikä sitä voinut erottaa mainista.
  *  Pelkkä SHA vaatisi gitin käyttöä sen tulkitsemiseen, mikä ei onnistu
- *  puhelimella kentän laidalla. */
+ *  operaattorin puhelimella kentän laidalla. */
 export function formatBuildInfo(info: BuildInfo = BUILD_INFO): string {
   if (info.sha === "unknown") return "versio tuntematon";
   const dirty = info.dirty ? " + muokattu" : "";

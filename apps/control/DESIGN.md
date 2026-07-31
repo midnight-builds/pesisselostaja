@@ -29,7 +29,7 @@ unohtuu ensin.
 - **Kirjautuminen laitevirralla** (OAuth client: *TVs and Limited Input
   devices*). Ei paluuosoitetta eikä verkkotunnuksen omistusvahvistusta — emme
   omista `ts.net`-domainia, joten web-redirect voisi kaatua juuri siihen.
-- **UI luo molemmat lähetykset etukäteen.** Vahvistettu 29.7.2026: puhelimen
+- **UI luo molemmat lähetykset etukäteen.** Vahvistettu 29.7.2026: kuvauspuhelimen
   **Streamlabs käyttää YouTube-integraatiota** ja näyttää kanavan kaikki
   ajastetut lähetykset — kuvauksen alussa valitaan vain oikea listalta.
   Streamlabs ei siis luo lähetystä eikä tarvitse meiltä stream keytä; se
@@ -43,7 +43,7 @@ unohtuu ensin.
   Normaali lähetys luodaan **ilman striimiä** ja ilman autostartia.
 - **Käsityökulku on jo API-pohjainen ja koeteltu.** 28.7.2026 jaettu paketti
   (`tools/youtube-create-broadcast.js`, `-with-stream.js`) luo lähetykset
-  YouTube Data API v3:lla, ja ne näkyvät puhelimen listassa normaalisti.
+  YouTube Data API v3:lla, ja ne näkyvät kuvauspuhelimen listassa normaalisti.
   `src/server/youtube.ts` toistaa saman kutsuketjun ja samat asetukset — UI ei
   siis ota käyttöön uutta, todentamatonta reittiä vaan automatisoi olemassa
   olevan.
@@ -72,7 +72,7 @@ URL/ottelu-ID, sekä suosikkijoukkueet etusivulla.
   kun Streamlabs alkaa työntää, UI ajaa preflightin ja käynnistää relayn.
   Nolla klikkiä kentällä. Preflightin este estää käynnistyksen ja lähettää
   ilmoituksen.
-- Koska UI luo lähdelähetyksen **ajastettuna**, yt-dlp saa YouTubelta "alkaa N
+- Koska UI luo raakalähetyksen **ajastettuna**, yt-dlp saa YouTubelta "alkaa N
   minuutin kuluttua" ja relay osaa jo nyt odottaa kuluttamatta
   luovutusikkunaansa (`SourceNotLiveYetError`).
 - **Törmäys** (B:n lähde menee liveen kun A on ajossa): B jää jonoon, **A ei

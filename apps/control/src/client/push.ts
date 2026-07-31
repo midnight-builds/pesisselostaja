@@ -105,7 +105,7 @@ export async function enablePush(): Promise<PushStatus> {
   // First thing in the gesture, before any await on the network.
   const permission = await Notification.requestPermission();
   if (permission === "denied") {
-    throw new Error("Ilmoitukset on estetty. Salli ne puhelimen asetuksista (Ilmoitukset → Ohjaamo).");
+    throw new Error("Ilmoitukset on estetty. Salli ne tämän puhelimen asetuksista (Ilmoitukset → Ohjaamo).");
   }
   if (permission !== "granted") {
     throw new Error("Ilmoituslupaa ei myönnetty.");

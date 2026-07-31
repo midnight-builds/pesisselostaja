@@ -63,13 +63,13 @@ singular is therefore not always accurate.
 When a pesäpallo detail is not written down here, **ask the user** rather than
 inferring it. Getting this wrong ships to every broadcast.
 
-## Lähdelähetykseen kirjoittaminen
+## Raakalähetykseen kirjoittaminen
 
-**Lähdettä (`RELAY_YOUTUBE_URL`, puhelimen alkuperäinen live) ei kosketa ottelun
-ollessa kesken.** Ainoa sallittu kirjoitus on hard stopin siivous päättyneen
+**Raakalähetystä (`RELAY_YOUTUBE_URL`, se johon kuvauspuhelin työntää) ei
+kosketa ottelun ollessa kesken.** Ainoa sallittu kirjoitus on hard stopin siivous päättyneen
 ottelun jälkeen (issue #123), ja sekin vain kun `CONTROL_HARD_STOP_SOURCE` on
 päällä (oletus pois). Siivouksen tekee ohjaamo laskevalla reunalla, kun relayn
-oma telemetria kertoo `endReason === "hard_stop"`. Kohdelähetys transitoidaan
+oma telemetria kertoo `endReason === "hard_stop"`. Selostettu lähetys transitoidaan
 `complete`ksi vain samassa tilanteessa — normaalissa lopetuksessa luotetaan
 YouTuben `enableAutoStop`iin.
 
@@ -97,9 +97,12 @@ Kaksi asiaa, jotka ovat menneet väärin nimenomaan tässä:
   käynnistysikkuna). Lue se ennen kuin kirjoitat ketjusta issueen, dokumenttiin
   tai koodikommenttiin; paljas "lähde-URL" on jo kaatanut kaksi dokumenttia.
 
-Ketjua **ei ole vielä kertaakaan ajettu läpi ohjaamon luomalla lähetysparilla**,
-eikä ajastimen automaattikäynnistystä ole koeteltu livenä. Älä esitä niitä
-varmana; kerro mikä on koeteltu ja mikä ei.
+Ketju **on ajettu läpi ohjaamon luomalla lähetysparilla kerran**: 31.7.2026,
+ottelu 145918. Luonti, käsikäynnistys, ajo ja itsesammutus toimivat; kaksi
+vikaa löytyi (#154 kunnarin selostus, #155 preflight validoi väärää ottelua).
+**Ajastimen automaattikäynnistystä ei ole yhä koeteltu livenä**, eikä hard
+stopin siivousta — 31.7. lopetus tuli normaalina `ended`-polkuna. Älä esitä
+koettelematonta varmana; kerro mikä on koeteltu ja mikä ei.
 
 ## TTS pronunciation
 Speech is read aloud by browser TTS or Piper, which mispronounce some terms.

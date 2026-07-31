@@ -881,7 +881,7 @@ function settingsSheet(): string {
         <a href="${REPO_URL}" target="_blank" rel="noopener">Pesisselostaja GitHubissa</a>
         · <a href="${CREDITS_URL}" target="_blank" rel="noopener">Äänet ja lisenssit</a>
         <!-- Mistä tarjoiltu build on peräisin (#71). Asetuspaneelissa, koska
-             tätä katsotaan harvoin mutta silloin nimenomaan puhelimella:
+             tätä katsotaan harvoin mutta silloin nimenomaan operaattorin puhelimella:
              kerran palvelu jäi pyörittämään haaralta siirrettyä buildia eikä
              sitä voinut todeta käyttöliittymästä lainkaan. -->
         <div class="set-build">${esc(formatBuildInfo())}</div>

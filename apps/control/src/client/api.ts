@@ -272,7 +272,7 @@ export const api = {
 /** Thumbnail-esikatselu ei kulje request()-apurin läpi: reitti palauttaa
  *  image/png-tavuja, ei JSONia. Virhevastaus on silti JSONia, joten se
  *  puretaan samalla tavalla kuin muualla — muuten renderöijän puuttuva
- *  Pillow-asennus näkyisi puhelimella tyhjänä kuvana. */
+ *  Pillow-asennus näkyisi operaattorin puhelimella tyhjänä kuvana. */
 export async function fetchThumbnailPreview(opts: ThumbnailRequest): Promise<Blob> {
   let res: Response;
   try {

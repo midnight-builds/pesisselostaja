@@ -1,6 +1,6 @@
 # Kenttäaudion parannuksen arviointikriteeristö
 
-Mitä tavoitellaan kun puhelimen kenttäääntä käsitellään (ei koske TTS-
+Mitä tavoitellaan kun kuvauspuhelimen kenttäääntä käsitellään (ei koske TTS-
 selostusta, ks. [field-audio-demo.md](field-audio-demo.md)). Kirjoitettu
 ennen variaatioiden arviointia, jotta arvio ei ajaudu pelkäksi "kuulostaa
 kivalta" -mielipiteeksi.

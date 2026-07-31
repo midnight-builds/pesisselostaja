@@ -1,7 +1,7 @@
 # @pesisselostaja/control — Ohjaamo
 
 Mobiilikäyttöinen (iPhone Safari) ohjaussovellus, jolla koko broadcast-tuotanto
-hoidetaan puhelimesta: ottelun valinta, relayn elinkaari, live-valvonta ja
+hoidetaan operaattorin puhelimesta: ottelun valinta, relayn elinkaari, live-valvonta ja
 YouTube-ketju. Suunnitelma ja päätösten perustelut: `DESIGN.md`.
 
 ## Miksi tämä on oma palvelunsa
@@ -39,7 +39,7 @@ ohitettavissa (`CONTROL_PORT`, `CONTROL_HOST`, `CONTROL_RELAY_ENV`,
 
 | Muuttuja | Oletus | Mitä tekee |
 |---|---|---|
-| `CONTROL_HARD_STOP_SOURCE` | `false` | Saako hard stopin siivous (#123) lopettaa myös **lähdelähetyksen**. Kohdelähetys lopetetaan hard stopissa aina; lähde on lipun takana, koska se on toisen ihmisen lähetys. Vain kirjaimellinen `"true"` on päällä. |
+| `CONTROL_HARD_STOP_SOURCE` | `false` | Saako hard stopin siivous (#123) lopettaa myös **raakalähetyksen**. Selostettu lähetys lopetetaan hard stopissa aina: se on kokonaan meidän, relay on ainoa joka siihen työntää, eikä sen sulkeminen vie mitään mikä ei ollut jo mennyttä. Raakalähetys on lipun takana, koska väärässä tilanteessa sen lopettaminen on peruuttamatonta — jos takarajapäättely osuu väärin, katkeaa lähetys jota yhä kuvataan ja katsotaan, eikä kuvauspuhelin ole tolpan päässä kenenkään ulottuvilla kesken ottelun. Normaalisti raakalähetyksen lopettaa kuvaaja itse StreamLabsista. Vain kirjaimellinen `"true"` on päällä. |
 
 **Hard stopin siivous** laukeaa vain kun relay sammutti itsensä takarajan takia
 (telemetrian `endReason === "hard_stop"`, ks. issue #123): ottelu oli päättynyt
@@ -134,7 +134,7 @@ relay lukee. Relay **ei** kysy Googlelta itse: kaksi refresh_tokenin päivittäj
 rikkoisi authin kesken ottelun, eikä lähetyksen jatkuminen saa riippua
 Google-yhteydestä.
 
-30 s välein ohjaamo hakee lähdelähetyksen `lifeCycleStatus`in
+30 s välein ohjaamo hakee raakalähetyksen `lifeCycleStatus`in
 (`liveBroadcasts.list`) ja siihen sidotun syötteen `streamStatus`in
 (`liveStreams.list`), ja kirjoittaa havainnon control-tiedoston
 `sourceIngest`-avaimeen (`observedAt`, `videoId`, tilat raakoina merkkijonoina,
@@ -195,7 +195,7 @@ relayn omalla näytöllä**: `run/status-<ID>.json` kertoo mitä relay ajaa.
   lähetyksen. Sovittelu yrittää myös hard stopin siivousta (#123), mutta sen
   omat vartijat ratkaisevat: relayn status saa olla korkeintaan 90 s vanha.
   **Käytännössä siivous onnistuu vain jos ohjaamo on takaisin pystyssä noin
-  minuutissa.** Pidempi katko ⇒ kohde- ja lähdelähetys jäävät päälle ja ne on
+  minuutissa.** Pidempi katko ⇒ selostettu lähetys ja raakalähetys jäävät päälle ja ne on
   lopetettava käsin. Se on tietoinen raja: vanhentuneen syyn perusteella
   sammuttaminen voisi katkaista lähetyksen joka on vasta alkamassa.
 - **Odottava työ vanhenee tunnissa.** `arming`-tilassa oleva työ, jolle ei ole

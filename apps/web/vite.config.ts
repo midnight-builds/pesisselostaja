@@ -6,7 +6,7 @@ import { defineConfig, type Plugin } from "vite";
  *  Kaksi ulostuloa samasta tiedosta:
  *  - `__BUILD_INFO__`, jonka käyttöliittymä näyttää asetuspaneelin
  *    alatunnisteessa — se on se paikka jossa vian olisi voinut todeta
- *    puhelimella,
+ *    operaattorin puhelimella,
  *  - `dist/version.json`, joka on samalla `/version.json`-osoite ilman yhtään
  *    palvelinmuutosta, koska `apps/server` tarjoilee `dist`-hakemistoa
  *    sellaisenaan.

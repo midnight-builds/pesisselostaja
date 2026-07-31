@@ -240,7 +240,7 @@ export interface DeviceFlowStart {
   verificationUrl: string;
   expiresAt: string;
   intervalSec: number;
-  /** Valmis suomenkielinen ohje puhelimen ruudulle. */
+  /** Valmis suomenkielinen ohje operaattorin puhelimen ruudulle. */
   instructions: string;
 }
 
@@ -517,7 +517,7 @@ async function fetchChannel(accessToken: string): Promise<{ id: string; title: s
 export interface AuthHealth {
   connected: boolean;
   health: "ok" | "warn" | "fail" | "idle";
-  /** Yksi lause, jonka operaattori lukee puhelimen ruudulta. */
+  /** Yksi lause, jonka operaattori lukee puhelimensa ruudulta. */
   headline: string;
   channel: { id: string; title: string } | null;
   scopes: string[];

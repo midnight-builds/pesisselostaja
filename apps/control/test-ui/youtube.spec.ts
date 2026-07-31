@@ -99,7 +99,7 @@ test.describe("lähetysten luonti", () => {
     await shot(page, info, "youtube-preview-overrides");
   });
 
-  test("esikatselu mahtuu puhelimen ruudulle — tekstit rivittyvät, kuvat skaalautuvat (#129)", async ({
+  test("esikatselu mahtuu operaattorin puhelimen ruudulle — tekstit rivittyvät, kuvat skaalautuvat (#129)", async ({
     page,
     openApp,
     api,

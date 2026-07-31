@@ -432,7 +432,7 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
   }
   if (pathname === "/api/youtube/auth/start" && method === "POST") {
     // Client-tunnukset saa lähettää mukana: laitteella ei ole muuta reittiä
-    // syöttää niitä kuin puhelimen lomake (tai käsin run/google-client.json).
+    // syöttää niitä kuin operaattorin puhelimen lomake (tai käsin run/google-client.json).
     const body = await readJsonBody<{ clientId?: string; clientSecret?: string | null }>(req).catch(() => ({}));
     sendJson(res, 200, await startDeviceFlow(body));
     return;
