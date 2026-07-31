@@ -987,13 +987,15 @@ export class CommentaryLoop {
     }
     const afterMs = this.deltaCursor?.afterMs ?? this.lastServerDateMs - AFTER_MARGIN_MS;
     const after = this.deltaCursor?.after ?? formatHelsinkiTimestamp(new Date(afterMs));
-    const res = await fetchLiveEvents(this.config.matchId, {
-      apiBase: this.config.apiBase,
-      timeoutMs: this.apiTimeoutMs("small"),
-      skipDelay: true,
-      after,
-      etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,
-    });
+    const res = await this.timedFetch(() =>
+      fetchLiveEvents(this.config.matchId, {
+        apiBase: this.config.apiBase,
+        timeoutMs: this.apiTimeoutMs("small"),
+        skipDelay: true,
+        after,
+        etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,
+      })
+    );
     if (res.notModified) {
       this.clearResetStreak();
       this.pollStats.notModified++;
