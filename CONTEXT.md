@@ -4,10 +4,48 @@ Yksi lähetysketju: ohjaamo ajastaa YouTube-lähetykset, relay miksaa selostukse
 katsojat saavat linkit. Tämä sanasto määrittelee ketjun käsitteet niin, ettei
 "lähde" tai "ajastus" tarkoita eri asiaa eri dokumentissa.
 
+`apps/web` on tämän ulkopuolella — ks. **Selainkuuntelija**.
+
+## Roolit
+
+**Operaattori**:
+Ohjaamoa käyttävä henkilö: valitsee ottelun, ajastaa lähetysparin, käynnistää ja
+ohjaa relayta, valvoo lähetystä ja siivoaa sen jälkeen. Ainoa rooli joka koskee
+ohjaamoa.
+
+**Kuvaaja**:
+Henkilö joka pystyttää kuvauspuhelimen, **käynnistää** siitä StreamLabsin ennen
+ottelua ja **lopettaa** sen ottelun päätyttyä. Molemmat ovat normaali tapa, jolla
+raakalähetys alkaa ja loppuu; ohjaamon ja relayn hard stop -keinot ovat
+erikoistilanteita varten, eivät oletus. Ottelun aikana kuvaaja ei ole
+kuvauspuhelimen luona.
+
+Operaattori ja kuvaaja **voivat olla sama henkilö tai eri henkilöt** — kumpaakaan
+ei saa olettaa. Käytännössä se tarkoittaa, ettei ohjaamo voi olettaa operaattorin
+ylettävän kuvauspuhelimeen, eikä myöskään sitä ettei hän ylettäisi.
+
+**Katsoja**:
+Jakoviestin linkistä YouTube-lähetystä seuraava henkilö. Katsoo joko
+raakalähetystä tai selostettua lähetystä.
+
+**Selainkuuntelija**:
+`apps/web`-sovelluksen käyttäjä: avaa julkisesti GitHub Pagesissa olevan
+web-sovelluksen omalla laitteellaan ja **kuulee** selostuksen selaimestaan, ilman
+videota.
+
+Selainkuuntelija ei ole osa lähetysketjua. `apps/web` on periaatteessa oma
+projektinsa, eikä sitä käytetä YouTube-lähetyksiin lainkaan; se on samassa
+repossa siksi, että rajapinta tulospalveluun, sen tulkinta ja selostustekstien
+muodostus ovat samat (`packages/core`). Kun mietit muutoksen vaikutuksia, kysy
+kumpaa käyttäjää se koskee — vastaus on usein vain toinen.
+_Vältä_: "katsoja" selainkuuntelijasta (hän ei katso mitään).
+
 ## Laitteet
 
 Ketjussa on **kaksi puhelinta**, ja ne ovat eri ihmisen kädessä eri paikassa.
 Paljas "puhelin" ei siksi kerro mitään — käytä aina jompaakumpaa näistä.
+(Selainkuuntelijan laite ei ole kumpikaan näistä eikä sitä nimetä: se voi olla
+mikä tahansa.)
 
 **Kuvauspuhelin**:
 Kentällä kolmen metrin tolpan päässä oleva puhelin, jonka StreamLabs työntää
