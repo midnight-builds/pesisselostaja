@@ -198,17 +198,17 @@ export function JobView({ live, notify, reloadToken }: Props) {
       <section className="card">
         <h2 className="card__title">Lähde ja kohde</h2>
         <p className="warnbox">
-          <strong>LÄHDE</strong> = puhelimen oma live, jota <em>luetaan</em>.<br />
-          <strong>KOHDE</strong> = selostettu lähetys, johon <em>pushataan</em>.<br />
+          <strong>LÄHDE</strong> = <strong>raakalähetys</strong>, jota <em>luetaan</em>.<br />
+          <strong>KOHDE</strong> = <strong>selostettu lähetys</strong>, johon <em>pushataan</em>.<br />
           Näiden sekoittaminen lähettää selostuksen väärään lähetykseen.
         </p>
 
         <Field
-          label="LÄHDE — YouTube-URL (luetaan)"
+          label="LÄHDE — raakalähetyksen YouTube-URL (luetaan)"
           value={form.sourceUrl}
           inputMode="url"
           placeholder="https://www.youtube.com/watch?v=…"
-          hint="Puhelimen Streamlabs-lähetys, jota relay kuuntelee."
+          hint="Lähetys johon kuvauspuhelimen StreamLabs työntää. Ohjaamon luomana tämä täyttyy itsestään."
           onChange={(v) => setForm({ ...form, sourceUrl: v })}
         />
         <Field
