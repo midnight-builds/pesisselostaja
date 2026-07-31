@@ -95,6 +95,28 @@ const FULL_FETCH_TIMEOUT_MS = 10_000;
  *  FETCH_FAILURE_ALARM_STREAK, and `api.poll_window` now logs the duration
  *  spread so the next retune has the relay's own numbers rather than curl's. */
 const SMALL_FETCH_TIMEOUT_MS = 1_000;
+
+/** Yhden pollausikkunan onnistuneiden hakujen kestot yhdeksi luettavaksi
+ *  palaseksi (#156).
+ *
+ *  Mediaani ja maksimi, ei keskiarvoa: yksi 4 sekunnin haku 20 sadan
+ *  millisekunnin haun joukossa siirtäisi keskiarvoa 200 ms:iin ja piilottaisi
+ *  sekä normaalin tason että poikkeaman. Mediaani kertoo tason, maksimi
+ *  kertoo pahimman — ja juuri niiden välinen ero on se, jonka perusteella
+ *  aikakatkaisu asetetaan.
+ *
+ *  Otos on ikkunakohtainen (nollataan joka yhteenvedossa), joten se ei kasva
+ *  ottelun mitassa eikä vuoda muistia. */
+export function formatFetchDurations(samples: number[]): string {
+  if (samples.length === 0) return "ei onnistuneita hakuja";
+  const sorted = [...samples].sort((a, b) => a - b);
+  // Pariton pituus antaa keskimmäisen, parillinen alemman keskimmäisistä.
+  // Tarkka interpolointi ei ole tässä minkään arvoista: luku luetaan lokista
+  // silmällä, ei syötetä mihinkään.
+  const median = sorted[Math.floor((sorted.length - 1) / 2)] as number;
+  const max = sorted[sorted.length - 1] as number;
+  return `mediaani ${median} ms, max ${max} ms (n=${sorted.length})`;
+}
 /** Delta polling: events carry no per-event
  *  wall-clock field (verified against real data 2026-07-17 — only the
  *  match-epoch-relative `timestamp`), so the `after=` value is derived from
@@ -328,6 +350,18 @@ export class CommentaryLoop {
      *  eivät ajaneet" tilanteesta "pollit ajoivat ja API vastasi vanhaa". */
     lastEventCount: null as number | null,
     newEvents: 0,
+    /** ONNISTUNEIDEN hakujen kestot ikkunan ajalta, millisekunteina (#156).
+     *
+     *  Ennen tätä kesto kirjattiin vain epäonnistuneesta hausta
+     *  (`api.fetch_failed`), eli pelkästä jakauman hännästä. Aikakatkaisuja on
+     *  siksi viritetty kahdesti (#47, #81) ilman että keskiosaa on kertaakaan
+     *  mitattu, ja #156:ssa se johti väärään päätelmään: 4 s luultiin
+     *  perustelluksi, koska kuorman oletettiin selittävän hitaat haut.
+     *
+     *  Epäonnistuneita EI lasketa tähän: niiden kesto on määritelmällisesti
+     *  aikakatkaisu, joten ne vetäisivät jakauman kohti sitä rajaa, jota tällä
+     *  on tarkoitus arvioida. Ne näkyvät erikseen `virhe`-lukumääränä. */
+    fetchMs: [] as number[],
   };
   private lastPollSummaryAtMs = Date.now();
   /** Consecutive failed poll cycles; reset by the first success. Drives the
@@ -468,7 +502,8 @@ export class CommentaryLoop {
       "api.poll_window",
       `Pollit ${Math.round(elapsedMs / 1000)} s aikana: ${w.polls} kpl ` +
         `(304 ${w.notModified}, delta ${w.delta}, täyshaku ${w.full}, reset ${w.resets}, virhe ${w.failures}), ` +
-        `${w.newEvents} uutta tapahtumaa, ${answered}, historiassa ${this.history.size}, kursori ${cursor}.`
+        `${w.newEvents} uutta tapahtumaa, ${answered}, historiassa ${this.history.size}, ` +
+        `kestot ${formatFetchDurations(w.fetchMs)}, kursori ${cursor}.`
     );
     this.lastPollSummaryAtMs = Date.now();
     this.pollWindow = {
@@ -480,7 +515,20 @@ export class CommentaryLoop {
       failures: 0,
       lastEventCount: null,
       newEvents: 0,
+      fetchMs: [],
     };
+  }
+
+  /** Kirjaa yhden ONNISTUNEEN haun keston ikkunan otokseen (#156).
+   *
+   *  Kutsutaan haun ympäriltä eikä `fetchEventsForPoll`in ympäriltä, jotta luku
+   *  on API:n vasteaika eikä sisällä paikallista yhdistelyä — juuri sitä lukua
+   *  vasten aikakatkaisu asetetaan. */
+  private async timedFetch<T>(fetch: () => Promise<T>): Promise<T> {
+    const startedAt = Date.now();
+    const result = await fetch();
+    this.pollWindow.fetchMs.push(Date.now() - startedAt);
+    return result;
   }
 
   get pollStatsSummary(): string {
