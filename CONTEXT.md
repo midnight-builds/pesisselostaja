@@ -104,6 +104,37 @@ käynnistysikkuna lasketaan.
 Suunniteltua alkuaikaa edeltävä jakso, jonka aikana ohjaamo vahtii
 raakalähetystä ja käynnistää relayn heti kun kuvaaja aloittaa lähetyksen.
 
+**Lopetus**:
+Se, miten lähetysketju päättyy. Oletus on yksi ketju: kuvaaja sulkee
+StreamLabsin → raakalähetys päättyy → relay havaitsee sen ja sammuu itse →
+YouTube sulkee selostetun lähetyksen omalla AutoStopillaan. Ohjaamo ei lopeta
+mitään; se siivoaa vasta jälkikäteen.
+
+**Tämä on oletus, ei ainoa tapa, eikä ketju pääty aina kokonaisena.**
+Raakalähetys, relayn ajo, selostettu lähetys ja työ päättyvät kukin erikseen ja
+voivat päättyä eri syistä — raakalähetys myös yllättäen (akku, verkko, puhelin
+kaatuu), relayn ajo myös luovutukseen tai hard stopiin, ja työ kirjautuu
+päättyneeksi tai peruuntuneeksi sen mukaan ehtikö relay käynnistyä.
+
+Älä siis kirjoita "kun ottelu loppuu, …" ilman että kerrot **mikä** loppuu ja
+**miten**. Syyt luetellaan tyhjentävästi kahdessa paikassa, ei täällä:
+`SourceEndReason` (`packages/core/src/types.ts`) relayn ajolle ja `closedStatus`
+(`apps/control/src/server/jobs.ts`) työlle. Molemmat on kirjoitettu niin, että
+uusi arvo kaataa käännöksen — sanasto ei voisi luvata samaa.
+
+**Luovutusikkuna**:
+Aika, jonka relay yrittää saada **yllättäen** katkennutta raakalähetystä
+takaisin ennen kuin se luovuttaa ja sammuu. Yllätyksellisyys on olennaista:
+hallittu lopetus tunnistetaan omakseen eikä sitä yritetä palauttaa. Katve
+luovutusikkunan sisällä **ei ole lopetus** — selostettu lähetys pysyy pystyssä
+sen ajan.
+
+**Hard stop**:
+Ohjaamon tai relayn tekemä sammutus silloin kun normaalia lopetusta ei tullut:
+ottelu on päättynyt, uusia tapahtumia ei tule ja raakalähetys oireilee (#123).
+Erikoistilanne, ei vaihtoehtoinen oletus — ja ainoa tilanne jossa ohjaamo saa
+kirjoittaa raakalähetykseen.
+
 ## Muualla määritelty
 
 Pesäpallotermit (palo, tuoja, vuorossa/lyömässä, lyöntipisteet) on määritelty
