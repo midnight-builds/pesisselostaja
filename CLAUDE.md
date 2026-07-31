@@ -63,13 +63,13 @@ singular is therefore not always accurate.
 When a pesäpallo detail is not written down here, **ask the user** rather than
 inferring it. Getting this wrong ships to every broadcast.
 
-## Lähdelähetykseen kirjoittaminen
+## Raakalähetykseen kirjoittaminen
 
-**Lähdettä (`RELAY_YOUTUBE_URL`, raakalähetys johon kuvauspuhelin työntää) ei kosketa ottelun
-ollessa kesken.** Ainoa sallittu kirjoitus on hard stopin siivous päättyneen
+**Raakalähetystä (`RELAY_YOUTUBE_URL`, se johon kuvauspuhelin työntää) ei
+kosketa ottelun ollessa kesken.** Ainoa sallittu kirjoitus on hard stopin siivous päättyneen
 ottelun jälkeen (issue #123), ja sekin vain kun `CONTROL_HARD_STOP_SOURCE` on
 päällä (oletus pois). Siivouksen tekee ohjaamo laskevalla reunalla, kun relayn
-oma telemetria kertoo `endReason === "hard_stop"`. Kohdelähetys transitoidaan
+oma telemetria kertoo `endReason === "hard_stop"`. Selostettu lähetys transitoidaan
 `complete`ksi vain samassa tilanteessa — normaalissa lopetuksessa luotetaan
 YouTuben `enableAutoStop`iin.
 

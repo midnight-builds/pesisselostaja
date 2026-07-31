@@ -75,7 +75,21 @@ _Vältä_: "lähdelähetys", "lähde-URL", pelkkä "lähde" ilman määrettä,
 **Selostettu lähetys**:
 YouTube-lähetys, johon relay työntää raakalähetyksen videon selostuksella
 miksattuna. Katsojille näkyvä "pääkanava".
-_Vältä_: pelkkä "kohde" ilman määrettä.
+_Vältä_: pelkkä "kohde" ilman määrettä, "kohdelähetys", ja ennen kaikkea
+**"normaali"** raakalähetyksestä — se väittää selostetun olevan epänormaali eikä
+kerro kummastakaan mitään.
+
+**Pari ja lyhytmuodot.** Lähetyksiä on kaksi ja ne ovat aina tämä pari:
+`raakalähetys` ↔ `selostettu lähetys`. Kun tila on tiukalla (kenttien otsikot,
+taulukot, välilehdet), lyhytmuodot ovat **`raaka`** ↔ **`selostettu`** — molemmat
+määreitä, joten pari pysyy symmetrisenä.
+
+Koodin englanninkieliset tunnisteet **eivät** noudata tätä, tarkoituksella:
+`sourceUrl`/`RELAY_YOUTUBE_URL`/`normal` = raakalähetys, `target*`/`narrated` =
+selostettu lähetys. Ne on jätetty rauhaan, koska nimeäminen uusiksi koskisi
+`.env.relay`-muuttujaa, työjonon levylle kirjoitettua JSONia ja telemetriaa —
+se olisi datamigraatio, ei termisiivous. Älä siis "korjaa" niitä; korjaa
+suomenkielinen teksti niiden ympärillä.
 
 **Tulospalvelun ottelusivu**:
 Ottelun sivu pesistulokset.fi:ssä (`matchId`). Tapahtumadatan ja selostuksen

@@ -27,7 +27,7 @@ kirjoita "lähde-URL" ilman määrettä: se on kaatanut kaksi dokumenttia.
    kirjoitus on hard stopin siivous päättyneen ottelun jälkeen (#123), ja sekin
    vain kun ohjaamon `CONTROL_HARD_STOP_SOURCE` on päällä. Siivouksen tekee
    ohjaamo itse; sinä et transitoi lähetyksiä käsin.
-2. **Uptime voittaa siisteyden.** Ottelun ollessa kesken kuollut lähde voi
+2. **Uptime voittaa siisteyden.** Ottelun ollessa kesken kuollut raakalähetys voi
    palata — älä pysäytä relayta.
 3. **Levytila alle 2 Gt → pysäytä kaikki kirjoittavat operaatiot heti** ja
    ilmoita käyttäjälle (globaali sääntö).
@@ -203,13 +203,13 @@ katsojat ehtivät paikalle.
 
 Kun ottelu on ohi, lopetuksen pitäisi tapahtua itsestään:
 
-- Relay sammuttaa itsensä, kun lähde päättyy (`ended`), tai hard stopin
-  takarajalla (#123): ottelu päättynyt **ja** hiljaisuutta **ja** lähde
+- Relay sammuttaa itsensä, kun raakalähetys päättyy (`ended`), tai hard stopin
+  takarajalla (#123): ottelu päättynyt **ja** hiljaisuutta **ja** raakalähetys
   oireilee. Ottelu päättyneenä on ehdoton portti — hard stop ei voi laueta
   kesken ottelun.
 - Ohjaamo sulkee työn laskevalla reunalla, ja tekee hard stopin siivouksen
-  (kohde ja — lipun ollessa päällä — raakalähetys) vain kun telemetria kertoo
-  `endReason === "hard_stop"`. Normaalissa lopetuksessa kohteen sulkee YouTuben
+  (selostettu lähetys ja — lipun ollessa päällä — raakalähetys) vain kun telemetria
+  kertoo `endReason === "hard_stop"`. Normaalissa lopetuksessa selostetun sulkee YouTuben
   `enableAutoStop`, eikä raakalähetykseen kosketa.
 
 > **Tarkista silti itse, että ajo todella loppui.** Mitään tästä ketjusta ei ole

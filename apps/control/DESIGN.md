@@ -72,7 +72,7 @@ URL/ottelu-ID, sekä suosikkijoukkueet etusivulla.
   kun Streamlabs alkaa työntää, UI ajaa preflightin ja käynnistää relayn.
   Nolla klikkiä kentällä. Preflightin este estää käynnistyksen ja lähettää
   ilmoituksen.
-- Koska UI luo lähdelähetyksen **ajastettuna**, yt-dlp saa YouTubelta "alkaa N
+- Koska UI luo raakalähetyksen **ajastettuna**, yt-dlp saa YouTubelta "alkaa N
   minuutin kuluttua" ja relay osaa jo nyt odottaa kuluttamatta
   luovutusikkunaansa (`SourceNotLiveYetError`).
 - **Törmäys** (B:n lähde menee liveen kun A on ajossa): B jää jonoon, **A ei
