@@ -100,6 +100,22 @@ const FULL_FETCH_TIMEOUT_MS = 10_000;
  *  relay's own per-size spread; retune from that, after #158. */
 const SMALL_FETCH_TIMEOUT_MS = 4_000;
 
+/** Käynnistyshakujen uudelleenyritysten odotukset (#158).
+ *
+ *  Käynnistyksen haut tehdään vasta kun mikseri jo työntää kuvaa selostettuun
+ *  lähetykseen, joten yksi hylätty lupaus kaataisi prosessin ja systemd
+ *  käynnistäisi sen 10 s:n päästä uudelleen — katsojalle musta ruutu. Siksi
+ *  käynnistys ei koskaan kaadu hakuvirheeseen, vaan yrittää uudelleen kunnes
+ *  onnistuu tai relay sammutetaan. Viimeinen arvo toistuu loputtomiin, eli
+ *  API:ta ei hakata mutta yhteys palautuu itsestään puolen minuutin sisällä
+ *  siitä kun API taas vastaa. */
+const STARTUP_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
+
+/** Monennenko epäonnistuneen käynnistysyrityksen jälkeen lokitetaan ERROR
+ *  WARNin sijaan: yksittäinen tökkiminen on odotettavaa, mutta jatkuva ei — ja
+ *  se pitää näkyä operaattorille ilman että hän lukee koko lokin. */
+const STARTUP_RETRY_ERROR_AFTER = 3;
+
 /** Yhden pollausikkunan onnistuneiden hakujen kestot yhdeksi luettavaksi
  *  palaseksi (#156).
  *
