@@ -69,16 +69,58 @@ const WELCOME_FILLER_MS = 90 * 1000;
  *  decide whether the relay gives up. */
 const FULL_FETCH_TIMEOUT_MS = 10_000;
 /** Timeout for the small responses: the delta poll and the one-off metadata
- *  fetch (issue #81).
+ *  fetch (issue #81, retuned in #156).
  *
- *  Deliberately the pre-#47 value, because #47's reasoning does not carry over:
- *  a delta returns only the new events (a 304 not even that), so it has no
- *  growing body to be patient about, and it is the fetch that runs EVERY poll —
- *  i.e. the one that decides how fast a hung API is noticed at all. Inheriting
- *  the full fetch's 10 s here would only delay detection (and recovery) by ~6 s
- *  per poll. Aborting a delta costs nothing: the next poll retries immediately
- *  and the 60 s resync closes any gap. */
+ *  #47's "be patient, the body grows" reasoning does not carry over here: a
+ *  delta returns only the new events (a 304 not even that), and it is the fetch
+ *  that runs EVERY poll — the one that decides how fast a hung API is noticed.
+ *
+ *  STILL 4 s — #156 measured but deliberately did not retune. What that
+ *  measurement found, so the next attempt starts from facts:
+ *
+ *  - The value here is NOT the effective timeout. `apiTimeoutMs()` floors it at
+ *    `pollIntervalMs` (3 s by default), so shipped behaviour is
+ *    `max(4000, 3000) = 4000` — and lowering this constant to 1 s would have
+ *    produced 3 s, not 1 s. Any retune must decide about that floor first.
+ *  - The earlier comment here claimed "aborting a delta costs nothing". True of
+ *    CORRECTNESS — the retry re-fetches and the 60 s resync backstops it — but
+ *    false of LATENCY. run() resumes the cadence from now
+ *    (`Math.max(nextPollAt + interval, Date.now())`), so the retry fires
+ *    IMMEDIATELY and an abort costs the whole timeout in dead waiting, at the
+ *    head of the speech chain (fetch -> state -> TTS -> speak). Match 145918
+ *    (31.7.2026) spent 31 x 4 s there, every retry succeeding on the first
+ *    attempt — stuck connections, not slow ones, so waiting never helped.
+ *  - Response times are nowhere near this: 120 samples against four
+ *    simultaneously live matches under camp-day load gave p50 96 ms, p99
+ *    169 ms, max 303 ms; a cold TCP+TLS+DNS connection measured 173 ms.
+ *
+ *  Not retuned yet because those samples are curl's, and this constant also
+ *  governs `fetchMatchMetadata` — including the unguarded startup call whose
+ *  timeout can kill a live broadcast (#158). `api.poll_window` now reports the
+ *  relay's own per-size spread; retune from that, after #158. */
 const SMALL_FETCH_TIMEOUT_MS = 4_000;
+
+/** Yhden pollausikkunan onnistuneiden hakujen kestot yhdeksi luettavaksi
+ *  palaseksi (#156).
+ *
+ *  Mediaani ja maksimi, ei keskiarvoa: yksi 4 sekunnin haku 20 sadan
+ *  millisekunnin haun joukossa siirtäisi keskiarvoa 200 ms:iin ja piilottaisi
+ *  sekä normaalin tason että poikkeaman. Mediaani kertoo tason, maksimi
+ *  kertoo pahimman — ja juuri niiden välinen ero on se, jonka perusteella
+ *  aikakatkaisu asetetaan.
+ *
+ *  Otos on ikkunakohtainen (nollataan joka yhteenvedossa), joten se ei kasva
+ *  ottelun mitassa eikä vuoda muistia. */
+export function formatFetchDurations(samples: number[]): string {
+  if (samples.length === 0) return "ei onnistuneita hakuja";
+  const sorted = [...samples].sort((a, b) => a - b);
+  // Pariton pituus antaa keskimmäisen, parillinen alemman keskimmäisistä.
+  // Tarkka interpolointi ei ole tässä minkään arvoista: luku luetaan lokista
+  // silmällä, ei syötetä mihinkään.
+  const median = sorted[Math.floor((sorted.length - 1) / 2)] as number;
+  const max = sorted[sorted.length - 1] as number;
+  return `mediaani ${median} ms, max ${max} ms (n=${sorted.length})`;
+}
 /** Delta polling: events carry no per-event
  *  wall-clock field (verified against real data 2026-07-17 — only the
  *  match-epoch-relative `timestamp`), so the `after=` value is derived from
@@ -312,6 +354,32 @@ export class CommentaryLoop {
      *  eivät ajaneet" tilanteesta "pollit ajoivat ja API vastasi vanhaa". */
     lastEventCount: null as number | null,
     newEvents: 0,
+    /** ONNISTUNEIDEN hakujen kestot ikkunan ajalta, millisekunteina, ERIKSEEN
+     *  kummallekin aikakatkaisulle (#156).
+     *
+     *  Ennen tätä kesto kirjattiin vain epäonnistuneesta hausta
+     *  (`api.fetch_failed`), eli pelkästä jakauman hännästä. Aikakatkaisuja on
+     *  siksi viritetty kahdesti (#47, #81) ilman että keskiosaa on kertaakaan
+     *  mitattu.
+     *
+     *  Kaksi syytä pitää ne erillään, ja molemmat opittiin kantapään kautta:
+     *
+     *  1. Niitä säätelee ERI raja (`FULL_FETCH_TIMEOUT_MS` 10 s vs.
+     *     `SMALL_FETCH_TIMEOUT_MS` 4 s). Yhteen taulukkoon sekoitettuna
+     *     raportoitu maksimi voi olla haku, jota arvioitava raja ei koske —
+     *     ja koko #156 on olemassa siksi, ettei rajaa perusteltaisi väärällä
+     *     joukolla. Sekoitus olisi ollut sama kehäpäätelmä uudessa muodossa.
+     *  2. Ne ovat oikeasti eri kokoisia: täyshaku palauttaa koko historian
+     *     (mitattu ~32 kt ottelun lopussa), delta vain uudet tapahtumat.
+     *
+     *  "small" kattaa delta-pollin JA molemmat `fetchMatchMetadata`-kutsut,
+     *  koska sama raja säätelee niitä — käynnistyksen haku mukaan lukien, joka
+     *  on juuri se kutsu jonka aikakatkaisu voi tappaa lähetyksen (#158).
+     *
+     *  Epäonnistuneita EI lasketa: niiden kesto on määritelmällisesti
+     *  aikakatkaisu, joten ne vetäisivät jakauman kohti sitä rajaa, jota tällä
+     *  on tarkoitus arvioida. Ne näkyvät erikseen `virhe`-lukumääränä. */
+    fetchMs: { small: [] as number[], full: [] as number[] },
   };
   private lastPollSummaryAtMs = Date.now();
   /** Consecutive failed poll cycles; reset by the first success. Drives the
@@ -452,7 +520,9 @@ export class CommentaryLoop {
       "api.poll_window",
       `Pollit ${Math.round(elapsedMs / 1000)} s aikana: ${w.polls} kpl ` +
         `(304 ${w.notModified}, delta ${w.delta}, täyshaku ${w.full}, reset ${w.resets}, virhe ${w.failures}), ` +
-        `${w.newEvents} uutta tapahtumaa, ${answered}, historiassa ${this.history.size}, kursori ${cursor}.`
+        `${w.newEvents} uutta tapahtumaa, ${answered}, historiassa ${this.history.size}, ` +
+        `kestot pieni ${formatFetchDurations(w.fetchMs.small)} / täys ${formatFetchDurations(w.fetchMs.full)}, ` +
+        `kursori ${cursor}.`
     );
     this.lastPollSummaryAtMs = Date.now();
     this.pollWindow = {
@@ -464,7 +534,22 @@ export class CommentaryLoop {
       failures: 0,
       lastEventCount: null,
       newEvents: 0,
+      fetchMs: { small: [], full: [] },
     };
+  }
+
+  /** Kirjaa yhden ONNISTUNEEN haun keston ikkunan otokseen (#156).
+   *
+   *  Kutsutaan haun ympäriltä eikä `fetchEventsForPoll`in ympäriltä, jotta luku
+   *  on API:n vasteaika eikä sisällä paikallista yhdistelyä — juuri sitä lukua
+   *  vasten aikakatkaisu asetetaan. */
+  private async timedFetch<T>(size: "small" | "full", fetch: () => Promise<T>): Promise<T> {
+    const startedAt = Date.now();
+    const result = await fetch();
+    // Vasta onnistumisen jälkeen: heitto ohittaa tämän rivin, eikä
+    // aikakatkaistu haku päädy otokseen. Tarkoituksella EI `finally`.
+    this.pollWindow.fetchMs[size].push(Date.now() - startedAt);
+    return result;
   }
 
   get pollStatsSummary(): string {
@@ -522,11 +607,13 @@ export class CommentaryLoop {
 
     let meta: MatchMetadata;
     try {
-      meta = await fetchMatchMetadata(this.config.matchId, {
-        apiBase: this.config.apiBase,
-        apiKey: this.config.apiKey,
-        timeoutMs: this.apiTimeoutMs("small"),
-      });
+      meta = await this.timedFetch("small", () =>
+        fetchMatchMetadata(this.config.matchId, {
+          apiBase: this.config.apiBase,
+          apiKey: this.config.apiKey,
+          timeoutMs: this.apiTimeoutMs("small"),
+        })
+      );
     } catch (err) {
       // Keep the names we have and try again next interval: a failed refresh
       // must never be worse than not refreshing at all.
@@ -623,11 +710,13 @@ export class CommentaryLoop {
     );
 
     logInfo("api.fetching_meta", `Haetaan ottelutietoja (ID: ${this.config.matchId})…`);
-    let meta = await fetchMatchMetadata(this.config.matchId, {
-      apiBase: this.config.apiBase,
-      apiKey: this.config.apiKey,
-      timeoutMs: this.apiTimeoutMs("small"),
-    });
+    let meta = await this.timedFetch("small", () =>
+      fetchMatchMetadata(this.config.matchId, {
+        apiBase: this.config.apiBase,
+        apiKey: this.config.apiKey,
+        timeoutMs: this.apiTimeoutMs("small"),
+      })
+    );
     this.meta = meta;
     let lookup = buildPlayerLookup(meta);
     this.rosterRefreshedAt = Date.now();
@@ -813,11 +902,13 @@ export class CommentaryLoop {
    *  cursor. Used at startup, when delta polling is off, for the periodic
    *  resync, and as the fallback whenever a delta looks untrustworthy. */
   private async fetchFullEvents(): Promise<LiveEventsResult> {
-    const res = await fetchLiveEvents(this.config.matchId, {
-      apiBase: this.config.apiBase,
-      timeoutMs: this.apiTimeoutMs("full"),
-      skipDelay: true,
-    });
+    const res = await this.timedFetch("full", () =>
+      fetchLiveEvents(this.config.matchId, {
+        apiBase: this.config.apiBase,
+        timeoutMs: this.apiTimeoutMs("full"),
+        skipDelay: true,
+      })
+    );
     return this.adoptFullSnapshot(res);
   }
 
@@ -921,13 +1012,15 @@ export class CommentaryLoop {
     }
     const afterMs = this.deltaCursor?.afterMs ?? this.lastServerDateMs - AFTER_MARGIN_MS;
     const after = this.deltaCursor?.after ?? formatHelsinkiTimestamp(new Date(afterMs));
-    const res = await fetchLiveEvents(this.config.matchId, {
-      apiBase: this.config.apiBase,
-      timeoutMs: this.apiTimeoutMs("small"),
-      skipDelay: true,
-      after,
-      etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,
-    });
+    const res = await this.timedFetch("small", () =>
+      fetchLiveEvents(this.config.matchId, {
+        apiBase: this.config.apiBase,
+        timeoutMs: this.apiTimeoutMs("small"),
+        skipDelay: true,
+        after,
+        etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,
+      })
+    );
     if (res.notModified) {
       this.clearResetStreak();
       this.pollStats.notModified++;

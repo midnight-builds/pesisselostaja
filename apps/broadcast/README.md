@@ -204,7 +204,28 @@ current poll interval:
 | Fetch | Timeout | Why |
 |---|---|---|
 | Full history (startup, 60 s resync, delta fallbacks) | **10 s** | The response holds the whole match history and keeps growing, so the earlier 4 s cut healthy requests short late in a match — one broadcast logged 12 aborts in two minutes, all at exactly 4.0 s. |
-| Delta poll + startup metadata | **4 s** | Small responses (a 304 smaller still), and the delta runs *every* poll, so it is what decides how fast a hung API is noticed. Giving it the full fetch's patience would only delay detection and recovery by ~6 s per poll; an aborted delta loses nothing, since the next poll retries at once and the resync closes any gap. |
+| Delta poll + startup metadata | **4 s** | Small responses (a 304 smaller still), and the delta runs *every* poll, so it is what decides how fast a hung API is noticed. Giving it the full fetch's patience would only delay detection and recovery by ~6 s per poll. |
+
+**"An aborted delta loses nothing" is only half true, and the half that is false
+cost us a wrong conclusion (#156).** Nothing is lost in terms of *correctness* —
+the next poll retries and the 60 s resync closes any gap. But `run()` resumes the
+cadence from *now*, so the retry fires immediately and the abort costs the whole
+timeout in dead waiting, at the head of the speech chain. Match 145918
+(31.7.2026) spent 31 x 4 s there, every retry succeeding first try.
+
+Two things to know before retuning either value:
+
+- **The constants are not the effective timeouts.** `apiTimeoutMs()` floors both
+  at `pollIntervalMs`, so at the default 3 s cadence the delta timeout is
+  `max(4000, 3000)`. Lowering the constant alone can be a no-op.
+- **Measure with the relay's own numbers.** `api.poll_window` reports the median
+  and max per fetch size (#156). Response times measured externally were p50
+  96 ms / max 303 ms under camp-day load, but that is curl's connection
+  behaviour, not the relay's.
+
+Also note the startup metadata fetch shares the "small" timeout and is
+**unguarded** — a timeout there exits the process while ffmpeg is already
+pushing to a live target (#158). Fix that before shortening this.
 
 Polls are sequential, so neither timeout can stack requests; a hung fetch only
 postpones the next poll. A control file that raises `pollIntervalMs` above a base
