@@ -877,11 +877,13 @@ export class CommentaryLoop {
    *  cursor. Used at startup, when delta polling is off, for the periodic
    *  resync, and as the fallback whenever a delta looks untrustworthy. */
   private async fetchFullEvents(): Promise<LiveEventsResult> {
-    const res = await fetchLiveEvents(this.config.matchId, {
-      apiBase: this.config.apiBase,
-      timeoutMs: this.apiTimeoutMs("full"),
-      skipDelay: true,
-    });
+    const res = await this.timedFetch(() =>
+      fetchLiveEvents(this.config.matchId, {
+        apiBase: this.config.apiBase,
+        timeoutMs: this.apiTimeoutMs("full"),
+        skipDelay: true,
+      })
+    );
     return this.adoptFullSnapshot(res);
   }
 
