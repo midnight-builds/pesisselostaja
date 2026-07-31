@@ -726,13 +726,20 @@ export class CommentaryLoop {
     );
 
     logInfo("api.fetching_meta", `Haetaan ottelutietoja (ID: ${this.config.matchId})…`);
-    let meta = await this.timedFetch("small", () =>
-      fetchMatchMetadata(this.config.matchId, {
-        apiBase: this.config.apiBase,
-        apiKey: this.config.apiKey,
-        timeoutMs: this.apiTimeoutMs("small"),
-      })
+    const startupMeta = await this.startupFetch(
+      "Ottelutietojen haku",
+      () =>
+        this.timedFetch("small", () =>
+          fetchMatchMetadata(this.config.matchId, {
+            apiBase: this.config.apiBase,
+            apiKey: this.config.apiKey,
+            timeoutMs: this.apiTimeoutMs("small"),
+          })
+        ),
+      signal
     );
+    if (startupMeta == null) return; // aborted while retrying
+    let meta = startupMeta;
     this.meta = meta;
     let lookup = buildPlayerLookup(meta);
     this.rosterRefreshedAt = Date.now();
