@@ -758,7 +758,10 @@ export class CommentaryLoop {
     logInfo("api.skip_history", "Ohitetaan historialliset tapahtumat…");
     // Full fetch — also seeds the local history + delta cursor (see
     // fetchEventsForPoll).
-    const initial = await this.fetchFullEvents();
+    // Same protection as the metadata fetch above, and for the same reason:
+    // this call, too, happens with ffmpeg already live (#158).
+    const initial = await this.startupFetch("Tapahtumahistorian haku", () => this.fetchFullEvents(), signal);
+    if (initial == null) return; // aborted while retrying
     this.state.periodRuns = {};
     this.state.currentOuts = 0;
     this.state.paloTurnKey = null;
