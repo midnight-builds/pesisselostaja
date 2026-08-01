@@ -837,12 +837,12 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
 
   /** Hard stopin siivous (#123). Ajetaan vain kun relayn oma telemetria kertoo
    *  että se sammutti itsensä takarajan takia (`endReason === "hard_stop"`) —
-   *  siis ottelu oli päättynyt ja lähde oireili. Normaalissa lopetuksessa ei
-   *  tehdä mitään: kohdelähetyksen sulkee YouTuben `enableAutoStop`, ja
-   *  lähdettä ei kosketa lainkaan.
+   *  siis ottelu oli päättynyt ja raakalähetys oireili. Normaalissa
+   *  lopetuksessa ei tehdä mitään: selostetun lähetyksen sulkee YouTuben
+   *  `enableAutoStop`, eikä raakalähetykseen kosketa lainkaan.
    *
-   *  Lähteen sammutus on lisäksi lipun takana (CONTROL_HARD_STOP_SOURCE) —
-   *  lähde on toisen ihmisen lähetys.
+   *  Raakalähetyksen sammutus on lisäksi lipun takana
+   *  (CONTROL_HARD_STOP_SOURCE) — se on toisen ihmisen lähetys.
    *
    *  Ei koskaan heitä: kaikki menee errors-Mappiin ja lokiin, jotta työn
    *  sulkeminen ehtii tapahtua joka tapauksessa. */
