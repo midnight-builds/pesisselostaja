@@ -142,7 +142,11 @@ oikeassa käytössä.
 1. **"Lähde ja kohde"** — tarkista että raakalähetys ja selostettu ovat oikein
    päin. (LÄHDE = raakalähetys, jota *luetaan*. KOHDE = selostettu, johon
    *pushataan*.)
-2. **"Preflight"** — aja se. Tämä on ainoa esitarkistus; älä tee käsin
+2. **"Kirjoita .env.relay"** — aja tämä ENNEN preflightia. Lähetysten luonti ei
+   kirjoita tiedostoa, joten uuden työn kohdalla se osoittaa yhä edelliseen
+   otteluun ja preflight antaa esteen "Työn sidonta" (#155). Tämä on yksi
+   napautus, ei vikatila.
+3. **"Preflight"** — aja se. Tämä on ainoa esitarkistus; älä tee käsin
    `df`/`ps`/`systemctl`-kierrosta. `✓` kunnossa · `⚠` lue mutta ei este ·
    `✗` este.
    - `Lähde … ei vielä livenä, ajastettu alkavaksi (~N min) — relay odottaa`
@@ -150,11 +154,17 @@ oikeassa käytössä.
    - `Tapahtumat … 0 tapahtumaa — ottelua ei ole vielä avattu` on normaali
      ennen ottelun alkua.
    - Levytila-`✗` = globaali pysäytyssääntö.
-3. **Deployaa ennen käynnistystä**, jos main on muuttunut sitten viime ajon:
+   - `Työn sidonta … ✗` = `.env.relay` osoittaa eri otteluun kuin avoinna
+     oleva työ; **aja "Kirjoita .env.relay" ja preflight uudelleen** (#155).
+     Ilman tätä riviä kaikki muut rivit voivat kuvata eilistä ottelua ja
+     näyttää silti vihreiltä — niin kävi 31.7.2026. Jos rivi sanoo, että avain
+     on tiedostossa **useammin kuin kerran**, uudelleenkirjoitus ei auta:
+     poista ylimääräinen rivi käsin.
+4. **Deployaa ennen käynnistystä**, jos main on muuttunut sitten viime ajon:
    `npm run relay:deploy` (oletus `origin/main`; `-- <ref>` muulle). Skripti
    kieltäytyy, jos relay on ajossa. **Kirjaa deployattu commit ylös** — se on
    ainoa tapa tietää jälkikäteen mitä koodia lähetys ajoi.
-4. **"Käynnistä relay"**. Nappi on lukossa, jos preflightissä on esteitä tai
+5. **"Käynnistä relay"**. Nappi on lukossa, jos preflightissä on esteitä tai
    relay on jo ajossa.
 
 **Ajastimella — Työ-välilehden alaosa, "Ajastin":** ajastin vahtii

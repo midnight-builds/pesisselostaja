@@ -206,7 +206,9 @@ export const api = {
   settings: () => request<ControlSettings>("/api/settings"),
   patchSettings: (payload: Partial<ControlSettings>) =>
     request<ControlSettings>("/api/settings", { method: "PATCH", body: JSON.stringify(payload) }),
-  preflight: () => postJson<PreflightResult>("/api/preflight"),
+  /** jobId mukaan aina kun työ on avattuna: ilman sitä preflight kertoo
+   *  totuuden .env.relay:stä, joka voi osoittaa eiliseen otteluun (#155). */
+  preflight: (jobId?: string) => postJson<PreflightResult>("/api/preflight", jobId ? { jobId } : undefined),
   relay: (action: "start" | "stop" | "restart") => postJson<RelayProcess>(`/api/relay/${action}`),
   knobs: (payload: PatchKnobsRequest) => postJson<ControlKnobs>("/api/knobs", payload),
   delayNudge: (deltaMs: number) => postJson<ControlKnobs>("/api/knobs/delay-nudge", { deltaMs }),

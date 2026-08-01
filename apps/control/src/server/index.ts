@@ -295,7 +295,15 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
   }
 
   if (pathname === "/api/preflight" && method === "POST") {
-    sendJson(res, 200, await runControlPreflight());
+    // jobId on vapaaehtoinen: sen kanssa preflight tarkistaa myös, osoittaako
+    // .env.relay juuri siihen työhön jota operaattori katsoo (#155). Ilman
+    // sitä käytös on ennallaan — tuntematon id ei ole virhe vaan sama
+    // sidontatarkistuksen puuttuminen, koska preflight ei saa kaatua siihen
+    // että käyttöliittymä lähetti vanhentuneen id:n.
+    const body = await readJsonBody<{ jobId?: unknown }>(req).catch(() => ({}) as { jobId?: unknown });
+    const jobId = typeof body.jobId === "string" ? body.jobId : null;
+    const job = jobId ? ((await listJobs()).find((j) => j.id === jobId) ?? null) : null;
+    sendJson(res, 200, await runControlPreflight(job));
     return;
   }
 
