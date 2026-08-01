@@ -3,6 +3,8 @@ import { EventHistory } from "./eventHistory.js";
 import {
   buildPlayerLookup,
   subEventToSpeech,
+  groupSubEventsForSpeech,
+  groupToSpeech,
   subEventFeedDetail,
   isRunScoringSubEvent,
   isOutSubEvent,
@@ -1138,52 +1140,62 @@ export class CommentaryLoop {
         logDebug("api.first_seen", `first-seen: id=${event.id} ts=${event.timestamp} delta=${deltaS}s`);
       }
 
-      for (let i = 0; i < event.events.length; i++) {
-        const sub = event.events[i];
-        const fp = eventFingerprint(event, i);
-        if (state.seenFingerprints.has(fp)) continue;
-        state.seenFingerprints.add(fp);
+      // One swing can be several markings (#154). Bookkeeping stays per
+      // marking — the score counts one run each, and every index has to be
+      // fingerprinted or the tail of a group is re-announced next poll — but
+      // the SPEECH is one sentence per group.
+      for (const group of groupSubEventsForSpeech(event.events)) {
+        const fresh = group.filter((i) => !state.seenFingerprints.has(eventFingerprint(event, i)));
+        if (fresh.length === 0) continue;
+        for (const i of fresh) state.seenFingerprints.add(eventFingerprint(event, i));
 
-        // A score change after "Ottelu päättyi" means the scorer ended the
-        // game too early and reopened it — the finished gate is not one-way,
-        // narration wakes back up here.
-        if (state.finished && isRunScoringSubEvent(sub)) {
-          state.finished = false;
-          logWarn("match.score_after_finish", "Pistetilanne muuttui ottelun päättymisen jälkeen — selostus jatkuu.");
+        let ctx = this.buildContext();
+        for (const i of fresh) {
+          const sub = event.events[i];
+          // A score change after "Ottelu päättyi" means the scorer ended the
+          // game too early and reopened it — the finished gate is not one-way,
+          // narration wakes back up here.
+          if (state.finished && isRunScoringSubEvent(sub)) {
+            state.finished = false;
+            logWarn("match.score_after_finish", "Pistetilanne muuttui ottelun päättymisen jälkeen — selostus jatkuu.");
+          }
+
+          if (isMatchEndSubEvent(sub)) state.finished = true;
+
+          if (isRunScoringSubEvent(sub) && event.team !== null) {
+            addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
+            const s = getPeriodScore(state, event.period);
+            logInfo("match.score", `Pisteet (${periodName(event.period)}): ${meta.home.shorthand} ${s.home}-${s.away} ${meta.away.shorthand}`);
+          }
+
+          // For an out, the spoken ordinal must come from the turn-key recompute
+          // (same source as the scoreboard), not the running currentOuts which
+          // can drift across polls.
+          ctx = this.buildContext();
+          if (isOutSubEvent(sub) && event.team !== null) {
+            ctx.currentOuts = outsThroughSubEvent(events, ei, i);
+            const team = event.team === meta.home.id ? meta.home.shorthand : meta.away.shorthand;
+            logInfo("match.palo", `Palo: ${team} ${ctx.currentOuts}`);
+          }
+
+          // The relay has no feed; its log is the written mirror of the source, so
+          // the lineup list the narration leaves out (issue #48) is logged here
+          // instead of vanishing (issue #74). Logged even when nothing is spoken.
+          // Per marking on purpose: the log mirrors the source even where the
+          // speech merges (feedback-feed-mirrors-source-speech-dedupes).
+          const feedDetail = subEventFeedDetail(sub, lookup);
+          if (feedDetail) logDebug("match.event", `Tapahtuma: ${feedDetail}`);
         }
 
-        if (isMatchEndSubEvent(sub)) state.finished = true;
-
-        if (isRunScoringSubEvent(sub) && event.team !== null) {
-          addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
-          const s = getPeriodScore(state, event.period);
-          logInfo("match.score", `Pisteet (${periodName(event.period)}): ${meta.home.shorthand} ${s.home}-${s.away} ${meta.away.shorthand}`);
-        }
-
-        // For an out, the spoken ordinal must come from the turn-key recompute
-        // (same source as the scoreboard), not the running currentOuts which
-        // can drift across polls.
-        const ctx = this.buildContext();
-        if (isOutSubEvent(sub) && event.team !== null) {
-          ctx.currentOuts = outsThroughSubEvent(events, ei, i);
-          const team = event.team === meta.home.id ? meta.home.shorthand : meta.away.shorthand;
-          logInfo("match.palo", `Palo: ${team} ${ctx.currentOuts}`);
-        }
-
-        // The relay has no feed; its log is the written mirror of the source, so
-        // the lineup list the narration leaves out (issue #48) is logged here
-        // instead of vanishing (issue #74). Logged even when nothing is spoken.
-        const feedDetail = subEventFeedDetail(sub, lookup);
-        if (feedDetail) logDebug("match.event", `Tapahtuma: ${feedDetail}`);
-
-        const speech = subEventToSpeech(event, sub, meta, lookup, this.announceBatterChanges, ctx);
+        const lastSub = event.events[fresh[fresh.length - 1]];
+        const speech = groupToSpeech(event, event.events, fresh, meta, lookup, this.announceBatterChanges, ctx);
         if (!speech) continue;
         // After the closing announcement everything else stays silent (the
         // match-end sub-event itself is what speaks that closing line).
-        if (state.finished && !isMatchEndSubEvent(sub)) continue;
+        if (state.finished && !isMatchEndSubEvent(lastSub)) continue;
         // Same texts in the same turn and situation = a scorer double-marking.
         const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
-          `${JSON.stringify(sub.texts)}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
+          `${JSON.stringify(fresh.map((i) => event.events[i].texts))}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
         this.speak(speech, true, dedupeKey);
       }
 
