@@ -724,11 +724,6 @@ export function groupToSpeech(
     sub.texts.some((el) => typeof el === "object" && el.type === "event" && "text" in el && el.text.includes("löi kunnarin"))
   );
   const base = formatMultiRunHit(group, lookup, hasKunnari);
-  if (base === null) {
-    // Names could not be resolved — fall back to the old behaviour rather than
-    // inventing a sentence: one line per marking is noisy, never wrong.
-    return subEventToSpeech(event, subs[indexes[0]], meta, lookup, announceBatterChanges, ctx);
-  }
   const runs = group.reduce((sum, sub) => sum + runValueOfSubEvent(sub), 0);
   const count = runs > 1 ? ` ${capitalize(FI_CARDINAL[runs] ?? String(runs))} juoksua.` : "";
   if (!ctx) return `${base}${count}`;
