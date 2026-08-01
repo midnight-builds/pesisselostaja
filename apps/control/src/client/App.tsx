@@ -73,7 +73,7 @@ export function App() {
           />
         </TabPanel>
         <TabPanel id="job" active={tab === "job"}>
-          <JobView live={live} notify={notify} reloadToken={jobReloadToken} />
+          <JobView live={live} notify={notify} reloadToken={jobReloadToken} active={tab === "job"} />
         </TabPanel>
         <TabPanel id="youtube" active={tab === "youtube"}>
           <YouTubeView active={tab === "youtube"} notify={notify} />

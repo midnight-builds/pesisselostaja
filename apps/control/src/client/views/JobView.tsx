@@ -17,6 +17,9 @@ interface Props {
   notify: (kind: "ok" | "error", text: string) => void;
   /** Bumped by the matches view after creating jobs, to force a refetch. */
   reloadToken: number;
+  /** Whether this tab is the visible one — the create card only auto-previews
+   *  while it is on screen (#129). */
+  active: boolean;
 }
 
 interface FormState {
@@ -27,7 +30,7 @@ interface FormState {
 
 const EMPTY_FORM: FormState = { sourceUrl: "", targetStreamKey: "", targetRtmpUrl: DEFAULT_RTMP_URL };
 
-export function JobView({ live, notify, reloadToken }: Props) {
+export function JobView({ live, notify, reloadToken, active }: Props) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -261,6 +264,18 @@ export function JobView({ live, notify, reloadToken }: Props) {
           </div>
         )}
       </section>
+
+      {/* Lähetysten luonti on tässä eikä YouTube-välilehdellä (#129): ottelun
+          valinta, lähetykset, jakoviesti, preflight ja käynnistys ovat yksi
+          jatkuva polku, ei kahta sivua joiden järjestys pitää muistaa. */}
+      <BroadcastCreateCard
+        active={active}
+        notify={notify}
+        onGoToAuth={() => notify("error", "YouTube-valtuutus puuttuu — avaa YouTube-välilehti.")}
+        reloadToken={reloadToken}
+        job={job}
+        onCreated={() => void loadJobs()}
+      />
 
       {/* Jakoviesti on saatavilla työn koko elinkaaren ajan, ei vain
           luontihetkellä (#131). Ennen lähetysten luontia se näkyy silti —

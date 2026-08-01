@@ -501,7 +501,7 @@ function sourceFromTelemetry(telemetry: RelayTelemetry): { health: Health; detai
   const detail = telemetry.source.detail;
   switch (telemetry.source.state) {
     case "live":
-      return { health: "ok", detail: detail ?? "ffmpeg kiinni lähteessä" };
+      return { health: "ok", detail: detail ?? "ffmpeg kiinni raakalähetyksessä" };
     case "scheduled":
       return { health: "ok", detail: `ei vielä livenä — ${detail ?? "relay odottaa"}` };
     case "resolving":
@@ -523,7 +523,7 @@ function sourceFromTelemetry(telemetry: RelayTelemetry): { health: Health; detai
     case "reconnecting":
       // ffmpeg ei ole juuri nyt käynnissä (#122). Keltainen eikä vihreä,
       // koska tällä hetkellä kohteeseen ei työnnetä mitään — juuri tämä hetki
-      // näytti ennen vihreältä ("ffmpeg kiinni lähteessä") koko sen ajan kun
+      // näytti ennen vihreältä ("ffmpeg kiinni raakalähetyksessä") koko sen ajan kun
       // sama 34 s häntä respawnattiin kolmesti ottelussa 145900.
       //
       // Terve osoitteenkierrätys käy myös tästä, mutta sen katko kestää
@@ -552,7 +552,8 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
   const telemetry = freshTelemetry(snap);
   const rows: ChainStatus[] = [];
 
-  // --- Lähde: the phone's own YouTube live, which we only ever read. The relay
+  // --- Raakalähetys: the YouTube live the camera phone pushes into, which we
+  // only ever read. The relay
   // reports its own view of it (yt-dlp result + ffmpeg session), so we quote
   // that. The log fallback below is only for a relay too old to publish
   // telemetry — and it is the one that produced #102, where a working stream
@@ -564,9 +565,9 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
   if (!job) {
     source = { health: "idle", detail: "ei aktiivista työtä" };
   } else if (!job.sourceUrl) {
-    source = { health: "warn", detail: "lähde-URL puuttuu työstä" };
+    source = { health: "warn", detail: "raakalähetyksen URL puuttuu työstä" };
   } else if (!relay.active) {
-    source = { health: "idle", detail: "relay ei lue lähdettä" };
+    source = { health: "idle", detail: "relay ei lue raakalähetystä" };
   } else if (telemetry) {
     source = sourceFromTelemetry(telemetry);
   } else if (notLive && (!ffmpegStart || Date.parse(notLive.ts) > Date.parse(ffmpegStart.ts))) {
@@ -574,11 +575,11 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
     // sleeps and rechecks without burning its give-up window.
     source = { health: "ok", detail: "ei vielä livenä — relay odottaa" };
   } else if (ffmpegStart) {
-    source = { health: "ok", detail: "ffmpeg kiinni lähteessä" };
+    source = { health: "ok", detail: "ffmpeg kiinni raakalähetyksessä" };
   } else {
     source = {
       health: "warn",
-      detail: "relay ei julkaise telemetriaa eikä lokissa ole havaintoa lähteestä",
+      detail: "relay ei julkaise telemetriaa eikä lokissa ole havaintoa raakalähetyksestä",
     };
   }
   // Ohjaamon YouTube-havainto vasta tämän jälkeen: se ei korvaa relayn omaa

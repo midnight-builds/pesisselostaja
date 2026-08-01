@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AuthHealth } from "../api";
 import { api } from "../api";
-import { BroadcastCreateCard } from "../components/BroadcastCreateCard";
 import { GoogleAuthCard } from "../components/GoogleAuthCard";
 import { VideoListCard } from "../components/VideoListCard";
 
@@ -75,12 +74,6 @@ export function YouTubeView({
           notify={notify}
         />
       </div>
-      <BroadcastCreateCard
-        active={active}
-        notify={notify}
-        onGoToAuth={goToAuth}
-        reloadToken={reloadToken}
-      />
       <VideoListCard active={active} notify={notify} onGoToAuth={goToAuth} reloadToken={reloadToken} />
     </section>
   );
