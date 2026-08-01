@@ -893,7 +893,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
         }
         if (!target.allowed) {
           console.warn(
-            `[control] hard stop -siivous: ${target.label}lähetystä ${target.videoId} EI kosketa — ${target.why}`
+            `[control] hard stop -siivous: ${target.label} ${target.videoId} EI kosketa — ${target.why}`
           );
           continue;
         }
