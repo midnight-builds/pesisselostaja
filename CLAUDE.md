@@ -250,3 +250,22 @@ tuntematon" — deliberately, rather than showing nothing.
 4. Confirm `systemctl --user is-active pesisselostaja.service` → `active`.
 
 Do this automatically at the end of every successful feature, without waiting to be asked.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues in `midnight-builds/pesisselostaja` (`gh` CLI); ne
+kirjoitetaan suomeksi, ja ulkoiset PR:t eivät ole triage-pinta. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles under their default names — `needs-triage`,
+`needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix` (not yet created in
+GitHub). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one root `CONTEXT.md` (chain terms) plus the pesäpallo rules in
+this file, `docs/adr/` for decisions. See `docs/agents/domain.md`.
