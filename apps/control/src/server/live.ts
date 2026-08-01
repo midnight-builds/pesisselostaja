@@ -585,7 +585,7 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
   // Ohjaamon YouTube-havainto vasta tämän jälkeen: se ei korvaa relayn omaa
   // havaintoa, vaan täydentää sitä (ks. applySourceIngest).
   const withIngest = applySourceIngest(source, snap, now);
-  rows.push(chainRow("source", "Lähde", withIngest.health, withIngest.detail));
+  rows.push(chainRow("source", "Raakalähetys", withIngest.health, withIngest.detail));
 
   // --- Relay: the one row we can state as fact. All four reads that describe
   // the relay (unit state, journal, job store, control file) surface here,
