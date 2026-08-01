@@ -153,7 +153,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       // ole ajossa. Ilman tätä porttia poltettaisiin 240 yksikköä tunnissa
       // HUOMISEN ottelun videosta ja kirjoitettaisiin väärä matchId.
       if (job.status !== "live" && job.status !== "arming") {
-        return { ok: false, reason: `työ on tilassa "${job.status}" — lähdettä ei pollata vielä` };
+        return { ok: false, reason: `työ on tilassa "${job.status}" — raakalähetystä ei pollata vielä` };
       }
       if (!(await d.isRelayActive())) return { ok: false, reason: "relay ei ole käynnissä" };
 
