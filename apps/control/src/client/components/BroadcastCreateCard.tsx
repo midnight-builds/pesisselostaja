@@ -242,7 +242,7 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken, j
         <>
           <section className="card">
             <h2 className="card__title">Otsikot</h2>
-            <p className="field__label">Normaali</p>
+            <p className="field__label">Raakalähetys</p>
             <p className="textline">{preview.texts.title}</p>
             <p className="field__label">Selostettu</p>
             <p className="textline">{preview.texts.narratedTitle}</p>
@@ -352,7 +352,7 @@ function CreatedResult({ created }: { created: CreatedBroadcastPair }) {
         <h2 className="card__title">Luodut lähetykset</h2>
         <dl className="kv">
           <div className="kv__row">
-            <dt>Normaali</dt>
+            <dt>Raakalähetys</dt>
             <dd>
               <a className="linkbtn" href={created.normal.watchUrl} target="_blank" rel="noreferrer">
                 Avaa
@@ -368,7 +368,7 @@ function CreatedResult({ created }: { created: CreatedBroadcastPair }) {
             </dd>
           </div>
           <div className="kv__row">
-            <dt>Kohteen video id</dt>
+            <dt>Selostetun lähetyksen video id</dt>
             <dd className="num">{created.narrated.videoId}</dd>
           </div>
           <div className="kv__row">
@@ -408,7 +408,7 @@ function CreatedResult({ created }: { created: CreatedBroadcastPair }) {
                     : [
                         created.thumbnails.normal.ok
                           ? null
-                          : `normaali: ${created.thumbnails.normal.error}`,
+                          : `raakalähetys: ${created.thumbnails.normal.error}`,
                         created.thumbnails.narrated.ok
                           ? null
                           : `selostettu: ${created.thumbnails.narrated.error}`,
@@ -426,7 +426,7 @@ function CreatedResult({ created }: { created: CreatedBroadcastPair }) {
           </>
         )}
         <p className="field__hint">
-          Työn kohdetiedot päivittyivät automaattisesti — .env.relay kirjoitetaan Työ-välilehdeltä.
+          Työn selostetun lähetyksen tiedot päivittyivät automaattisesti — .env.relay kirjoitetaan Työ-välilehdeltä.
         </p>
       </section>
     </>

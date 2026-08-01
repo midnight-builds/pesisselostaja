@@ -505,7 +505,7 @@ function sourceFromTelemetry(telemetry: RelayTelemetry): { health: Health; detai
     case "scheduled":
       return { health: "ok", detail: `ei vielä livenä — ${detail ?? "relay odottaa"}` };
     case "resolving":
-      return { health: "ok", detail: "haetaan lähdeosoitetta yt-dlp:llä" };
+      return { health: "ok", detail: "haetaan raakalähetyksen osoitetta yt-dlp:llä" };
     case "failed":
       return { health: "fail", detail: detail ?? "lähteen avaus epäonnistui" };
     case "ended":
