@@ -655,24 +655,37 @@ function formatMultiRunHit(
   subs: SubEvent[],
   lookup: PlayerLookup,
   hasKunnari: boolean
-): string | null {
+): string {
   let batter: string | null = null;
   const runners: string[] = [];
   for (const sub of subs) {
     const names: string[] = [];
+    let players = 0;
     for (const el of sub.texts) {
       if (typeof el === "object" && el.type === "player") {
+        players++;
         const name = resolvePlayerName(lookup, el);
-        if (name) names.push(name);
+        // "?" rather than nothing when a name won't resolve: the relay fetches
+        // the roster once at startup, and starting before the lineup is
+        // published leaves every name unresolvable for the whole match
+        // (reference-lineups-published-late). Dropping the element there would
+        // silently shorten the sentence — and an earlier version dropped the
+        // whole group, kunnari included.
+        names.push(name ?? "?");
       }
     }
     if (batter === null) batter = names[0] ?? null;
     // The kunnari marking names only the batter — he brings himself home, so
     // there is no tuoja to add (CLAUDE.md: the tuoja is the runner who gets
     // from 3. pesä to kotipesä).
-    if (names.length > 1) runners.push(names[1]);
+    if (players > 1) {
+      // A scorer double-marking repeats the same runner; naming them twice in
+      // one sentence ("tuojina Ilves ja Ilves") reads as two people. The feed
+      // still mirrors both markings.
+      if (runners[runners.length - 1] !== names[1]) runners.push(names[1]);
+    }
   }
-  if (!batter) return null;
+  if (!batter) batter = "?";
   const tuojat = runners.length === 0 ? "" : runners.length === 1 ? `, tuojana ${runners[0]}` : `, tuojina ${listNames(runners)}`;
   if (hasKunnari) {
     return pickVariant("kunnari-multi", [
