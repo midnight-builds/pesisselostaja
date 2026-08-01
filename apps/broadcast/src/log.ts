@@ -80,6 +80,10 @@ export type EventCode =
   | "api.poll_window"
   | "api.poll_trace"
   | "api.first_seen"
+  // Käynnistyshaun uudelleenyritykset (#158): käynnistys ei kaadu hakuvirheeseen,
+  // koska mikseri työntää jo kuvaa livenä olevaan lähetykseen.
+  | "api.startup_fetch_failed"
+  | "api.startup_fetch_recovered"
   // Kokoonpanon elinkaari (#90): puuttuu → muuttui → vakiintui.
   | "api.roster_missing"
   | "api.roster_refresh_failed"

@@ -2,7 +2,8 @@ import { fetchMatchMetadata, fetchLiveEvents, formatHelsinkiTimestamp, type Live
 import { EventHistory } from "./eventHistory.js";
 import {
   buildPlayerLookup,
-  subEventToSpeech,
+  groupSubEventsForSpeech,
+  groupToSpeech,
   subEventFeedDetail,
   isRunScoringSubEvent,
   isOutSubEvent,
@@ -99,6 +100,22 @@ const FULL_FETCH_TIMEOUT_MS = 10_000;
  *  timeout can kill a live broadcast (#158). `api.poll_window` now reports the
  *  relay's own per-size spread; retune from that, after #158. */
 const SMALL_FETCH_TIMEOUT_MS = 4_000;
+
+/** Käynnistyshakujen uudelleenyritysten odotukset (#158).
+ *
+ *  Käynnistyksen haut tehdään vasta kun mikseri jo työntää kuvaa selostettuun
+ *  lähetykseen, joten yksi hylätty lupaus kaataisi prosessin ja systemd
+ *  käynnistäisi sen 10 s:n päästä uudelleen — katsojalle musta ruutu. Siksi
+ *  käynnistys ei koskaan kaadu hakuvirheeseen, vaan yrittää uudelleen kunnes
+ *  onnistuu tai relay sammutetaan. Viimeinen arvo toistuu loputtomiin, eli
+ *  API:ta ei hakata mutta yhteys palautuu itsestään puolen minuutin sisällä
+ *  siitä kun API taas vastaa. */
+const STARTUP_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
+
+/** Monennenko epäonnistuneen käynnistysyrityksen jälkeen lokitetaan ERROR
+ *  WARNin sijaan: yksittäinen tökkiminen on odotettavaa, mutta jatkuva ei — ja
+ *  se pitää näkyä operaattorille ilman että hän lukee koko lokin. */
+const STARTUP_RETRY_ERROR_AFTER = 3;
 
 /** Yhden pollausikkunan onnistuneiden hakujen kestot yhdeksi luettavaksi
  *  palaseksi (#156).
@@ -709,14 +726,29 @@ export class CommentaryLoop {
         `(vaihda ajon aikana: ${this.config.controlFile})`
     );
 
+    // Ennen hakuja, ei niiden jälkeen: `matchFinished` lukee tätä ja mikseri
+    // lukee sitä (`isMatchFinished`). Tilatiedostosta palautunut `finished:
+    // true` lyhentäisi mikserin luovutusikkunan 12 minuutista 2:een juuri sinä
+    // aikana kun käynnistyshaku yrittää uudelleen (#158) — eli uudelleenyritys
+    // voisi itse tappaa relayn, jonka suojelemiseksi se lisättiin. Rivi
+    // toistuu alempana muun tilan nollauksen kanssa; molemmat ovat halpoja.
+    this.state.finished = false;
+
     logInfo("api.fetching_meta", `Haetaan ottelutietoja (ID: ${this.config.matchId})…`);
-    let meta = await this.timedFetch("small", () =>
-      fetchMatchMetadata(this.config.matchId, {
-        apiBase: this.config.apiBase,
-        apiKey: this.config.apiKey,
-        timeoutMs: this.apiTimeoutMs("small"),
-      })
+    const startupMeta = await this.startupFetch(
+      "Ottelutietojen haku",
+      () =>
+        this.timedFetch("small", () =>
+          fetchMatchMetadata(this.config.matchId, {
+            apiBase: this.config.apiBase,
+            apiKey: this.config.apiKey,
+            timeoutMs: this.apiTimeoutMs("small"),
+          })
+        ),
+      signal
     );
+    if (startupMeta == null) return; // aborted while retrying
+    let meta = startupMeta;
     this.meta = meta;
     let lookup = buildPlayerLookup(meta);
     this.rosterRefreshedAt = Date.now();
@@ -735,7 +767,10 @@ export class CommentaryLoop {
     logInfo("api.skip_history", "Ohitetaan historialliset tapahtumat…");
     // Full fetch — also seeds the local history + delta cursor (see
     // fetchEventsForPoll).
-    const initial = await this.fetchFullEvents();
+    // Same protection as the metadata fetch above, and for the same reason:
+    // this call, too, happens with ffmpeg already live (#158).
+    const initial = await this.startupFetch("Tapahtumahistorian haku", () => this.fetchFullEvents(), signal);
+    if (initial == null) return; // aborted while retrying
     this.state.periodRuns = {};
     this.state.currentOuts = 0;
     this.state.paloTurnKey = null;
@@ -893,6 +928,45 @@ export class CommentaryLoop {
    *
    *  "small" covers the delta poll and the startup metadata fetch; "full" the
    *  whole-history fetch. Why they differ: SMALL_FETCH_TIMEOUT_MS (#81). */
+  /** Runs a startup fetch that must not be allowed to kill the process (#158).
+   *
+   *  By the time `run()` starts, ffmpeg is already pushing picture to the
+   *  commentated broadcast. An unhandled rejection here would propagate to
+   *  `main().catch()` → `process.exit(1)`, and `Restart=on-failure` +
+   *  `RestartSec=10` + `KillMode=control-group` would take ffmpeg down with it:
+   *  a ≥10 s hole in a live broadcast, repeating for as long as the API is
+   *  slow. Retrying costs a few seconds of late narration instead.
+   *
+   *  Retries until it succeeds or the loop is aborted; on abort it resolves to
+   *  `null` and the caller returns without narrating. Same reasoning as
+   *  `maybeRefreshRoster`'s catch, applied where the price is a black screen
+   *  rather than a stale name.
+   *
+   *  Deliberately unbounded: giving up would mean either crashing (the thing
+   *  being fixed) or running a broadcast that can never narrate. A genuinely
+   *  wrong match id is preflight's job, and it is loud in the log here. */
+  private async startupFetch<T>(what: string, fn: () => Promise<T>, signal: AbortSignal): Promise<T | null> {
+    for (let attempt = 1; ; attempt++) {
+      if (signal.aborted) return null;
+      try {
+        const value = await fn();
+        if (attempt > 1) {
+          logInfo("api.startup_fetch_recovered", `${what} onnistui ${attempt}. yrityksellä.`);
+        }
+        return value;
+      } catch (err) {
+        if (signal.aborted) return null;
+        const waitMs = STARTUP_RETRY_DELAYS_MS[Math.min(attempt - 1, STARTUP_RETRY_DELAYS_MS.length - 1)];
+        const message =
+          `${what} epäonnistui (${attempt}. yritys): ${err instanceof Error ? err.message : err} — ` +
+          `yritetään uudelleen ${waitMs} ms:n kuluttua. Lähetys jatkuu, selostus alkaa myöhässä.`;
+        if (attempt >= STARTUP_RETRY_ERROR_AFTER) logError("api.startup_fetch_failed", message);
+        else logWarn("api.startup_fetch_failed", message);
+        await this.sleepAbortable(waitMs, signal);
+      }
+    }
+  }
+
   private apiTimeoutMs(size: "small" | "full"): number {
     const base = size === "full" ? FULL_FETCH_TIMEOUT_MS : SMALL_FETCH_TIMEOUT_MS;
     return Math.max(base, this.pollIntervalMs);
@@ -1138,52 +1212,62 @@ export class CommentaryLoop {
         logDebug("api.first_seen", `first-seen: id=${event.id} ts=${event.timestamp} delta=${deltaS}s`);
       }
 
-      for (let i = 0; i < event.events.length; i++) {
-        const sub = event.events[i];
-        const fp = eventFingerprint(event, i);
-        if (state.seenFingerprints.has(fp)) continue;
-        state.seenFingerprints.add(fp);
+      // One swing can be several markings (#154). Bookkeeping stays per
+      // marking — the score counts one run each, and every index has to be
+      // fingerprinted or the tail of a group is re-announced next poll — but
+      // the SPEECH is one sentence per group.
+      for (const group of groupSubEventsForSpeech(event.events)) {
+        const fresh = group.filter((i) => !state.seenFingerprints.has(eventFingerprint(event, i)));
+        if (fresh.length === 0) continue;
+        for (const i of fresh) state.seenFingerprints.add(eventFingerprint(event, i));
 
-        // A score change after "Ottelu päättyi" means the scorer ended the
-        // game too early and reopened it — the finished gate is not one-way,
-        // narration wakes back up here.
-        if (state.finished && isRunScoringSubEvent(sub)) {
-          state.finished = false;
-          logWarn("match.score_after_finish", "Pistetilanne muuttui ottelun päättymisen jälkeen — selostus jatkuu.");
+        let ctx = this.buildContext();
+        for (const i of fresh) {
+          const sub = event.events[i];
+          // A score change after "Ottelu päättyi" means the scorer ended the
+          // game too early and reopened it — the finished gate is not one-way,
+          // narration wakes back up here.
+          if (state.finished && isRunScoringSubEvent(sub)) {
+            state.finished = false;
+            logWarn("match.score_after_finish", "Pistetilanne muuttui ottelun päättymisen jälkeen — selostus jatkuu.");
+          }
+
+          if (isMatchEndSubEvent(sub)) state.finished = true;
+
+          if (isRunScoringSubEvent(sub) && event.team !== null) {
+            addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
+            const s = getPeriodScore(state, event.period);
+            logInfo("match.score", `Pisteet (${periodName(event.period)}): ${meta.home.shorthand} ${s.home}-${s.away} ${meta.away.shorthand}`);
+          }
+
+          // For an out, the spoken ordinal must come from the turn-key recompute
+          // (same source as the scoreboard), not the running currentOuts which
+          // can drift across polls.
+          ctx = this.buildContext();
+          if (isOutSubEvent(sub) && event.team !== null) {
+            ctx.currentOuts = outsThroughSubEvent(events, ei, i);
+            const team = event.team === meta.home.id ? meta.home.shorthand : meta.away.shorthand;
+            logInfo("match.palo", `Palo: ${team} ${ctx.currentOuts}`);
+          }
+
+          // The relay has no feed; its log is the written mirror of the source, so
+          // the lineup list the narration leaves out (issue #48) is logged here
+          // instead of vanishing (issue #74). Logged even when nothing is spoken.
+          // Per marking on purpose: the log mirrors the source even where the
+          // speech merges (feedback-feed-mirrors-source-speech-dedupes).
+          const feedDetail = subEventFeedDetail(sub, lookup);
+          if (feedDetail) logDebug("match.event", `Tapahtuma: ${feedDetail}`);
         }
 
-        if (isMatchEndSubEvent(sub)) state.finished = true;
-
-        if (isRunScoringSubEvent(sub) && event.team !== null) {
-          addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
-          const s = getPeriodScore(state, event.period);
-          logInfo("match.score", `Pisteet (${periodName(event.period)}): ${meta.home.shorthand} ${s.home}-${s.away} ${meta.away.shorthand}`);
-        }
-
-        // For an out, the spoken ordinal must come from the turn-key recompute
-        // (same source as the scoreboard), not the running currentOuts which
-        // can drift across polls.
-        const ctx = this.buildContext();
-        if (isOutSubEvent(sub) && event.team !== null) {
-          ctx.currentOuts = outsThroughSubEvent(events, ei, i);
-          const team = event.team === meta.home.id ? meta.home.shorthand : meta.away.shorthand;
-          logInfo("match.palo", `Palo: ${team} ${ctx.currentOuts}`);
-        }
-
-        // The relay has no feed; its log is the written mirror of the source, so
-        // the lineup list the narration leaves out (issue #48) is logged here
-        // instead of vanishing (issue #74). Logged even when nothing is spoken.
-        const feedDetail = subEventFeedDetail(sub, lookup);
-        if (feedDetail) logDebug("match.event", `Tapahtuma: ${feedDetail}`);
-
-        const speech = subEventToSpeech(event, sub, meta, lookup, this.announceBatterChanges, ctx);
+        const lastSub = event.events[fresh[fresh.length - 1]];
+        const speech = groupToSpeech(event, event.events, fresh, meta, lookup, this.announceBatterChanges, ctx);
         if (!speech) continue;
         // After the closing announcement everything else stays silent (the
         // match-end sub-event itself is what speaks that closing line).
-        if (state.finished && !isMatchEndSubEvent(sub)) continue;
+        if (state.finished && !isMatchEndSubEvent(lastSub)) continue;
         // Same texts in the same turn and situation = a scorer double-marking.
         const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
-          `${JSON.stringify(sub.texts)}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
+          `${JSON.stringify(fresh.map((i) => event.events[i].texts))}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
         this.speak(speech, true, dedupeKey);
       }
 

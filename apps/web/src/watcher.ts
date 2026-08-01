@@ -1,7 +1,13 @@
-import { fetchMatchMetadata, fetchLiveEvents, type ApiOptions } from "@pesisselostaja/core";
+import {
+  fetchMatchMetadata,
+  fetchLiveEvents,
+  type ApiOptions,
+} from "@pesisselostaja/core";
 import {
   buildPlayerLookup,
   subEventToSpeech,
+  groupSubEventsForSpeech,
+  groupToSpeech,
   subEventToFeedText,
   isRunScoringSubEvent,
   isOutSubEvent,
@@ -18,7 +24,11 @@ import {
   periodName,
   type SpeechContext,
 } from "@pesisselostaja/core";
-import { applyPronunciations, preventOrdinalReading, type PronunciationRule } from "./pronunciation.js";
+import {
+  applyPronunciations,
+  preventOrdinalReading,
+  type PronunciationRule,
+} from "./pronunciation.js";
 import { piperSynthesize } from "./piper.js";
 import { elevenLabsSynthesize } from "./elevenlabs.js";
 import { debugLog } from "./debuglog.js";
@@ -52,7 +62,8 @@ function boostBuffer(buf: AudioBuffer): void {
   const norm = Math.tanh(BOOST_DRIVE);
   for (let ch = 0; ch < buf.numberOfChannels; ch++) {
     const d = buf.getChannelData(ch);
-    for (let i = 0; i < d.length; i++) d[i] = Math.tanh(d[i] * BOOST_DRIVE) / norm;
+    for (let i = 0; i < d.length; i++)
+      d[i] = Math.tanh(d[i] * BOOST_DRIVE) / norm;
   }
 }
 
@@ -63,7 +74,8 @@ export interface WatcherConfig {
   apiBase: string;
 }
 
-export type FeedType = "run" | "out" | "period" | "bat" | "summary" | "info" | "end";
+export type FeedType =
+  "run" | "out" | "period" | "bat" | "summary" | "info" | "end";
 
 export interface FeedItem {
   type: FeedType;
@@ -90,7 +102,11 @@ export interface MatchSnapshot {
 
 export interface WatcherCallbacks {
   onLog: (msg: string) => void;
-  onMatchInfo: (info: { matchInfo: string; seriesName: string | null; stadiumName: string }) => void;
+  onMatchInfo: (info: {
+    matchInfo: string;
+    seriesName: string | null;
+    stadiumName: string;
+  }) => void;
   onFinished: () => void;
   onError: (err: string) => void;
   onState?: (snapshot: MatchSnapshot) => void;
@@ -113,16 +129,16 @@ export class BrowserWatcher {
   private _voiceEngine: "browser" | "piper" | "elevenlabs" = "browser";
   private _piperVoiceId = "fi_FI-harri-medium";
   private _volumeBoost = false;
-  private _piperFailed = false;            // sticky fallback to browser this session
+  private _piperFailed = false; // sticky fallback to browser this session
   private _elevenLabsApiKey = "";
-  private _elevenLabsFailed = false;       // sticky fallback to browser this session
+  private _elevenLabsFailed = false; // sticky fallback to browser this session
   private _currentAudio: HTMLAudioElement | null = null;
   private _currentSource: AudioBufferSourceNode | null = null;
   private _audioCtx: AudioContext | null = null;
-  private _drainToken = 0;                 // generation counter; bump to abort in-flight work
-  private _lastSummaryCount = 0;           // announcementCount at the last periodic summary
-  private _lastSpeechAt = 0;               // wall clock of the last spoken announcement
-  private _matchEndSeen = false;           // true after first poll that contains "Ottelu päättyi"
+  private _drainToken = 0; // generation counter; bump to abort in-flight work
+  private _lastSummaryCount = 0; // announcementCount at the last periodic summary
+  private _lastSpeechAt = 0; // wall clock of the last spoken announcement
+  private _matchEndSeen = false; // true after first poll that contains "Ottelu päättyi"
   /** False until the match has produced any event — the endpoint always
    *  returns the full history, so an empty history means the game genuinely
    *  hasn't started and the watcher speaks welcome fillers instead of recaps. */
@@ -130,11 +146,15 @@ export class BrowserWatcher {
 
   constructor(
     private config: WatcherConfig,
-    private callbacks: WatcherCallbacks
+    private callbacks: WatcherCallbacks,
   ) {}
 
-  get running(): boolean { return this._running; }
-  get muted(): boolean { return this._muted; }
+  get running(): boolean {
+    return this._running;
+  }
+  get muted(): boolean {
+    return this._muted;
+  }
 
   setPronunciations(rules: PronunciationRule[]): void {
     this._pronunciations = rules;
@@ -176,7 +196,10 @@ export class BrowserWatcher {
   /** Speak the current situation summary now (used when the listener un-mutes). */
   announceSituation(): void {
     if (this._muted || !this._meta || !this._state) return;
-    const summary = formatSituationSummary(this._meta, this.buildContext(this._state));
+    const summary = formatSituationSummary(
+      this._meta,
+      this.buildContext(this._state),
+    );
     this.speakRaw(summary);
   }
 
@@ -194,7 +217,8 @@ export class BrowserWatcher {
    */
   resumeAudio(): void {
     if (this._muted) return;
-    const speechPaused = "speechSynthesis" in window ? window.speechSynthesis.paused : undefined;
+    const speechPaused =
+      "speechSynthesis" in window ? window.speechSynthesis.paused : undefined;
     debugLog("resume-audio", {
       speechPaused,
       audioCtxState: this._audioCtx?.state ?? null,
@@ -203,10 +227,12 @@ export class BrowserWatcher {
     });
     // resume() is a no-op when not paused, so call it unconditionally.
     if ("speechSynthesis" in window) window.speechSynthesis.resume();
-    if (this._audioCtx && this._audioCtx.state === "suspended") void this._audioCtx.resume();
+    if (this._audioCtx && this._audioCtx.state === "suspended")
+      void this._audioCtx.resume();
     // If the queue wedged while hidden (items waiting but the drain loop is not
     // running), re-kick it so pending speech plays.
-    if (!this._speechBusy && this._speechQueue.length > 0) void this._drainQueue();
+    if (!this._speechBusy && this._speechQueue.length > 0)
+      void this._drainQueue();
   }
 
   start(matchInput: string): void {
@@ -246,8 +272,14 @@ export class BrowserWatcher {
     this.callbacks.onLog(`[${ts}] ${msg}`);
   }
 
-  private async runWatcher(matchId: number, signal: AbortSignal): Promise<void> {
-    const apiOpts: ApiOptions = { apiBase: this.config.apiBase, apiKey: this.config.apiKey };
+  private async runWatcher(
+    matchId: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const apiOpts: ApiOptions = {
+      apiBase: this.config.apiBase,
+      apiKey: this.config.apiKey,
+    };
 
     this.log(`Haetaan ottelutietoja (ID: ${matchId})…`);
     const meta = await fetchMatchMetadata(matchId, apiOpts);
@@ -279,7 +311,8 @@ export class BrowserWatcher {
     this._matchStarted = initial.events.length > 0;
 
     if (initial.team != null) state.currentBatTeamId = initial.team;
-    if ((initial.period ?? 0) > state.currentPeriod) state.currentPeriod = initial.period!;
+    if ((initial.period ?? 0) > state.currentPeriod)
+      state.currentPeriod = initial.period!;
     {
       const { outs, turnKey } = recomputeCurrentOutsKeyed(initial.events);
       state.paloTurnKey = turnKey;
@@ -306,10 +339,15 @@ export class BrowserWatcher {
     if (!this._audioUnlocked && !this._muted) {
       this.log("Odotetaan laitteen äänen käynnistystä…");
       await Promise.race([
-        new Promise<void>((resolve) => { this._audioUnlockResolve = resolve; }),
+        new Promise<void>((resolve) => {
+          this._audioUnlockResolve = resolve;
+        }),
         this.sleepAbortable(60000, signal),
       ]);
-      if (signal.aborted) { this._running = false; return; }
+      if (signal.aborted) {
+        this._running = false;
+        return;
+      }
     }
 
     const startupMsg = this._matchStarted
@@ -338,7 +376,10 @@ export class BrowserWatcher {
           team: data.team,
           sinceLastPollMs: fetchStartedAt - pollStartedAt,
           fetchMs: Date.now() - fetchStartedAt,
-          visibility: typeof document !== "undefined" ? document.visibilityState : undefined,
+          visibility:
+            typeof document !== "undefined"
+              ? document.visibilityState
+              : undefined,
         });
 
         // Ordinary bat-turn changes (no dedicated API text marker) are
@@ -372,7 +413,8 @@ export class BrowserWatcher {
         // batting, and the periodic summary below never names the team whose turn
         // just ended. Period only advances — the response-level period can lag
         // behind individual event periods, so never let it go backward.
-        if ((data.period ?? 0) > state.currentPeriod) state.currentPeriod = data.period!;
+        if ((data.period ?? 0) > state.currentPeriod)
+          state.currentPeriod = data.period!;
         if (data.team != null && data.team !== state.currentBatTeamId) {
           state.currentBatTeamId = data.team;
           state.currentOuts = 0;
@@ -409,9 +451,18 @@ export class BrowserWatcher {
     this._running = false;
   }
 
-  private processEventsSilent(events: LiveEvent[], state: WatcherState, meta: MatchMetadata): void {
+  private processEventsSilent(
+    events: LiveEvent[],
+    state: WatcherState,
+    meta: MatchMetadata,
+  ): void {
     for (const event of events) {
-      if (event.team != null && (event.team !== state.currentBatTeamId || event.inning !== state.currentInning || event.batTurn !== state.currentBatTurn)) {
+      if (
+        event.team != null &&
+        (event.team !== state.currentBatTeamId ||
+          event.inning !== state.currentInning ||
+          event.batTurn !== state.currentBatTurn)
+      ) {
         state.currentBatTeamId = event.team;
         state.currentInning = event.inning;
         state.currentBatTurn = event.batTurn;
@@ -432,7 +483,13 @@ export class BrowserWatcher {
         state.seenFingerprints.add(fp);
         if (isMatchEndSubEvent(sub)) state.finished = true;
         if (isRunScoringSubEvent(sub)) {
-          if (event.team !== null) addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
+          if (event.team !== null)
+            addRun(
+              state,
+              event.period,
+              event.team === meta.home.id,
+              runValueOfSubEvent(sub),
+            );
         }
         if (isOutSubEvent(sub)) {
           if (event.team !== null) state.currentOuts++;
@@ -449,13 +506,17 @@ export class BrowserWatcher {
     events: LiveEvent[],
     state: WatcherState,
     meta: MatchMetadata,
-    lookup: ReturnType<typeof buildPlayerLookup>
+    lookup: ReturnType<typeof buildPlayerLookup>,
   ): void {
     if (events.length > 0) this._matchStarted = true;
     for (let ei = 0; ei < events.length; ei++) {
       const event = events[ei];
       const prevBatTeamId = state.currentBatTeamId;
-      const turnChanged = event.team != null && (event.team !== state.currentBatTeamId || event.inning !== state.currentInning || event.batTurn !== state.currentBatTurn);
+      const turnChanged =
+        event.team != null &&
+        (event.team !== state.currentBatTeamId ||
+          event.inning !== state.currentInning ||
+          event.batTurn !== state.currentBatTurn);
       // The very first turn of a period (inning 0, aloittava) is announced by
       // the "X jakso alkoi" / "Ottelu alkoi" text handling in subEventToSpeech
       // instead — skip it here to avoid saying it twice.
@@ -491,77 +552,125 @@ export class BrowserWatcher {
         !state.finished &&
         event.team != null &&
         turnKey !== state.announcedTurnKey &&
-        event.events.some((_, i) => !state.seenFingerprints.has(eventFingerprint(event, i)))
+        event.events.some(
+          (_, i) => !state.seenFingerprints.has(eventFingerprint(event, i)),
+        )
       ) {
         const cur = getPeriodScore(state, state.currentPeriod);
         const msg = formatBatTurnChangeSpeech(
-          meta, prevBatTeamId, event.team, cur.home, cur.away, state.currentInning, state.currentBatTurn
+          meta,
+          prevBatTeamId,
+          event.team,
+          cur.home,
+          cur.away,
+          state.currentInning,
+          state.currentBatTurn,
         );
         this.say(msg, state);
         this.emitFeed("period", msg);
         state.announcedTurnKey = turnKey;
       }
 
-      for (let i = 0; i < event.events.length; i++) {
-        const sub = event.events[i];
-        const fp = eventFingerprint(event, i);
-        if (state.seenFingerprints.has(fp)) continue;
-        state.seenFingerprints.add(fp);
-
-        // A score change after "Ottelu päättyi" means the scorer ended the
-        // game too early and reopened it — the finished gate is not one-way,
-        // narration wakes back up here.
-        if (state.finished && isRunScoringSubEvent(sub)) {
-          state.finished = false;
-          this._matchEndSeen = false;
-          this.log("Pistetilanne muuttui ottelun päättymisen jälkeen — selostus jatkuu.");
-        }
-
-        if (isMatchEndSubEvent(sub)) state.finished = true;
-
-        if (isRunScoringSubEvent(sub)) {
-          if (event.team !== null) {
-            addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
-            const s = getPeriodScore(state, event.period);
-            this.log(`Pisteet (${periodName(event.period)}): ${meta.home.shorthand} ${s.home}–${s.away} ${meta.away.shorthand}`);
-          }
-        }
-
-        // Build context per sub-event. For an out, the spoken ordinal must come
-        // from the turn-key recompute (same source as the scoreboard), not the
-        // running state.currentOuts which can drift across polls.
-        const ctx = this.buildContext(state);
-        if (isOutSubEvent(sub) && event.team !== null) {
-          ctx.currentOuts = outsThroughSubEvent(events, ei, i);
-          const team = event.team === meta.home.id ? meta.home.shorthand : meta.away.shorthand;
-          this.log(`Palo: ${team} ${ctx.currentOuts}`);
-        }
-
-        const speech = subEventToSpeech(
-          event, sub, meta, lookup, this.config.announceBatterChanges, ctx
+      // One swing, several markings (#154): the FEED still mirrors the source
+      // one line per marking, only the SPEECH merges into one sentence — the
+      // two are deliberately asymmetric (feedback-feed-mirrors-source).
+      for (const group of groupSubEventsForSpeech(event.events)) {
+        const fresh = group.filter(
+          (i) => !state.seenFingerprints.has(eventFingerprint(event, i)),
         );
-        // The feed mirrors the source, the speech trims: a lineup change is
-        // spoken without the 11-name list (issue #48) but the feed shows it
-        // (issue #74), so the two texts are built separately from here on.
-        const feedText = subEventToFeedText(speech, sub, lookup);
-        if (!speech) {
-          if (feedText) this.emitFeed(this.classifyFeed(sub, feedText), feedText);
-          continue;
+        if (fresh.length === 0) continue;
+        for (const i of fresh)
+          state.seenFingerprints.add(eventFingerprint(event, i));
+        let groupCtx = this.buildContext(state);
+        let lastSub = event.events[fresh[fresh.length - 1]];
+
+        for (const i of fresh) {
+          const sub = event.events[i];
+          lastSub = sub;
+
+          // A score change after "Ottelu päättyi" means the scorer ended the
+          // game too early and reopened it — the finished gate is not one-way,
+          // narration wakes back up here.
+          if (state.finished && isRunScoringSubEvent(sub)) {
+            state.finished = false;
+            this._matchEndSeen = false;
+            this.log(
+              "Pistetilanne muuttui ottelun päättymisen jälkeen — selostus jatkuu.",
+            );
+          }
+
+          if (isMatchEndSubEvent(sub)) state.finished = true;
+
+          if (isRunScoringSubEvent(sub)) {
+            if (event.team !== null) {
+              addRun(
+                state,
+                event.period,
+                event.team === meta.home.id,
+                runValueOfSubEvent(sub),
+              );
+              const s = getPeriodScore(state, event.period);
+              this.log(
+                `Pisteet (${periodName(event.period)}): ${meta.home.shorthand} ${s.home}–${s.away} ${meta.away.shorthand}`,
+              );
+            }
+          }
+
+          // Build context per sub-event. For an out, the spoken ordinal must come
+          // from the turn-key recompute (same source as the scoreboard), not the
+          // running state.currentOuts which can drift across polls.
+          const ctx = this.buildContext(state);
+          if (isOutSubEvent(sub) && event.team !== null) {
+            ctx.currentOuts = outsThroughSubEvent(events, ei, i);
+            const team =
+              event.team === meta.home.id
+                ? meta.home.shorthand
+                : meta.away.shorthand;
+            this.log(`Palo: ${team} ${ctx.currentOuts}`);
+          }
+
+          groupCtx = ctx;
+
+          // Feed line per marking, built from this marking's own sentence — the
+          // feed keeps mirroring the source even where the speech merges.
+          const soloSpeech = subEventToSpeech(
+            event,
+            sub,
+            meta,
+            lookup,
+            this.config.announceBatterChanges,
+            ctx,
+          );
+          // The feed mirrors the source, the speech trims: a lineup change is
+          // spoken without the 11-name list (issue #48) but the feed shows it
+          // (issue #74), so the two texts are built separately from here on.
+          const feedText = subEventToFeedText(soloSpeech, sub, lookup);
+          const line = feedText ?? soloSpeech;
+          if (line) this.emitFeed(this.classifyFeed(sub, line), line);
         }
+
+        const ctx = groupCtx;
+        const speech = groupToSpeech(
+          event,
+          event.events,
+          fresh,
+          meta,
+          lookup,
+          this.config.announceBatterChanges,
+          ctx,
+        );
+        if (!speech) continue;
 
         // After the closing announcement everything else stays silent (the
-        // match-end sub-event itself speaks that closing line). The feed still
-        // shows the event — it mirrors the source, only the speech is gated.
-        if (state.finished && !isMatchEndSubEvent(sub)) {
-          this.emitFeed(this.classifyFeed(sub, speech), feedText ?? speech);
-          continue;
-        }
+        // match-end sub-event itself speaks that closing line). The feed has
+        // already shown the markings above — only the speech is gated.
+        if (state.finished && !isMatchEndSubEvent(lastSub)) continue;
 
         // Same texts in the same turn and situation = a scorer double-marking.
-        const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
-          `${JSON.stringify(sub.texts)}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
+        const dedupeKey =
+          `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
+          `${JSON.stringify(fresh.map((i) => event.events[i].texts))}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
         this.say(speech, state, dedupeKey);
-        this.emitFeed(this.classifyFeed(sub, speech), feedText ?? speech);
       }
 
       if (event.timestamp !== null && event.timestamp > state.lastTimestamp) {
@@ -588,9 +697,11 @@ export class BrowserWatcher {
     const cur = getPeriodScore(state, state.currentPeriod);
     const won = periodsWon(state);
     const battingSide =
-      state.currentBatTeamId === meta.home.id ? "home"
-      : state.currentBatTeamId === meta.away.id ? "away"
-      : null;
+      state.currentBatTeamId === meta.home.id
+        ? "home"
+        : state.currentBatTeamId === meta.away.id
+          ? "away"
+          : null;
     this.callbacks.onState({
       homeName: meta.home.name,
       awayName: meta.away.name,
@@ -647,14 +758,17 @@ export class BrowserWatcher {
       return;
     }
     if (state.announcementCount === 0) return;
-    const countDue = state.announcementCount - this._lastSummaryCount >= SUMMARY_EVERY_N;
+    const countDue =
+      state.announcementCount - this._lastSummaryCount >= SUMMARY_EVERY_N;
     const idleDue = now - this._lastSpeechAt > IDLE_FILLER_MS;
     if (!countDue && !idleDue) return;
     this._lastSummaryCount = state.announcementCount;
     state.lastSummaryTime = now;
     this._lastSpeechAt = now;
     const ctx = this.buildContext(state);
-    const summary = countDue ? formatSituationSummary(meta, ctx) : formatIdleSummary(meta, ctx);
+    const summary = countDue
+      ? formatSituationSummary(meta, ctx)
+      : formatIdleSummary(meta, ctx);
     this.emitFeed("summary", summary);
     if (!this._muted) this.speakRaw(summary);
   }
@@ -664,12 +778,20 @@ export class BrowserWatcher {
    *  comparing the final strings, but pickVariant can now phrase the same
    *  duplicate two different ways — so duplicates must be detected on the
    *  pre-variant key, never on the rendered speech. */
-  private say(speech: string, state: WatcherState, dedupeKey: string = speech): void {
+  private say(
+    speech: string,
+    state: WatcherState,
+    dedupeKey: string = speech,
+  ): void {
     if (dedupeKey === this._lastSpeech) return;
     this._lastSpeech = dedupeKey;
     this._lastSpeechAt = Date.now();
     this.log(`Puhe: ${speech}`);
-    debugLog("say", { text: speech, muted: this._muted, queueLen: this._speechQueue.length });
+    debugLog("say", {
+      text: speech,
+      muted: this._muted,
+      queueLen: this._speechQueue.length,
+    });
     this.speakRaw(speech);
     state.announcementCount++;
   }
@@ -685,7 +807,9 @@ export class BrowserWatcher {
 
   /** Pronunciation-substituted form for the Piper/browser engines. */
   private _substituted(text: string): string {
-    return preventOrdinalReading(applyPronunciations(text, this._pronunciations));
+    return preventOrdinalReading(
+      applyPronunciations(text, this._pronunciations),
+    );
   }
 
   /** Serial async loop: synthesize + play each item to completion before the next. */
@@ -693,14 +817,18 @@ export class BrowserWatcher {
     this._speechBusy = true;
     const token = ++this._drainToken;
     while (this._speechQueue.length > 0) {
-      if (this._muted || token !== this._drainToken) break;   // cancelled
+      if (this._muted || token !== this._drainToken) break; // cancelled
       const raw = this._speechQueue.shift()!;
       const useElevenLabs =
-        this._voiceEngine === "elevenlabs" && !this._elevenLabsFailed && this._elevenLabsApiKey !== "";
+        this._voiceEngine === "elevenlabs" &&
+        !this._elevenLabsFailed &&
+        this._elevenLabsApiKey !== "";
       const usePiper = this._voiceEngine === "piper" && !this._piperFailed;
       try {
         if (useElevenLabs) {
-          await this._withWatchdog(raw, () => this._speakElevenLabs(raw, token));
+          await this._withWatchdog(raw, () =>
+            this._speakElevenLabs(raw, token),
+          );
         } else if (usePiper) {
           const text = this._substituted(raw);
           await this._withWatchdog(text, () => this._speakPiper(text, token));
@@ -718,15 +846,29 @@ export class BrowserWatcher {
           this._piperFailed = true;
           this.log("Edistynyt ääni epäonnistui, vaihdetaan selaimen ääneen.");
         }
-        if ((useElevenLabs || usePiper) && token === this._drainToken && !this._muted) {
+        if (
+          (useElevenLabs || usePiper) &&
+          token === this._drainToken &&
+          !this._muted
+        ) {
           const text = this._substituted(raw);
-          try { await this._withWatchdog(text, () => this._speakBrowser(text)); } catch { /* give up on this item */ }
+          try {
+            await this._withWatchdog(text, () => this._speakBrowser(text));
+          } catch {
+            /* give up on this item */
+          }
         }
       }
       // Breathe between consecutive announcements so a burst from one poll
       // doesn't run together into one long sentence.
-      if (this._speechQueue.length > 0 && token === this._drainToken && !this._muted) {
-        await new Promise<void>((resolve) => setTimeout(resolve, NARRATION_GAP_MS));
+      if (
+        this._speechQueue.length > 0 &&
+        token === this._drainToken &&
+        !this._muted
+      ) {
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, NARRATION_GAP_MS),
+        );
       }
     }
     if (token === this._drainToken) this._speechBusy = false;
@@ -751,22 +893,41 @@ export class BrowserWatcher {
         resolve();
       }, timeoutMs);
       fn().then(
-        () => { if (settled) return; settled = true; clearTimeout(timer); resolve(); },
-        (err: unknown) => { if (settled) return; settled = true; clearTimeout(timer); reject(err); }
+        () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve();
+        },
+        (err: unknown) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          reject(err);
+        },
       );
     });
   }
 
   private _speakBrowser(text: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      if (!("speechSynthesis" in window)) { reject(new Error("no speechSynthesis")); return; }
+      if (!("speechSynthesis" in window)) {
+        reject(new Error("no speechSynthesis"));
+        return;
+      }
       const startedAt = Date.now();
       debugLog("speak-browser-start", { text });
       const utt = new SpeechSynthesisUtterance(text);
       utt.lang = "fi-FI";
       if (this._selectedVoice) utt.voice = this._selectedVoice;
-      utt.onend = () => { debugLog("speak-browser-end", { text, ms: Date.now() - startedAt }); resolve(); };
-      utt.onerror = (e) => { debugLog("speak-browser-error", { text, error: e.error }); resolve(); };   // resolve (don't trip the piper fallback)
+      utt.onend = () => {
+        debugLog("speak-browser-end", { text, ms: Date.now() - startedAt });
+        resolve();
+      };
+      utt.onerror = (e) => {
+        debugLog("speak-browser-error", { text, error: e.error });
+        resolve();
+      }; // resolve (don't trip the piper fallback)
       window.speechSynthesis.speak(utt);
     });
   }
@@ -775,7 +936,7 @@ export class BrowserWatcher {
     const startedAt = Date.now();
     debugLog("speak-elevenlabs-start", { text, chars: text.length });
     const blob = await elevenLabsSynthesize(text, this._elevenLabsApiKey);
-    if (this._muted || token !== this._drainToken) return;   // cancelled during synth
+    if (this._muted || token !== this._drainToken) return; // cancelled during synth
     await this._playBlob(blob);
     debugLog("speak-elevenlabs-end", { text, ms: Date.now() - startedAt });
   }
@@ -784,7 +945,7 @@ export class BrowserWatcher {
     const startedAt = Date.now();
     debugLog("speak-piper-start", { text });
     const blob = await piperSynthesize(text, this._piperVoiceId);
-    if (this._muted || token !== this._drainToken) return;   // cancelled during synth
+    if (this._muted || token !== this._drainToken) return; // cancelled during synth
     await this._playBlob(blob);
     debugLog("speak-piper-end", { text, ms: Date.now() - startedAt });
   }
@@ -807,12 +968,17 @@ export class BrowserWatcher {
           src.buffer = buf;
           src.connect(ctx.destination);
           this._currentSource = src;
-          src.onended = () => { if (this._currentSource === src) this._currentSource = null; resolve(); };
+          src.onended = () => {
+            if (this._currentSource === src) this._currentSource = null;
+            resolve();
+          };
           src.start(0);
         });
         return;
       } catch (err) {
-        debugLog("playblob-audiocontext-error", { error: err instanceof Error ? err.message : String(err) });
+        debugLog("playblob-audiocontext-error", {
+          error: err instanceof Error ? err.message : String(err),
+        });
         // fall through to the <audio> path below
       }
     }
@@ -827,7 +993,7 @@ export class BrowserWatcher {
       };
       audio.onended = done;
       audio.onerror = done;
-      void audio.play().catch(done);   // autoplay block → continue the queue
+      void audio.play().catch(done); // autoplay block → continue the queue
     });
   }
 
@@ -839,7 +1005,11 @@ export class BrowserWatcher {
       this._currentAudio = null;
     }
     if (this._currentSource) {
-      try { this._currentSource.stop(); } catch { /* already stopped */ }
+      try {
+        this._currentSource.stop();
+      } catch {
+        /* already stopped */
+      }
       this._currentSource = null;
     }
   }
@@ -847,14 +1017,21 @@ export class BrowserWatcher {
   private _cancelSpeech(): void {
     this._speechQueue = [];
     this._speechBusy = false;
-    this._drainToken++;   // invalidate any in-flight drain/synth so late audio is dropped
+    this._drainToken++; // invalidate any in-flight drain/synth so late audio is dropped
     this._forceStopStuckPlayback();
   }
 
   private sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve) => {
       const timer = setTimeout(resolve, ms);
-      signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        { once: true },
+      );
     });
   }
 }
