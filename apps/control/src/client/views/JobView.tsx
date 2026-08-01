@@ -274,7 +274,16 @@ export function JobView({ live, notify, reloadToken, active }: Props) {
         onGoToAuth={() => notify("error", "YouTube-valtuutus puuttuu — avaa YouTube-välilehti.")}
         reloadToken={reloadToken}
         job={job}
-        onCreated={() => void loadJobs()}
+        onCreated={() => {
+          // Lähetykset olemassa = työ on ajastettu. Ilman tätä siirtymää työ jää
+          // "draft"-tilaan, eikä ajastin ota sitä koskaan ehdokkaaksi (#129).
+          // Epäonnistuminen ei ole este: tilan voi vaihtaa myös käsin, eikä
+          // juuri luotu pari saa näyttää virheeltä sen takia.
+          void api
+            .patchJob(job.id, { status: "scheduled" })
+            .catch(() => undefined)
+            .then(() => loadJobs());
+        }}
       />
 
       {/* Jakoviesti on saatavilla työn koko elinkaaren ajan, ei vain

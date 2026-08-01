@@ -851,8 +851,8 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       // Vain oikeasti käynnissä ollut ajo. Ehto on `startedAt` eikä status
       // "live", jotta sama siivous kelpaa myös sovittelun sulkemalle työlle
       // (joka on jo "finished"): ilman sitä ohjaamon uudelleenkäynnistys
-      // päättyneen hard stopin jälkeen jättäisi kohde- JA lähdelähetyksen
-      // päälle, mikä on juuri se vika jonka #123 poisti. Leimaamaton työ taas
+      // päättyneen hard stopin jälkeen jättäisi sekä selostetun lähetyksen
+      // että raakalähetyksen päälle, mikä on juuri se vika jonka #123 poisti. Leimaamaton työ taas
       // tarkoittaa ettei relay koskaan päässyt liikkeelle — sen ajon hard
       // stopia ei ole olemassa, ja levyllä oleva syy on silloin väistämättä
       // EDELLISEN ajon.
