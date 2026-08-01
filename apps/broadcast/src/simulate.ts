@@ -5,7 +5,8 @@ import { execFile, spawn } from "node:child_process";
 import { fetchMatchMetadata, fetchLiveEvents } from "@pesisselostaja/core";
 import {
   buildPlayerLookup,
-  subEventToSpeech,
+  groupSubEventsForSpeech,
+  groupToSpeech,
   isRunScoringSubEvent,
   isOutSubEvent,
   isMatchEndSubEvent,
@@ -130,13 +131,18 @@ async function buildTimeline(
     }
     if (event.period > 0) state.currentPeriod = event.period;
 
-    for (const sub of event.events) {
-      if (isMatchEndSubEvent(sub)) state.finished = true;
-      if (isRunScoringSubEvent(sub)) {
-        const value = runValueOfSubEvent(sub);
-        if (event.team != null && value > 0) addRun(state, event.period, event.team === meta.home.id, value);
+    // Same grouping as the live loops (#154): one swing's several markings
+    // become one sentence, so a simulated run sounds like the broadcast does.
+    for (const group of groupSubEventsForSpeech(event.events)) {
+      for (const i of group) {
+        const sub = event.events[i];
+        if (isMatchEndSubEvent(sub)) state.finished = true;
+        if (isRunScoringSubEvent(sub)) {
+          const value = runValueOfSubEvent(sub);
+          if (event.team != null && value > 0) addRun(state, event.period, event.team === meta.home.id, value);
+        }
+        if (isOutSubEvent(sub)) state.currentOuts++;
       }
-      if (isOutSubEvent(sub)) state.currentOuts++;
 
       const periodScore = getPeriodScore(state, state.currentPeriod);
       const won = periodsWon(state);
@@ -152,7 +158,7 @@ async function buildTimeline(
         currentInning: state.currentInning,
         currentBatTurn: state.currentBatTurn,
       };
-      const readable = subEventToSpeech(event, sub, meta, lookup, true, ctx);
+      const readable = groupToSpeech(event, event.events, group, meta, lookup, true, ctx);
       if (!readable || readable === lastSpoken) continue;
       lastSpoken = readable;
 
