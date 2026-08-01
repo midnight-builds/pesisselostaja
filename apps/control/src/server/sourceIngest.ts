@@ -244,7 +244,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       const broadcast = await d.fetchBroadcast(videoId);
       if (!broadcast) {
         notFoundStreak += 1;
-        // Yleensä pysyvä tilanne, ei transientti: lähde ei ole omalla kanavalla
+        // Yleensä pysyvä tilanne, ei transientti: raakalähetys ei ole omalla kanavalla
         // eikä API näe sitä lainkaan (yt-dlp näkee — signaalit täydentävät
         // toisiaan). Ei ole mitään syytä hakata rajapintaa 30 s välein.
         //
