@@ -589,8 +589,13 @@ function batterKeyOfHit(sub: SubEvent): string | null {
   if (!text.includes("löi juoksun") && !text.includes("löi kunnarin")) return null;
   if (first === null || typeof first !== "object" || first.type !== "player") return null;
   const p = first as { id?: number; number?: number; team?: number };
-  const who = p.id ?? p.number;
-  return who == null ? null : `${p.team ?? ""}:${who}`;
+  // `id` and `number` are different namespaces — resolvePlayerName treats them
+  // as overlapping on purpose, but a KEY may not: `{id: 12}` and `{number: 12}`
+  // can be two different people, and merging them would attribute one player's
+  // hit to another. Tagged, so they can never collide.
+  if (p.id != null) return `${p.team ?? ""}:id:${p.id}`;
+  if (p.number != null) return `${p.team ?? ""}:num:${p.number}`;
+  return null;
 }
 
 /** Splits one event's sub-events into the units that get ONE sentence each
