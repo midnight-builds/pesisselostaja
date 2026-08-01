@@ -18,6 +18,7 @@ import {
   formatIdleSummary,
   formatWelcomeFiller,
   subEventToSpeech,
+  groupToSpeech,
   type SpeechContext,
 } from "../src/speech.js";
 import type { LiveEvent, MatchMetadata, Player, SubEvent, Team } from "../src/types.js";
@@ -189,6 +190,29 @@ describe("kunnari", () => {
   it("every variant names the hitter", () => {
     const variants = allVariants(3, () => speechFor(homerunSub));
     expectEveryVariantCarries(variants, ["Mäyrä", "unnari"]);
+  });
+});
+
+describe("grouped hit (#154)", () => {
+  // One swing, several markings. A variant that drops a tuoja here silently
+  // erases a child's name from the broadcast — the exact class of loss this
+  // file exists to catch.
+  const groupedSubs: SubEvent[] = [
+    { texts: [{ type: "event", text: "löi juoksun, tuojana" }, { type: "player", id: 11 }, { type: "player", id: 12 }, { type: "stat", score: 1 }] },
+    { texts: [{ type: "event", text: "löi juoksun, tuojana" }, { type: "player", id: 11 }, { type: "player", id: 21 }, { type: "stat", score: 1 }] },
+    { texts: [{ type: "event", text: "löi kunnarin" }, { type: "player", id: 11 }, { type: "stat", homerun: 1 }] },
+  ];
+
+  function groupedSpeech(): string | null {
+    const event = liveEvent({ events: groupedSubs });
+    return groupToSpeech(event, groupedSubs, [0, 1, 2], meta, lookup, true, undefined);
+  }
+
+  it("every variant names the batter, every tuoja and the kunnari", () => {
+    const variants = allVariants(3, groupedSpeech);
+    expectEveryVariantCarries(variants, ["Mäyrä", "Ilves", "Karhu", "unnari"]);
+    // And the run count, or the score jump is unexplained.
+    for (const variant of variants) expect(variant).toContain("Kolme juoksua.");
   });
 });
 

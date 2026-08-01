@@ -171,4 +171,52 @@ describe("one swing = one sentence (#154)", () => {
     const subs = [scored(LYOJA, A), scored(LYOJA, B), brought(C)];
     expect(groupSubEventsForSpeech(subs)).toEqual([[0, 1], [2]]);
   });
+
+  it("still announces the kunnari when no name resolves at all", () => {
+    // The relay fetches the roster once at startup, so starting before the
+    // lineup is published leaves every name unresolvable for the whole match
+    // (reference-lineups-published-late). An earlier version of the grouping
+    // dropped the entire group here and spoke only the first marking — the
+    // kunnari was never announced while the score jumped four runs.
+    const emptyLookup = buildPlayerLookup({
+      ...meta,
+      home: team(100, "Ketut", []),
+      away: team(200, "Sudet", []),
+    });
+    const subs = [scored(LYOJA, A), scored(LYOJA, B), scored(LYOJA, C), kunnari(LYOJA)];
+    const text = groupToSpeech(liveEvent(subs), subs, [0, 1, 2, 3], meta, emptyLookup, true, ctx());
+    expect(text).not.toBeNull();
+    expect(text!.toLowerCase()).toContain("kunnari");
+    expect(text).toContain("Neljä juoksua.");
+  });
+
+  it("does not name the same tuoja twice on a scorer double-marking", () => {
+    // Double-markings are real and expected; the feed mirrors them. But
+    // "tuojina Ilves ja Ilves" in one sentence reads as two people.
+    const subs = [scored(LYOJA, A), scored(LYOJA, A)];
+    const text = groupToSpeech(liveEvent(subs), subs, [0, 1], meta, lookup, true, ctx());
+    expect(text!.match(/Ilves/g)).toHaveLength(1);
+  });
+
+  it("does not merge an id-keyed player with a number-keyed one", () => {
+    // resolvePlayerName treats id and number as overlapping namespaces; a
+    // grouping key may not, or one player's hit gets attributed to another.
+    const byId = {
+      texts: [
+        { team: 100, type: "player", id: 12 },
+        { type: "event", text: "löi juoksun, tuojana", base: null },
+        { team: 100, type: "player", number: A.number },
+        { type: "stat", score: 1 },
+      ],
+    } as unknown as SubEvent;
+    const byNumber = {
+      texts: [
+        { team: 100, type: "player", number: 12 },
+        { type: "event", text: "löi juoksun, tuojana", base: null },
+        { team: 100, type: "player", number: B.number },
+        { type: "stat", score: 1 },
+      ],
+    } as unknown as SubEvent;
+    expect(groupSubEventsForSpeech([byId, byNumber])).toEqual([[0], [1]]);
+  });
 });
