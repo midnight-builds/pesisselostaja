@@ -279,10 +279,13 @@ export function JobView({ live, notify, reloadToken, active }: Props) {
           // "draft"-tilaan, eikä ajastin ota sitä koskaan ehdokkaaksi (#129).
           // Epäonnistuminen ei ole este: tilan voi vaihtaa myös käsin, eikä
           // juuri luotu pari saa näyttää virheeltä sen takia.
-          void api
-            .patchJob(job.id, { status: "scheduled" })
-            .catch(() => undefined)
-            .then(() => loadJobs());
+          // Vain luonnokselle: käynnissä olevan tai jo päättyneen työn tilaa
+          // ei siirretä taaksepäin, vaikka sille luotaisiin lähetykset uudelleen.
+          const promote =
+            job.status === "draft"
+              ? api.patchJob(job.id, { status: "scheduled" }).catch(() => undefined)
+              : Promise.resolve();
+          void promote.then(() => loadJobs());
         }}
       />
 

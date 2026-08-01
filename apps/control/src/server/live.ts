@@ -878,9 +878,9 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       }
       const sourceVideoId = parseYouTubeVideoId(current.sourceUrl);
       const targets: Array<{ label: string; videoId: string | null; allowed: boolean; why: string }> = [
-        { label: "kohde", videoId: current.targetVideoId, allowed: true, why: "" },
+        { label: "selostettu lähetys", videoId: current.targetVideoId, allowed: true, why: "" },
         {
-          label: "lähde",
+          label: "raakalähetys",
           videoId: sourceVideoId,
           allowed: hardStopSourceEnabled,
           why: "CONTROL_HARD_STOP_SOURCE ei ole päällä",
