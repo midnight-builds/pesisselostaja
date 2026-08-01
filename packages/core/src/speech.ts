@@ -572,6 +572,151 @@ function withRunCountAndScore(
   return `${base}${count} ${capitalize(formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns))}.`;
 }
 
+/** The batter's own jersey number in a "löi juoksun"/"löi kunnarin" marking,
+ *  or null when the marking is not one of those. The batter is the FIRST
+ *  player element — the same positional convention formatRunScored relies on;
+ *  in the live data it additionally carries `role: "batter"`, but only on the
+ *  "löi juoksun" markings, not on the kunnari one, so position is what can
+ *  actually be compared across the two. */
+function batterKeyOfHit(sub: SubEvent): string | null {
+  let text = "";
+  let first: EventTextElement | null = null;
+  for (const el of sub.texts) {
+    if (typeof el !== "object") continue;
+    if (el.type === "event" && "text" in el) text = el.text;
+    if (el.type === "player" && first === null) first = el;
+  }
+  if (!text.includes("löi juoksun") && !text.includes("löi kunnarin")) return null;
+  if (first === null || typeof first !== "object" || first.type !== "player") return null;
+  const p = first as { id?: number; number?: number; team?: number };
+  const who = p.id ?? p.number;
+  return who == null ? null : `${p.team ?? ""}:${who}`;
+}
+
+/** Splits one event's sub-events into the units that get ONE sentence each
+ *  (issue #154).
+ *
+ *  The scorer records every runner who reached home as its own marking, so a
+ *  kunnari that cleared the bases arrives as three "X löi juoksun, tuojana …"
+ *  plus one "X löi kunnarin" — four markings, one swing. Spoken one by one
+ *  they were four sentences in the same second, each naming a different tuoja,
+ *  and the listener heard four hits. Measured live on 31.7.2026 (match 145918,
+ *  10.55.35): six lines within two seconds.
+ *
+ *  Grouped: consecutive markings of the same event that name the SAME batter
+ *  and are of the "löi …" family. That is exactly what one swing looks like in
+ *  the data — verified against match 145918, where every multi-marking hit
+ *  landed inside a single event with a repeated batter.
+ *
+ *  NOT grouped, deliberately: `toi juoksun` (harhaheitto / vapaataival) has no
+ *  batter to be the same, and two of those in a row are genuinely two separate
+ *  things that happened. Palot, batter changes and everything else keep their
+ *  own sentence.
+ *
+ *  Returns index groups rather than merged sub-events, because every caller
+ *  still has to walk the ORIGINAL markings: the score counts one run per
+ *  marking, and the seen-fingerprint has to be marked per index or the tail of
+ *  a group is re-announced on the next poll. */
+export function groupSubEventsForSpeech(subs: SubEvent[]): number[][] {
+  const groups: number[][] = [];
+  let current: number[] = [];
+  let currentBatter: string | null = null;
+  for (let i = 0; i < subs.length; i++) {
+    const batter = batterKeyOfHit(subs[i]);
+    if (batter !== null && batter === currentBatter) {
+      current.push(i);
+      continue;
+    }
+    if (current.length > 0) groups.push(current);
+    current = [i];
+    currentBatter = batter;
+  }
+  if (current.length > 0) groups.push(current);
+  return groups;
+}
+
+/** "A", "A ja B", "A, B ja C" — a Finnish list, for the tuojat of one hit.
+ *  The operator's decision (31.7.2026) was explicit: read every one of them,
+ *  even when a shorter phrasing was on offer. Getting home as a tuoja is the
+ *  highlight of a child's match, and hearing the name is what the broadcast is
+ *  for. */
+function listNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} ja ${names[names.length - 1]}`;
+}
+
+/** One sentence for one swing that produced several markings. */
+function formatMultiRunHit(
+  subs: SubEvent[],
+  lookup: PlayerLookup,
+  hasKunnari: boolean
+): string | null {
+  let batter: string | null = null;
+  const runners: string[] = [];
+  for (const sub of subs) {
+    const names: string[] = [];
+    for (const el of sub.texts) {
+      if (typeof el === "object" && el.type === "player") {
+        const name = resolvePlayerName(lookup, el);
+        if (name) names.push(name);
+      }
+    }
+    if (batter === null) batter = names[0] ?? null;
+    // The kunnari marking names only the batter — he brings himself home, so
+    // there is no tuoja to add (CLAUDE.md: the tuoja is the runner who gets
+    // from 3. pesä to kotipesä).
+    if (names.length > 1) runners.push(names[1]);
+  }
+  if (!batter) return null;
+  const tuojat = runners.length === 0 ? "" : runners.length === 1 ? `, tuojana ${runners[0]}` : `, tuojina ${listNames(runners)}`;
+  if (hasKunnari) {
+    return pickVariant("kunnari-multi", [
+      `Kunnari! Sen löi ${batter}${tuojat}.`,
+      `${batter} löi kunnarin${tuojat}!`,
+      `Kunnarilla juoksuja: lyöjänä ${batter}${tuojat}.`,
+    ]);
+  }
+  return pickVariant("run-scored-multi", [
+    `${batter} löi juoksut${tuojat}.`,
+    `Juoksut löi ${batter}${tuojat}.`,
+    `Tulospalveluun on kirjattu juoksut: ne löi ${batter}${tuojat}.`,
+  ]);
+}
+
+/** Speech for one group from groupSubEventsForSpeech: a single marking behaves
+ *  exactly as before, several markings of one swing become one sentence.
+ *
+ *  The run count is the sum over the group, not one marking's value, so
+ *  "Neljä juoksua." matches the jump the listener is about to hear in the
+ *  score. */
+export function groupToSpeech(
+  event: LiveEvent,
+  subs: SubEvent[],
+  indexes: number[],
+  meta: MatchMetadata,
+  lookup: PlayerLookup,
+  announceBatterChanges = true,
+  ctx?: SpeechContext
+): string | null {
+  if (indexes.length === 1) {
+    return subEventToSpeech(event, subs[indexes[0]], meta, lookup, announceBatterChanges, ctx);
+  }
+  const group = indexes.map((i) => subs[i]);
+  const hasKunnari = group.some((sub) =>
+    sub.texts.some((el) => typeof el === "object" && el.type === "event" && "text" in el && el.text.includes("löi kunnarin"))
+  );
+  const base = formatMultiRunHit(group, lookup, hasKunnari);
+  if (base === null) {
+    // Names could not be resolved — fall back to the old behaviour rather than
+    // inventing a sentence: one line per marking is noisy, never wrong.
+    return subEventToSpeech(event, subs[indexes[0]], meta, lookup, announceBatterChanges, ctx);
+  }
+  const runs = group.reduce((sum, sub) => sum + runValueOfSubEvent(sub), 0);
+  const count = runs > 1 ? ` ${capitalize(FI_CARDINAL[runs] ?? String(runs))} juoksua.` : "";
+  if (!ctx) return `${base}${count}`;
+  return `${base}${count} ${capitalize(formatScore(meta, ctx.periodHomeRuns, ctx.periodAwayRuns))}.`;
+}
+
 function formatRunScored(texts: EventTextElement[], _meta: MatchMetadata, lookup: PlayerLookup): string {
   const players: string[] = [];
   let eventText = "";
