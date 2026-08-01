@@ -278,7 +278,7 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken, j
             <h2 className="card__title">Luo lähetykset</h2>
             <div className="warnbox">
               <strong>Peruuttamaton ja ulospäin näkyvä</strong>
-              Tämä luo kanavalle <strong>kaksi</strong> lähetystä: normaalin ja Selostetun. Poistaminen
+              Tämä luo kanavalle <strong>kaksi</strong> lähetystä: raakalähetyksen ja selostetun lähetyksen. Poistaminen
               jälkikäteen ei poista jo jaettua linkkiä.
             </div>
 

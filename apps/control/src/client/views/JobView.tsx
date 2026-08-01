@@ -4,6 +4,7 @@ import { ApiRequestError, DEFAULT_RTMP_URL, api } from "../api";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { CopyButton } from "../components/CopyButton";
 import { Field } from "../components/Field";
+import { BroadcastCreateCard } from "../components/BroadcastCreateCard";
 import { SchedulerCard } from "../components/SchedulerCard";
 import { fiDate, fiTime } from "../format";
 
@@ -196,15 +197,15 @@ export function JobView({ live, notify, reloadToken }: Props) {
       </section>
 
       <section className="card">
-        <h2 className="card__title">Lähde ja kohde</h2>
+        <h2 className="card__title">Raakalähetys ja selostettu lähetys</h2>
         <p className="warnbox">
-          <strong>LÄHDE</strong> = <strong>raakalähetys</strong>, jota <em>luetaan</em>.<br />
-          <strong>KOHDE</strong> = <strong>selostettu lähetys</strong>, johon <em>pushataan</em>.<br />
+          <strong>Raakalähetystä</strong> <em>luetaan</em> — se on se, johon kuvauspuhelin työntää.<br />
+          <strong>Selostettuun lähetykseen</strong> <em>pushataan</em> — se on se, jonka relay tuottaa.<br />
           Näiden sekoittaminen lähettää selostuksen väärään lähetykseen.
         </p>
 
         <Field
-          label="LÄHDE — raakalähetyksen YouTube-URL (luetaan)"
+          label="Raakalähetyksen YouTube-osoite (luetaan)"
           value={form.sourceUrl}
           inputMode="url"
           placeholder="https://www.youtube.com/watch?v=…"
@@ -212,15 +213,15 @@ export function JobView({ live, notify, reloadToken }: Props) {
           onChange={(v) => setForm({ ...form, sourceUrl: v })}
         />
         <Field
-          label="KOHDE — stream key (pushataan)"
+          label="Selostetun lähetyksen stream key (pushataan)"
           value={form.targetStreamKey}
           secret
           placeholder="xxxx-xxxx-xxxx-xxxx"
-          hint="Selostetun lähetyksen avain. Ei koskaan lähteen avain."
+          hint="Selostetun lähetyksen avain — ei koskaan raakalähetyksen avain."
           onChange={(v) => setForm({ ...form, targetStreamKey: v })}
         />
         <Field
-          label="KOHDE — RTMP-URL"
+          label="Selostetun lähetyksen RTMP-osoite"
           value={form.targetRtmpUrl}
           inputMode="url"
           hint={`Oletus: ${DEFAULT_RTMP_URL}`}

@@ -507,16 +507,19 @@ function sourceFromTelemetry(telemetry: RelayTelemetry): { health: Health; detai
     case "resolving":
       return { health: "ok", detail: "haetaan raakalähetyksen osoitetta yt-dlp:llä" };
     case "failed":
-      return { health: "fail", detail: detail ?? "lähteen avaus epäonnistui" };
+      return { health: "fail", detail: detail ?? "raakalähetyksen avaus epäonnistui" };
     case "ended":
-      // Kuvaaja lopetti lähteen (#103). Ottelun jälkeen normaali, terve
+      // Kuvaaja lopetti raakalähetyksen (#103). Ottelun jälkeen normaali, terve
       // lopputila: relay sammuu itse. Kesken ottelun sama tila tarkoittaa
       // että lähetys on kuolemassa ennen aikojaan — silloin ei saa näyttää
       // vihreää "siistiä lopetusta" (adversaarilöydös #117:n arviosta).
       if (!telemetry.match.finished) {
-        return { health: "warn", detail: detail ?? "lähde päättyi kesken ottelun" };
+        return { health: "warn", detail: detail ?? "raakalähetys päättyi kesken ottelun" };
       }
-      return { health: "ok", detail: detail ?? "lähde päättyi — lähetys lopetetaan siististi" };
+      return {
+        health: "ok",
+        detail: detail ?? "raakalähetys päättyi — selostettu lähetys lopetetaan siististi",
+      };
     case "reconnecting":
       // ffmpeg ei ole juuri nyt käynnissä (#122). Keltainen eikä vihreä,
       // koska tällä hetkellä kohteeseen ei työnnetä mitään — juuri tämä hetki

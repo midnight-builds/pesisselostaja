@@ -26,7 +26,7 @@ interface Variant {
 }
 
 const VARIANTS: Variant[] = [
-  { narrated: false, label: "Normaali" },
+  { narrated: false, label: "Raakalähetys" },
   { narrated: true, label: "Selostettu tekoälyllä" },
 ];
 
