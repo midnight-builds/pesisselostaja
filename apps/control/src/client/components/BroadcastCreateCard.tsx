@@ -46,9 +46,17 @@ interface Props {
   onGoToAuth: () => void;
   /** Bumped when the connection state changes, to retry after connecting. */
   reloadToken: number;
+  /** The job the surrounding view already has open (#129). Given one, the card
+   *  drops its own match picker — two pickers for the same choice is how you
+   *  preview job A and create job B. */
+  job?: Job | null;
+  /** Called after a successful create, so the view can refresh the job it
+   *  shows: the links and the stream key land on the job server-side. */
+  onCreated?: () => void;
 }
 
-export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken }: Props) {
+export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken, job: externalJob, onCreated }: Props) {
+  const ownsJobChoice = externalJob === undefined;
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobId, setJobId] = useState<string>("");
   const [privacy, setPrivacy] = useState<PrivacyStatus>("unlisted");
@@ -76,9 +84,9 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken }:
   }, [notify]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || !ownsJobChoice) return;
     void loadJobs();
-  }, [active, loadJobs, reloadToken]);
+  }, [active, ownsJobChoice, loadJobs, reloadToken]);
 
   // Changing the job invalidates everything downstream: previewing job A and
   // then creating job B is exactly the mistake this card exists to prevent.
@@ -86,7 +94,7 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken }:
     setPreview(null);
     setCreated(null);
     setChecked(false);
-  }, [jobId]);
+  }, [job?.id]);
 
   // Editing a title field after previewing would leave the checked-and-read
   // texts describing something else than what gets created — so the preview
@@ -96,7 +104,7 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken }:
     setChecked(false);
   }, [teamLabel, opponent, shortVenue]);
 
-  const job = jobs.find((j) => j.id === jobId) ?? null;
+  const job = ownsJobChoice ? (jobs.find((j) => j.id === jobId) ?? null) : (externalJob ?? null);
 
   /** Tyhjä kenttä = ei ohitusta; palvelin päättelee nimen itse. */
   const overrides = (): TitleOverrides => ({
@@ -144,7 +152,7 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken }:
     }
   };
 
-  if (jobs.length === 0) {
+  if (ownsJobChoice && jobs.length === 0) {
     return (
       <section className="card">
         <h2 className="card__title">Lähetysten luonti</h2>
@@ -152,6 +160,7 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken }:
       </section>
     );
   }
+  if (!ownsJobChoice && !job) return null;
 
   return (
     <>

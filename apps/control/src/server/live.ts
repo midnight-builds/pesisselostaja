@@ -127,7 +127,7 @@ export interface LiveAggregatorOptions {
    *  juuri ennen sammumistaan — muistissa oleva snapshot on yleensä sitä
    *  vanhempi. */
   readTelemetry?: (matchId: number) => Promise<RelayTelemetry | null>;
-  /** Saako lähdelähetykseen koskea. Oletus CONFIG.hardStopSource (false). */
+  /** Saako raakalähetykseen koskea. Oletus CONFIG.hardStopSource (false). */
   hardStopSource?: boolean;
 }
 
