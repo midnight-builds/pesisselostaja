@@ -297,7 +297,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       }
       // Verkko, 5xx, 429: nämä korjaantuvat itsestään, joten yritetään
       // uudelleen — mutta harvenevasti.
-      await publish(job.matchId, { ...blank, error: `lähteen tilaa ei saatu: ${messageOf(err)}` });
+      await publish(job.matchId, { ...blank, error: `raakalähetyksen tilaa ei saatu: ${messageOf(err)}` });
       increaseBackoff();
     }
   }
