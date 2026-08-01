@@ -143,7 +143,7 @@ test.describe("ottelun valinta", () => {
     expect(posts[0].body).toEqual({ matchId: 999002 });
 
     // Creating a job moves the operator straight to the job form.
-    await expect(page.getByRole("heading", { name: "Lähde ja kohde" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Raakalähetys ja selostettu lähetys" })).toBeVisible();
   });
 
   test("monta rastia luo monta työtä", async ({ page, openApp, api }) => {

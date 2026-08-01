@@ -7,7 +7,7 @@
  *  Kaikki avaukset menevät `openApp`in kautta: se asentaa API-mockin. Suora
  *  page.goto ohittaisi mockin ja päästäisi testin oikeaan palvelimeen. */
 
-import { expect, test, shot } from "./support/harness";
+import { expect, test } from "./support/harness";
 import * as fixture from "./support/state";
 
 async function openYouTube(page: import("@playwright/test").Page) {
@@ -76,103 +76,20 @@ test.describe("YouTube-välilehti", () => {
 
     await expect(page.getByText("Joku muu kanava").first()).toBeVisible();
   });
-});
 
-/** #95: jaettava viesti on se mitä WhatsApp-ryhmiin liimataan, ja otsikon
- *  joukkuenimet eivät tule tulospalvelusta — ne kysytään. */
-test.describe("lähetysten luonti", () => {
-  test("otsikkokentät menevät esikatseluun ja viesti käyttää niitä", async ({ page, openApp, api }, info) => {
+  /** #129: lähetysten luonti muutti pois täältä Työ-välilehdelle. Sen kattavuus
+   *  on job.spec.ts:ssä; täällä varmistetaan vain, ettei korttia ole kahdessa
+   *  paikassa — kaksi luontinappia on tapa luoda pari kahdesti. */
+  test("ei enää sisällä lähetysten luontia (siirtyi Työ-välilehdelle)", async ({ page, api, openApp }) => {
     api.authHealth = fixture.authHealthConnected();
     await openApp();
-    await page.getByRole("button", { name: "YouTube", exact: true }).click();
+    await openYouTube(page);
 
-    await page.getByLabel("Oma joukkue otsikossa (valinnainen)").fill("Pesä Ysit F-pojat");
-    await page.getByLabel("Vastustaja otsikossa (valinnainen)").fill("IPV");
-    await page.getByRole("button", { name: "Esikatsele tekstit" }).click();
-
-    const preview = api.calledWith("POST", "/api/youtube/templates/preview")[0];
-    expect((preview.body as { overrides?: Record<string, string> }).overrides).toEqual({
-      teamLabel: "Pesä Ysit F-pojat",
-      opponent: "IPV",
-    });
-    await expect(page.getByText(/Seuraava live on klo 8:30: Pesä Ysit F-pojat - IPV/)).toBeVisible();
-    await shot(page, info, "youtube-preview-overrides");
-  });
-
-  test("esikatselu mahtuu operaattorin puhelimen ruudulle — tekstit rivittyvät, kuvat skaalautuvat (#129)", async ({
-    page,
-    openApp,
-    api,
-  }, info) => {
-    // Tämä on se aukko, jonka takia vika pääsi kentälle: asettelutesti kiertää
-    // kaikki välilehdet, mutta EI avaa esikatselua, joten sen sisältöä ei ollut
-    // koskaan mitattu 393 px:n ruudulla. Operaattori raportoi molemmat ("tekstit
-    // eivät rivity", "kuvat eivät mahdu ruutuun") ensimmäisestä ohjaamolla
-    // tehdystä ajastuksesta.
-    api.authHealth = fixture.authHealthConnected();
-    await openApp();
-    await page.getByRole("button", { name: "YouTube", exact: true }).click();
-    await page.getByRole("button", { name: "Esikatsele tekstit" }).click();
-    await expect(page.getByRole("heading", { name: "Luo lähetykset" })).toBeVisible();
-
-    // Mitataan elementin OMAA ylivuotoa (scrollWidth vs clientWidth) eikä
-    // dokumentin vieritystä: `<pre>`:n rivittymätön sisältö jää `.scroll`
-    // -säiliön sisään, joten sivu ei vierrä vaakaan vaikka teksti on katkennut
-    // ruudun reunaan. Juuri sen operaattori näkee.
-    const measured = await page.evaluate(() => {
-      const rows = [...document.querySelectorAll<HTMLElement>(".textblock, .textline")].map((el) => ({
-        kind: el.className,
-        overflow: el.scrollWidth - el.clientWidth,
-        text: (el.textContent ?? "").slice(0, 30),
-      }));
-      const images = [...document.querySelectorAll<HTMLImageElement>(".thumb__img")].map((el) => ({
-        width: el.getBoundingClientRect().width,
-      }));
-      return { rows, images, viewport: document.documentElement.clientWidth };
-    });
-
-    expect(measured.rows.length, "esikatselussa pitää olla tekstilaatikoita mitattavaksi").toBeGreaterThan(0);
-    for (const row of measured.rows) {
-      expect(row.overflow, `"${row.text}…" ei rivity ruudulle`).toBeLessThanOrEqual(1);
-    }
-    expect(measured.images.length, "esikatselussa pitää olla thumbnailit").toBeGreaterThan(0);
-    for (const img of measured.images) {
-      // Kaksi suuntaa, koska mock palauttaa 1×1-pikselin eikä oikeaa 1280 px:n
-      // komposiittia: yläraja kiinnittää oikean maailman ylivuodon, alaraja
-      // todistaa että skaalaussääntö on ylipäätään voimassa — ilman sitä
-      // 1-pikselinen kuva menisi läpi vaikka oikea kuva vuotaisi ruudun yli.
-      expect(img.width, "thumbnail ei mahdu ruudulle").toBeLessThanOrEqual(measured.viewport);
-      expect(img.width, "thumbnailia ei skaalata säiliön leveyteen").toBeGreaterThan(
-        measured.viewport * 0.5,
-      );
-    }
-
-    await shot(page, info, "youtube-preview-mobile");
-  });
-
-  test("luonnin jälkeen jaettava viesti on kokonaisuudessaan kopioitavissa", async ({ page, openApp, api }, info) => {
-    api.authHealth = fixture.authHealthConnected();
-    await openApp();
-    await page.getByRole("button", { name: "YouTube", exact: true }).click();
-
-    await page.getByRole("button", { name: "Esikatsele tekstit" }).click();
-    await expect(page.getByRole("heading", { name: "Luo lähetykset" })).toBeVisible();
-
-    await page.getByRole("button", { name: /Olen tarkistanut/ }).click();
-    await page.getByRole("button", { name: "Luo lähetykset YouTubeen" }).click();
-    await page.getByRole("button", { name: "Vahvista: luo 2 lähetystä" }).click();
-
-    const message = page.getByTestId("share-message");
-    await expect(message).toBeVisible();
-    // Paikkamerkkien tilalla ovat oikeat linkit — juuri se erottaa luodun
-    // viestin esikatselusta.
-    await expect(message).toContainText("YouTube: https://www.youtube.com/watch?v=NORMAALI");
-    await expect(message).toContainText("YouTube selostettu: https://www.youtube.com/watch?v=SELOSTETTU");
-    await expect(message).toContainText("Tulospalvelu: https://www.pesistulokset.fi/ottelut/999001");
-    // Eikä stream key koskaan: viesti menee ulkopuolisille.
-    await expect(message).not.toContainText("cccc-dddd");
-
-    await expect(page.getByRole("button", { name: "Kopioi jaettava viesti" })).toBeEnabled();
-    await shot(page, info, "youtube-share-message");
+    const tab = page.locator('[data-view="youtube"]');
+    await expect(tab.getByRole("button", { name: "Luo lähetykset YouTubeen" })).toHaveCount(0);
+    await expect(tab.getByRole("heading", { name: "Luo lähetykset" })).toHaveCount(0);
+    // Eikä esikatselua ajeta täältä: se kuuluu nyt Työ-välilehdelle.
+    await page.waitForTimeout(1000);
+    expect(api.called("POST", "/api/youtube/templates/preview")).toBe(false);
   });
 });
