@@ -327,7 +327,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
         liveness.startsInMs === null ? "" : ` (~${Math.round(liveness.startsInMs / 60_000)} min)`;
       return {
         decision: "waiting",
-        reason: `${label(candidate)}: lähde ei ole vielä livenä${eta}.`,
+        reason: `${label(candidate)}: raakalähetys ei ole vielä livenä${eta}.`,
         job: candidate,
         blocking,
         liveness,
