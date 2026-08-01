@@ -97,12 +97,29 @@ Kaksi asiaa, jotka ovat menneet väärin nimenomaan tässä:
   käynnistysikkuna). Lue se ennen kuin kirjoitat ketjusta issueen, dokumenttiin
   tai koodikommenttiin; paljas "lähde-URL" on jo kaatanut kaksi dokumenttia.
 
-Ketju **on ajettu läpi ohjaamon luomalla lähetysparilla kerran**: 31.7.2026,
-ottelu 145918. Luonti, käsikäynnistys, ajo ja itsesammutus toimivat; kaksi
-vikaa löytyi (#154 kunnarin selostus, #155 preflight validoi väärää ottelua).
+Ketju **on ajettu läpi ohjaamon luomalla lähetysparilla kahdesti**: 31.7.2026
+(ottelu 145918) ja 1.8.2026 (ottelu 136745, 104 min). Luonti, käsikäynnistys,
+ajo ja itsesammutus toimivat molemmilla kerroilla, ja 1.8. myös raakalähetys
+sulkeutui itsestään.
+
 **Ajastimen automaattikäynnistystä ei ole yhä koeteltu livenä**, eikä hard
-stopin siivousta — 31.7. lopetus tuli normaalina `ended`-polkuna. Älä esitä
-koettelematonta varmana; kerro mikä on koeteltu ja mikä ei.
+stopin siivousta — molemmat lopetukset tulivat normaalina `ended`-polkuna. Älä
+esitä koettelematonta varmana; kerro mikä on koeteltu ja mikä ei.
+
+Löydetyt viat: #154 (kunnarin selostus), #155 (preflight validoi väärää
+ottelua) — molemmat korjattu — sekä #162 ja #165, jotka ovat auki ja osuvat
+**joka** ottelupäivänä:
+
+- **#162:** lähetysparin luonti onnistuu YouTubessa, mutta stream key ja
+  raakalähetyksen URL eivät tallennu työhön. Arvot on toistaiseksi haettava
+  `liveStreams.list`ista ja kirjoitettava työhön käsin.
+- **#165:** Työ-välilehden oletusvalinta voi osoittaa eiliseen työhön, ja
+  "Kirjoita .env.relay" aktivoi sen — jolloin päättynyt työ palaa
+  `arming`-tilaan ja estää oikean työn aktivoinnin.
+
+Molemmissa tapauksissa **#155:n sidontarivi on se, joka pysäyttää
+käynnistyksen** ennen kuin selostus menee väärään otteluun. Se ei ole
+vikailmoitus vaan viimeinen suoja.
 
 ## TTS pronunciation
 Speech is read aloud by browser TTS or Piper, which mispronounce some terms.

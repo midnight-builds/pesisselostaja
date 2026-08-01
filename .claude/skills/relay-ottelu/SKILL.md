@@ -40,10 +40,10 @@ Ole rehellinen käyttäjälle tästä; älä esitä koettelematonta varmana.
 |---|---|
 | Relay + selostus | Koeteltu useassa lähetyksessä |
 | Ohjaamon ottelulista, työjono, preflight, käsikäynnistys | Koeteltu |
-| Ohjaamon lähetysparin **luonti** | Ajettu 30.7.2026 (ottelu 145905, kaksikin kertaa). Toimi; puutteet kirjattu #130–#132 |
-| **Ohjaamon luoma pari päästä päähän** (StreamLabs poimii raakalähetyksen → relay ajaa sen) | **Koeteltu kerran**: 31.7.2026, ottelu 145918. Toimi. Löydöt: #154, #155 |
+| Ohjaamon lähetysparin **luonti** | Ajettu 30.7.2026 (ottelu 145905, kaksikin kertaa). Toimi; puutteet kirjattu #130–#132. **HUOM (#162): 1.8. luonti onnistui YouTubessa mutta stream key ja raakalähetyksen URL eivät tallentuneet työhön** — preflightin sidontarivi pysäytti käynnistyksen, arvot piti hakea ja kirjoittaa käsin |
+| **Ohjaamon luoma pari päästä päähän** (StreamLabs poimii raakalähetyksen → relay ajaa sen) | **Koeteltu kahdesti**: 31.7.2026 (145918) ja 1.8.2026 (136745, 104 min). Molemmat toimivat. Löydöt: #154, #155, #162, #165 |
 | **Ajastimen automaattinen käynnistys** | **EI koeteltu livenä**, oletuksena pois (#124 vaihe 2) |
-| **Itsesammutus** normaalilla `ended`-polulla | **Koeteltu 31.7.2026**: ffmpeg code=0 → respawn ajastettu → lähde päättynyt havaittu → siisti sammutus 3 s kuluttua. Ohjaamo sulki työn (`finished`) ja YouTuben AutoStop sulki molemmat lähetykset |
+| **Itsesammutus** normaalilla `ended`-polulla | **Koeteltu kahdesti** (31.7. ja 1.8.2026): ffmpeg code=0 → lähde päättynyt havaittu → siisti sammutus muutamassa sekunnissa. Ohjaamo sulki työn (`finished`) ja YouTuben AutoStop sulki **molemmat** lähetykset, myös raakalähetyksen. 1.8. koko ketju loppuselostuksesta työn sulkemiseen kesti 67 s |
 | **Hard stopin siivous** | **EI koeteltu livenä** (#123 korjattu koodissa) — 31.7. lopetus tuli normaalina polkuna, ei hard stopina |
 
 Kun jokin näistä ajetaan ensi kertaa, **kirjaa mikä takkuaa** — se on #124:n
