@@ -888,7 +888,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       ];
       for (const target of targets) {
         if (!target.videoId) {
-          console.warn(`[control] hard stop -siivous: ${target.label}lähetyksen video id ei tiedossa, ohitetaan`);
+          console.warn(`[control] hard stop -siivous: ${target.label} — video id ei tiedossa, ohitetaan`);
           continue;
         }
         if (!target.allowed) {
