@@ -15,16 +15,24 @@ import { ThumbnailPair } from "./ThumbnailPair";
  *  Creating the pair is the one action in this whole app that is visible to
  *  people outside it and cannot be taken back: two broadcasts appear on the
  *  channel, and even deleting them afterwards leaves a link that was already
- *  shared. So the button that does it is behind three separate gates:
+ *  shared. So the button that does it stays behind two gates:
  *
- *    1. the texts must have been fetched (POST .../templates/preview creates
- *       nothing — it is pure text, so previewing is free),
- *    2. the operator must tick "olen tarkistanut", which is the moment the
- *       spoiler-free title and the right date are actually looked at,
- *    3. and then the button itself takes two taps (ConfirmButton).
+ *    1. the texts must be on screen above the button (POST
+ *       .../templates/preview creates nothing — it is pure text, so previewing
+ *       is free, and since #129 it runs by itself as soon as the job and the
+ *       title fields settle),
+ *    2. and the button itself takes two taps (ConfirmButton).
  *
- *  None of the three is decoration: the first two make the check possible, the
- *  third makes a pocket tap harmless. */
+ *  The third gate — an "olen tarkistanut" tick — was removed on the operator's
+ *  decision (1.8.2026) as one step too many in a flow that is already a
+ *  checklist. Neither remaining gate is decoration: the preview makes the check
+ *  possible, the double tap makes a pocket tap harmless. A duplicate pair HAS
+ *  been created for real once (match 145905), which is why the preview stays
+ *  directly above the button rather than behind a press.
+ *
+ *  The card is used in two ways: given a `job` it renders for that job and
+ *  drops its own picker (Työ-välilehti, #129), without one it fetches the job
+ *  list and asks which match. */
 
 const PRIVACY_OPTIONS: Array<{ value: PrivacyStatus; label: string }> = [
   { value: "unlisted", label: "Piilotettu — vain linkin saaneet" },
