@@ -201,7 +201,11 @@ export interface SchedulerDeps {
   getSystemState(): Promise<SystemState>;
   checkSource(url: string): Promise<Check>;
   writeRelayEnv(job: Job): Promise<void>;
-  runPreflight(): Promise<PreflightResult>;
+  /** Job mukana, jotta preflight voi tarkistaa myös työn sidonnan (#155).
+   *  Ajastimen polulla `writeRelayEnv` on juuri ajettu, joten tarkistus on
+   *  tässä varmistus siitä että kirjoitus meni perille — ohjaamon napin
+   *  polulla se on itse suoja. */
+  runPreflight(job: Job): Promise<PreflightResult>;
   activateJob(id: string): Promise<Job>;
   setJobStatus(id: string, status: Job["status"]): Promise<Job>;
   /** Sama funktio jota poller käyttää — ei omaa `setJobStatus(…, "live")`
@@ -395,7 +399,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
       // mean anything. Safe here and only here: we have already established that
       // no other job holds the slot.
       await deps.writeRelayEnv(job);
-      const preflight = await deps.runPreflight();
+      const preflight = await deps.runPreflight(job);
       if (preflight.blockers > 0) {
         // runControlPreflight sends its own "Preflight: N estettä" push, so this
         // one adds the piece that push cannot know: the start was refused.

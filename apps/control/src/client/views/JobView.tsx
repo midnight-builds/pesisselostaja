@@ -292,7 +292,7 @@ export function JobView({ live, notify, reloadToken }: Props) {
           disabled={busy}
           onClick={() =>
             void run(async () => {
-              const result = await api.preflight();
+              const result = await api.preflight(job.id);
               setPreflight(result);
               return result;
             }, "Preflight ajettu")

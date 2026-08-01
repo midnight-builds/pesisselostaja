@@ -71,20 +71,32 @@ const BINDING_LABEL: Record<string, string> = {
  *  or systemd — the rest of runPreflight() is untestable for exactly those
  *  reasons.
  *
- *  Precedence mirrors runPreflight(): `process.env` wins over the file, because
- *  that is what the relay itself would see. A value the job has not got yet
- *  (`null` — no broadcast created) is not a mismatch; it is simply not bound
- *  yet, and the existing rows already say what is missing. */
+ *  Read ONLY from the file, deliberately: runPreflight() lets `process.env` win,
+ *  because that is what systemd hands the RELAY. This runs in the CONTROL app,
+ *  whose environment is a different process's and says nothing about the relay's
+ *  — honouring it here would let a `RELAY_MATCH_ID` exported in the control
+ *  app's shell produce a permanent fail that no "Kirjoita .env.relay" can clear.
+ *
+ *  A value the job has not got yet (`null` — no broadcast created) is not a
+ *  mismatch; it is simply not bound yet, and the existing rows already say what
+ *  is missing. `duplicateKeys` names keys the file defines more than once: the
+ *  writer replaces the FIRST occurrence and both this parser and systemd take
+ *  the LAST, so a hand-edited duplicate makes "Kirjoita .env.relay" a no-op —
+ *  a blocker the documented remedy can never clear unless the row says so. */
 export function checkJobBinding(
   job: Job,
   fileEnv: Record<string, string>,
-  processEnv: NodeJS.ProcessEnv = process.env
+  duplicateKeys: readonly string[] = []
 ): Check {
   const expected = expectedBinding(job);
   const wrong: string[] = [];
   for (const [key, want] of Object.entries(expected)) {
     if (want == null) continue;
-    const actual = processEnv[key] || fileEnv[key] || "";
+    const actual = fileEnv[key] ?? "";
+    // A missing RTMP address is not a binding fault: the relay defaults it, and
+    // checkTarget already warns. Escalating it to a blocker would stop a start
+    // over a value that does not change where the broadcast goes.
+    if (!actual && key === "RELAY_RTMP_URL") continue;
     if (actual !== want) {
       wrong.push(
         actual
@@ -92,6 +104,12 @@ export function checkJobBinding(
           : `${BINDING_LABEL[key]} puuttuu`
       );
     }
+  }
+  const dupes = duplicateKeys.filter((k) => k in expected);
+  if (dupes.length > 0) {
+    wrong.push(
+      `${dupes.join(", ")} on .env.relay:ssä useammin kuin kerran — poista ylimääräiset rivit käsin, "Kirjoita .env.relay" ei korjaa tätä`
+    );
   }
   if (wrong.length === 0) {
     return { name: "Työn sidonta", status: "ok", detail: `.env.relay osoittaa valittuun työhön (ottelu ${job.matchId})` };
@@ -103,6 +121,24 @@ export function checkJobBinding(
   };
 }
 
+/** Keys an env file defines more than once, in file order. Uncommented lines
+ *  only — the same shape parseEnvFile accepts. See checkJobBinding for why a
+ *  duplicate matters more than it looks. */
+export function duplicateEnvKeys(text: string): string[] {
+  const seen = new Set<string>();
+  const dupes = new Set<string>();
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (seen.has(key)) dupes.add(key);
+    seen.add(key);
+  }
+  return [...dupes];
+}
+
 /** @param job the job the operator has open, when there is one. Omitted by
  *  callers that have no job to compare against (the CLI is deliberately
  *  path-based); given one, the binding check goes first, because every row
@@ -112,14 +148,14 @@ export async function runControlPreflight(job?: Job | null): Promise<PreflightRe
   // to check what the service would actually run, not what the UI thinks.
   const checks = await runPreflight(CONFIG.relayEnvPath);
   if (job) {
-    let fileEnv: Record<string, string> = {};
+    let text = "";
     try {
-      fileEnv = parseEnvFile(await readFile(CONFIG.relayEnvPath, "utf8"));
+      text = await readFile(CONFIG.relayEnvPath, "utf8");
     } catch {
       // No file at all: every bound key reads as missing, which is exactly the
       // blocker the operator needs to see.
     }
-    checks.unshift(checkJobBinding(job, fileEnv));
+    checks.unshift(checkJobBinding(job, parseEnvFile(text), duplicateEnvKeys(text)));
   }
   const result: PreflightResult = {
     ranAt: new Date().toISOString(),
