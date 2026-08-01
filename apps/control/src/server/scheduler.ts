@@ -338,7 +338,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
       // yet — an ordinary pre-match state, not an alarm. Recorded, not pushed.
       return {
         decision: "source-error",
-        reason: `${label(candidate)}: lähdettä ei saatu selvitettyä — ${liveness.detail}`,
+        reason: `${label(candidate)}: raakalähetystä ei saatu selvitettyä — ${liveness.detail}`,
         job: candidate,
         blocking,
         liveness,
