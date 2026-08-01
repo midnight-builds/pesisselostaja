@@ -69,7 +69,6 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken, j
   const [shortVenue, setShortVenue] = useState("");
   const [preview, setPreview] = useState<TemplatePreview | null>(null);
   const [created, setCreated] = useState<CreatedBroadcastPair | null>(null);
-  const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -88,23 +87,35 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken, j
     void loadJobs();
   }, [active, ownsJobChoice, loadJobs, reloadToken]);
 
+  const job = ownsJobChoice ? (jobs.find((j) => j.id === jobId) ?? null) : (externalJob ?? null);
+
   // Changing the job invalidates everything downstream: previewing job A and
   // then creating job B is exactly the mistake this card exists to prevent.
   useEffect(() => {
     setPreview(null);
     setCreated(null);
-    setChecked(false);
   }, [job?.id]);
 
-  // Editing a title field after previewing would leave the checked-and-read
-  // texts describing something else than what gets created — so the preview
-  // (and the tick) go with it.
+  // Editing a title field after previewing would leave the texts on screen
+  // describing something else than what gets created — so the preview goes
+  // with it, and the auto-preview below fetches a fresh one.
   useEffect(() => {
     setPreview(null);
-    setChecked(false);
   }, [teamLabel, opponent, shortVenue]);
 
-  const job = ownsJobChoice ? (jobs.find((j) => j.id === jobId) ?? null) : (externalJob ?? null);
+  // Esikatselu ajetaan itsestään (#129): se ei luo mitään YouTubeen, joten
+  // erillinen painallus oli vain este sen ja luonnin välissä. Pieni viive,
+  // jotta otsikkokenttiin kirjoittaminen ei laukaise hakua joka näppäimestä.
+  // Vain kun kortti on näkyvissä eikä pari ole jo luotu.
+  useEffect(() => {
+    if (!active || !job || preview || created || busy) return;
+    const timer = setTimeout(() => void runPreview(), 600);
+    return () => clearTimeout(timer);
+    // runPreview luetaan tuoreena joka ajolla; sen sulkeuma riippuu samoista
+    // arvoista kuin tämä efekti.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, job?.id, preview, created, busy, teamLabel, opponent, shortVenue]);
+
 
   /** Tyhjä kenttä = ei ohitusta; palvelin päättelee nimen itse. */
   const overrides = (): TitleOverrides => ({
@@ -120,7 +131,6 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken, j
     try {
       const result = await api.templatesPreview({ jobId: job.id, overrides: overrides() });
       setPreview(result);
-      setChecked(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (isAuthMissing(err)) setAuthError(message);
@@ -143,6 +153,10 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken, j
       });
       setCreated(result);
       notify("ok", "Lähetykset luotu YouTubeen");
+      // Työlle kirjautui palvelimella raakalähetyksen URL ja selostetun stream
+      // key; näkymän on luettava se uudelleen, tai operaattori katsoo tyhjiä
+      // kenttiä juuri luodun parin vieressä.
+      onCreated?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (isAuthMissing(err)) setAuthError(message);
@@ -294,29 +308,21 @@ export function BroadcastCreateCard({ active, notify, onGoToAuth, reloadToken, j
               onChange={setPlaylistOverride}
             />
 
-            <button
-              type="button"
-              className="knob knob--toggle"
-              aria-pressed={checked}
-              onClick={() => setChecked(!checked)}
-            >
-              <span className="knob__text">
-                <span className="knob__label">Olen tarkistanut tekstit ja kuvat</span>
-                <span className="knob__hint">Otsikossa ei saa olla lopputulosta, päivä ja aika oikein</span>
-              </span>
-              <span className={`switch ${checked ? "switch--on" : ""}`}>
-                <span className="switch__knob" />
-              </span>
-            </button>
-
+            {/* Tekstit ja kuvat ovat yllä, tässä järjestyksessä tarkoituksella:
+                otsikossa ei saa olla lopputulosta, ja päivän ja ajan on
+                täsmättävä. Erillinen kuittauskytkin poistettiin (#129), kaksi
+                napautusta jää. */}
             <ConfirmButton
               className="btn--wide btn--tall"
               label="Luo lähetykset YouTubeen"
               confirmLabel="Vahvista: luo 2 lähetystä"
-              disabled={busy || !checked || created !== null}
+              disabled={busy || created !== null}
               onConfirm={() => void runCreate()}
             />
-            {!checked && <p className="field__hint">Kuittaa tarkistus ensin.</p>}
+            <p className="field__hint">
+              Tarkista yltä ettei otsikossa ole lopputulosta ja että päivä ja aika ovat oikein — luonti on
+              peruuttamaton ja näkyy ulospäin.
+            </p>
             {created && <p className="field__hint">Lähetykset on jo luotu tälle työlle.</p>}
           </section>
         </>

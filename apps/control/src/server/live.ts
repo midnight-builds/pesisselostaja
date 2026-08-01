@@ -196,6 +196,9 @@ function lastMatching(log: LogLine[], pattern: RegExp): LogLine | null {
 const PHRASE = {
   ffmpegStart: /Käynnistetään ffmpeg/i,
   ffmpegEnd: /ffmpeg päättyi/i,
+  // Sanamuoto on relayn oma (apps/broadcast) eikä sanaston mukainen
+  // "raakalähetys": tämä on hakuehto toisen sovelluksen lokitekstiin, joten se
+  // on pakko pitää sellaisenaan kunnes relay siirtyy tapahtumakoodeihin.
   sourceNotLive: /Lähde ei ole vielä livenä/i,
   heartbeat: /Sydänääni: relay käynnissä/i,
   targetBlamed: /KOHTEESEEN/,
@@ -382,7 +385,7 @@ export function deriveHealth(snap: Snapshot): { health: Health; headline: string
   // 8. Match over but the unit still up — expected: the relay shuts itself down
   //    once the source ends, and we never cut it short (uptime first).
   if (relay.active && match.finished) {
-    return { health: "ok", headline: "Ottelu päättyi — relay sammuu itse kun lähde loppuu" };
+    return { health: "ok", headline: "Ottelu päättyi — relay sammuu itse kun raakalähetys loppuu" };
   }
 
   // 9. Job exists, relay down, but the job isn't claiming to be live: waiting
@@ -402,7 +405,7 @@ function chainRow(key: ChainKey, label: string, health: Health, detail: string):
   return { key, label, health, detail };
 }
 
-/** Lähde-rivin sääntö YouTube-havainnolle: **API-havainto voi vain lisätä
+/** Raakalähetys-rivin sääntö YouTube-havainnolle: **API-havainto voi vain lisätä
  *  epäilystä, ei koskaan tuottaa vihreää.**
  *
  *  Kaksi mielipidettä samasta rivistä on juuri se ongelma jonka issue #97
@@ -423,7 +426,7 @@ function applySourceIngest(
   const notes: string[] = [];
   let health = row.health;
   const doubt = (): void => {
-    // Vain ok → warn. Idle pysyy idlenä (relay ei lue lähdettä, joten
+    // Vain ok → warn. Idle pysyy idlenä (relay ei lue raakalähetystä, joten
     // syötteen tila ei kerro rivistä mitään), fail pysyy failina.
     if (health === "ok") health = "warn";
   };
@@ -446,9 +449,9 @@ function applySourceIngest(
     }
   } else if (ingest) {
     if (ingest.lifeCycleStatus === "complete") {
-      notes.push("YouTube: lähde on päättynyt");
-      // Relay yhä ajossa vaikka lähde on suljettu: se on epäilystä, ei vielä
-      // vikaa — relay sammuu itse kun lähde loppuu.
+      notes.push("YouTube: raakalähetys on päättynyt");
+      // Relay yhä ajossa vaikka raakalähetys on suljettu: se on epäilystä, ei
+      // vielä vikaa — relay sammuu itse kun raakalähetys loppuu.
       if (snap.relay.active) doubt();
     }
     if (ingest.streamStatus === "active") {
