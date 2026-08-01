@@ -184,7 +184,8 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       if (job.targetVideoId && videoId === job.targetVideoId) {
         return {
           ok: false,
-          reason: "lähde-URL osoittaa selostettuun lähetykseen — korjaa työn lähde-URL",
+          reason:
+            "raakalähetyksen URL osoittaa selostettuun lähetykseen — korjaa työn raakalähetyksen URL",
         };
       }
 
