@@ -237,7 +237,7 @@ export interface Snapshot {
   /** Per-source failures from this cycle; a failed source can't be judged
    *  healthy just because its last known value looked fine. */
   errors: Map<SourceKey, string>;
-  /** Ohjaamon oma YouTube-havainto lähteestä. Valinnainen, koska se lisättiin
+  /** Ohjaamon oma YouTube-havainto raakalähetyksestä. Valinnainen, koska se lisättiin
    *  olemassa olevaan tyyppiin; puuttuva ja null tarkoittavat samaa asiaa
    *  ("ei havaintoa"), eikä kumpikaan saa muuttaa yhtään terveyspäätöstä
    *  entisestään. */
@@ -495,7 +495,7 @@ function applySourceIngest(
  *
  *  `ended` ja `no_signal` tulivat relaylle vasta issueiden #103 ja #104
  *  myötä. Ilman omia haaroja ne putoaisivat defaultiin ja rivi sanoisi
- *  "relay ei kerro lähteen tilaa" juuri silloin kun relay kertoo sen hyvin
+ *  "relay ei kerro raakalähetyksen tilaa" juuri silloin kun relay kertoo sen hyvin
  *  tarkasti — kaksi eri tilaa naamioituneena telemetrian puutteeksi. */
 function sourceFromTelemetry(telemetry: RelayTelemetry): { health: Health; detail: string } {
   const detail = telemetry.source.detail;
@@ -541,7 +541,7 @@ function sourceFromTelemetry(telemetry: RelayTelemetry): { health: Health; detai
         detail: `katvekuva päällä — kuva poikki, selostus jatkuu${detail ? ` (${detail})` : ""}`,
       };
     default:
-      return { health: "warn", detail: "relay ei kerro lähteen tilaa" };
+      return { health: "warn", detail: "relay ei kerro raakalähetyksen tilaa" };
   }
 }
 

@@ -160,7 +160,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       // Ajossa oleva relay ei riitä: sen on ajettava TÄTÄ ottelua. Kun ottelu A
       // on yhä lähetyksessä (itsesammutus kesken) ja operaattori aktivoi
       // ottelun B, getActiveJob palauttaa B:n mutta relay ajaa yhä A:ta —
-      // silloin pollattaisiin väärän ottelun lähdettä, kirjoitettaisiin
+      // silloin pollattaisiin väärän ottelun raakalähetystä, kirjoitettaisiin
       // .control-<B>.jsoniin jota kukaan ei lue, ja tilarivi liittäisi B:n
       // havainnon A:n riville: "syöte ei virtaa" täysin terveestä lähetyksestä.
       //
@@ -311,7 +311,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       reason = gate.reason;
       intervalMs = BASE_INTERVAL_MS;
       // Portti voi olla kiinni siksi että työ vaihtui; edellisen ottelun
-      // "ei löytynyt" -sarja ei kerro uudesta lähteestä mitään.
+      // "ei löytynyt" -sarja ei kerro uudesta raakalähetyksestä mitään.
       notFoundStreak = 0;
       return;
     }
@@ -341,7 +341,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       await tick();
     } catch (err) {
       // tick() ei saisi heittää; jos se silti heittää, silmukka jatkaa.
-      console.error("[control] lähteen tilan pollaus kaatui:", err);
+      console.error("[control] raakalähetyksen tilan pollaus kaatui:", err);
     }
     if (stopped) return;
     // Ketjutettu setTimeout eikä setInterval: väli muuttuu backoffin myötä.

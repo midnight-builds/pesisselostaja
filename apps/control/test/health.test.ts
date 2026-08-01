@@ -340,7 +340,7 @@ describe("buildChain: lähde-rivi ja YouTube-havainto", () => {
     // Kuvaaja lopetti lähteen ottelun jälkeen: normaali lopputila, ei vika
     // josta herätetään.
     expect(row.health).toBe("ok");
-    expect(row.detail).not.toMatch(/ei kerro lähteen tilaa/);
+    expect(row.detail).not.toMatch(/ei kerro raakalähetyksen tilaa/);
   });
 
   it("kesken ottelun päättynyt lähde on KELTAINEN, ei 'siisti lopetus' (#117)", () => {
@@ -363,7 +363,7 @@ describe("buildChain: lähde-rivi ja YouTube-havainto", () => {
     expect(row.health).toBe("warn");
     expect(row.detail).toMatch(/katvekuva päällä/);
     expect(row.detail).toMatch(/selostus jatkuu/);
-    expect(row.detail).not.toMatch(/ei kerro lähteen tilaa/);
+    expect(row.detail).not.toMatch(/ei kerro raakalähetyksen tilaa/);
   });
 
   it("aktiivinen syöte säilyttää terveyden ja mainitaan detailissa", () => {
@@ -383,7 +383,7 @@ describe("buildChain: lähde-rivi ja YouTube-havainto", () => {
       sourceIngest: ingest({ lifeCycleStatus: "complete", streamStatus: "inactive" }),
     });
     expect(row.health).toBe("warn");
-    expect(row.detail).toMatch(/lähde on päättynyt/);
+    expect(row.detail).toMatch(/raakalähetys on päättynyt/);
   });
 
   it("havainto ei koskaan nosta riviä vihreäksi", () => {
@@ -393,7 +393,7 @@ describe("buildChain: lähde-rivi ja YouTube-havainto", () => {
     expect(row.health).toBe("warn");
     // Lokivarapolun oma sanamuoto säilyy, ja havainto tulee sen PERÄÄN — se ei
     // korvaa relayn omaa havaintoa eikä nosta riviä vihreäksi.
-    expect(row.detail).toMatch(/havaintoa lähteestä/);
+    expect(row.detail).toMatch(/havaintoa raakalähetyksestä/);
     expect(row.detail).toMatch(/syöte aktiivinen/);
   });
 
