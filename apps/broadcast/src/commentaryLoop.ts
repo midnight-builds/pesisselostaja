@@ -2,7 +2,6 @@ import { fetchMatchMetadata, fetchLiveEvents, formatHelsinkiTimestamp, type Live
 import { EventHistory } from "./eventHistory.js";
 import {
   buildPlayerLookup,
-  subEventToSpeech,
   groupSubEventsForSpeech,
   groupToSpeech,
   subEventFeedDetail,
