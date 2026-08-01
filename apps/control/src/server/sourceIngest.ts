@@ -177,8 +177,8 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       }
 
       const videoId = parseYouTubeVideoId(job.sourceUrl);
-      if (!videoId) return { ok: false, reason: "lähde-URLista ei saa videoId:tä" };
-      // Lähteeksi on liitetty selostetun lähetyksen URL. Vaiheessa 2 tämä olisi
+      if (!videoId) return { ok: false, reason: "raakalähetyksen URLista ei saa videoId:tä" };
+      // Raakalähetykseksi on liitetty selostetun lähetyksen URL. Vaiheessa 2 tämä olisi
       // takaisinkytkentä: relay katsoisi omaa ulostuloaan ja päättelisi siitä
       // onko sen sisääntulo elossa.
       if (job.targetVideoId && videoId === job.targetVideoId) {
