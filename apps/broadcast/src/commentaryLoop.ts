@@ -100,6 +100,22 @@ const FULL_FETCH_TIMEOUT_MS = 10_000;
  *  relay's own per-size spread; retune from that, after #158. */
 const SMALL_FETCH_TIMEOUT_MS = 4_000;
 
+/** Käynnistyshakujen uudelleenyritysten odotukset (#158).
+ *
+ *  Käynnistyksen haut tehdään vasta kun mikseri jo työntää kuvaa selostettuun
+ *  lähetykseen, joten yksi hylätty lupaus kaataisi prosessin ja systemd
+ *  käynnistäisi sen 10 s:n päästä uudelleen — katsojalle musta ruutu. Siksi
+ *  käynnistys ei koskaan kaadu hakuvirheeseen, vaan yrittää uudelleen kunnes
+ *  onnistuu tai relay sammutetaan. Viimeinen arvo toistuu loputtomiin, eli
+ *  API:ta ei hakata mutta yhteys palautuu itsestään puolen minuutin sisällä
+ *  siitä kun API taas vastaa. */
+const STARTUP_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
+
+/** Monennenko epäonnistuneen käynnistysyrityksen jälkeen lokitetaan ERROR
+ *  WARNin sijaan: yksittäinen tökkiminen on odotettavaa, mutta jatkuva ei — ja
+ *  se pitää näkyä operaattorille ilman että hän lukee koko lokin. */
+const STARTUP_RETRY_ERROR_AFTER = 3;
+
 /** Yhden pollausikkunan onnistuneiden hakujen kestot yhdeksi luettavaksi
  *  palaseksi (#156).
  *
@@ -709,14 +725,29 @@ export class CommentaryLoop {
         `(vaihda ajon aikana: ${this.config.controlFile})`
     );
 
+    // Ennen hakuja, ei niiden jälkeen: `matchFinished` lukee tätä ja mikseri
+    // lukee sitä (`isMatchFinished`). Tilatiedostosta palautunut `finished:
+    // true` lyhentäisi mikserin luovutusikkunan 12 minuutista 2:een juuri sinä
+    // aikana kun käynnistyshaku yrittää uudelleen (#158) — eli uudelleenyritys
+    // voisi itse tappaa relayn, jonka suojelemiseksi se lisättiin. Rivi
+    // toistuu alempana muun tilan nollauksen kanssa; molemmat ovat halpoja.
+    this.state.finished = false;
+
     logInfo("api.fetching_meta", `Haetaan ottelutietoja (ID: ${this.config.matchId})…`);
-    let meta = await this.timedFetch("small", () =>
-      fetchMatchMetadata(this.config.matchId, {
-        apiBase: this.config.apiBase,
-        apiKey: this.config.apiKey,
-        timeoutMs: this.apiTimeoutMs("small"),
-      })
+    const startupMeta = await this.startupFetch(
+      "Ottelutietojen haku",
+      () =>
+        this.timedFetch("small", () =>
+          fetchMatchMetadata(this.config.matchId, {
+            apiBase: this.config.apiBase,
+            apiKey: this.config.apiKey,
+            timeoutMs: this.apiTimeoutMs("small"),
+          })
+        ),
+      signal
     );
+    if (startupMeta == null) return; // aborted while retrying
+    let meta = startupMeta;
     this.meta = meta;
     let lookup = buildPlayerLookup(meta);
     this.rosterRefreshedAt = Date.now();
@@ -735,7 +766,10 @@ export class CommentaryLoop {
     logInfo("api.skip_history", "Ohitetaan historialliset tapahtumat…");
     // Full fetch — also seeds the local history + delta cursor (see
     // fetchEventsForPoll).
-    const initial = await this.fetchFullEvents();
+    // Same protection as the metadata fetch above, and for the same reason:
+    // this call, too, happens with ffmpeg already live (#158).
+    const initial = await this.startupFetch("Tapahtumahistorian haku", () => this.fetchFullEvents(), signal);
+    if (initial == null) return; // aborted while retrying
     this.state.periodRuns = {};
     this.state.currentOuts = 0;
     this.state.paloTurnKey = null;
@@ -893,6 +927,45 @@ export class CommentaryLoop {
    *
    *  "small" covers the delta poll and the startup metadata fetch; "full" the
    *  whole-history fetch. Why they differ: SMALL_FETCH_TIMEOUT_MS (#81). */
+  /** Runs a startup fetch that must not be allowed to kill the process (#158).
+   *
+   *  By the time `run()` starts, ffmpeg is already pushing picture to the
+   *  commentated broadcast. An unhandled rejection here would propagate to
+   *  `main().catch()` → `process.exit(1)`, and `Restart=on-failure` +
+   *  `RestartSec=10` + `KillMode=control-group` would take ffmpeg down with it:
+   *  a ≥10 s hole in a live broadcast, repeating for as long as the API is
+   *  slow. Retrying costs a few seconds of late narration instead.
+   *
+   *  Retries until it succeeds or the loop is aborted; on abort it resolves to
+   *  `null` and the caller returns without narrating. Same reasoning as
+   *  `maybeRefreshRoster`'s catch, applied where the price is a black screen
+   *  rather than a stale name.
+   *
+   *  Deliberately unbounded: giving up would mean either crashing (the thing
+   *  being fixed) or running a broadcast that can never narrate. A genuinely
+   *  wrong match id is preflight's job, and it is loud in the log here. */
+  private async startupFetch<T>(what: string, fn: () => Promise<T>, signal: AbortSignal): Promise<T | null> {
+    for (let attempt = 1; ; attempt++) {
+      if (signal.aborted) return null;
+      try {
+        const value = await fn();
+        if (attempt > 1) {
+          logInfo("api.startup_fetch_recovered", `${what} onnistui ${attempt}. yrityksellä.`);
+        }
+        return value;
+      } catch (err) {
+        if (signal.aborted) return null;
+        const waitMs = STARTUP_RETRY_DELAYS_MS[Math.min(attempt - 1, STARTUP_RETRY_DELAYS_MS.length - 1)];
+        const message =
+          `${what} epäonnistui (${attempt}. yritys): ${err instanceof Error ? err.message : err} — ` +
+          `yritetään uudelleen ${waitMs} ms:n kuluttua. Lähetys jatkuu, selostus alkaa myöhässä.`;
+        if (attempt >= STARTUP_RETRY_ERROR_AFTER) logError("api.startup_fetch_failed", message);
+        else logWarn("api.startup_fetch_failed", message);
+        await this.sleepAbortable(waitMs, signal);
+      }
+    }
+  }
+
   private apiTimeoutMs(size: "small" | "full"): number {
     const base = size === "full" ? FULL_FETCH_TIMEOUT_MS : SMALL_FETCH_TIMEOUT_MS;
     return Math.max(base, this.pollIntervalMs);
