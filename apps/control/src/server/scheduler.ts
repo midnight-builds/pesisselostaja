@@ -361,7 +361,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
     const quality = liveness.quality === "degraded" ? " (heikkolaatuisena)" : "";
     return {
       decision: "start",
-      reason: `${label(candidate)}: lähde on livenä${quality} — preflight ja käynnistys.`,
+      reason: `${label(candidate)}: raakalähetys on livenä${quality} — preflight ja käynnistys.`,
       job: candidate,
       blocking: null,
       liveness,
