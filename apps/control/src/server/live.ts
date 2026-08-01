@@ -866,7 +866,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       // relay ei koskaan ehdi kirjoittaa (kaatuu ExecStartissa, config heittää),
       // levylle jää edellisen ajon "hard_stop". Ilman tätä vartijaa ohjaamo
       // sammuttaisi sen perusteella lähetykset, jotka ovat vasta alkamassa —
-      // pahimmillaan toisen ihmisen lähdelähetyksen. Vaaditaan siis että
+      // pahimmillaan toisen ihmisen raakalähetyksen. Vaaditaan siis että
       // snapshot kuuluu TÄHÄN ajoon: oikea ottelu, tuore kirjoitus, ja relayn
       // oma aloitushetki vähintään työn aloitushetkestä.
       const staleReason = hardStopSnapshotStaleReason(snapshot, current, now);
