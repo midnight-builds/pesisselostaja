@@ -252,7 +252,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
         // lähetys voi puuttua listauksesta hetken (eventual consistency).
         // Yksi uusinta perusvälillä säästää 5 minuutin sokeuden heti ottelun
         // alussa ja maksaa yhden kiintiöyksikön.
-        await publish(job.matchId, { ...blank, error: "lähdelähetystä ei löytynyt tältä kanavalta" });
+        await publish(job.matchId, { ...blank, error: "raakalähetystä ei löytynyt tältä kanavalta" });
         intervalMs = notFoundStreak >= 2 ? MAX_INTERVAL_MS : BASE_INTERVAL_MS;
         return;
       }
