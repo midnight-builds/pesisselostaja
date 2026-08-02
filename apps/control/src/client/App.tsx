@@ -9,6 +9,7 @@ import { LogView } from "./views/LogView";
 import { MatchesView } from "./views/MatchesView";
 import { YouTubeView } from "./views/YouTubeView";
 import { SettingsView } from "./views/SettingsView";
+import { PrototypeView } from "./views/PrototypeView";
 
 /** App shell: one SSE-backed LiveState for the whole UI, plus tab state.
  *  No router — five tabs do not justify a dependency, and a URL-less shell is
@@ -83,6 +84,10 @@ export function App() {
         </TabPanel>
         <TabPanel id="settings" active={tab === "settings"}>
           <SettingsView notify={notify} />
+        </TabPanel>
+        {/* PROTOTYPE (#173) — poistuu tämän haaran mukana */}
+        <TabPanel id="proto" active={tab === "proto"}>
+          <PrototypeView />
         </TabPanel>
       </main>
 
