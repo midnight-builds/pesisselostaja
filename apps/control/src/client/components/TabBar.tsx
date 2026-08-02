@@ -1,9 +1,11 @@
 /** Bottom navigation. Fixed to the bottom edge with the home-indicator inset
  *  added as padding, and every target is at least 44 px tall. */
 
-export type TabId = "live" | "matches" | "job" | "youtube" | "log" | "settings";
+export type TabId = "live" | "matches" | "job" | "youtube" | "log" | "settings" | "proto";
 
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
+  // PROTOTYPE (#173) — poistuu tämän haaran mukana
+  { id: "proto", label: "Luonnos", icon: "✎" },
   { id: "live", label: "Live", icon: "●" },
   { id: "matches", label: "Ottelut", icon: "▦" },
   { id: "job", label: "Työ", icon: "▶" },
