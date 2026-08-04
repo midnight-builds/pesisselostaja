@@ -527,7 +527,10 @@ describe("stream keyn tyhjennys (#162)", () => {
     expect(cleared.targetStreamKey).toBeNull();
     expect(cleared.targetVideoId).toBe("UUSI");
 
-    const kept = await patchJob(job.id, { targetStreamKey: undefined });
-    expect(kept.targetStreamKey).toBeNull();
+    // Ja toisin päin: undefined tarkoittaa "älä koske", ei "tyhjennä" —
+    // muuten kenttä katoaisi työstä eikä sidontatarkistus enää näkisi sitä.
+    await patchJob(job.id, { targetStreamKey: "avain-uusi" });
+    const kept = await patchJob(job.id, { targetVideoId: "TOINEN", targetStreamKey: undefined });
+    expect(kept.targetStreamKey).toBe("avain-uusi");
   });
 });

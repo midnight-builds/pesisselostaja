@@ -216,7 +216,11 @@ export function duplicateEnvKeys(text: string): string[] {
 /** Itsekorjaus: sitoo ohjaamon annettuun työhön. Injektoitu eikä tuotu suoraan,
  *  koska kutsuja on se joka tietää saako korjata — vain operaattorin valitsemaan
  *  otteluun, ei koskaan itse pääteltyyn (#171/3). Ilman tätä argumenttia
- *  preflight on entisellään: se katsoo eikä koske. */
+ *  preflight on entisellään: se katsoo eikä koske.
+ *
+ *  Korjaus EI lähetä pushia (`notifyAutoFix`): itsekorjautuva este on #174:n
+ *  kolmiluokkaisessa säännössä se luokka, josta ei ilmoiteta lainkaan. Se näkyy
+ *  rivinä siellä missä operaattori muutenkin katsoo. */
 export interface PreflightRepair {
   bindJob(job: Job): Promise<void>;
 }

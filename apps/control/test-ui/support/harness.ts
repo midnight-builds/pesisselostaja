@@ -49,6 +49,13 @@ export class ApiMock {
     venueCleanup: { stripFieldNumber: true, stripQualifier: true },
   };
   log: LogLine[] = fixture.logLines();
+  /** Jakoviesti valmiilla linkeillä — sama teksti jonka palvelin muodostaa
+   *  työn linkeistä (#131). */
+  shareMessage = [
+    "Seuraava live on klo 8:30: Kuvitteellisen Kylän Veikot - Lapinlahden Peikot. Alla linkit:",
+    "YouTube: https://www.youtube.com/watch?v=NORMAALI",
+    "YouTube selostettu: https://www.youtube.com/watch?v=SELOSTETTU",
+  ].join("\n");
   day: (date: string) => DayMatches = (date) => fixture.dayMatches(date);
   /** Google-yhteyden tila. Ilman yhteyttä palvelin vastaa 409:llä jokaiseen
    *  muuhun YouTube-reittiin kuin terveyteen, ja UI näyttää AuthMissingNoticen
@@ -234,6 +241,17 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
         : j
       );
       return void (await send(api.jobs.find((j) => j.id === activate[1]) ?? api.jobs[0]));
+    }
+    // Jakoviesti muodostetaan aina uudelleen työn linkeistä (#131): ennen
+    // lähetysparia siinä on paikkamerkit, ja `linksReady` kertoo kumpi on kyseessä.
+    const shareId = /^\/api\/jobs\/([^/]+)\/share$/.exec(path);
+    if (shareId && method === "GET") {
+      const target = api.jobs.find((j) => j.id === shareId[1]);
+      const ready = Boolean(target?.targetVideoId) || api.calledWith("POST", "/api/youtube/broadcasts").length > 0;
+      return void (await send({
+        shareMessage: ready ? api.shareMessage : "Seuraava live on klo 8:30. YouTube: <youtube-linkki>",
+        linksReady: ready,
+      }));
     }
     const jobId = /^\/api\/jobs\/([^/]+)$/.exec(path);
     if (jobId && method === "PATCH") {
