@@ -213,24 +213,75 @@ export function duplicateEnvKeys(text: string): string[] {
   return [...dupes];
 }
 
+/** Itsekorjaus: sitoo ohjaamon annettuun työhön. Injektoitu eikä tuotu suoraan,
+ *  koska kutsuja on se joka tietää saako korjata — vain operaattorin valitsemaan
+ *  otteluun, ei koskaan itse pääteltyyn (#171/3). Ilman tätä argumenttia
+ *  preflight on entisellään: se katsoo eikä koske. */
+export interface PreflightRepair {
+  bindJob(job: Job): Promise<void>;
+}
+
+async function readEnvText(): Promise<string> {
+  try {
+    return await readFile(CONFIG.relayEnvPath, "utf8");
+  } catch {
+    // No file at all: every bound key reads as missing, which is exactly the
+    // blocker the operator needs to see.
+    return "";
+  }
+}
+
 /** @param job the job the operator has open, when there is one. Omitted by
  *  callers that have no job to compare against (the CLI is deliberately
  *  path-based); given one, the binding check goes first, because every row
- *  below it is only meaningful if it holds. */
-export async function runControlPreflight(job?: Job | null): Promise<PreflightResult> {
+ *  below it is only meaningful if it holds.
+ *  @param repair kun annettu, väärä sidonta korjataan ennen muita tarkistuksia
+ *  ja korjaus näkyy rivinä ("Korjattiin: …") — hiljaista itsekorjausta ei tehdä,
+ *  koska sidonta on #155:n viimeinen suoja ja sen teot jäävät näkyviin (#176). */
+export async function runControlPreflight(job?: Job | null, repair?: PreflightRepair): Promise<PreflightResult> {
+  let binding: Check | null = null;
+  let repaired = false;
+  if (job) {
+    const text = await readEnvText();
+    binding = checkJobBinding(job, parseEnvFile(text), duplicateEnvKeys(text));
+    // Korjaus ENNEN muita tarkistuksia: ne lukevat saman tiedoston, ja korjauksen
+    // jälkeen ajettuina ne kertovat sen todellisuuden, jossa lähetys alkaisi.
+    // Toisin päin rivit kuvaisivat tilaa, jota ei enää ole.
+    if (binding.status === "fail" && repair) {
+      try {
+        await repair.bindJob(job);
+        const after = await readEnvText();
+        const recheck = checkJobBinding(job, parseEnvFile(after), duplicateEnvKeys(after));
+        if (recheck.status === "ok") {
+          repaired = true;
+          binding = {
+            name: recheck.name,
+            status: "ok",
+            detail: `Korjattiin: ${recheck.detail}`,
+          };
+        } else {
+          // Korjaus ei purrut (esim. sama avain kahdesti tiedostossa): jäljelle
+          // jää este, ja rivi kertoo sen jälkimmäisen totuuden — ei sitä mitä
+          // yritettiin.
+          binding = recheck;
+        }
+      } catch (err) {
+        binding = {
+          name: binding.name,
+          status: "fail",
+          detail: `${binding.detail} Automaattinen korjaus epäonnistui: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+  }
+
   // The same env file systemd hands the unit — see the runbook: preflight has
   // to check what the service would actually run, not what the UI thinks.
   const checks = await runPreflight(CONFIG.relayEnvPath);
-  if (job) {
-    let text = "";
-    try {
-      text = await readFile(CONFIG.relayEnvPath, "utf8");
-    } catch {
-      // No file at all: every bound key reads as missing, which is exactly the
-      // blocker the operator needs to see.
-    }
-    checks.unshift(checkJobBinding(job, parseEnvFile(text), duplicateEnvKeys(text)));
+  if (binding) {
+    checks.unshift(binding);
   }
+  void repaired;
   const result: PreflightResult = {
     ranAt: new Date().toISOString(),
     checks: checks.map(toWireCheck),
