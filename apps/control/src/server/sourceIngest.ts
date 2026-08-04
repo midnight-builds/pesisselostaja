@@ -153,14 +153,14 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       // ole ajossa. Ilman tätä porttia poltettaisiin 240 yksikköä tunnissa
       // HUOMISEN ottelun videosta ja kirjoitettaisiin väärä matchId.
       if (job.status !== "live" && job.status !== "arming") {
-        return { ok: false, reason: `työ on tilassa "${job.status}" — lähdettä ei pollata vielä` };
+        return { ok: false, reason: `työ on tilassa "${job.status}" — raakalähetystä ei pollata vielä` };
       }
       if (!(await d.isRelayActive())) return { ok: false, reason: "relay ei ole käynnissä" };
 
       // Ajossa oleva relay ei riitä: sen on ajettava TÄTÄ ottelua. Kun ottelu A
       // on yhä lähetyksessä (itsesammutus kesken) ja operaattori aktivoi
       // ottelun B, getActiveJob palauttaa B:n mutta relay ajaa yhä A:ta —
-      // silloin pollattaisiin väärän ottelun lähdettä, kirjoitettaisiin
+      // silloin pollattaisiin väärän ottelun raakalähetystä, kirjoitettaisiin
       // .control-<B>.jsoniin jota kukaan ei lue, ja tilarivi liittäisi B:n
       // havainnon A:n riville: "syöte ei virtaa" täysin terveestä lähetyksestä.
       //
@@ -177,14 +177,15 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       }
 
       const videoId = parseYouTubeVideoId(job.sourceUrl);
-      if (!videoId) return { ok: false, reason: "lähde-URLista ei saa videoId:tä" };
-      // Lähteeksi on liitetty selostetun lähetyksen URL. Vaiheessa 2 tämä olisi
+      if (!videoId) return { ok: false, reason: "raakalähetyksen URLista ei saa videoId:tä" };
+      // Raakalähetykseksi on liitetty selostetun lähetyksen URL. Vaiheessa 2 tämä olisi
       // takaisinkytkentä: relay katsoisi omaa ulostuloaan ja päättelisi siitä
       // onko sen sisääntulo elossa.
       if (job.targetVideoId && videoId === job.targetVideoId) {
         return {
           ok: false,
-          reason: "lähde-URL osoittaa selostettuun lähetykseen — korjaa työn lähde-URL",
+          reason:
+            "raakalähetyksen URL osoittaa selostettuun lähetykseen — korjaa työn raakalähetyksen URL",
         };
       }
 
@@ -243,7 +244,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       const broadcast = await d.fetchBroadcast(videoId);
       if (!broadcast) {
         notFoundStreak += 1;
-        // Yleensä pysyvä tilanne, ei transientti: lähde ei ole omalla kanavalla
+        // Yleensä pysyvä tilanne, ei transientti: raakalähetys ei ole omalla kanavalla
         // eikä API näe sitä lainkaan (yt-dlp näkee — signaalit täydentävät
         // toisiaan). Ei ole mitään syytä hakata rajapintaa 30 s välein.
         //
@@ -251,7 +252,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
         // lähetys voi puuttua listauksesta hetken (eventual consistency).
         // Yksi uusinta perusvälillä säästää 5 minuutin sokeuden heti ottelun
         // alussa ja maksaa yhden kiintiöyksikön.
-        await publish(job.matchId, { ...blank, error: "lähdelähetystä ei löytynyt tältä kanavalta" });
+        await publish(job.matchId, { ...blank, error: "raakalähetystä ei löytynyt tältä kanavalta" });
         intervalMs = notFoundStreak >= 2 ? MAX_INTERVAL_MS : BASE_INTERVAL_MS;
         return;
       }
@@ -296,7 +297,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       }
       // Verkko, 5xx, 429: nämä korjaantuvat itsestään, joten yritetään
       // uudelleen — mutta harvenevasti.
-      await publish(job.matchId, { ...blank, error: `lähteen tilaa ei saatu: ${messageOf(err)}` });
+      await publish(job.matchId, { ...blank, error: `raakalähetyksen tilaa ei saatu: ${messageOf(err)}` });
       increaseBackoff();
     }
   }
@@ -310,7 +311,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       reason = gate.reason;
       intervalMs = BASE_INTERVAL_MS;
       // Portti voi olla kiinni siksi että työ vaihtui; edellisen ottelun
-      // "ei löytynyt" -sarja ei kerro uudesta lähteestä mitään.
+      // "ei löytynyt" -sarja ei kerro uudesta raakalähetyksestä mitään.
       notFoundStreak = 0;
       return;
     }
@@ -340,7 +341,7 @@ export function createSourceIngestPoller(deps: Partial<SourceIngestPollerDeps> =
       await tick();
     } catch (err) {
       // tick() ei saisi heittää; jos se silti heittää, silmukka jatkaa.
-      console.error("[control] lähteen tilan pollaus kaatui:", err);
+      console.error("[control] raakalähetyksen tilan pollaus kaatui:", err);
     }
     if (stopped) return;
     // Ketjutettu setTimeout eikä setInterval: väli muuttuu backoffin myötä.

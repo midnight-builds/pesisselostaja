@@ -127,7 +127,7 @@ export interface LiveAggregatorOptions {
    *  juuri ennen sammumistaan — muistissa oleva snapshot on yleensä sitä
    *  vanhempi. */
   readTelemetry?: (matchId: number) => Promise<RelayTelemetry | null>;
-  /** Saako lähdelähetykseen koskea. Oletus CONFIG.hardStopSource (false). */
+  /** Saako raakalähetykseen koskea. Oletus CONFIG.hardStopSource (false). */
   hardStopSource?: boolean;
 }
 
@@ -196,6 +196,9 @@ function lastMatching(log: LogLine[], pattern: RegExp): LogLine | null {
 const PHRASE = {
   ffmpegStart: /Käynnistetään ffmpeg/i,
   ffmpegEnd: /ffmpeg päättyi/i,
+  // Sanamuoto on relayn oma (apps/broadcast) eikä sanaston mukainen
+  // "raakalähetys": tämä on hakuehto toisen sovelluksen lokitekstiin, joten se
+  // on pakko pitää sellaisenaan kunnes relay siirtyy tapahtumakoodeihin.
   sourceNotLive: /Lähde ei ole vielä livenä/i,
   heartbeat: /Sydänääni: relay käynnissä/i,
   targetBlamed: /KOHTEESEEN/,
@@ -234,7 +237,7 @@ export interface Snapshot {
   /** Per-source failures from this cycle; a failed source can't be judged
    *  healthy just because its last known value looked fine. */
   errors: Map<SourceKey, string>;
-  /** Ohjaamon oma YouTube-havainto lähteestä. Valinnainen, koska se lisättiin
+  /** Ohjaamon oma YouTube-havainto raakalähetyksestä. Valinnainen, koska se lisättiin
    *  olemassa olevaan tyyppiin; puuttuva ja null tarkoittavat samaa asiaa
    *  ("ei havaintoa"), eikä kumpikaan saa muuttaa yhtään terveyspäätöstä
    *  entisestään. */
@@ -382,7 +385,7 @@ export function deriveHealth(snap: Snapshot): { health: Health; headline: string
   // 8. Match over but the unit still up — expected: the relay shuts itself down
   //    once the source ends, and we never cut it short (uptime first).
   if (relay.active && match.finished) {
-    return { health: "ok", headline: "Ottelu päättyi — relay sammuu itse kun lähde loppuu" };
+    return { health: "ok", headline: "Ottelu päättyi — relay sammuu itse kun raakalähetys loppuu" };
   }
 
   // 9. Job exists, relay down, but the job isn't claiming to be live: waiting
@@ -402,7 +405,7 @@ function chainRow(key: ChainKey, label: string, health: Health, detail: string):
   return { key, label, health, detail };
 }
 
-/** Lähde-rivin sääntö YouTube-havainnolle: **API-havainto voi vain lisätä
+/** Raakalähetys-rivin sääntö YouTube-havainnolle: **API-havainto voi vain lisätä
  *  epäilystä, ei koskaan tuottaa vihreää.**
  *
  *  Kaksi mielipidettä samasta rivistä on juuri se ongelma jonka issue #97
@@ -423,7 +426,7 @@ function applySourceIngest(
   const notes: string[] = [];
   let health = row.health;
   const doubt = (): void => {
-    // Vain ok → warn. Idle pysyy idlenä (relay ei lue lähdettä, joten
+    // Vain ok → warn. Idle pysyy idlenä (relay ei lue raakalähetystä, joten
     // syötteen tila ei kerro rivistä mitään), fail pysyy failina.
     if (health === "ok") health = "warn";
   };
@@ -446,9 +449,9 @@ function applySourceIngest(
     }
   } else if (ingest) {
     if (ingest.lifeCycleStatus === "complete") {
-      notes.push("YouTube: lähde on päättynyt");
-      // Relay yhä ajossa vaikka lähde on suljettu: se on epäilystä, ei vielä
-      // vikaa — relay sammuu itse kun lähde loppuu.
+      notes.push("YouTube: raakalähetys on päättynyt");
+      // Relay yhä ajossa vaikka raakalähetys on suljettu: se on epäilystä, ei
+      // vielä vikaa — relay sammuu itse kun raakalähetys loppuu.
       if (snap.relay.active) doubt();
     }
     if (ingest.streamStatus === "active") {
@@ -492,32 +495,35 @@ function applySourceIngest(
  *
  *  `ended` ja `no_signal` tulivat relaylle vasta issueiden #103 ja #104
  *  myötä. Ilman omia haaroja ne putoaisivat defaultiin ja rivi sanoisi
- *  "relay ei kerro lähteen tilaa" juuri silloin kun relay kertoo sen hyvin
+ *  "relay ei kerro raakalähetyksen tilaa" juuri silloin kun relay kertoo sen hyvin
  *  tarkasti — kaksi eri tilaa naamioituneena telemetrian puutteeksi. */
 function sourceFromTelemetry(telemetry: RelayTelemetry): { health: Health; detail: string } {
   const detail = telemetry.source.detail;
   switch (telemetry.source.state) {
     case "live":
-      return { health: "ok", detail: detail ?? "ffmpeg kiinni lähteessä" };
+      return { health: "ok", detail: detail ?? "ffmpeg kiinni raakalähetyksessä" };
     case "scheduled":
       return { health: "ok", detail: `ei vielä livenä — ${detail ?? "relay odottaa"}` };
     case "resolving":
-      return { health: "ok", detail: "haetaan lähdeosoitetta yt-dlp:llä" };
+      return { health: "ok", detail: "haetaan raakalähetyksen osoitetta yt-dlp:llä" };
     case "failed":
-      return { health: "fail", detail: detail ?? "lähteen avaus epäonnistui" };
+      return { health: "fail", detail: detail ?? "raakalähetyksen avaus epäonnistui" };
     case "ended":
-      // Kuvaaja lopetti lähteen (#103). Ottelun jälkeen normaali, terve
+      // Kuvaaja lopetti raakalähetyksen (#103). Ottelun jälkeen normaali, terve
       // lopputila: relay sammuu itse. Kesken ottelun sama tila tarkoittaa
       // että lähetys on kuolemassa ennen aikojaan — silloin ei saa näyttää
       // vihreää "siistiä lopetusta" (adversaarilöydös #117:n arviosta).
       if (!telemetry.match.finished) {
-        return { health: "warn", detail: detail ?? "lähde päättyi kesken ottelun" };
+        return { health: "warn", detail: detail ?? "raakalähetys päättyi kesken ottelun" };
       }
-      return { health: "ok", detail: detail ?? "lähde päättyi — lähetys lopetetaan siististi" };
+      return {
+        health: "ok",
+        detail: detail ?? "raakalähetys päättyi — selostettu lähetys lopetetaan siististi",
+      };
     case "reconnecting":
       // ffmpeg ei ole juuri nyt käynnissä (#122). Keltainen eikä vihreä,
       // koska tällä hetkellä kohteeseen ei työnnetä mitään — juuri tämä hetki
-      // näytti ennen vihreältä ("ffmpeg kiinni lähteessä") koko sen ajan kun
+      // näytti ennen vihreältä ("ffmpeg kiinni raakalähetyksessä") koko sen ajan kun
       // sama 34 s häntä respawnattiin kolmesti ottelussa 145900.
       //
       // Terve osoitteenkierrätys käy myös tästä, mutta sen katko kestää
@@ -535,7 +541,7 @@ function sourceFromTelemetry(telemetry: RelayTelemetry): { health: Health; detai
         detail: `katvekuva päällä — kuva poikki, selostus jatkuu${detail ? ` (${detail})` : ""}`,
       };
     default:
-      return { health: "warn", detail: "relay ei kerro lähteen tilaa" };
+      return { health: "warn", detail: "relay ei kerro raakalähetyksen tilaa" };
   }
 }
 
@@ -546,7 +552,8 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
   const telemetry = freshTelemetry(snap);
   const rows: ChainStatus[] = [];
 
-  // --- Lähde: the phone's own YouTube live, which we only ever read. The relay
+  // --- Raakalähetys: the YouTube live the camera phone pushes into, which we
+  // only ever read. The relay
   // reports its own view of it (yt-dlp result + ffmpeg session), so we quote
   // that. The log fallback below is only for a relay too old to publish
   // telemetry — and it is the one that produced #102, where a working stream
@@ -558,9 +565,9 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
   if (!job) {
     source = { health: "idle", detail: "ei aktiivista työtä" };
   } else if (!job.sourceUrl) {
-    source = { health: "warn", detail: "lähde-URL puuttuu työstä" };
+    source = { health: "warn", detail: "raakalähetyksen URL puuttuu työstä" };
   } else if (!relay.active) {
-    source = { health: "idle", detail: "relay ei lue lähdettä" };
+    source = { health: "idle", detail: "relay ei lue raakalähetystä" };
   } else if (telemetry) {
     source = sourceFromTelemetry(telemetry);
   } else if (notLive && (!ffmpegStart || Date.parse(notLive.ts) > Date.parse(ffmpegStart.ts))) {
@@ -568,17 +575,17 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
     // sleeps and rechecks without burning its give-up window.
     source = { health: "ok", detail: "ei vielä livenä — relay odottaa" };
   } else if (ffmpegStart) {
-    source = { health: "ok", detail: "ffmpeg kiinni lähteessä" };
+    source = { health: "ok", detail: "ffmpeg kiinni raakalähetyksessä" };
   } else {
     source = {
       health: "warn",
-      detail: "relay ei julkaise telemetriaa eikä lokissa ole havaintoa lähteestä",
+      detail: "relay ei julkaise telemetriaa eikä lokissa ole havaintoa raakalähetyksestä",
     };
   }
   // Ohjaamon YouTube-havainto vasta tämän jälkeen: se ei korvaa relayn omaa
   // havaintoa, vaan täydentää sitä (ks. applySourceIngest).
   const withIngest = applySourceIngest(source, snap, now);
-  rows.push(chainRow("source", "Lähde", withIngest.health, withIngest.detail));
+  rows.push(chainRow("source", "Raakalähetys", withIngest.health, withIngest.detail));
 
   // --- Relay: the one row we can state as fact. All four reads that describe
   // the relay (unit state, journal, job store, control file) surface here,
@@ -830,12 +837,12 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
 
   /** Hard stopin siivous (#123). Ajetaan vain kun relayn oma telemetria kertoo
    *  että se sammutti itsensä takarajan takia (`endReason === "hard_stop"`) —
-   *  siis ottelu oli päättynyt ja lähde oireili. Normaalissa lopetuksessa ei
-   *  tehdä mitään: kohdelähetyksen sulkee YouTuben `enableAutoStop`, ja
-   *  lähdettä ei kosketa lainkaan.
+   *  siis ottelu oli päättynyt ja raakalähetys oireili. Normaalissa
+   *  lopetuksessa ei tehdä mitään: selostetun lähetyksen sulkee YouTuben
+   *  `enableAutoStop`, eikä raakalähetykseen kosketa lainkaan.
    *
-   *  Lähteen sammutus on lisäksi lipun takana (CONTROL_HARD_STOP_SOURCE) —
-   *  lähde on toisen ihmisen lähetys.
+   *  Raakalähetyksen sammutus on lisäksi lipun takana
+   *  (CONTROL_HARD_STOP_SOURCE) — se on toisen ihmisen lähetys.
    *
    *  Ei koskaan heitä: kaikki menee errors-Mappiin ja lokiin, jotta työn
    *  sulkeminen ehtii tapahtua joka tapauksessa. */
@@ -844,8 +851,8 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       // Vain oikeasti käynnissä ollut ajo. Ehto on `startedAt` eikä status
       // "live", jotta sama siivous kelpaa myös sovittelun sulkemalle työlle
       // (joka on jo "finished"): ilman sitä ohjaamon uudelleenkäynnistys
-      // päättyneen hard stopin jälkeen jättäisi kohde- JA lähdelähetyksen
-      // päälle, mikä on juuri se vika jonka #123 poisti. Leimaamaton työ taas
+      // päättyneen hard stopin jälkeen jättäisi sekä selostetun lähetyksen
+      // että raakalähetyksen päälle, mikä on juuri se vika jonka #123 poisti. Leimaamaton työ taas
       // tarkoittaa ettei relay koskaan päässyt liikkeelle — sen ajon hard
       // stopia ei ole olemassa, ja levyllä oleva syy on silloin väistämättä
       // EDELLISEN ajon.
@@ -859,7 +866,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       // relay ei koskaan ehdi kirjoittaa (kaatuu ExecStartissa, config heittää),
       // levylle jää edellisen ajon "hard_stop". Ilman tätä vartijaa ohjaamo
       // sammuttaisi sen perusteella lähetykset, jotka ovat vasta alkamassa —
-      // pahimmillaan toisen ihmisen lähdelähetyksen. Vaaditaan siis että
+      // pahimmillaan toisen ihmisen raakalähetyksen. Vaaditaan siis että
       // snapshot kuuluu TÄHÄN ajoon: oikea ottelu, tuore kirjoitus, ja relayn
       // oma aloitushetki vähintään työn aloitushetkestä.
       const staleReason = hardStopSnapshotStaleReason(snapshot, current, now);
@@ -871,9 +878,9 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       }
       const sourceVideoId = parseYouTubeVideoId(current.sourceUrl);
       const targets: Array<{ label: string; videoId: string | null; allowed: boolean; why: string }> = [
-        { label: "kohde", videoId: current.targetVideoId, allowed: true, why: "" },
+        { label: "selostettu lähetys", videoId: current.targetVideoId, allowed: true, why: "" },
         {
-          label: "lähde",
+          label: "raakalähetys",
           videoId: sourceVideoId,
           allowed: hardStopSourceEnabled,
           why: "CONTROL_HARD_STOP_SOURCE ei ole päällä",
@@ -881,12 +888,12 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       ];
       for (const target of targets) {
         if (!target.videoId) {
-          console.warn(`[control] hard stop -siivous: ${target.label}lähetyksen video id ei tiedossa, ohitetaan`);
+          console.warn(`[control] hard stop -siivous: ${target.label} — video id ei tiedossa, ohitetaan`);
           continue;
         }
         if (!target.allowed) {
           console.warn(
-            `[control] hard stop -siivous: ${target.label}lähetystä ${target.videoId} EI kosketa — ${target.why}`
+            `[control] hard stop -siivous: ${target.label} ${target.videoId} EI kosketa — ${target.why}`
           );
           continue;
         }

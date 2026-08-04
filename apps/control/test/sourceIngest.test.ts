@@ -328,7 +328,7 @@ describe("virheet", () => {
     const h = harness({ fetchBroadcast });
     await settle();
     expect(fetchBroadcast).toHaveBeenCalledTimes(1);
-    expect(h.writes[0].ingest.error).toMatch(/lähteen tilaa ei saatu/);
+    expect(h.writes[0].ingest.error).toMatch(/raakalähetyksen tilaa ei saatu/);
     expect(h.writes[0].ingest.streamStatus).toBeNull();
 
     // Odotetut välit peräkkäisten yritysten VÄLILLÄ.
