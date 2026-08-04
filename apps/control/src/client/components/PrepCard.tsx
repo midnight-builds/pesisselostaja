@@ -39,7 +39,12 @@ export function PrepCard({ job, notify }: Props) {
   const [checks, setChecks] = useState<PreflightResult | null>(null);
   const [checking, setChecking] = useState(false);
 
-  const hasPair = job.targetVideoId !== null || created !== null;
+  // Työ on totuus siitä onko pari olemassa; juuri luotu pari on mukana siksi,
+  // että palvelimen seuraava kehys on sekunteja päässä eikä luonti saa näyttää
+  // menneen hukkaan sillä välin.
+  const videoId = job.targetVideoId ?? created?.narrated.videoId ?? null;
+  const hasPair = videoId !== null;
+  const narratedUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : null;
 
   const fail = useCallback(
     (err: unknown) => {
@@ -153,16 +158,21 @@ export function PrepCard({ job, notify }: Props) {
   return (
     <div className="prep">
       <p className="prep__note">Lähetyspari on luotu.</p>
-      {created && (
-        <div className="prep__links">
-          <a className="linkbtn" href={created.narrated.watchUrl} target="_blank" rel="noreferrer">
+      {/* Linkit luetaan TYÖSTÄ eikä luontivastauksesta: vastaus on olemassa vain
+          sen selainistunnon ajan, jossa pari luotiin, ja kortti on sama myös
+          seuraavalla avauksella. */}
+      <div className="prep__links">
+        {narratedUrl && (
+          <a className="linkbtn" href={narratedUrl} target="_blank" rel="noreferrer">
             Avaa selostettu lähetys
           </a>
-          <a className="linkbtn" href={created.normal.watchUrl} target="_blank" rel="noreferrer">
+        )}
+        {job.sourceUrl && (
+          <a className="linkbtn" href={job.sourceUrl} target="_blank" rel="noreferrer">
             Avaa raakalähetys
           </a>
-        </div>
-      )}
+        )}
+      </div>
       {/* Thumbnail on ainoa osa luontia joka voi epäonnistua ILMAN että luonti
           epäonnistuu — lähetykset ovat jo olemassa (#130). Hiljainen niely
           johtaisi siihen että pari luodaan uudelleen turhaan. */}
