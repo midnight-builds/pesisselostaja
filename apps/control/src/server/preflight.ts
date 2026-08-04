@@ -283,7 +283,9 @@ export async function runControlPreflight(job?: Job | null, repair?: PreflightRe
   const wire = checks.map(toWireCheck);
   // Sidonta on aina ensimmäinen rivi kun se on mukana, joten korjauksen lause
   // menee siihen — ja raaka rivi säilyy huoltoa varten.
-  if (repairedDetail) wire[0] = { ...wire[0], detail: repairedDetail, technical: checks[0].detail };
+  if (repairedDetail) {
+    wire[0] = { ...wire[0], detail: repairedDetail, fixed: true, technical: checks[0].detail };
+  }
   const result: PreflightResult = {
     ranAt: new Date().toISOString(),
     checks: wire,
