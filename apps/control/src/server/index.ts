@@ -518,7 +518,11 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
     if (job) {
       await patchJob(job.id, {
         targetVideoId: pair.narrated.videoId,
-        targetStreamKey: pair.narrated.streamKey ?? undefined,
+        // `null` kirjoitetaan sellaisenaan eikä `?? undefined`-muodossa (#162):
+        // undefined levitettäisiin patchissa pois, jolloin työhön jäisi
+        // EDELLISEN lähetyksen avain uuden videoId:n rinnalle. Tyhjä avain on
+        // näkyvä este, väärä avain ei ole.
+        targetStreamKey: pair.narrated.streamKey,
         sourceUrl: pair.normal.watchUrl,
       });
       // Luonti onnistui → työ on ajastettavissa. Palvelin tekee siirron itse
