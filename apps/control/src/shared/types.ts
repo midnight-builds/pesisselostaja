@@ -389,6 +389,11 @@ export interface PreflightCheck {
    *  keytä (#176). Korjattu este kerrotaan tekona ("Korjattiin: …"), operaattoria
    *  vaativa käskymuodossa. */
   detail: string;
+  /** Tosi kun ohjaamo korjasi tämän itse tällä ajolla. Rakenteinen tieto eikä
+   *  vain "Korjattiin:"-alkuinen lause, koska käyttöliittymä nostaa korjatut
+   *  rivit esiin siinä missä esteetkin: kunnossa oleva rivi katoaisi muuten
+   *  muiden kunnossa olevien joukkoon, eikä teko jäisi näkyviin (#171, #176). */
+  fixed?: boolean;
   /** Sama havainto sellaisena kuin preflight sen tuotti — raaka virhe, env-avain,
    *  polku. Vianetsintää varten, ja se kuuluu VAIN huoltopintaan (#176/9): ihmiset
    *  eivät käytä SSH:ta, joten tekninen totuus on oltava jossain UI:ssa, mutta ei
