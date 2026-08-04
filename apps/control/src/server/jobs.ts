@@ -11,6 +11,7 @@ import { createStore } from "./store.js";
 import { DEFAULT_RTMP_URL } from "../shared/api.js";
 import type { Job, JobStatus } from "../shared/types.js";
 import type { CreateJobRequest, PatchJobRequest } from "../shared/api.js";
+import { isSelectableStart } from "../shared/jobState.js";
 import { getMatch } from "./matches.js";
 
 const store = createStore<Job[]>("jobs.json", []);
@@ -334,16 +335,45 @@ export async function reconcileOpenJobs(
   return closed;
 }
 
+/** Se työ, jonka operaattori on valinnut — **valinnan yksi totuuslähde**
+ *  (#171). Ohjaamon etusivu on yksi tilakortti, joka näyttää täsmälleen tämän
+ *  työn tilaa (#173), joten "mikä ottelu on valittu" ei saa olla selaimen
+ *  muistissa eikä kahdessa rinnakkaisessa valitsimessa niin kuin ennen (#169:n
+ *  kaksi työvalitsinta, #165:n väärä oletusvalinta).
+ *
+ *  Järjestys: lähetyspaikkaa pitävä työ voittaa aina, muuten viimeisin
+ *  keskeneräinen. `draft` on mukana, koska ottelun valinta LUO työn ja kortin
+ *  on näytettävä se heti — luonnos on valinta, ei vielä ajastus. Ajastimen
+ *  automaattikäynnistys katsoo yhä vain `scheduled`-töitä (scheduler.ts), ja
+ *  raakalähetystä pollataan vain arming/live-tilassa (sourceIngest.ts), joten
+ *  luonnoksen näkyminen tässä ei käynnistä mitään. */
 export async function getActiveJob(): Promise<Job | null> {
   const jobs = await store.read();
   const blocking = jobs.find((j) => isBlocking(j.status));
   if (blocking) return blocking;
-  const scheduled = jobs.filter((j) => j.status === "scheduled");
-  if (scheduled.length === 0) return null;
+  const now = Date.now();
+  const open = jobs.filter(
+    (j) => (j.status === "scheduled" || j.status === "draft") && !isForgottenOpenJob(j, now)
+  );
+  if (open.length === 0) return null;
   // "Viimeisin" = most recently created. startsAt can be null (not every
   // scheduled job has a kickoff time pinned down yet), so createdAt is the
   // only ordering key every job is guaranteed to have.
-  return scheduled.reduce((latest, j) => (j.createdAt > latest.createdAt ? j : latest));
+  return open.reduce((latest, j) => (j.createdAt > latest.createdAt ? j : latest));
+}
+
+/** Eilen luotu, koskaan ajamatta jäänyt työ EI ole tämän päivän valinta.
+ *
+ *  Tämä on #165:n ansa juuressaan: kun valinta on yksi palvelimen palauttama
+ *  työ, vanha keskeneräinen työ näkyisi etusivun tilakortissa tämän päivän
+ *  otteluna — ja aktivointi kirjoittaisi sen `.env.relay`:iin. Lähetyspaikkaa
+ *  pitävää työtä (arming/live) tämä ei koske: ajossa olevaa ei piiloteta
+ *  koskaan, ja sen elinkaaren omistaa reconcileOpenJobs.
+ *
+ *  Raja on `SELECTABLE_AFTER_START_MS`, sama jota ottelun valitsin käyttää:
+ *  ottelua jonka valinta katoaisi tähän sääntöön ei tarjota valittavaksi. */
+function isForgottenOpenJob(job: Job, now: number): boolean {
+  return !isSelectableStart(job.startsAt ?? job.createdAt, now);
 }
 
 export async function setJobStatus(id: string, status: JobStatus): Promise<Job> {

@@ -200,10 +200,15 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
     if (path === "/api/jobs" && method === "GET") return void (await send(api.jobs));
     if (path === "/api/jobs" && method === "POST") {
       const payload = (body ?? {}) as CreateJobRequest;
+      // Aloitusaika otetaan päivän fixtuurista kuten palvelimella (createJob
+      // hakee ottelun): se on suhteessa *nyt*-hetkeen, ja käyttöliittymä
+      // torjuu liian kauan sitten alkaneen ottelun sen perusteella.
+      const match = api.day("2026-07-29").matches.find((m) => m.id === payload.matchId);
       const created = fixture.job({
         id: `job-${api.jobs.length + 1}`,
         status: "draft",
         matchId: payload.matchId,
+        startsAt: match?.startsAt ?? new Date(Date.now() + 60 * 60_000).toISOString(),
       });
       api.jobs = [...api.jobs, created];
       return void (await send(created, 201));
@@ -398,21 +403,20 @@ export const test = base.extend<Fixtures>({
       await page.goto("/");
       await sse.waitForConnections(1);
       await sse.push(api.live);
-      // The headline is rendered straight from the frame we just pushed, so
-      // waiting for it means every later assertion runs against a painted view.
-      await expect(page.getByText(api.live.headline, { exact: false }).first()).toBeVisible();
+      // Tilakortin otsikkosana renderöityy juuri työnnetystä kehyksestä, joten
+      // sen odottaminen tarkoittaa että jokainen myöhempi väite ajetaan
+      // maalattua näkymää vasten. Otsikkoa (headline) ei voi käyttää tähän:
+      // se näkyy vain ottelunaikaisessa tilassa.
+      await expect(stateWord(page)).toBeVisible();
     });
   },
 });
 
 export { expect };
 
-/** One tab's panel. Every view stays mounted (App.tsx renders all five and
- *  hides the inactive ones), so a text that occurs in more than one view — the
- *  same match named both in the Ottelut list and in the job card — has to be
- *  scoped to the view under test instead of being looked up page-wide. */
-export function view(page: Page, tab: "live" | "matches" | "job" | "log"): Locator {
-  return page.locator(`[data-view="${tab}"]`);
+/** Tilakortin otsikkosana — etusivun ainoa aina läsnä oleva teksti (#173). */
+export function stateWord(page: Page): Locator {
+  return page.locator(".state__word");
 }
 
 /** Writes a screenshot artifact under apps/control/test-results/screenshots/. */

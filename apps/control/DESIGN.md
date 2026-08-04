@@ -8,6 +8,13 @@ Syntynyt grillauksesta 29.7.2026 00:00–00:30. Jokainen alla oleva päätös on
 käyttäjän vahvistama; perustelut ovat mukana, koska ne ovat se osa joka
 unohtuu ensin.
 
+> **Käyttöliittymän rakenne on sen jälkeen piirretty uusiksi.** Kartta #168 ja
+> rakennepäätös #173 korvasivat välilehtijaon yhdellä tilakortilla; toteutus
+> etenee tilakoneen järjestyksessä (#178). Palvelinpuolen päätökset alla ovat
+> voimassa sellaisenaan — näkymiä koskevat kohdat (`Live-näkymä`,
+> "kahdeksan näkymää") kuvaavat sitä rakennetta joka purettiin. Nykyinen
+> rakenne on `README.md`:n "Käyttöliittymä: yksi tilakortti".
+
 ---
 
 ## Rajaus ja perusmalli

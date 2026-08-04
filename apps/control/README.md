@@ -58,10 +58,10 @@ npm run test:ui -w @pesisselostaja/control -- --headed --project=webkit
 ```
 
 Selain­testit (`test-ui/`, Playwright) ajetaan **WebKitillä ensisijaisesti** —
-kohde on iPhonen Safari, 393×853. Ne kattavat ulkoasun (ei vaakavieritystä,
-kosketuskohteiden koot, live-näkymän lukittu järjestys, kontrastit, pitkät
-joukkuenimet) ja toiminnan (välilehdet, ottelunvalinta, työn lomake,
-preflight-portti, kaksoisvahvistus, viivenapit, lokisuodatin, SSE-katko).
+kohde on iPhonen Safari, 393×853. Ne kasvavat käyttöliittymän tahdissa: jokainen
+tilan PR tuo oman specinsä (#178). Nyt katettuna on kuori ja tilakortti —
+perusrenderöinti oikealla palvelimella (`smoke.spec.ts`) ja tilakortin tilat +
+ottelun valinta (`statecard.spec.ts`).
 
 Testit käynnistävät oman palvelimen porttiin **3099** ja ohjaavat kaikki
 kirjoitukset hakemistoon `.playwright-tmp/` (`CONTROL_STATE_DIR`,
@@ -81,18 +81,55 @@ Yksikkötestit (`test/`, vitest) ajetaan erikseen.
 |-------|--------|
 | `src/shared/` | Palvelimen ja clientin **sitova sopimus** (`types.ts`, `api.ts`). Muutos täällä rikkoo typecheckin molemmilla puolilla — se on tarkoitus. |
 | `src/server/` | node:http-palvelin, SSE, JSON-tallennus, relay-ohjaus, pesistulokset-haut |
-| `src/client/` | React + Vite -käyttöliittymä. Kaikki viisi näkymää ovat **jatkuvasti mountattuina** (`App.tsx`, `TabPanel`); välilehti vain valitsee näytettävän. Näkymän oma tila (Ottelut-suodattimet ja rastit, lokitaso, valittu työ) säilyy siis välilehteä vaihtaessa. Testeissä tämä tarkoittaa, että useassa näkymässä esiintyvä teksti pitää rajata näkymään (`view(page, "job")`). |
+| `src/client/` | React + Vite -käyttöliittymä. **Ei navigaatiota:** kuori (`App.tsx`) renderöi yhden tilakortin ja sen alle ottelun valinnan. Ks. "Käyttöliittymä: yksi tilakortti" alla. |
 | `tools/` | `pesaysit-thumbnail-compose.py` — thumbnailin PIL-komposiitti |
 | `docs/` | Nykyisen YouTube-työnkulun kanoniset ohjeet ja templaatit |
 | `assets/` | Operaattorin brändimedia + PWA-kuvakkeet. **Ei gitissä** (repo on julkinen). |
 | `run/` | Ajonaikainen tila (työt, asetukset). Ei gitissä. |
+
+## Käyttöliittymä: yksi tilakortti
+
+Rakenne on piirretty uusiksi (kartta #168, rakennepäätös #173, pilkkominen
+#178). **Välilehtiä ei ole** — kuusi välilehteä oli itse ongelma, ei niiden
+sisältö. Etusivu on aina yksi kortti: *tämä ottelu, tässä tilassa*.
+
+- **Kortin otsikkosana tulee työn tilasta** yhdestä sanamuotolähteestä,
+  `src/shared/jobState.ts`. Sama lista on myöhemmin push-ilmoitusten otsikko,
+  koska push on kortin tilasiirtymän projektio (#174) — sanamuotoa ei kirjoiteta
+  kahteen paikkaan.
+- **Ilman aktiivista ottelua etusivu on ottelun valinta.** Valinta *on* työn
+  luonti: erillistä "Luo työ" -vahvistusta ei ole (#171). Päättyneen ottelun
+  jälkeen valitsin palaa kortin alle.
+- **Valinnan totuuslähde on palvelin.** Se mikä ottelu on valittu tulee
+  SSE-virran `LiveState.job`-kentästä (`getActiveJob`, `src/server/jobs.ts`), ei
+  selaimen tilasta: kaksi rinnakkaista työvalitsinta oli #129:n ja #165:n
+  juurisyy. `getActiveJob` palauttaa myös luonnoksen — valinta näkyy heti — mutta
+  **ei keskeneräistä työtä jonka ottelu alkoi yli kuusi tuntia sitten**, jotta
+  eilinen työ ei esittäydy tämän päivän valintana. Lähetyspaikkaa pitävää työtä
+  (arming/live) tämä ei koske.
+- Selain pitää juuri luotua työtä näkyvillä siihen asti kunnes palvelin kertoo
+  saman (aggregaattori tikittää 5 s välein). Palvelimen kehys voittaa aina.
+
+Tilakohtainen sisältö kasvaa tilakoneen järjestyksessä omissa PR:issään (#178):
+valmistelu ja lähetysparin luonti (#184) → ajastettu-tila ja pushit (#185) →
+ottelunaikainen kertasilmäys, viivesäätö ja selostuslista (#186) →
+päättynyt-tila ja siivous (#187) → huoltoarkki (#188). Vanhat näkymät ja niiden
+komponentit on poistettu; niitä ei ole säilytetty velvollisuudesta, ja tarvittava
+pala poimitaan git-historiasta.
+
+**Huollolle ei siis ole vielä käyttöliittymää** (asetukset, Google-valtuutus,
+ilmoitusasetukset, loki, videot). Palvelinreitit ovat paikallaan ja toimivat;
+huoltoarkki tulee viimeisenä, joten jos Google-valtuutus vanhenee sitä ennen,
+uudelleenvaltuutus tehdään palvelinreitin kautta käsin — tiedostettu riski
+(#178).
 
 ## Push-ilmoitukset
 
 Ilmoitukset lähetetään palvelimelta selaimen push-palvelun kautta (`web-push`,
 ainoa ajonaikainen riippuvuus — VAPID-JWT ja hyötykuorman salaus ovat kryptoa,
 jota ei kirjoiteta itse). Neljä laukaisijaa, kaikki kytkettävissä pois
-live-näkymän **Ilmoitukset**-kortista:
+`POST /api/push/prefs`illa; käyttöliittymä niille tulee huoltoarkin mukana
+(#188):
 
 | Laukaisija | Ehto |
 |-----------|------|
@@ -219,18 +256,19 @@ tulospalvelun raakoja nimiä. Tulospalvelun osoite on monikkomuodossa
 (`/ottelut/<id>`), kuten palvelu itse sen kirjoittaa.
 
 Viestin saa **milloin tahansa** työn elinkaaren aikana:
-`GET /api/jobs/:id/share`, ja Työ-välilehdellä oma kortti kopiointinapilla
-(#131). Se muodostetaan uudelleen työn linkeistä eikä talleteta luontihetkellä,
+`GET /api/jobs/:id/share` (#131); tilakortin kopiointinappi tulee valmistelutilan
+mukana (#184). Se muodostetaan uudelleen työn linkeistä eikä talleteta luontihetkellä,
 joten mallin vaihtaminen kesken leiripäivän näkyy myös jo luoduissa töissä.
 Ennen lähetysten luontia viestissä on paikkamerkit ja `linksReady` on `false` —
 käyttöliittymä sanoo silloin "älä jaa sitä vielä".
 
-## Asetukset-välilehti
+## Pysyväisasetukset
 
 Pysyväisasetukset yhdessä paikassa (#133): `GET /api/settings` ja osittainen
 `PATCH /api/settings`. Talletus jakautuu samoihin `run/`-tiedostoihin kuin
 ennenkin, joten hätätilassa ne voi yhä korjata tiedostoselaimella — sivu on
-normaali tie, ei ainoa tie.
+normaali tie, ei ainoa tie. Käyttöliittymä niille tulee huoltoarkin mukana
+(#188); tällä hetkellä ainoa tie on reitti tai tiedosto.
 
 | Kortti | Tiedosto |
 |---|---|
@@ -242,9 +280,9 @@ vain sen kortin jota operaattori muokkasi. Muuten kesken jäänyt muokkaus
 toisessa kortissa tallentuisi sivutuotteena, kun hän painaa tallenna toisessa.
 
 **Mikä EI ole täällä:** relayn ottelunaikaiset säätimet (selostus päälle/pois,
-viive, pollausväli). Ne ovat Live-välilehdellä ja menevät relayn
-control-tiedostoon, koska ne ovat *ohjausta kesken lähetyksen* eivätkä
-asetuksia. Sama rajaus on issuessa. Lähetysten näkyvyys ja soittolista taas
+viive, pollausväli). Ne menevät relayn control-tiedostoon ja kuuluvat
+ottelunaikaiseen tilakorttiin (#186), koska ne ovat *ohjausta kesken lähetyksen*
+eivätkä asetuksia. Sama rajaus on issuessa. Lähetysten näkyvyys ja soittolista taas
 valitaan luonnin yhteydessä, koska ne ovat lähetyskohtaisia valintoja.
 Käynnistysikkunan pituus (`NEAR_WINDOW_MS`) on yhä koodivakio.
 
@@ -271,6 +309,10 @@ Vain kirjaimellinen `false` sammuttaa säännön; roska tai merkkijono `"false"`
 tarkoittaa oletusta. Käyttöliittymä tulee Asetukset-sivun mukana (#133).
 
 ## Vaiheet
+
+Tämä on **historia**: mitä oli rakennettu 29.7. mennessä. Palvelinpuoli on yhä
+tämä, mutta clientin rakenne on sen jälkeen piirretty uusiksi — välilehdet ovat
+poissa, ks. "Käyttöliittymä: yksi tilakortti" yllä.
 
 **Vaihe A (tehty ensin):** ottelun valinta, `.env.relay`, preflight, relayn
 käynnistys/pysäytys/uudelleenkäynnistys, live-näkymä ilman relay-muutoksia,
