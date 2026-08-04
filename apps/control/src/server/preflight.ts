@@ -240,7 +240,10 @@ async function readEnvText(): Promise<string> {
  *  koska sidonta on #155:n viimeinen suoja ja sen teot jäävät näkyviin (#176). */
 export async function runControlPreflight(job?: Job | null, repair?: PreflightRepair): Promise<PreflightResult> {
   let binding: Check | null = null;
-  let repaired = false;
+  /** Operaattorin lause korjatulle sidonnalle. Se ei kulje käännöstaulun kautta:
+   *  taulussa "Työn sidonta"/ok on tavallinen kunnossa-rivi, ja se söisi juuri
+   *  sen tiedon, joka tässä on tärkein — että ohjaamo teki jotain. */
+  let repairedDetail: string | null = null;
   if (job) {
     const text = await readEnvText();
     binding = checkJobBinding(job, parseEnvFile(text), duplicateEnvKeys(text));
@@ -253,12 +256,8 @@ export async function runControlPreflight(job?: Job | null, repair?: PreflightRe
         const after = await readEnvText();
         const recheck = checkJobBinding(job, parseEnvFile(after), duplicateEnvKeys(after));
         if (recheck.status === "ok") {
-          repaired = true;
-          binding = {
-            name: recheck.name,
-            status: "ok",
-            detail: `Korjattiin: ${recheck.detail}`,
-          };
+          binding = recheck;
+          repairedDetail = `Korjattiin: ohjaamo osoitti toiseen otteluun, nyt valittuun (${job.home} – ${job.away}).`;
         } else {
           // Korjaus ei purrut (esim. sama avain kahdesti tiedostossa): jäljelle
           // jää este, ja rivi kertoo sen jälkimmäisen totuuden — ei sitä mitä
@@ -281,10 +280,13 @@ export async function runControlPreflight(job?: Job | null, repair?: PreflightRe
   if (binding) {
     checks.unshift(binding);
   }
-  void repaired;
+  const wire = checks.map(toWireCheck);
+  // Sidonta on aina ensimmäinen rivi kun se on mukana, joten korjauksen lause
+  // menee siihen — ja raaka rivi säilyy huoltoa varten.
+  if (repairedDetail) wire[0] = { ...wire[0], detail: repairedDetail, technical: checks[0].detail };
   const result: PreflightResult = {
     ranAt: new Date().toISOString(),
-    checks: checks.map(toWireCheck),
+    checks: wire,
     blockers: checks.filter((c) => c.status === "fail").length,
     warnings: checks.filter((c) => c.status === "warn").length,
     summary: summaryLine(checks),
