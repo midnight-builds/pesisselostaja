@@ -40,7 +40,7 @@ Ole rehellinen käyttäjälle tästä; älä esitä koettelematonta varmana.
 |---|---|
 | Relay + selostus | Koeteltu useassa lähetyksessä |
 | Ohjaamon ottelulista, työjono, preflight, käsikäynnistys | Koeteltu |
-| Ohjaamon lähetysparin **luonti** | Ajettu 30.7.2026 (ottelu 145905, kaksikin kertaa). Toimi; puutteet kirjattu #130–#132. **HUOM (#162): 1.8. luonti onnistui YouTubessa mutta stream key ja raakalähetyksen URL eivät tallentuneet työhön** — preflightin sidontarivi pysäytti käynnistyksen, arvot piti hakea ja kirjoittaa käsin |
+| Ohjaamon lähetysparin **luonti** | Ajettu 30.7.2026 (ottelu 145905, kaksikin kertaa). Toimi; puutteet kirjattu #130–#132. #162 (1.8.: stream key ei tallentunut työhön) **korjattu #184:ssä** — puuttuva `liveStreams.list`-rivi on nyt virhe eikä hiljainen null. **Ei koeteltu livenä.** Käsin kirjoittamisen varapolkua ei enää ole: käsikentät poistuivat (#176) |
 | **Ohjaamon luoma pari päästä päähän** (StreamLabs poimii raakalähetyksen → relay ajaa sen) | **Koeteltu kahdesti**: 31.7.2026 (145918) ja 1.8.2026 (136745, 104 min). Molemmat toimivat. Löydöt: #154, #155, #162, #165 |
 | **Ajastimen automaattinen käynnistys** | **EI koeteltu livenä**, oletuksena pois (#124 vaihe 2) |
 | **Itsesammutus** normaalilla `ended`-polulla | **Koeteltu kahdesti** (31.7. ja 1.8.2026): ffmpeg code=0 → lähde päättynyt havaittu → siisti sammutus muutamassa sekunnissa. Ohjaamo sulki työn (`finished`) ja YouTuben AutoStop sulki **molemmat** lähetykset, myös raakalähetyksen. 1.8. koko ketju loppuselostuksesta työn sulkemiseen kesti 67 s |
@@ -82,21 +82,30 @@ tarkoittaa ajastusta **ohjaamon välinein**, samaa polkua, ei käsikierrosta.
 > lähetysten luonti valui takaisin sille ulkopuoliselle palvelulle, jonka
 > korvaaminen on #124:n koko tavoite.
 
+> **Käyttöliittymä on kesken (kartta #168).** Välilehdet on purettu ja tilalle
+> on tullut yksi tilakortti (#183); valmistelu ja lähetysparin luonti ovat
+> uudessa kortissa (#184). **Käynnistystä, ottelunaikaista ohjausta ja huoltoa
+> EI vielä ole käyttöliittymässä** (#185–#188) — niiden osalta ottelupäivä
+> ajetaan polulla B tai palvelinreittejä käyttäen. Alla oleva teksti kuvaa
+> kunkin vaiheen kohdalla, kummasta on kyse.
+
 ## A1. Ajastushetki — työ ja lähetykset (esim. edellisenä iltana)
 
-**Ottelut-välilehti.** Valitse päivä, rajaa suodattimilla, napauta ottelua (tai
-useaa) → **"Luo työ"**. Jos ottelu ei ole listalla, "Ottelu-ID tai osoite"
--kortti ottaa vastaan tulospalvelun ottelusivun osoitteen tai pelkän ID:n →
-**"Luo työ ID:stä"**.
+**Etusivu = ottelun valinta**, kun aktiivista ottelua ei ole. Valitse päivä,
+rajaa suodattimilla, napauta ottelua. **Valinta ON työn luonti** — erillistä
+"Luo työ" -nappia ei ole (#171). Jos ottelu ei ole listalla, "Ottelu-ID tai
+osoite" ottaa vastaan tulospalvelun ottelusivun osoitteen tai pelkän ID:n.
 
-**YouTube-välilehti → "Lähetysten luonti".**
+Sen jälkeen etusivu on sen ottelun **tilakortti**, tilassa *Valmistelu kesken*:
 
-1. Valitse **"Mille ottelulle"** (= äsken luotu työ).
-2. Täytä joukkue-/tapahtumakentät ja **esikatsele**. Esikatselu ei luo mitään
-   YouTubeen — otsikot, kuvaus, jakoviesti ja thumbnail näkyvät ennen kuin
-   mitään on olemassa.
-3. Tarkista tekstit ja kuvat, rastita **"Olen tarkistanut tekstit ja kuvat"**.
-4. **"Luo lähetykset"** — tämä on **peruuttamaton ja ulospäin näkyvä**.
+1. **Esikatselu on valmiina näkyvissä** — otsikot ja alkamisaika sellaisina kuin
+   ne YouTubeen syntyvät. Esikatselu ei luo mitään. Jos oma joukkue, vastustaja
+   tai paikka pitää kirjoittaa vakiintuneeseen muotoon (#95), ne ovat
+   "Muokkaa otsikkoa" -taitoksen takana → "Päivitä esikatselu".
+2. **"Luo lähetyspari"** — **peruuttamaton ja ulospäin näkyvä**, siksi
+   **kaksi napautusta**: toinen nappi lukee "Vahvista: luo lähetyspari".
+   Erillistä "olen tarkistanut" -rastia ei enää ole; kun työllä on jo pari,
+   nappia ei näy lainkaan.
 
 Ohjaamo luo **molemmat** lähetykset yhdellä kertaa
 (`createBroadcastPair`, `apps/control/src/server/youtube.ts`):
@@ -137,16 +146,19 @@ sellaista, oletus on väärä.
 Kaksi tapaa. **Käsikäynnistys on yhä ensisijainen**, kunnes ajastin on nähty
 oikeassa käytössä.
 
-**Käsin — Työ-välilehti:**
+**Käsin.** Käynnistysnappia ei ole uudessa käyttöliittymässä vielä (#186);
+tähän asti käynnistys tehdään polun B ohjeilla (`POST /api/relay/start` tai
+`systemctl --user start`). Valmiustarkistus sen sijaan on tilakortissa:
 
-1. **"Lähde ja kohde"** — tarkista että raakalähetys ja selostettu ovat oikein
-   päin. (LÄHDE = raakalähetys, jota *luetaan*. KOHDE = selostettu, johon
-   *pushataan*.)
-2. **"Kirjoita .env.relay"** — aja tämä ENNEN preflightia. Lähetysten luonti ei
-   kirjoita tiedostoa, joten uuden työn kohdalla se osoittaa yhä edelliseen
-   otteluun ja preflight antaa esteen "Työn sidonta" (#155). Tämä on yksi
-   napautus, ei vikatila.
-3. **"Preflight"** — aja se. Tämä on ainoa esitarkistus; älä tee käsin
+1. **Lähde ja kohde** ovat oikein päin ilman käsityötä: ohjaamo kirjoitti ne
+   luodessaan lähetysparin. (LÄHDE = raakalähetys, jota *luetaan*. KOHDE =
+   selostettu, johon *pushataan*.)
+2. **Sidonta hoituu itsestään.** "Kirjoita .env.relay" -nappia ei ole (#176):
+   valmiustarkistus korjaa väärän sidonnan itse valittuun otteluun ja sanoo sen
+   rivinä *"Korjattiin: …"*. Jos rivi sanoo sidonnan olevan **ristiriitainen**,
+   korjaus ei pure (sama avain tiedostossa kahdesti) — se on ylläpidon asia.
+3. **Valmiustarkistus** ajetaan itsestään, kun lähetyspari on olemassa; nappi
+   "Tarkista uudelleen" ajaa sen uudelleen. Tämä on ainoa esitarkistus; älä tee käsin
    `df`/`ps`/`systemctl`-kierrosta. `✓` kunnossa · `⚠` lue mutta ei este ·
    `✗` este.
    - `Lähde … ei vielä livenä, ajastettu alkavaksi (~N min) — relay odottaa`
@@ -154,12 +166,9 @@ oikeassa käytössä.
    - `Tapahtumat … 0 tapahtumaa — ottelua ei ole vielä avattu` on normaali
      ennen ottelun alkua.
    - Levytila-`✗` = globaali pysäytyssääntö.
-   - `Työn sidonta … ✗` = `.env.relay` osoittaa eri otteluun kuin avoinna
-     oleva työ; **aja "Kirjoita .env.relay" ja preflight uudelleen** (#155).
-     Ilman tätä riviä kaikki muut rivit voivat kuvata eilistä ottelua ja
-     näyttää silti vihreiltä — niin kävi 31.7.2026. Jos rivi sanoo, että avain
-     on tiedostossa **useammin kuin kerran**, uudelleenkirjoitus ei auta:
-     poista ylimääräinen rivi käsin.
+   - Sidontarivi on se, joka pysäyttää käynnistyksen ennen kuin selostus menee
+     väärään otteluun (#155). Ilman sitä kaikki muut rivit voivat kuvata
+     eilistä ottelua ja näyttää silti vihreiltä — niin kävi 31.7.2026.
 4. **Deployaa ennen käynnistystä**, jos main on muuttunut sitten viime ajon:
    `npm run relay:deploy` (oletus `origin/main`; `-- <ref>` muulle). Skripti
    kieltäytyy, jos relay on ajossa. **Kirjaa deployattu commit ylös** — se on
