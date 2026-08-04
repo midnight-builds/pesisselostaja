@@ -385,7 +385,15 @@ export interface SchedulerState {
 export interface PreflightCheck {
   name: string;
   status: "ok" | "warn" | "fail";
+  /** Operaattorin kieltä: ei env-avainten nimiä, ei tiedostopolkuja, ei stream
+   *  keytä (#176). Korjattu este kerrotaan tekona ("Korjattiin: …"), operaattoria
+   *  vaativa käskymuodossa. */
   detail: string;
+  /** Sama havainto sellaisena kuin preflight sen tuotti — raaka virhe, env-avain,
+   *  polku. Vianetsintää varten, ja se kuuluu VAIN huoltopintaan (#176/9): ihmiset
+   *  eivät käytä SSH:ta, joten tekninen totuus on oltava jossain UI:ssa, mutta ei
+   *  ottelupäivän polulla. Puuttuu kun operaattorin lause on jo sama teksti. */
+  technical?: string;
 }
 
 export interface PreflightResult {
