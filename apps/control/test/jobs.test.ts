@@ -513,3 +513,21 @@ describe("markJobScheduled (#180)", () => {
     await expect(markJobScheduled("eiole123")).rejects.toThrow(/Työtä eiole123 ei löytynyt\./);
   });
 });
+
+// #162: lähetysparin luonti patchaa työhön videoId:n ja stream keyn samasta
+// parista. Jos avain kirjoitetaan `?? undefined`-muodossa, patch levittää sen
+// pois eikä avain vaihdu — jolloin työhön jää EDELLISEN parin avain uuden
+// videoId:n rinnalle, ja selostus menisi väärään lähetykseen. Tyhjä avain on
+// näkyvä este, väärä avain ei ole.
+describe("stream keyn tyhjennys (#162)", () => {
+  it("null tyhjentää avaimen, undefined jättäisi vanhan paikoilleen", async () => {
+    const job = await createJob({ matchId: 1, targetStreamKey: "avain-edellisesta-parista" });
+
+    const cleared = await patchJob(job.id, { targetVideoId: "UUSI", targetStreamKey: null });
+    expect(cleared.targetStreamKey).toBeNull();
+    expect(cleared.targetVideoId).toBe("UUSI");
+
+    const kept = await patchJob(job.id, { targetStreamKey: undefined });
+    expect(kept.targetStreamKey).toBeNull();
+  });
+});

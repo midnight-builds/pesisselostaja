@@ -89,7 +89,7 @@ function operatorDetail(check: Check): string {
 /** Check → PreflightCheck: operaattorin lause päälle, raaka rivi talteen.
  *  `technical` jätetään pois kun käännös ei muuttanut mitään — kaksi kertaa
  *  samaa tekstiä ei ole vianetsintätietoa. */
-function toWireCheck(check: Check): PreflightCheck {
+export function toOperatorCheck(check: Check): PreflightCheck {
   const detail = operatorDetail(check);
   return {
     name: check.name,
@@ -280,7 +280,7 @@ export async function runControlPreflight(job?: Job | null, repair?: PreflightRe
   if (binding) {
     checks.unshift(binding);
   }
-  const wire = checks.map(toWireCheck);
+  const wire = checks.map(toOperatorCheck);
   // Sidonta on aina ensimmäinen rivi kun se on mukana, joten korjauksen lause
   // menee siihen — ja raaka rivi säilyy huoltoa varten.
   if (repairedDetail) {
