@@ -88,7 +88,7 @@ export interface RelayTelemetry {
     /** Peilaa relayn omaa `RelayStatus.source.state`-unionia
      *  (`apps/broadcast/src/telemetry.ts`). Kun relay saa uuden tilan, se on
      *  lisättävä myös tänne — muuten arvo putoaa ohjaamon defaulttiin ja
-     *  tilarivi sanoo "relay ei kerro lähteen tilaa" juuri silloin kun relay
+     *  tilarivi sanoo "relay ei kerro raakalähetyksen tilaa" juuri silloin kun relay
      *  kertoo sen tarkasti. Niin kävi `ended`ille (#103) ja `no_signal`ille
      *  (#104), jotka lisättiin relaylle tämän tyypin jo olemassa ollessa. */
     state:

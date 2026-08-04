@@ -327,7 +327,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
         liveness.startsInMs === null ? "" : ` (~${Math.round(liveness.startsInMs / 60_000)} min)`;
       return {
         decision: "waiting",
-        reason: `${label(candidate)}: lähde ei ole vielä livenä${eta}.`,
+        reason: `${label(candidate)}: raakalähetys ei ole vielä livenä${eta}.`,
         job: candidate,
         blocking,
         liveness,
@@ -338,7 +338,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
       // yet — an ordinary pre-match state, not an alarm. Recorded, not pushed.
       return {
         decision: "source-error",
-        reason: `${label(candidate)}: lähdettä ei saatu selvitettyä — ${liveness.detail}`,
+        reason: `${label(candidate)}: raakalähetystä ei saatu selvitettyä — ${liveness.detail}`,
         job: candidate,
         blocking,
         liveness,
@@ -361,7 +361,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
     const quality = liveness.quality === "degraded" ? " (heikkolaatuisena)" : "";
     return {
       decision: "start",
-      reason: `${label(candidate)}: lähde on livenä${quality} — preflight ja käynnistys.`,
+      reason: `${label(candidate)}: raakalähetys on livenä${quality} — preflight ja käynnistys.`,
       job: candidate,
       blocking: null,
       liveness,
