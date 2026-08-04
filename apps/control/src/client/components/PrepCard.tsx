@@ -45,6 +45,7 @@ export function PrepCard({ job, notify }: Props) {
   const videoId = job.targetVideoId ?? created?.narrated.videoId ?? null;
   const hasPair = videoId !== null;
   const narratedUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : null;
+  const rawUrl = job.sourceUrl ?? created?.normal.watchUrl ?? null;
 
   const fail = useCallback(
     (err: unknown) => {
@@ -167,8 +168,8 @@ export function PrepCard({ job, notify }: Props) {
             Avaa selostettu lähetys
           </a>
         )}
-        {job.sourceUrl && (
-          <a className="linkbtn" href={job.sourceUrl} target="_blank" rel="noreferrer">
+        {rawUrl && (
+          <a className="linkbtn" href={rawUrl} target="_blank" rel="noreferrer">
             Avaa raakalähetys
           </a>
         )}
