@@ -170,6 +170,27 @@ export async function patchJob(id: string, patch: PatchJobRequest): Promise<Job>
   return updateJob(id, patch);
 }
 
+/** Siirtää työn `draft` → `scheduled` onnistuneen lähetysparin luonnin
+ *  jälkeen (#180). Palvelin on tilan totuuslähde (#171): ilman tätä työ jäisi
+ *  luonnokseksi eikä ajastin koskaan ottaisi sitä automaattikäynnistyksen
+ *  ehdokkaaksi. Vain luonnos siirtyy — pidemmällä oleva työ (arming/live tai
+ *  jo päättynyt) ei saa pudota taaksepäin siksi, että lähetyspari luotiin
+ *  uudelleen. */
+export async function markJobScheduled(id: string): Promise<Job> {
+  let job!: Job;
+  await store.update((jobs) => {
+    const idx = jobs.findIndex((j) => j.id === id);
+    if (idx === -1) throw new Error(`Työtä ${id} ei löytynyt.`);
+    job = jobs[idx];
+    if (job.status !== "draft") return jobs;
+    const next = jobs.slice();
+    job = { ...job, status: "scheduled" };
+    next[idx] = job;
+    return next;
+  });
+  return job;
+}
+
 /** Marks a job as the one about to go live. Deliberately does not touch
  *  .env.relay — DESIGN.md's routing splits that out to relay.ts's
  *  writeRelayEnv, called by the HTTP route once activation here succeeds.
