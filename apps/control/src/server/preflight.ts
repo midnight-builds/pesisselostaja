@@ -19,10 +19,84 @@ import type { Job, PreflightCheck, PreflightResult } from "../shared/types.js";
 import { CONFIG } from "./config.js";
 import { notifyPreflightBlockers } from "./notifications.js";
 
-/** Check and PreflightCheck have the same shape today; the mapping is explicit
- *  so a future field on either side breaks the typecheck instead of leaking. */
+/** Preflightin oma sanasto → operaattorin kieli (#176).
+ *
+ *  Rivit syntyvät relayn omassa preflightissa, joka puhuu komentoriville: se
+ *  nimeää env-avaimia ja tiedostoja, ja niin sen kuuluukin. Ohjaamon
+ *  käyttöliittymä ei mainitse niitä missään — ei edes huoltopinnassa nostettuna
+ *  esiin normaalipolulle — joten käännös tehdään tässä, wire-muodon rajalla, ja
+ *  raaka teksti kulkee mukana `technical`-kentässä huoltoa varten.
+ *
+ *  Sääntö on nimen ja tilan pari, ei tekstin osuma silloin kun sitä ei tarvita:
+ *  jos relayn preflight muotoilee saman rivin uusiksi, käännös seuraa mukana.
+ *  `contains` on mukana vain siellä, missä sama nimi ja tila tarkoittavat kahta
+ *  eri asiaa. */
+interface Rewrite {
+  name: string;
+  status: Check["status"];
+  /** Erottaa saman nimen ja tilan eri tapaukset toisistaan. */
+  contains?: string;
+  text: string;
+}
+
+const REWRITES: Rewrite[] = [
+  {
+    name: "Työn sidonta",
+    status: "ok",
+    text: "Ohjaamo on sidottu valittuun otteluun.",
+  },
+  {
+    name: "Työn sidonta",
+    status: "fail",
+    contains: "useammin kuin kerran",
+    // Ristiriitaa ei voi korjata itse eikä operaattori korjaa sitä puhelimella:
+    // SSH ei ole käytettävissä, joten rivi sanoo rehellisesti mitä voi tehdä.
+    text: "Ohjaamon sidonta on ristiriitainen eikä korjaudu itsestään — ilmoita ylläpitoon.",
+  },
+  {
+    name: "Työn sidonta",
+    status: "fail",
+    text: "Ohjaamo on yhä sidottu toiseen otteluun — valitse ottelu uudelleen.",
+  },
+  { name: "Kohde", status: "fail", text: "Selostetulla lähetyksellä ei ole kohdetta — luo lähetyspari." },
+  { name: "Kohde", status: "warn", text: "Kohteen osoitetta ei ole erikseen asetettu — käytetään oletusta." },
+  { name: "Kohde", status: "ok", text: "Selostettu lähetys on valmis ottamaan kuvaa vastaan." },
+  { name: "Ottelu", status: "fail", contains: "RELAY_MATCH_ID", text: "Ottelua ei ole sidottu — valitse ottelu uudelleen." },
+  { name: "Lähde", status: "fail", contains: "RELAY_YOUTUBE_URL", text: "Raakalähetystä ei ole sidottu — luo lähetyspari." },
+];
+
+/** Viimeinen suoja: rivi jolle ei ole omaa käännöstä ei silti saa vuotaa
+ *  env-avainta ruudulle. Tuntematon `RELAY_*` korvataan yleisellä sanalla, jotta
+ *  uusi tarkistus relayn puolella ei vuoda tänne huomaamatta. */
+const ENV_WORD: Record<string, string> = {
+  RELAY_MATCH_ID: "ottelu",
+  RELAY_YOUTUBE_URL: "raakalähetys",
+  RELAY_STREAM_KEY: "selostetun lähetyksen kohde",
+  RELAY_RTMP_URL: "kohteen osoite",
+};
+
+export function redactEnvKeys(detail: string): string {
+  return detail.replace(/RELAY_[A-Z0-9_]+/g, (key) => ENV_WORD[key] ?? "ohjaamon sidonta");
+}
+
+function operatorDetail(check: Check): string {
+  const rule = REWRITES.find(
+    (r) => r.name === check.name && r.status === check.status && (!r.contains || check.detail.includes(r.contains))
+  );
+  return rule ? rule.text : redactEnvKeys(check.detail);
+}
+
+/** Check → PreflightCheck: operaattorin lause päälle, raaka rivi talteen.
+ *  `technical` jätetään pois kun käännös ei muuttanut mitään — kaksi kertaa
+ *  samaa tekstiä ei ole vianetsintätietoa. */
 function toWireCheck(check: Check): PreflightCheck {
-  return { name: check.name, status: check.status, detail: check.detail };
+  const detail = operatorDetail(check);
+  return {
+    name: check.name,
+    status: check.status,
+    detail,
+    ...(detail === check.detail ? {} : { technical: check.detail }),
+  };
 }
 
 /** The one summary sentence, taken from the broadcast module's own summarize()
