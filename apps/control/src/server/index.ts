@@ -25,6 +25,7 @@ import {
   listJobs,
   createJob,
   patchJob,
+  markJobScheduled,
   activateJob,
   closeRunningJob,
   JobClashError,
@@ -520,6 +521,11 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
         targetStreamKey: pair.narrated.streamKey ?? undefined,
         sourceUrl: pair.normal.watchUrl,
       });
+      // Luonti onnistui → työ on ajastettavissa. Palvelin tekee siirron itse
+      // (#180, #171:n linja): clientin PATCH-kierros olisi tilalogiikan vuoto,
+      // ja ilman siirtoa ajastin ei koskaan poimi työtä
+      // automaattikäynnistyksen ehdokkaaksi.
+      await markJobScheduled(job.id);
     }
     const thumbnails = await uploadPairThumbnails(pair, texts);
     sendJson(res, 201, { ...pair, texts, thumbnails });

@@ -47,6 +47,7 @@ const {
   activateJob,
   closeRunningJob,
   markRunStarted,
+  markJobScheduled,
   reconcileOpenJobs,
   ARMING_STALE_MS,
   createJob,
@@ -428,5 +429,33 @@ describe("armedAt", () => {
 
     expect(await reconcileOpenJobs(null, Date.now() + 5 * 60_000)).toEqual([]);
     expect((await listJobs())[0].status).toBe("arming");
+  });
+});
+
+// #180: lähetysparin luonti jätti työn "draft"-tilaan, eikä ajastin koskaan
+// ottanut sitä automaattikäynnistyksen ehdokkaaksi. Luontireitti kutsuu nyt
+// markJobScheduledia; palvelin on tilan totuuslähde (#171), joten siirto ei
+// saa tulla clientin PATCHista.
+describe("markJobScheduled (#180)", () => {
+  it("siirtää luonnoksen scheduled-tilaan ja tallentaa sen levylle", async () => {
+    const job = await createJob({ matchId: 1 });
+    expect(job.status).toBe("draft");
+
+    const scheduled = await markJobScheduled(job.id);
+    expect(scheduled.status).toBe("scheduled");
+    expect((await listJobs())[0].status).toBe("scheduled");
+  });
+
+  it("ei pudota pidemmällä olevaa työtä taaksepäin (uudelleenluotu lähetyspari)", async () => {
+    const job = await createJob({ matchId: 1 });
+    await setJobStatus(job.id, "live");
+
+    const after = await markJobScheduled(job.id);
+    expect(after.status).toBe("live");
+    expect((await listJobs())[0].status).toBe("live");
+  });
+
+  it("hylkää tuntemattoman työn suomenkielisellä virheellä", async () => {
+    await expect(markJobScheduled("eiole123")).rejects.toThrow(/Työtä eiole123 ei löytynyt\./);
   });
 });
