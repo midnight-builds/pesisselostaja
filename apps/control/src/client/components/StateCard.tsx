@@ -3,6 +3,7 @@ import type { Job, LiveState } from "../../shared/types";
 import { NO_JOB_STATE, jobStateWord } from "../../shared/jobState";
 import { api } from "../api";
 import { fiTime } from "../format";
+import { PrepCard } from "./PrepCard";
 
 /** Tilakortti — ohjaamon etusivu (#173, variantti A).
  *
@@ -47,6 +48,15 @@ export function StateCard({ job, live, notify, onCleared }: Props) {
     <section className={`state state--${state.tone}`} aria-live="polite">
       <p className="state__word">{state.word}</p>
       <p className="state__detail">{detailFor(job, live)}</p>
+
+      {/* Valmistelu kattaa molemmat sitä edeltävät tilat: luonnoksen, jolla
+          lähetysparia ei vielä ole, ja ajastetun työn, jolla se on. Ne ovat sama
+          hetki operaattorille — ottelu on valittu, lähetys ei ole alkanut —
+          eivätkä kaksi korttia (#170). Ajastimen ja käynnistysikkunan oma
+          sisältö tulee #185:ssä. */}
+      {job && (job.status === "draft" || job.status === "scheduled") && (
+        <PrepCard job={job} notify={notify} />
+      )}
 
       {/* Luonnos on työ, jolle ei ole vielä luotu lähetysparia, joten sen saa
           hylätä ilman ulospäin näkyviä seurauksia — ottelunvaihto ON vahvistus
