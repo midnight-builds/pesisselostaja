@@ -353,7 +353,7 @@ async function createOne(
     rtmpUrl: ingestion.ingestionAddress ?? null,
     backupUrl: ingestion.backupIngestionAddress ?? null,
     streamKey: ingestion.streamName ?? null,
-    streamStatus: stream?.status?.streamStatus ?? null,
+    streamStatus: stream.status?.streamStatus ?? null,
   };
 }
 
