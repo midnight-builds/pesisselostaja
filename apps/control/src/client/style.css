@@ -4,6 +4,11 @@
    contrast beats subtlety. Palette derives from apps/web/style.css
    (#1C7A43 green, #E2952B batting orange, #102A1A scoreboard ink),
    lifted for legibility on a dark ground.
+
+   Rakenne: ei navigaatiota, yksi tilakortti (#173, variantti A). Näkymä-
+   kohtaiset lohkot (ottelunaikainen kertasilmäys, selostuslista, huolto-
+   arkki) tulevat omissa PR:issään (#178) — tänne ei jätetä valmiiksi
+   tyylejä komponenteille joita ei ole.
    ───────────────────────────────────────────────────────────── */
 
 :root {
@@ -62,13 +67,15 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Yksi sarake, puhelimen leveys. Työpöydällä sama sarake keskitettynä —
+   siedettävä, ei optimoitu (#173). */
 .app {
   height: 100%;
   position: relative; /* positioning context for the toast */
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  max-width: 560px;
+  max-width: 480px;
   margin: 0 auto;
   background: var(--bg);
 }
@@ -78,7 +85,7 @@ body {
   flex: none;
 }
 
-/* ── Top bar ─────────────────────────────────────────────── */
+/* ── Top bar: mikä ottelu tämä on ────────────────────────── */
 .topbar {
   display: flex;
   align-items: center;
@@ -87,16 +94,31 @@ body {
   flex: none;
   border-bottom: 1px solid var(--line);
 }
+.topbar__id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .topbar__title {
   font-family: "Archivo", sans-serif;
   font-weight: 800;
-  font-size: 18px;
+  font-size: 17px;
+  line-height: 1.15;
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
-.topbar__spacer {
-  flex: 1;
+.topbar__meta {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .conn {
+  flex: none;
+  align-self: flex-start;
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
@@ -127,25 +149,11 @@ body {
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
 }
-/* Tab panels: every view stays mounted (App.tsx), so `display: contents` keeps
-   the shown one laying out as if the shell rendered it directly — no extra box
-   between .scroll and .view, which is what .view--log's height: 100% needs. */
-.tabpanel {
-  display: contents;
-}
-.tabpanel[hidden] {
-  display: none;
-}
 .view {
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 12px 12px 24px;
-}
-.view--log {
-  height: 100%;
-  padding: 0;
-  gap: 0;
 }
 
 .card {
@@ -168,348 +176,64 @@ body {
   font-size: 14px;
   line-height: 1.45;
 }
-.is-fail {
-  color: var(--fail);
-}
 
-/* ── Health banner (the headline act) ────────────────────── */
-.health {
+/* ── Tilakortti: etusivun päähahmo ───────────────────────── */
+.state {
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 16px;
-  border: 1px solid var(--line);
-  border-left-width: 8px;
-  background: var(--panel);
-}
-.health--ok {
-  border-left-color: var(--ok);
-  background: linear-gradient(180deg, rgba(53, 196, 111, 0.18), rgba(53, 196, 111, 0.05));
-}
-.health--warn {
-  border-left-color: var(--warn);
-  background: linear-gradient(180deg, rgba(240, 166, 47, 0.2), rgba(240, 166, 47, 0.05));
-}
-.health--fail {
-  border-left-color: var(--fail);
-  /* The top stop is what the big word sits on, so it doubles as the ceiling on
-     that word's contrast — kept light enough for --fail-ink to clear 6:1. */
-  background: linear-gradient(180deg, rgba(255, 90, 61, 0.2), rgba(255, 90, 61, 0.06));
-}
-.health--idle {
-  border-left-color: var(--idle);
-}
-.health__top {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 10px;
-}
-.health__word {
-  font-family: "Archivo", sans-serif;
-  font-weight: 900;
-  font-size: 30px;
-  line-height: 1.05;
-  letter-spacing: -0.02em;
-  text-transform: uppercase;
-}
-.health--ok .health__word {
-  color: var(--ok);
-}
-.health--warn .health__word {
-  color: var(--warn);
-}
-.health--fail .health__word {
-  color: var(--fail-ink);
-}
-.health--idle .health__word {
-  color: var(--idle);
-}
-.health__conn {
-  margin-left: auto;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--fail);
-  border: 1px solid rgba(255, 90, 61, 0.5);
-  border-radius: 999px;
-  padding: 3px 8px;
-}
-.health__headline {
-  margin-top: 6px;
-  font-size: 19px;
-  font-weight: 600;
-  line-height: 1.3;
-}
-.health__sub {
-  margin-top: 4px;
-  font-size: 14px;
-  color: var(--muted);
-}
-
-/* ── Status grid ─────────────────────────────────────────── */
-.grid-card {
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 8px;
 }
-.lamps {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
+.state__word {
+  font-family: "Archivo", sans-serif;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
 }
-.lamp {
-  min-height: var(--tap);
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  color: var(--ink);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  text-align: left;
-}
-.lamp--open {
-  border-color: rgba(255, 255, 255, 0.35);
-}
-.lamp:active {
-  transform: scale(0.97);
-}
-.lamp__dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  flex: none;
-  background: var(--idle);
-}
-.lamp--ok .lamp__dot {
-  background: var(--ok);
-  box-shadow: 0 0 8px rgba(53, 196, 111, 0.6);
-}
-.lamp--warn .lamp__dot {
-  background: var(--warn);
-  box-shadow: 0 0 8px rgba(240, 166, 47, 0.6);
-}
-.lamp--fail .lamp__dot {
-  background: var(--fail);
-  box-shadow: 0 0 8px rgba(255, 90, 61, 0.7);
-}
-.lamp__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.lamp__detail {
-  margin: 8px 4px 4px;
-  font-size: 14px;
+.state__detail {
+  font-size: 15px;
   line-height: 1.45;
   color: var(--muted);
 }
-.lamp__detail strong {
+/* Sävy kertoo tilan ilman lukemista: valmistelu neutraali, odotus keltainen,
+   ajossa vihreä, päättynyt vaimea, vika punainen. */
+.state--idle {
+  border-color: var(--line);
+}
+.state--idle .state__word {
   color: var(--ink);
 }
-.lamp__detail--fail {
-  color: #ffb3a4;
+.state--prep {
+  border-color: rgba(255, 255, 255, 0.22);
 }
-.lamp__detail--warn {
-  color: #f7d59a;
+.state--wait {
+  border-color: rgba(240, 166, 47, 0.5);
+  background: linear-gradient(var(--panel), var(--panel)) padding-box,
+    rgba(240, 166, 47, 0.08);
 }
-
-/* ── Score panel ─────────────────────────────────────────── */
-.score__teams {
-  display: flex;
-  align-items: stretch;
-  gap: 6px;
+.state--wait .state__word {
+  color: var(--warn);
 }
-.score__team {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 6px 4px;
-  border-radius: 12px;
-  min-width: 0;
+.state--live {
+  border-color: rgba(53, 196, 111, 0.55);
+  background: rgba(53, 196, 111, 0.1);
 }
-.score__team--batting {
-  background: rgba(226, 149, 43, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(226, 149, 43, 0.4);
+.state--live .state__word {
+  color: var(--ok);
 }
-.score__name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--muted);
-  text-align: center;
-  line-height: 1.15;
-  overflow-wrap: anywhere;
-}
-.score__runs {
-  font-weight: 800;
-  font-size: 46px;
-  line-height: 1;
-  letter-spacing: -0.03em;
-}
-.score__pips {
-  display: flex;
-  gap: 4px;
-  margin-top: 3px;
-}
-.pip {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
-}
-.pip--on {
-  background: var(--primary);
-}
-.score__mid {
-  width: 88px;
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
+.state--done .state__word {
   color: var(--faint);
 }
-.score__period {
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  text-align: center;
-  line-height: 1.2;
-}
-.score__dash {
-  font-family: "Archivo", sans-serif;
-  font-size: 18px;
-}
-.score__finished {
-  font-size: 11px;
-  color: var(--muted);
-}
-.score__periods {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
-}
-.score__chip {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 5px 9px;
-  border-radius: 999px;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  font-size: 14px;
-  font-weight: 700;
-}
-.score__chip-label {
-  font-size: 11px;
-  color: var(--faint);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.score__palot {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-.score__palot-label {
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--faint);
-}
-.score__palot-dots {
-  display: flex;
-  gap: 6px;
-}
-.palo {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 1.5px solid rgba(255, 255, 255, 0.35);
-}
-.palo--on {
-  background: var(--batting);
-  border-color: var(--batting);
-  box-shadow: 0 0 8px rgba(226, 149, 43, 0.6);
-}
-.score__batting {
-  margin-left: auto;
-  font-size: 13px;
-  color: var(--muted);
-  text-align: right;
-}
-
-/* ── Narration list ──────────────────────────────────────── */
-.narration__list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.narration__row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 8px 6px;
-  border-radius: 10px;
-  font-size: 15px;
-  line-height: 1.35;
-}
-.narration__row + .narration__row {
-  border-top: 1px solid var(--line);
-}
-.narration__row--spoken {
-  color: var(--ink);
-  background: rgba(36, 168, 92, 0.1);
-}
-.narration__row--queued {
-  color: var(--faint);
-}
-/* Muted = the relay said it while ffmpeg was not attached. Nobody heard it, so
-   it must not look like the spoken lines around it. */
-.narration__row--muted {
-  color: var(--ink);
+.state--fail {
+  border-color: rgba(255, 90, 61, 0.6);
   background: rgba(255, 90, 61, 0.12);
-  text-decoration: line-through;
-  text-decoration-color: rgba(255, 90, 61, 0.7);
 }
-.narration__time {
-  flex: none;
-  font-size: 12px;
-  color: var(--faint);
-}
-.narration__text {
-  flex: 1;
-  overflow-wrap: anywhere;
-}
-.narration__tag {
-  flex: none;
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--faint);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 2px 6px;
-}
-.narration__tag--muted {
+.state--fail .state__word {
   color: var(--fail-ink);
-  border-color: var(--fail-ink);
 }
 
 /* ── Buttons ─────────────────────────────────────────────── */
@@ -544,31 +268,8 @@ body {
 .btn--ghost {
   background: transparent;
 }
-.btn--danger {
-  background: transparent;
-  border-color: rgba(255, 90, 61, 0.6);
-  color: #ffb3a4;
-}
-.btn--danger-armed {
-  background: var(--fail);
-  border-color: var(--fail);
-  color: #1a0603;
-}
 .btn--wide {
   width: 100%;
-}
-.btn--tall {
-  min-height: 60px;
-  font-size: 18px;
-}
-.btn-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-.btn-row > * {
-  flex: 1 1 44%;
 }
 .linkbtn {
   background: none;
@@ -579,165 +280,6 @@ body {
   text-decoration: underline;
   cursor: pointer;
   padding: 6px;
-}
-
-/* ── Delay nudges: the biggest targets in the app ────────── */
-.delay__value {
-  font-family: "Archivo", sans-serif;
-  font-weight: 900;
-  font-size: 34px;
-  letter-spacing: -0.02em;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-.delay__unit {
-  font-family: "Hanken Grotesk", sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--faint);
-}
-.delay__buttons {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 12px;
-}
-.btn--nudge {
-  min-height: 66px;
-  background: var(--panel-2);
-  border-color: rgba(255, 255, 255, 0.22);
-  gap: 2px;
-}
-.btn__big {
-  font-size: 18px;
-  font-weight: 800;
-}
-.btn__sub {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-/* ── Knobs ───────────────────────────────────────────────── */
-.knob {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: var(--tap);
-  padding: 10px 0;
-  border-top: 1px solid var(--line);
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.knob:first-of-type {
-  border-top: none;
-}
-.knob:disabled {
-  opacity: 0.45;
-}
-.knob--toggle {
-  justify-content: space-between;
-}
-.knob__text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.knob__label {
-  font-size: 16px;
-  font-weight: 700;
-}
-.knob__hint {
-  font-size: 13px;
-  color: var(--muted);
-}
-.switch {
-  width: 54px;
-  height: 32px;
-  flex: none;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  border: 1px solid var(--line);
-  position: relative;
-  transition: background 0.15s;
-}
-.switch--on {
-  background: var(--primary);
-  border-color: var(--primary);
-}
-.switch__knob {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: #fff;
-  transition: transform 0.15s;
-}
-.switch--on .switch__knob {
-  transform: translateX(22px);
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.chip {
-  /* 44×44 minimum: these are tapped one-handed, mid-match, without looking. */
-  min-height: var(--tap);
-  min-width: var(--tap);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  color: var(--muted);
-  font: inherit;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.chip--on {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #06180E;
-}
-.chip:disabled {
-  opacity: 0.45;
-}
-
-/* ── Key/value list ──────────────────────────────────────── */
-.kv__row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0;
-  font-size: 15px;
-  border-top: 1px solid var(--line);
-}
-.kv__row:first-child {
-  border-top: none;
-}
-.kv__row dt {
-  color: var(--muted);
-}
-.kv__row dd {
-  font-weight: 700;
-  text-align: right;
-}
-.kv__row--fail dd {
-  color: var(--fail);
 }
 
 /* ── Forms ───────────────────────────────────────────────── */
@@ -754,28 +296,6 @@ body {
   letter-spacing: 0.06em;
   color: var(--faint);
   margin-bottom: 6px;
-}
-/* A text button on a caption row, so its BOX is grown to the 44×44 minimum
-   rather than its type: the padding does the work, and the label row simply
-   becomes as tall as the target it carries. No negative margins — they would
-   put the tap area on top of the input below, and a mistap there unmasks a
-   stream key instead of focusing the field. */
-.field__reveal {
-  margin-left: auto;
-  min-height: var(--tap);
-  min-width: var(--tap);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  color: var(--primary);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-  cursor: pointer;
-  padding: 4px 10px;
 }
 .field__input {
   width: 100%;
@@ -802,128 +322,7 @@ select.field__input {
   line-height: 1.4;
 }
 
-.warnbox {
-  border: 1px solid rgba(240, 166, 47, 0.5);
-  background: rgba(240, 166, 47, 0.12);
-  border-radius: 12px;
-  padding: 11px 12px;
-  font-size: 14px;
-  line-height: 1.5;
-  margin-bottom: 14px;
-}
-.warnbox strong {
-  color: var(--warn);
-  letter-spacing: 0.04em;
-}
-
-/* Aktivointi torjuttiin, koska edellinen työ pitää yhä lähetyspaikkaa. Tila,
-   ei virhe — siksi huomioväri ja oma nappi, ei punainen toast (#101). */
-.clash {
-  margin-top: 12px;
-  border: 1px solid rgba(240, 166, 47, 0.5);
-  background: rgba(240, 166, 47, 0.12);
-  border-radius: 12px;
-  padding: 11px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.clash__text {
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-/* Ajastimen päällä/pois-rivi. Päällä oleva ajastin saa käynnistää lähetyksen
-   itse, joten se on väritetty huomiovärillä eikä onnistumisen vihreällä: se on
-   tila josta operaattorin kuuluu olla tietoinen, ei saavutus. */
-.statusline {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  border-radius: 12px;
-  padding: 11px 12px;
-  margin-bottom: 14px;
-  border: 1px solid var(--line);
-}
-.statusline strong {
-  letter-spacing: 0.06em;
-  font-size: 14px;
-}
-.statusline--on {
-  border-color: rgba(240, 166, 47, 0.5);
-  background: rgba(240, 166, 47, 0.12);
-}
-.statusline--on strong {
-  color: var(--warn);
-}
-.statusline--off strong {
-  color: var(--muted);
-}
-
-.job__teams {
-  font-family: "Archivo", sans-serif;
-  font-size: 20px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  margin-bottom: 4px;
-}
-
-/* ── Preflight checks ────────────────────────────────────── */
-.preflight__summary {
-  margin: 12px 0 8px;
-  font-size: 15px;
-  font-weight: 700;
-}
-.checks {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.check {
-  display: flex;
-  gap: 10px;
-  padding: 9px 10px;
-  border-radius: 12px;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-}
-.check__mark {
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1.2;
-  flex: none;
-}
-.check--ok .check__mark {
-  color: var(--ok);
-}
-.check--warn .check__mark {
-  color: var(--warn);
-}
-.check--fail .check__mark {
-  color: var(--fail);
-}
-.check--fail {
-  border-color: rgba(255, 90, 61, 0.5);
-}
-.check__body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.check__name {
-  font-size: 15px;
-  font-weight: 700;
-}
-.check__detail {
-  font-size: 13px;
-  color: var(--muted);
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-
-/* ── Matches ─────────────────────────────────────────────── */
+/* ── Ottelun valinta ─────────────────────────────────────── */
 .dayrow {
   display: flex;
   gap: 8px;
@@ -937,6 +336,17 @@ select.field__input {
   flex: none;
   font-size: 22px;
   padding: 0;
+}
+.picker__filters {
+  margin-top: 12px;
+}
+.picker__past {
+  align-self: flex-start;
+}
+.picker__manual {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
 .mlist {
   list-style: none;
@@ -961,30 +371,8 @@ select.field__input {
 .mlist li:first-child .mrow {
   border-top: none;
 }
-.mrow--on {
-  background: rgba(36, 168, 92, 0.12);
-}
-.checkbox {
-  width: 24px;
-  height: 24px;
-  flex: none;
-  border-radius: 7px;
-  border: 2px solid rgba(255, 255, 255, 0.35);
-}
-.checkbox--on {
-  background: var(--primary);
-  border-color: var(--primary);
-  position: relative;
-}
-.checkbox--on::after {
-  content: "✓";
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: #06180E;
-  font-weight: 900;
-  font-size: 15px;
+.mrow:disabled {
+  opacity: 0.5;
 }
 .mrow__time {
   flex: none;
@@ -1026,83 +414,13 @@ select.field__input {
   border-color: rgba(255, 90, 61, 0.6);
   background: rgba(255, 90, 61, 0.14);
 }
-.sticky-action {
-  position: sticky;
-  bottom: 0;
-  padding-top: 4px;
-}
-
-/* ── Log ─────────────────────────────────────────────────── */
-.log__bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg);
-}
-.log__scroll {
-  flex: 1;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 6px 10px 24px;
-}
-.log__empty {
-  padding: 20px 4px;
-}
-.log__list {
-  list-style: none;
-}
-.logrow {
-  display: grid;
-  grid-template-columns: auto auto 1fr;
-  gap: 8px;
-  padding: 8px 4px;
-  border-bottom: 1px solid var(--line);
-  font-size: 14px;
-  line-height: 1.4;
-  align-items: baseline;
-}
-.logrow__ts {
-  font-size: 12px;
-  color: var(--faint);
-}
-.logrow__level {
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--faint);
-}
-.logrow--warn .logrow__level {
-  color: var(--warn);
-}
-.logrow--error .logrow__level {
-  color: var(--fail);
-}
-.logrow--error {
-  background: rgba(255, 90, 61, 0.1);
-}
-.logrow__msg {
-  overflow-wrap: anywhere;
-}
-.logrow__code {
-  display: inline-block;
-  margin-right: 6px;
-  padding: 1px 5px;
-  border-radius: 5px;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  font-size: 11px;
-  color: var(--muted);
-}
 
 /* ── Toast ───────────────────────────────────────────────── */
 .toast {
   position: absolute;
   left: 12px;
   right: 12px;
-  bottom: calc(var(--tap) + 30px + env(safe-area-inset-bottom));
+  bottom: calc(16px + env(safe-area-inset-bottom));
   z-index: 20;
   padding: 12px 14px;
   border-radius: 12px;
@@ -1122,119 +440,4 @@ select.field__input {
 .toast--error {
   border-color: rgba(255, 90, 61, 0.6);
   background: #3A1712;
-}
-
-/* ── Tab bar ─────────────────────────────────────────────── */
-.tabbar {
-  flex: none;
-  display: flex;
-  border-top: 1px solid var(--line);
-  background: var(--panel);
-  padding-bottom: env(safe-area-inset-bottom);
-}
-.tabbar__btn {
-  flex: 1;
-  min-height: 54px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  background: none;
-  border: none;
-  color: var(--faint);
-  font: inherit;
-  cursor: pointer;
-  padding: 6px 0;
-}
-.tabbar__btn--on {
-  color: var(--primary);
-}
-.tabbar__icon {
-  font-size: 17px;
-  line-height: 1;
-  position: relative;
-}
-.tabbar__label {
-  font-size: 12px;
-  font-weight: 700;
-  /* Five tabs share 393 px on the target phone, so a label must never wrap —
-     wrapping would push the row past its 54 px and shift the whole bar. */
-  white-space: nowrap;
-}
-.tabbar__pip {
-  position: absolute;
-  top: -3px;
-  right: -7px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--fail);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  * {
-    transition: none !important;
-  }
-}
-
-/* --- Esikatselun tekstit ja kuvat (#129) -----------------------------------
- *
- * Nämä luokat olivat käytössä mutta täysin tyylittelemättä, ja se näkyi vasta
- * operaattorin puhelimella: `<pre>` ei rivity oletuksena, joten kuvaus ja jaettava viesti
- * työnsivät sivun vaakavieritykseen, ja thumbnail-esikatselu renderöityi
- * luonnollisessa 1280 px:n leveydessään. Asettelutesti ei paljastanut kumpaakaan,
- * koska se ei avaa esikatselua — se aukko on nyt paikattu (youtube.spec.ts).
- *
- * Ohjaamoa käytetään ensisijaisesti operaattorin puhelimella kentän laidalla, joten
- * vaakavieritys ei ole kauneusvirhe vaan estää tarkistamisen jota juuri tässä
- * kohtaa pyydetään ("Olen tarkistanut tekstit ja kuvat"). */
-.textline {
-  margin: 0 0 8px;
-  /* Otsikko on yksi pitkä rivi ilman välilyöntejä juuri siinä kohtaa missä se
-     on pisin (URL-mainen kenttänimi), joten pelkkä normaali rivitys ei riitä. */
-  overflow-wrap: anywhere;
-}
-.textblock {
-  margin: 0 0 8px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font: inherit;
-  color: var(--ink);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px 10px;
-  /* Kuvaus on pitkä; sen ei tarvitse viedä koko ruutua, mutta se saa vierittyä
-     pystysuunnassa omassa laatikossaan. */
-  max-height: 40vh;
-  overflow-y: auto;
-}
-.thumbs {
-  display: grid;
-  /* Allekkain operaattorin puhelimella: 16:9-kuva 393 px:n ruudulla on jo vain ~200 px
-     korkea, ja vierekkäin niistä ei erottaisi juuri sitä mitä pitää tarkistaa
-     (otsikon rivitys ja merkki). */
-  grid-template-columns: 1fr;
-  gap: 12px;
-}
-.thumb {
-  margin: 0;
-}
-.thumb__img {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-}
-.thumb__label,
-.thumb__loading,
-.thumb__error {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: var(--faint);
-}
-.thumb__error {
-  color: var(--fail);
 }

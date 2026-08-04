@@ -39,16 +39,15 @@ test.describe("perusrenderöinti oikealla palvelimella", () => {
     expect(rootChildren, "#root ei saa jäädä tyhjäksi kuoreksi").toBeGreaterThan(0);
 
     // 2. React actually rendered the chrome (this is what "blank shell" lost).
-    await expect(page.getByText("Ohjaamo").first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "Live" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Ottelut" })).toBeVisible();
+    //    Ei välilehtiä: etusivu on yksi tilakortti (#173).
+    await expect(page.locator(".topbar__title")).toBeVisible();
 
-    // 3. The live view rendered a real health state from the real /api/live —
-    //    an idle box says "Valmiudessa", a busy one says something else, but
-    //    one of the four words must be on screen.
-    await expect(
-      page.getByText(/Kunnossa|Huomio|Vika|Valmiudessa|Yhdistetään/).first(),
-    ).toBeVisible();
+    // 3. Tilakortti renderöityi oikeasta /api/live-vastauksesta: ilman
+    //    valittua ottelua sanan on oltava "Ei aktiivista ottelua", ja silloin
+    //    myös ottelun valinta on näkyvissä.
+    const word = page.locator(".state__word");
+    await expect(word).toBeVisible();
+    expect((await word.innerText()).trim().length).toBeGreaterThan(0);
 
     // 4. A module script served with the wrong MIME type (the exact shape of
     //    the original bug: SPA fallback hands out index.html for a missing

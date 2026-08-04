@@ -1,33 +1,34 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { LiveState } from "../shared/types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Job, LiveState } from "../shared/types";
+import { isJobClosed } from "../shared/jobState";
 import { connectLive, type LiveConnectionStatus } from "./api";
-import { TabBar, type TabId } from "./components/TabBar";
+import { MatchPicker } from "./components/MatchPicker";
+import { StateCard } from "./components/StateCard";
 import { Toast, type ToastMessage } from "./components/Toast";
-import { JobView } from "./views/JobView";
-import { LiveView } from "./views/LiveView";
-import { LogView } from "./views/LogView";
-import { MatchesView } from "./views/MatchesView";
-import { YouTubeView } from "./views/YouTubeView";
-import { SettingsView } from "./views/SettingsView";
+import { fiTime } from "./format";
 
-/** App shell: one SSE-backed LiveState for the whole UI, plus tab state.
- *  No router — five tabs do not justify a dependency, and a URL-less shell is
- *  what an installed PWA behaves like anyway.
+/** Kuori: ei navigaatiota lainkaan (#173, variantti A).
  *
- *  All five views stay MOUNTED; the tab only decides which one is displayed.
- *  Unmounting them threw away each view's own state — the Ottelut filters and
- *  ticks, the log level, the selected job — and refetched the day on the way
- *  back. On a camp day of 200 matches that means re-picking the field filter
- *  every single time the operator glances at Live, which is a thing they do
- *  constantly mid-broadcast. The state lives where it is used; only its
- *  visibility is lifted here. */
+ *  Etusivu on aina yksi tilakortti — "tämä ottelu, tässä tilassa" — ja ilman
+ *  aktiivista ottelua sen alla on ottelun valinta. Välilehtiä ei ole: kuusi
+ *  välilehteä oli itse ongelma, ei niiden sisältö (#168, #178).
+ *
+ *  **Valinnan totuuslähde on palvelin.** Se mikä ottelu on valittu tulee
+ *  SSE-virran `LiveState.job`-kentästä eikä tämän kuoren tilasta — kaksi
+ *  rinnakkaista työvalitsinta oli #129:n ja #165:n juurisyy (#169). Tässä
+ *  pidetään vain se työ, jonka juuri luotiin, siihen asti kunnes palvelin
+ *  kertoo saman: aggregaattori tikittää 5 s välein, ja niin kauan valinta
+ *  näyttäisi menneen hukkaan. */
 
 export function App() {
   const [live, setLive] = useState<LiveState | null>(null);
   const [connection, setConnection] = useState<LiveConnectionStatus>("connecting");
-  const [tab, setTab] = useState<TabId>("live");
   const [toast, setToast] = useState<ToastMessage | null>(null);
-  const [jobReloadToken, setJobReloadToken] = useState(0);
+  /** Juuri luotu työ, jota palvelin ei ole vielä ehtinyt julkaista. */
+  const [pending, setPending] = useState<Job | null>(null);
+  /** Tässä käyttöliittymässä peruttu työ: sitä ei näytetä vaikka palvelimen
+   *  edellinen tikki kertoisi sen vielä olevan valinta. */
+  const [dismissed, setDismissed] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => connectLive({ onState: setLive, onStatus: setConnection }), []);
@@ -46,71 +47,66 @@ export function App() {
     [],
   );
 
-  const alert = live?.health === "fail" || connection === "down";
+  const served = live?.job ?? null;
+  // Palvelin voittaa heti kun se puhuu samasta työstä — tai jostain muusta,
+  // mikä tarkoittaa että valinta on ehtinyt muuttua toisaalla.
+  useEffect(() => {
+    if (pending && served && served.id === pending.id) setPending(null);
+    if (dismissed && served?.id !== dismissed) setDismissed(null);
+  }, [served, pending, dismissed]);
+
+  const job = served && served.id === dismissed ? null : (served ?? pending);
+  const showPicker = !job || isJobClosed(job.status);
 
   return (
     <div className="app">
       <div className="safe-top" />
       <header className="topbar">
-        <span className="topbar__title">Ohjaamo</span>
-        <span className="topbar__spacer" />
+        <span className="topbar__id">
+          {job ? (
+            <>
+              <span className="topbar__title">
+                {job.home} – {job.away}
+              </span>
+              <span className="topbar__meta">
+                {[job.seriesName, job.stadium, job.startsAt ? `klo ${fiTime(job.startsAt)}` : null]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            </>
+          ) : (
+            <span className="topbar__title">Ohjaamo</span>
+          )}
+        </span>
         <span className={`conn conn--${connection}`}>
           {connection === "open" ? "yhteys ok" : connection === "connecting" ? "yhdistetään" : "yhteys poikki"}
         </span>
       </header>
 
       <main className="scroll">
-        <TabPanel id="live" active={tab === "live"}>
-          <LiveView live={live} connection={connection} notify={notify} />
-        </TabPanel>
-        <TabPanel id="matches" active={tab === "matches"}>
-          <MatchesView
+        <div className="view">
+          <StateCard
+            job={job}
+            live={live}
             notify={notify}
-            onJobCreated={() => {
-              setJobReloadToken((n) => n + 1);
-              setTab("job");
+            onCleared={(jobId) => {
+              setPending(null);
+              setDismissed(jobId);
             }}
           />
-        </TabPanel>
-        <TabPanel id="job" active={tab === "job"}>
-          <JobView live={live} notify={notify} reloadToken={jobReloadToken} />
-        </TabPanel>
-        <TabPanel id="youtube" active={tab === "youtube"}>
-          <YouTubeView active={tab === "youtube"} notify={notify} />
-        </TabPanel>
-        <TabPanel id="log" active={tab === "log"}>
-          <LogView lines={live?.log ?? []} notify={notify} />
-        </TabPanel>
-        <TabPanel id="settings" active={tab === "settings"}>
-          <SettingsView notify={notify} />
-        </TabPanel>
+          {showPicker && (
+            <MatchPicker
+              notify={notify}
+              onSelected={(created) => {
+                setDismissed(null);
+                setPending(created);
+              }}
+            />
+          )}
+        </div>
       </main>
 
       <Toast toast={toast} onDismiss={() => setToast(null)} />
-      <TabBar active={tab} onChange={setTab} alert={alert} />
-    </div>
-  );
-}
-
-/** One always-mounted view, shown or hidden.
- *
- *  The wrapper is `display: contents` when shown, so it adds no box of its own
- *  and each view lays out inside the scroll region exactly as it did when the
- *  shell rendered it directly — including the log view's height: 100%. When
- *  hidden it is `display: none`, which also takes it out of the accessibility
- *  tree, so a hidden view's buttons cannot be focused or read out. */
-function TabPanel({
-  id,
-  active,
-  children,
-}: {
-  id: TabId;
-  active: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <div className="tabpanel" data-view={id} hidden={!active}>
-      {children}
     </div>
   );
 }

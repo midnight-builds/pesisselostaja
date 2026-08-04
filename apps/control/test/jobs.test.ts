@@ -145,6 +145,60 @@ describe("single active job invariant", () => {
     const active = await getActiveJob();
     expect(active?.id).toBe(jobA.id);
   });
+
+  // Valinnan yksi totuuslähde (#171, #183): ohjaamon etusivu on tilakortti
+  // joka näyttää täsmälleen tämän työn, ja ottelun valinta LUO työn — joten
+  // luonnoksen on näyttävä heti. Ennen tätä getActiveJob katsoi vain
+  // ajastettuja, ja juuri valittu ottelu ei näkynyt missään.
+  it("getActiveJob palauttaa myös luonnoksen — valinta on työn luonti", async () => {
+    const draft = await createJob({ matchId: 1 });
+
+    const active = await getActiveJob();
+    expect(active?.id).toBe(draft.id);
+    expect(active?.status).toBe("draft");
+  });
+
+  it("getActiveJob palauttaa viimeisimmän keskeneräisen työn, myös ajastetun ohi", async () => {
+    const older = await createJob({ matchId: 1 });
+    await setJobStatus(older.id, "scheduled");
+    const newer = await createJob({ matchId: 2 });
+
+    expect((await getActiveJob())?.id).toBe(newer.id);
+  });
+
+  // #165: eilinen työ ei ole tämän päivän valinta. Ilman tätä vanha
+  // keskeneräinen työ näkyisi etusivun tilakortissa tämän päivän otteluna, ja
+  // aktivointi kirjoittaisi sen .env.relay:iin.
+  it("getActiveJob ei tarjoa keskeneräistä työtä jonka ottelu alkoi kauan sitten", async () => {
+    const stale = await createJob({ matchId: 1 });
+    await patchJob(stale.id, { startsAt: new Date(Date.now() - 20 * 60 * 60_000).toISOString() });
+    await setJobStatus(stale.id, "scheduled");
+
+    expect(await getActiveJob()).toBeNull();
+  });
+
+  it("getActiveJob ei hylkää ajossa olevaa työtä vaikka ottelu alkoi kauan sitten", async () => {
+    // Lähetyspaikkaa pitävän työn elinkaaren omistaa reconcileOpenJobs; ajossa
+    // olevaa ei piiloteta koskaan (uptime first).
+    const running = await createJob({ matchId: 1 });
+    await patchJob(running.id, { startsAt: new Date(Date.now() - 20 * 60 * 60_000).toISOString() });
+    await setJobStatus(running.id, "live");
+
+    expect((await getActiveJob())?.id).toBe(running.id);
+  });
+
+  it("getActiveJob hylkää vanhan luonnoksen jolla ei ole aloitusaikaa lainkaan", async () => {
+    // startsAt puuttuu (käsin syötetty ottelu-ID, jolle tulospalvelu ei antanut
+    // aikaa) — silloin luontihetki on ainoa aikaleima jolla vanhentuminen voi
+    // ratketa.
+    const draft = await createJob({ matchId: 1 });
+    const jobs = JSON.parse(readFileSync(jobsFile, "utf8")) as Array<Record<string, unknown>>;
+    jobs[0].createdAt = new Date(Date.now() - 20 * 60 * 60_000).toISOString();
+    writeFileSync(jobsFile, JSON.stringify(jobs), "utf8");
+
+    expect(await getActiveJob()).toBeNull();
+    expect(draft.status).toBe("draft");
+  });
 });
 
 // #101: the relay stopping — by an operator's tap or by its own shutdown when
