@@ -608,7 +608,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
     },
 
     async getState(): Promise<SchedulerState> {
-      return snapshot(await isEnabled());
+      return snapshot(await isEnabled(), await isDisabledByOperator());
     },
 
     async setEnabled(enabled: boolean): Promise<SchedulerState> {

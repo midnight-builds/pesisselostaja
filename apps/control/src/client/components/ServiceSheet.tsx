@@ -3,6 +3,7 @@ import type { LiveState } from "../../shared/types";
 import { GoogleCheck } from "./service/GoogleCheck";
 import { LogTail } from "./service/LogTail";
 import { PushCheck } from "./service/PushCheck";
+import { SchedulerCheck } from "./service/SchedulerCheck";
 import { ShareSettings } from "./service/ShareSettings";
 
 /** Huoltoarkki — kartan viimeinen tiketti (#188, päätökset #173, #176, #174).
@@ -59,6 +60,10 @@ export function ServiceSheet({ live, notify, onClose }: Props) {
         <div className="sheet__body">
           <GoogleCheck notify={notify} />
           <PushCheck notify={notify} />
+          {/* Käynnistysvahdin kytkin (#208): kerran tehtävä valinta, ei
+              ottelun aikana käytettävä säädin. Ilmoitusten jälkeen, koska
+              vahdin lupaus ("saat ilmoituksen") nojaa niihin. */}
+          <SchedulerCheck notify={notify} />
           <ShareSettings notify={notify} />
           <LogTail live={live} />
         </div>

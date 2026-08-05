@@ -677,6 +677,51 @@ describe("kytkin", () => {
     await expect(second.scheduler.getState()).resolves.toMatchObject({ enabled: true });
   });
 
+  // #208: käynnistysvahti kytkee ajastimen päälle itse, ja ilman tätä eroa se
+  // kytkisi sen takaisin päälle 30 s kuluttua siitä kun operaattori kytki sen
+  // pois. Silloin käsiajoa ei voisi suojata automatiikalta lainkaan — juuri
+  // sitä sääntöä varten ajastin on oletuksena pois päältä.
+  it("erottaa operaattorin päätöksen oletustilasta", async () => {
+    const { scheduler } = build({ jobs: [job()], source: SOURCE.scheduled });
+
+    // Oletus: pois, mutta kukaan ei ole päättänyt niin.
+    await expect(scheduler.getState()).resolves.toMatchObject({
+      enabled: false,
+      disabledByOperator: false,
+    });
+
+    await scheduler.setEnabled(true);
+    await expect(scheduler.getState()).resolves.toMatchObject({
+      enabled: true,
+      disabledByOperator: false,
+    });
+
+    await scheduler.setEnabled(false);
+    await expect(scheduler.getState()).resolves.toMatchObject({
+      enabled: false,
+      disabledByOperator: true,
+    });
+  });
+
+  it("operaattorin päätös säilyy palvelun uudelleenkäynnistyksen yli", async () => {
+    const first = build({ jobs: [job()], source: SOURCE.scheduled });
+    await first.scheduler.setEnabled(true);
+    await first.scheduler.setEnabled(false);
+
+    const second = build({ jobs: [job()], source: SOURCE.scheduled });
+    await expect(second.scheduler.getState()).resolves.toMatchObject({
+      enabled: false,
+      disabledByOperator: true,
+    });
+  });
+
+  it("tikin palauttama tila kertoo saman päätöksen", async () => {
+    const { scheduler } = build({ jobs: [job()], source: SOURCE.scheduled });
+    await scheduler.setEnabled(false);
+
+    await expect(scheduler.tick()).resolves.toMatchObject({ disabledByOperator: true });
+  });
+
   it("pois kytkeminen ei pysäytä mitään — se vain lopettaa uudet toimet", async () => {
     const { scheduler, calls } = build({ jobs: [job({ status: "live" })], source: SOURCE.liveFull });
     await scheduler.setEnabled(true);
