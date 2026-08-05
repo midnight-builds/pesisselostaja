@@ -29,6 +29,50 @@ async function openSheet(page: import("@playwright/test").Page) {
 }
 
 test.describe("huoltoarkki", () => {
+  /** #208: `StartGuard`in oma kommentti väitti kytkimen olevan huoltoarkissa,
+   *  mutta `schedulerEnable` esiintyi koko clientissä kerran ja aina arvolla
+   *  `true`. Tila on pysyvä, joten ensimmäisen mountin jälkeen vahti oli
+   *  päällä ikuisesti — myös päivinä joina kukaan ei ole kentällä. */
+  test("käynnistysvahdin saa kytkettyä molempiin suuntiin", async ({ page, api, openApp }) => {
+    api.scheduler = fixture.schedulerState({ enabled: true });
+    await openApp();
+    await openSheet(page);
+
+    const toggle = page.getByTestId("scheduler-toggle");
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await toggle.click();
+    await expect.poll(() => api.calledWith("POST", "/api/scheduler/enable").length).toBe(1);
+    expect(api.calledWith("POST", "/api/scheduler/enable")[0].body).toEqual({ enabled: false });
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expect(page.getByTestId("scheduler-check")).toContainText("pois päältä");
+
+    // Ja takaisin päälle: yksisuuntainen kytkin oli koko vika.
+    await toggle.click();
+    await expect.poll(() => api.calledWith("POST", "/api/scheduler/enable").length).toBe(2);
+    expect(api.calledWith("POST", "/api/scheduler/enable")[1].body).toEqual({ enabled: true });
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+  });
+
+  test("pois päältä oleva vahti näyttää mitä se olisi tehnyt", async ({ page, api, openApp }) => {
+    // Kuiva-ajo on koko syy siihen että vahdin uskaltaa kytkeä päälle: se
+    // laskee päätöksen kirjoittamatta mitään.
+    api.scheduler = fixture.schedulerState({
+      enabled: false,
+      wouldHaveDone: {
+        at: fixture.NOW,
+        decision: "waiting",
+        jobId: "job-1",
+        reason: "Kuusikon Kipinä – Rantalan Rasti: raakalähetys ei ole vielä livenä.",
+        applied: false,
+      },
+    });
+    await openApp();
+    await openSheet(page);
+
+    await expect(page.getByTestId("scheduler-check")).toContainText("Olisi tehnyt:");
+  });
+
   test("huolto on piilossa, kunnes hammasratasta napautetaan", async ({ page, openApp }) => {
     await openApp();
 
