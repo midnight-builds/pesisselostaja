@@ -124,6 +124,8 @@ export function App() {
           )}
         </div>
       </main>
+      {/* Kotipalkin kaista (#207): ilman sitä alin säädin jää sen alle. */}
+      <div className="safe-bottom" />
 
       {service && <ServiceSheet live={live} notify={notify} onClose={() => setService(false)} />}
 
