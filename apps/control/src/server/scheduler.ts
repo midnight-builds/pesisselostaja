@@ -301,7 +301,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
    *  safe to run on every tick regardless of `enabled`. */
   async function plan(): Promise<Plan> {
     const jobs = await deps.listJobs();
-    const candidate = pickCandidate(jobs);
+    const candidate = pickCandidate(jobs, deps.now());
     const blocking = blockingJob(jobs);
 
     if (!candidate) {
