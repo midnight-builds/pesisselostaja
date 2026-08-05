@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { checkJobBinding, duplicateEnvKeys } from "../src/server/preflight.js";
+import { checkJobBinding, duplicateEnvKeys, mayRepairBinding } from "../src/server/preflight.js";
 import type { Job } from "../src/shared/types.js";
 
 function job(overrides: Partial<Job> = {}): Job {
@@ -114,5 +114,31 @@ describe("preflight job binding (#155)", () => {
       "RELAY_MATCH_ID=145918",
     ].join("\n");
     expect(duplicateEnvKeys(text)).toEqual(["RELAY_MATCH_ID"]);
+  });
+});
+
+/** #209: `.env.relay` on suojaamaton ajastimen käynnistysikkunassa — se
+ *  kirjoitetaan, sitten ajetaan valmiustarkistus (~10 s), ja vasta sitten
+ *  käynnistetään relay. Ikkunassa relay ei ole vielä aktiivinen, joten
+ *  itsekorjauksen ehto täyttyi — ja PrepCard ajaa valmiustarkistuksen
+ *  automaattisesti mountissa, joten riittää että ohjaamo avataan. Ajastimen
+ *  oma sidontatarkistus on jo ajettu, joten #155:n suoja ei laukea. */
+describe("milloin sidonnan saa korjata", () => {
+  const base = { isSelectedJob: true, relayActive: false, schedulerStarting: false };
+
+  it("korjaa operaattorin valitseman työn kun mikään ei ole ajossa", () => {
+    expect(mayRepairBinding(base)).toBe(true);
+  });
+
+  it("ei korjaa työtä jota operaattori ei ole valinnut", () => {
+    expect(mayRepairBinding({ ...base, isSelectedJob: false })).toBe(false);
+  });
+
+  it("ei korjaa ajossa olevan lähetyksen alta", () => {
+    expect(mayRepairBinding({ ...base, relayActive: true })).toBe(false);
+  });
+
+  it("ei korjaa ajastimen käynnistysikkunassa", () => {
+    expect(mayRepairBinding({ ...base, schedulerStarting: true })).toBe(false);
   });
 });
