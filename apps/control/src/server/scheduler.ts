@@ -35,7 +35,7 @@ import type {
   SchedulerState,
   SystemState,
 } from "../shared/types.js";
-import { blockedPushTitle } from "../shared/jobState.js";
+import { blockedPushTitle, isSelectableStart } from "../shared/jobState.js";
 import { activateJob, listJobs, markRunStarted, setJobStatus } from "./jobs.js";
 import { notifySchedulerAction } from "./notifications.js";
 import { runControlPreflight } from "./preflight.js";
@@ -171,9 +171,26 @@ function startKey(job: Job): number {
  *
  *  "draft" is excluded on purpose — a draft is a job the operator has not
  *  finished filling in, and starting a broadcast off a half-entered form is the
- *  exact surprise this whole module is written to avoid. */
-export function pickCandidate(jobs: Job[]): Job | null {
-  const ready = jobs.filter((j) => j.status === "scheduled" && j.sourceUrl);
+ *  exact surprise this whole module is written to avoid.
+ *
+ *  Vanhentunut työ on suljettu pois samalla `isSelectableStart`-rajalla, jota
+ *  `getActiveJob` käyttää (#165). Ilman sitä nämä kaksi olivat eri mieltä
+ *  siitä, mikä "se ottelu" on: eilinen peruuntunut `scheduled`-työ voitti aina
+ *  aikaisimmalla aloitusajallaan, joten tilakortti näytti tämän päivän
+ *  ottelua ja käynnistysvahti pollasi eilistä raakalähetystä. Lopputulos oli
+ *  täysin hiljainen: `waiting`/`source-error` eivät lähetä pushia, joten
+ *  käynnistysikkuna meni ohi ilman mitään merkkiä (#199).
+ *
+ *  Vertailukohta on sama kuin `isForgottenOpenJob`illa: `startsAt`, ja sen
+ *  puuttuessa työn luontihetki — käsin syötetyllä ottelu-ID:llä ei ole
+ *  aloitusaikaa, ja ilman `createdAt`-varaa se olisi ikuisesti tuore. */
+export function pickCandidate(jobs: Job[], now: number = Date.now()): Job | null {
+  const ready = jobs.filter(
+    (j) =>
+      j.status === "scheduled" &&
+      j.sourceUrl &&
+      isSelectableStart(j.startsAt ?? j.createdAt, now)
+  );
   if (ready.length === 0) return null;
   return ready.reduce((best, j) => {
     const d = startKey(j) - startKey(best);
