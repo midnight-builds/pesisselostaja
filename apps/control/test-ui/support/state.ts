@@ -78,6 +78,7 @@ export function authHealth(p: Partial<AuthHealth> = {}): AuthHealth {
     warnings: [],
     quota: { day: "2026-07-28", used: 0, limit: 10000, remaining: 10000 },
     pending: null,
+    checkFailed: false,
     ...p,
   };
 }

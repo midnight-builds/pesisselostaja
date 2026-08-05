@@ -3,6 +3,7 @@ import type { Job, LiveState } from "../shared/types";
 import { isJobClosed } from "../shared/jobState";
 import { connectLive, type LiveConnectionStatus } from "./api";
 import { MatchPicker } from "./components/MatchPicker";
+import { ServiceSheet } from "./components/ServiceSheet";
 import { StateCard } from "./components/StateCard";
 import { Toast, type ToastMessage } from "./components/Toast";
 import { fiTime } from "./format";
@@ -29,6 +30,9 @@ export function App() {
   /** Tässä käyttöliittymässä peruttu työ: sitä ei näytetä vaikka palvelimen
    *  edellinen tikki kertoisi sen vielä olevan valinta. */
   const [dismissed, setDismissed] = useState<string | null>(null);
+  /** Huoltoarkki auki (#188). Ei reittiä eikä tilaa palvelimella: arkki on
+   *  ohikiitävä ja sen sulkeminen palauttaa aina ottelupäivän polulle. */
+  const [service, setService] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => connectLive({ onState: setLive, onStatus: setConnection }), []);
@@ -62,25 +66,35 @@ export function App() {
     <div className="app">
       <div className="safe-top" />
       <header className="topbar">
-        <span className="topbar__id">
-          {job ? (
-            <>
-              <span className="topbar__title">
-                {job.home} – {job.away}
-              </span>
-              <span className="topbar__meta">
-                {[job.seriesName, job.stadium, job.startsAt ? `klo ${fiTime(job.startsAt)}` : null]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            </>
-          ) : (
-            <span className="topbar__title">Ohjaamo</span>
-          )}
-        </span>
+        {/* Otsikko ja meta ovat topbarin ruudukossa omina soluinaan, eivät
+            sisäkkäisessä sarakkeessa: metarivi saa koko leveyden, joten
+            ajastushetki ei katkea kolmeen pisteeseen sen takia, että riville
+            lisättiin hammasratas (#188). Kellonaika on rivin viimeisenä ja
+            oikeat sarja- ja kenttänimet ovat fixtuureja pidempiä. */}
+        <span className="topbar__title">{job ? `${job.home} – ${job.away}` : "Ohjaamo"}</span>
+        {job && (
+          <span className="topbar__meta">
+            {/* Kellonaika ensin: jos rivi jostain syystä katkeaa, katkeaa
+                kenttänimen häntä eikä ajastushetki. */}
+            {[job.startsAt ? `klo ${fiTime(job.startsAt)}` : null, job.seriesName, job.stadium]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        )}
         <span className={`conn conn--${connection}`}>
           {connection === "open" ? "yhteys ok" : connection === "connecting" ? "yhdistetään" : "yhteys poikki"}
         </span>
+        {/* Ainoa navigaatio koko sovelluksessa, ja se johtaa pois ottelupäivän
+            polulta: huolto on olemassa vain kun jokin on rikki (#173). */}
+        <button
+          type="button"
+          className="gear"
+          aria-label="Huolto"
+          onClick={() => setService(true)}
+          data-testid="gear"
+        >
+          <span aria-hidden="true">⚙</span>
+        </button>
       </header>
 
       {/* Ottelun aikana näkymä EI vieri: viisi tietoa ja kaksi säätöä pysyvät
@@ -110,6 +124,8 @@ export function App() {
           )}
         </div>
       </main>
+
+      {service && <ServiceSheet live={live} notify={notify} onClose={() => setService(false)} />}
 
       <Toast toast={toast} onDismiss={() => setToast(null)} />
     </div>

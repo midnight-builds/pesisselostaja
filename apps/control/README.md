@@ -205,26 +205,63 @@ jälkikäteen — teko jota ei näytetä on teko jota ei voi tarkistaa.
   valitsin on kortin alla, ja `getActiveJob` pitää juuri päättyneen työn
   näkyvissä saman kuuden tunnin säännön mukaan kuin keskeneräiset.
 
-Tilakohtainen sisältö kasvaa tilakoneen järjestyksessä omissa PR:issään (#178):
+### Huoltoarkki (#188)
+
+Kaikki mikä **ei** ole ottelupäivän polkua asuu hammasrattaan takana
+(`ServiceSheet` + `components/service/`): Google-yhteys, ilmoitukset,
+jakoviestin pohja ja loki. Ne eivät ole vähemmän tärkeitä — ilman niitä ei lähde
+mitään — mutta ne ovat kerran tehtäviä ja rikkoutuessaan tarkistettavia, eivät
+ottelun aikana käytettäviä (#170). Juuri siksi tilakortti pysyy yhtenä
+silmäyksenä.
+
+- **Arkki peittää ruudun kokonaan.** 393 px:n leveydellä puolikas arkki
+  tarkoittaa, ettei kumpaakaan voi lukea. Se sulkeutuu taustasta, Escistä ja
+  omasta napistaan.
+- **Google-yhteys on yksi kuittausrivi**: "Google-yhteys kunnossa" ja kanavan
+  nimi. Scopet, tokenin ikä ja client id eivät näy missään (#176), eikä
+  käsisyöttökenttiä ole — uusinta käynnistää laitevirran, joka näyttää koodin ja
+  osoitteen ja huomaa itse kun kirjautuminen valmistuu. **Kesken jäänyt
+  laitevirta jatkuu itsestään** kun arkki avataan uudelleen, ja **vanhentunut
+  koodi näytetään nappina eikä näkymänä**: muuten kortti jäisi tuijottamaan
+  kuollutta koodia, eikä yhteyttä voisi enää uusia lainkaan — SSH-varapolkua ei
+  ole.
+- **Vanhenemisesta ja kiintiöstä tulee push, ei punainen rivi arkissa**
+  (`src/server/authWatch.ts`). Refresh token vanhenee Testing-tilassa 7
+  vuorokaudessa eli tyypillisesti ottelupäivien *välissä*, jolloin kukaan ei
+  katso ohjaamoa. Vartija tarkistaa tunnin välein, lähettää vain reunalla (sama
+  varoitus ei toistu tunneittain) eikä koske verkkoon lainkaan ilman tokenia —
+  yhdistämätön ohjaamo ei siis kuluta kiintiötä eikä varoita puuttumisesta,
+  koska se on valmistelun este ja siitä kertoo preflight.
+
+  **Jokainen laji tunnistetaan omasta havainnostaan, ei terveydestä.**
+  `health === "fail"` ei kelpaa vanhenemisen tunnusmerkiksi, koska sen nostavat
+  myös loppunut kiintiö ja epäonnistunut tarkistus: silloin puhelimeen tulisi
+  "uusi Google-yhteys" vaikka yhteydessä ei ole vikaa, ja jos operaattori
+  tottelee, hän purkaa toimivan valtuutuksen ottelupäivän aattona. Siksi
+  kiintiö luetaan kiintiöluvuista **ensin**, vanheneminen `tokenAgeDays`istä
+  (ei `daysSinceSuccess`istä, joka ei enää kasva kun ohjaamo uusii access
+  tokenin tunneittain) ja tavoittamattomuus omasta `checkFailed`-bitistään
+  vasta kun se on kestänyt kaksi tarkistusta.
+- **Loki on ohjaamon ainoa tekninen taso.** SSH:ta ei käytetä koskaan (#176),
+  joten vianetsinnän on onnistuttava täältä: rivit näytetään koneen kielellä,
+  ja mukana on palvelimen `headline` sekä levytila — samat, jotka ovat
+  ottelupäivän polulla kiellettyjä.
+- **Jakoviestin pohja ja kenttänimen siivous** tallentuvat osittaisella
+  PATCHilla (#133), joten viestin muokkaus ei nollaa kytkimiä.
+
+Tilakohtainen sisältö kasvoi tilakoneen järjestyksessä omissa PR:issään (#178):
 valmistelu ja lähetysparin luonti (#184) → ajastettu-tila ja pushit (#185) →
 ottelunaikainen kertasilmäys, viivesäätö ja selostuslista (#186) →
 päättynyt-tila ja siivous (#187) → huoltoarkki (#188). Vanhat näkymät ja niiden
 komponentit on poistettu; niitä ei ole säilytetty velvollisuudesta, ja tarvittava
 pala poimitaan git-historiasta.
 
-**Huollolle ei siis ole vielä käyttöliittymää** (asetukset, Google-valtuutus,
-ilmoitusasetukset, loki, videot). Palvelinreitit ovat paikallaan ja toimivat;
-huoltoarkki tulee viimeisenä, joten jos Google-valtuutus vanhenee sitä ennen,
-uudelleenvaltuutus tehdään palvelinreitin kautta käsin — tiedostettu riski
-(#178).
-
 ## Push-ilmoitukset
 
 Ilmoitukset lähetetään palvelimelta selaimen push-palvelun kautta (`web-push`,
 ainoa ajonaikainen riippuvuus — VAPID-JWT ja hyötykuorman salaus ovat kryptoa,
 jota ei kirjoiteta itse). Neljä laukaisijaa, kaikki kytkettävissä pois
-`POST /api/push/prefs`illa; käyttöliittymä niille tulee huoltoarkin mukana
-(#188):
+`POST /api/push/prefs`illa huoltoarkin kytkimillä (#188):
 
 | Laukaisija | Ehto |
 |-----------|------|
@@ -233,6 +270,7 @@ jota ei kirjoiteta itse). Neljä laukaisijaa, kaikki kytkettävissä pois
 | Valmistelu ja käynnistys | relay siirtyi ajoon, tai preflightissä oli esteitä |
 | Lähetys katkesi | relay poistui ajosta kesken ottelun |
 | Selostettu lähetys päättyi | työn **siivous kirjattiin** (`Job.cleanup`, #187) — ei siitä että työ sulkeutui |
+| Google-yhteys vaatii tekoa | tokenin ikä ≥ 6 vrk, päivän kiintiöstä käytetty 80 %, tai yhteys tavoittamattomissa kaksi tarkistusta (`authWatch.ts`, #188) — `startup`-preferenssin alla, koska se estää valmistelun |
 
 Hyvänä päivänä puhelin piippaa täsmälleen kolme kertaa (#174): *Lähetyspari
 valmiina* → *Lähetys käynnistyi* → *Selostettu lähetys päättyi*. Otsikot tulevat
@@ -369,8 +407,7 @@ pahempi kuin viesti, jota ei vielä ole.
 Pysyväisasetukset yhdessä paikassa (#133): `GET /api/settings` ja osittainen
 `PATCH /api/settings`. Talletus jakautuu samoihin `run/`-tiedostoihin kuin
 ennenkin, joten hätätilassa ne voi yhä korjata tiedostoselaimella — sivu on
-normaali tie, ei ainoa tie. Käyttöliittymä niille tulee huoltoarkin mukana
-(#188); tällä hetkellä ainoa tie on reitti tai tiedosto.
+normaali tie, ei ainoa tie. Käyttöliittymä on huoltoarkissa (#188).
 
 | Kortti | Tiedosto |
 |---|---|
@@ -408,7 +445,7 @@ pohja — oletukset levylle käynnistyksessä, luku joka pyynnöllä:
 ```
 
 Vain kirjaimellinen `false` sammuttaa säännön; roska tai merkkijono `"false"`
-tarkoittaa oletusta. Käyttöliittymä tulee Asetukset-sivun mukana (#133).
+tarkoittaa oletusta. Kytkimet ovat huoltoarkissa (#133, #188).
 
 ## Vaiheet
 
