@@ -323,6 +323,10 @@ export async function runControlPreflight(job?: Job | null, repair?: PreflightRe
   // is covered — including phase B's automatic arming, where a blocker is
   // found with nobody looking at the screen. Fire-and-forget: a push service
   // outage must not turn a successful preflight into an HTTP 500.
-  void notifyPreflightBlockers(result).catch(() => undefined);
+  // Työ mukana, jotta tagi on työkohtainen (#205): kiinteä "preflight-blocked"
+  // vaimensi seuraavan esteen 10 minuutiksi, ja PrepCard ajaa tarkistuksen
+  // joka mountissa — klo 9:00 avattu ohjaamo saattoi siis vaientaa 9:05
+  // tulevan käynnistyksen esteen kokonaan.
+  void notifyPreflightBlockers(result, job?.id ?? null).catch(() => undefined);
   return result;
 }
