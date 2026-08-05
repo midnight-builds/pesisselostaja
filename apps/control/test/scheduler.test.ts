@@ -472,17 +472,73 @@ describe("ehdokkaan valinta", () => {
   });
 
   it("jättää keskeneräisen luonnoksen rauhaan", () => {
-    expect(mod.pickCandidate([job({ status: "draft" })])).toBeNull();
+    expect(mod.pickCandidate([job({ status: "draft" })], NOW)).toBeNull();
   });
 
   it("jättää työn jolla ei ole lähde-URLia", () => {
-    expect(mod.pickCandidate([job({ sourceUrl: null })])).toBeNull();
+    expect(mod.pickCandidate([job({ sourceUrl: null })], NOW)).toBeNull();
   });
 
   it("valitsee aikaisimmin alkavan", () => {
     const late = job({ id: "late", startsAt: "2026-07-29T12:00:00.000Z" });
     const early = job({ id: "early", startsAt: "2026-07-29T09:00:00.000Z" });
-    expect(mod.pickCandidate([late, early])?.id).toBe("early");
+    expect(mod.pickCandidate([late, early], NOW)?.id).toBe("early");
+  });
+
+  // #199: `getActiveJob` tuntee #165:n ikärajan, `pickCandidate` ei tuntenut.
+  // Eilinen työ voitti aina aikaisimmalla aloitusajallaan, joten tilakortti ja
+  // käynnistysvahti seurasivat eri työtä — hiljaisesti, koska waiting/
+  // source-error eivät lähetä pushia.
+  it("ohittaa eilisen unohtuneen työn, vaikka sen aloitusaika on aikaisempi", () => {
+    const eilinen = job({
+      id: "eilinen",
+      startsAt: "2026-07-28T15:00:00.000Z",
+      createdAt: "2026-07-28T14:00:00.000Z",
+    });
+    const tanaan = job({ id: "tanaan", startsAt: "2026-07-29T10:00:00.000Z" });
+    expect(mod.pickCandidate([eilinen, tanaan], NOW)?.id).toBe("tanaan");
+    expect(mod.pickCandidate([eilinen], NOW)).toBeNull();
+  });
+
+  it("käyttää luontihetkeä ikärajaan kun aloitusaikaa ei ole (käsin syötetty ottelu-ID)", () => {
+    const vanha = job({ id: "vanha", startsAt: null, createdAt: "2026-07-28T04:00:00.000Z" });
+    const tuore = job({ id: "tuore", startsAt: null, createdAt: "2026-07-29T04:00:00.000Z" });
+    expect(mod.pickCandidate([vanha, tuore], NOW)?.id).toBe("tuore");
+  });
+
+  it("ei pollaa eilisen työn raakalähetystä lainkaan", async () => {
+    const eilinen = job({
+      id: "eilinen",
+      startsAt: "2026-07-28T15:00:00.000Z",
+      createdAt: "2026-07-28T14:00:00.000Z",
+    });
+    const { scheduler, calls } = build({ jobs: [eilinen], source: SOURCE.liveFull });
+    await scheduler.setEnabled(true);
+
+    const state = await scheduler.tick();
+
+    expect(calls.checkSource).not.toHaveBeenCalled();
+    expect(writes(calls)).toEqual([]);
+    expect(state.lastAction).toMatchObject({ decision: "idle" });
+    expect(state.nextJob).toBeNull();
+  });
+
+  it("seuraa samaa työtä kuin tilakortti kun eilinen työ on yhä jonossa", async () => {
+    const eilinen = job({
+      id: "eilinen",
+      startsAt: "2026-07-28T15:00:00.000Z",
+      createdAt: "2026-07-28T14:00:00.000Z",
+      sourceUrl: "https://example.invalid/eilen",
+    });
+    const tanaan = job({ id: "tanaan", startsAt: "2026-07-29T05:30:00.000Z" });
+    const { scheduler, calls } = build({ jobs: [eilinen, tanaan], source: SOURCE.liveFull });
+    await scheduler.setEnabled(true);
+
+    const state = await scheduler.tick();
+
+    expect(calls.checkSource).toHaveBeenCalledWith(tanaan.sourceUrl);
+    expect(state.nextJob).toMatchObject({ id: "tanaan" });
+    expect(state.lastAction).toMatchObject({ decision: "start", jobId: "tanaan", applied: true });
   });
 });
 
