@@ -1,8 +1,8 @@
-# Relay — suunnitelma ja tehdyt päätökset
+# Relay — voimassa olevat päätökset
 
-Tämä on relay-osajärjestelmän alkuperäinen suunnitteludokumentti (heinäkuu 2026):
-mitä rakennettiin, mitkä vaihtoehdot hylättiin ja miksi. Käyttöohje on
-[README.md](README.md):ssä.
+Relay-osajärjestelmän rakennepäätökset ja niiden perustelut. Vain voimassa
+olevat: kumotut päätökset ja rakennusvaiheiden historia on poistettu, koska
+niitä luettiin ohjeina. Käyttöohje on [README.md](README.md):ssä.
 
 ## Tavoite
 
@@ -30,22 +30,16 @@ Kaksi vaihtoehtoa punnittiin:
   ja vankempi, mutta alkuperäinen live olisi riippuvainen relaystä — käyttäjä
   valitsi A:n nimenomaan siksi, että originaali lähetys säilyy itsenäisenä.
 
-### Käsinpariutus, ei YouTube API -automaatiota — **kumottu (#124)**
+### Lähetysparin luo ohjaamo; relay vain lukee sidontansa
 
-> **Tämä päätös ei ole enää voimassa.** Ohjaamo (`apps/control`) tekee
-> nimenomaan sen, mikä tässä hylättiin: YouTube Live Data API + Google OAuth,
-> `createBroadcastPair` luo molemmat lähetykset ja kirjoittaa sidonnan itse.
-> Käsinpariutus on varapolku, jota käytetään vain kun ohjaamo tai sen
-> valtuutus ei toimi. Päätös on jätetty näkyviin, koska se selittää miksi
-> relay lukee yhä `.env.relay`:tä — ohjaamosta relayyn on täsmälleen kaksi
-> kosketuspintaa, tuo tiedosto ja control-tiedosto, eikä kolmatta rakenneta
-> (#59). Älä palauta alkuperäistä perustelua ohjeeksi.
+Relay ei puhu YouTube Data API:lle eikä tiedä lähetysten luonnista mitään. Se
+lukee ottelun, lähteen ja kohteen `apps/broadcast/.env.relay`-tiedostosta, jonka
+ohjaamo (`apps/control`) kirjoittaa luodessaan lähetysparin.
 
-Alkuperäinen perustelu: käyttäjä luo toisen lähetyksen käsin YouTube Studiossa
-ja antaa sen RTMP-osoitteen + avaimen `.env.relay`-tiedostossa. YouTube Live
-Data API + Google OAuth -automaatio hylättiin: paljon monimutkaisempi
-(OAuth-virrat, kiintiöt) eikä tarpeen, kun lähetyksiä luodaan yksi per ottelu
-käsin.
+**Ohjaamosta relayyn on täsmälleen kaksi kosketuspintaa** — tuo tiedosto ja
+`run/.control-<ID>.json`. Kolmatta ei rakenneta (#59): relay ajaa pinnatusta
+`~/relay-deploy`-kopiosta, joka voi olla ohjaamoa vanhempi, joten mikä tahansa
+prosessien välinen sopimus vanhenisi juuri kun se on kriittisin.
 
 ### Oma hakemisto + oma palvelu samassa repossa
 
@@ -133,44 +127,24 @@ Hylätty vaihtoehto: ffmpegin `azmq`/`sendcmd`-filtterit dynaamiseen
 wav-toistoon ilman FIFO:a — vaatisi libzmq-käännetyn ffmpegin ja erillisen
 ohjauskanavan, eikä poistaisi reaaliaikatahdituksen ongelmaa.
 
-## Riskit ja avoimet kysymykset
+## Rajoitteet, jotka on opittu kantapään kautta
 
-- **HLS-URL:n vanhenemiskäyttäytyminen** ei ole varmuudella tiedossa —
-  suunnitelma olettaa pahimman (voi vaihtua kesken ottelun); 5 min testiajo
-  (2026-07-10) ei osunut URL-rotaatioon (15 min kynnys ei
-  ehtinyt täyttyä) — vahvistettava vielä pidemmällä testistriimillä.
-- **`-reconnect`/`-reconnect_streamed`/`-reconnect_at_eof`-liput jumittivat
-  HLS-luvun kokonaan** googlevideon m3u8-lähteen kanssa (löytyi 2026-07-10
-  ensimmäisessä live-testissä: ffmpeg söi CPU:ta muttei tuottanut mitään).
-  Poistettu — `hls`-demukserilla on jo oma segmenttikohtainen
-  reconnect-logiikkansa, ja sama testi osoitti sen selviävän itse lyhyestä
-  TLS-katkosta ilman näitä lippuja.
-- **YouTuben ingest voi olla nirso keyframe-välistä** `-c:v copy`:n kanssa
-  (alkuperäinen striimaaja määrää GOP-rakenteen) — tarkista YouTube Studion
-  ingest-terveys ensimmäisessä oikeassa RTMP-live-testissä (ei vielä tehty,
-  koska toista YouTube-lähetystä ei ole ollut käytettävissä).
-- **FIFO:n 20 ms -tahditus**: 5 min testiajo tuotti jatkuvan, validin
-  mp4:n (98 Mt, kesto täsmäsi ajoaikaan) ilman havaittuja katkoja, mutta
-  ääntä ei kuunneltu läpi — pidempi soak-testi ja kuuntelu suositeltavaa
-  ennen oikeaa lähetystä.
-- **Resurssit**: `-c:v copy` on kevyt, mutta HLS-pull + RTMP-push + piper
-  vievät muistia/verkkoa jaetulla koneella — seuraa RSS/CPU:ta live-testeissä.
-- **`fetchLiveEvents`/`fetchMatchMetadata` ilman aikakatkaisua** (`src/api.ts`)
-  aiheutti live-testissä 4 min 9 s:n selostuskatkon (hetkellinen verkkohikka
-  jätti `fetch()`-kutsun roikkumaan rajattomasti), minkä jälkeen kaikki sinä
-  aikana kertyneet tapahtumat purskahtivat ulos kerralla — kuulosti
-  satunnaiselta selostukselta. Korjattu 2026-07-10: molemmat käyttävät nyt
-  samaa 8 s `fetchWithTimeout`-apuria mitä `fetchLiveMatches` jo käytti.
+Nämä ovat sääntöjä, eivät muistiinpanoja: jokainen on kaatanut lähetyksen tai
+selostuksen kerran, ja koodi nojaa niihin nyt.
 
-## Välietapit ja tila
-
-| # | Sisältö | Tila |
-|---|---|---|
-| M0 | Käsin ajettu yt-dlp/piper/ffmpeg-savutesti | ✅ (2026-07-10, oikea livestriimi) |
-| M1 | Runko: config, logitus, systemd | ✅ |
-| M2 | Passthrough pull/republish valvottuna | ✅ (2026-07-10, `--record-file`-tila, 5 min, löytyi+korjattiin reconnect-lippu-bugi) |
-| M3 | FIFO-putkitus testiäänellä | koodi + yksikkötestit ✅; pidempi soak-testi + kuuntelu tekemättä |
-| M4 | Selostussilmukka dry-runilla | ✅ (dry-run + oikea synteesi molemmat ajettu oikealla ottelulla) |
-| M5 | Täysi päästä-päähän-integraatio | osittain: pull+mix+paikallistallennus testattu oikealla ottelulla (M2); RTMP-julkaisu toiseen YouTube-lähetykseen vielä testaamatta (ei toista lähetystä käytettävissä) |
-| M6 | Sietokykytestaus (kaatumiset, URL-rotaatio, RTMP-katkot) | tekemättä; yksi verkkokatko selvisi testissä itsestään (ks. riskit) |
-| M7 | Dokumentaatio | ✅ (README.md + tämä tiedosto) |
+- **`-reconnect`-lippuja ei käytetä HLS-lähteessä.**
+  `-reconnect`/`-reconnect_streamed`/`-reconnect_at_eof` jumittivat lukemisen
+  kokonaan googlevideon m3u8-lähteellä: ffmpeg söi CPU:ta tuottamatta mitään.
+  `hls`-demukserilla on oma segmenttikohtainen reconnect-logiikkansa, joka
+  selviää lyhyestä TLS-katkosta itse.
+- **Jokaisella tulospalvelun kutsulla on aikakatkaisu.** Ilman sitä yksi
+  verkkohikka jätti `fetch()`-kutsun roikkumaan rajattomasti, selostus katkesi
+  neljäksi minuutiksi ja purskahti sitten ulos kerralla. Kaikki `src/api.ts`:n
+  haut käyttävät samaa `fetchWithTimeout`-apuria.
+- **HLS-URL voi vaihtua kesken ottelun**, joten yt-dlp-lähde uusitaan
+  määrävälein eikä pidetä yhtä URLia koko ajon.
+- **YouTuben ingest on nirso keyframe-välistä** `-c:v copy`:n kanssa, koska
+  GOP-rakenteen määrää alkuperäinen striimaaja — emme me.
+- **Resurssit:** `-c:v copy` on kevyt, mutta HLS-pull + RTMP-push + TTS vievät
+  muistia ja verkkoa jaetulla koneella. Levytila alle 2 Gt pysäyttää kaiken
+  kirjoittavan.

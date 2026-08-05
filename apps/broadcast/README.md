@@ -5,8 +5,9 @@ Pesisselostaja's spoken commentary (synthesized with the same Piper voice v2
 uses), and republishes the result as a **second, separate** YouTube live
 broadcast. The original broadcast is never touched — this only reads it.
 
-See [DESIGN.md](DESIGN.md) for the full architecture/rationale and the
-decisions behind it. This file is the day-to-day operator runbook.
+See [DESIGN.md](DESIGN.md) for the architecture and the reasoning behind it.
+This file documents the pipeline itself; match day is run from the ohjaamo
+(`apps/control`), not from here.
 
 ## One-time setup
 
