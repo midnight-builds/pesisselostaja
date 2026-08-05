@@ -83,7 +83,14 @@ korvattu tällä; älä palauta sitä. Sama teksti on `.claude/skills/relay-otte
 lähetysten luonti, jakoviesti, käynnistys, ajonaikainen ohjaus ja siivous
 (issue #124). Käsityökierros YouTube Studiossa on **poikkeuspolku**, jota
 käytetään vain kun ohjaamo tai sen YouTube-valtuutus ei toimi — ei runbook.
-Ajaminen: `/relay-ottelu` (polku A = ohjaamo, polku B = käsityö).
+
+**Ajaminen tapahtuu ohjaamon käyttöliittymästä, ei agentin kautta.** Kartta
+#168 vei ketjun käyttöliittymään asti: yksi tilakortti puhelimen ruudulla,
+ei navigaatiota, ei terminaalia. `/relay-ottelu` **ei ole ajotapa vaan
+varapolku** — se on osoitin ohjaamoon plus se, mitä tehdään kun ohjaamo ei
+riitä (deploy, käsikäynnistys vahdin pettäessä, vianetsintä lokista,
+käsikierros Studiossa). Jos ajat ottelun agentin kautta, olet ohittanut sen
+mitä varten ohjaamo tehtiin.
 
 Kaksi asiaa, jotka ovat menneet väärin nimenomaan tässä:
 

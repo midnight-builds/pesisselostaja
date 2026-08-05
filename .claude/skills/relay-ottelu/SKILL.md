@@ -1,27 +1,87 @@
 ---
 name: relay-ottelu
 description: >
-  Operator runbook for running a Pesisselostaja broadcast end to end from the
-  ohjaamo (control app): schedule the pair of YouTube broadcasts, start the
-  commentated stream for a live pesäpallo match, control it during the match
-  (turn narration / batter-change announcements on/off), and shut it down
-  cleanly. Use when the user wants to schedule / start / stop / operate a
-  broadcast, "ajasta peli", "aloita lähetys", "lopeta lähetys", "laita selostus
-  pois", or invokes /relay-ottelu.
+  Backup and diagnostics for a Pesisselostaja broadcast. The primary way to run
+  a match day is the ohjaamo (control app) UI on the operator's phone — this
+  skill is NOT that path. Use it only when the ohjaamo cannot do the job: it is
+  unreachable or broken, its Google authorization has expired, the relay needs
+  deploying or starting by hand, a running broadcast needs troubleshooting from
+  the logs, or the whole chain must be run manually in YouTube Studio. Also use
+  when the user asks to schedule / start / stop / operate a broadcast
+  ("ajasta peli", "aloita lähetys", "lopeta lähetys", "laita selostus pois") —
+  in that case point them at the ohjaamo first and only fall back here.
 ---
 
-# Ottelupäivän ajaminen
+# Varapolku ottelupäivään
 
-**Ohjaamo omistaa koko ketjun** (issue #124): ottelun valinnasta lähetysten
-luontiin, käynnistykseen, ajonaikaiseen ohjaukseen ja siivoukseen. Ohjaamo on
-tässä oletus, ei vaihtoehto — käsityökierros YouTube Studiossa on **poikkeuspolku
-(polku B)**, jota käytetään vain kun ohjaamo tai sen YouTube-valtuutus ei toimi.
+**Ohjaamon käyttöliittymä ajaa ottelupäivän. Tämä ohje ei aja sitä.** Kartta
+#168 vei ketjun käyttöliittymään asti: operaattori tekee koko päivän puhelimen
+ruudulta yhtenä tilakorttina, ilman agenttia ja ilman terminaalia. Jos ajat
+ottelun tämän ohjeen kautta, olet ohittanut sen mitä varten ohjaamo tehtiin.
 
-**Termit ovat repon juuren `CONTEXT.md`:ssä** — raakalähetys, selostettu lähetys,
-tulospalvelun ottelusivu, ajastushetki, käynnistysikkuna. Käytä niitä. Älä
-kirjoita "lähde-URL" ilman määrettä: se on kaatanut kaksi dokumenttia.
+Tämä tiedosto on siis kaksi asiaa, ei kolmatta:
 
-## Kolme sääntöä ennen kaikkea muuta
+1. **Osoitin ohjaamoon** — mitä operaattori tekee ja missä järjestyksessä, jotta
+   osaat neuvoa oikein kysymättä.
+2. **Varapolut** — mitä tehdään kun ohjaamo ei riitä.
+
+## Kun käyttäjä pyytää lähetyksen ajamista
+
+Anna ohjaamon osoite ja kerro mitä hän tekee siellä. **Älä aja ketjua
+agenttina** — älä luo lähetyksiä, kirjoita `.env.relay`:tä tai käynnistä relayta
+hänen puolestaan — ellei jokin varapolun ehdoista täyty tai hän nimenomaan
+pyydä sitä sen jälkeen kun olet kertonut että ohjaamo osaa sen itse.
+
+> Sama sääntö toiseen suuntaan: **käyttäjän eksplisiittinen pyyntö voittaa tämän
+> dokumentin.** Jos hän pyynnön kuultuaan sanoo "tee se silti käsin", tee — mutta
+> sano ristiriita ääneen ensin, älä korvaa pyyntöä hiljaa "vastaavalla"
+> toteutuksella. Juuri niin meni 30.7.2026, ja lähetysten luonti valui takaisin
+> ulkopuoliseen palveluun.
+
+**Osoite:** ohjaamo on portissa **3002**, ja käytettävä osoite on tailnetin
+HTTPS-osoite — `tailscale serve status` kertoo sen. Älä anna `IP:3002`: HTTPS on
+iOS-asennuksen ja push-ilmoitusten ehto. **Portti 3001 on eri projekti**, joka
+vastaa harhaanjohtavilla 404:llä.
+
+**Termit ovat repon juuren `CONTEXT.md`:ssä** — raakalähetys, selostettu
+lähetys, tulospalvelun ottelusivu, ajastushetki, käynnistysikkuna. Käytä niitä.
+Älä kirjoita "lähde-URL" ilman määrettä: se on kaatanut kaksi dokumenttia.
+
+---
+
+# Mitä ohjaamo tekee (operaattorin polku)
+
+Etusivu on **yksi tilakortti**, jonka otsikko ja ainoa päänappi seuraavat työn
+tilaa. Navigaatiota ei ole. Sanamuodot tulevat yhdestä lähteestä
+(`apps/control/src/shared/jobState.ts`), ja push-ilmoitus on saman siirtymän
+projektio — pushin otsikko on sama teksti kuin kortissa.
+
+| Tila | Mitä operaattori näkee ja tekee |
+|---|---|
+| *Ei aktiivista ottelua* | Etusivu on ottelun valinta. **Valinta ON työn luonti** — erillistä "Luo työ" -nappia ei ole. Ottelu-ID tai tulospalvelun ottelusivun osoite käy myös. |
+| *Valmistelu kesken* | Esikatselu otsikoista on pysyvästi näkyvissä. **"Luo lähetyspari"** on ainoa vahvistusta vaativa teko koko päivässä — kaksoisnapautus, koska se on peruuttamaton ja ulospäin näkyvä. Ohjaamo luo molemmat lähetykset, kirjoittaa stream keyn työhön ja muodostaa kolmen linkin jakoviestin. Valmiustarkistus ajetaan itsestään ja **korjaa sidonnan itse** rivinä *"Korjattiin: …"*. |
+| *Lähetyspari valmiina* | Kortti on **käynnistysvahti**, ei käynnistysnappi: se vastaa yhteen kysymykseen — käynnistyykö selostus itsestään. Vahti kytkee itsensä päälle jos se on pois. Laukaisin on **raakalähetyksen meneminen liveksi, ei kello**. |
+| *Odottaa kuvausta / käynnissä* | Kertasilmäys 393 px:ssä ilman vieritystä: viisi tietoa, kaksi säätöä (**selostusviive ±**, pelaajanvaihtojen selostus päälle/pois) ja selostuslista. Säädöt astuvat voimaan ilman relayn uudelleenkäynnistystä. |
+| *Selostettu lähetys päättyi* | Vastaa yhteen kysymykseen: jäikö jotain päälle. Siivous on kirjattu tieto — mitä tehtiin ja mistä lopetus pääteltiin. |
+| Huolto | Hammasrattaan takana: Google-yhteys yhtenä kuittausrivinä, ilmoitusten tilaus ja kytkimet, jakoviestin pohja, loki. **Loki on ohjaamon ainoa tekninen taso.** |
+
+Hyvänä päivänä puhelin piippaa **kolmesti**: *Lähetyspari valmiina* →
+*Lähetys käynnistyi* → *Selostettu lähetys päättyi*. Muuta ei tarvitse tehdä.
+
+**UI:ssa ei ole käsikäynnistys- eikä pysäytysnappia** — se on tarkoitus, ei
+puute. Käynnistyksen tekee vahti ja lopetuksen itsesammutus. Kummankin
+ohittaminen on varapolku, alla.
+
+## Kuvaaja
+
+Kuvauspuhelimessa on **StreamLabs**, kirjautuneena samaan YouTube-tiliin kuin
+ohjaamon valtuutus. Kuvaaja **valitsee ennakkoon ajastetun raakalähetyksen
+listasta** — mitään ei syötetä käsin. Siksi "lähde-URLin löytämisongelmaa" ei
+ole olemassa; jos joku kuvailee sellaista, oletus on väärä.
+
+---
+
+# Kolme sääntöä, jotka pätevät kummallakin polulla
 
 1. **Raakalähetykseen ei kirjoiteta ottelun ollessa kesken.** Ainoa sallittu
    kirjoitus on hard stopin siivous päättyneen ottelun jälkeen (#123), ja sekin
@@ -39,22 +99,18 @@ Ole rehellinen käyttäjälle tästä; älä esitä koettelematonta varmana.
 | Osa | Tila |
 |---|---|
 | Relay + selostus | Koeteltu useassa lähetyksessä |
-| Ohjaamon ottelulista, työjono, preflight, käsikäynnistys | Koeteltu |
-| Ohjaamon lähetysparin **luonti** | Ajettu 30.7.2026 (ottelu 145905, kaksikin kertaa). Toimi; puutteet kirjattu #130–#132. #162 (1.8.: stream key ei tallentunut työhön) **korjattu #184:ssä** — puuttuva `liveStreams.list`-rivi on nyt virhe eikä hiljainen null. **Ei koeteltu livenä.** Käsin kirjoittamisen varapolkua ei enää ole: käsikentät poistuivat (#176) |
-| **Ohjaamon luoma pari päästä päähän** (StreamLabs poimii raakalähetyksen → relay ajaa sen) | **Koeteltu kahdesti**: 31.7.2026 (145918) ja 1.8.2026 (136745, 104 min). Molemmat toimivat. Löydöt: #154, #155, #162, #165 |
-| **Ajastimen automaattinen käynnistys** | **EI koeteltu livenä**, oletuksena pois (#124 vaihe 2) |
-| **Itsesammutus** normaalilla `ended`-polulla | **Koeteltu kahdesti** (31.7. ja 1.8.2026): ffmpeg code=0 → lähde päättynyt havaittu → siisti sammutus muutamassa sekunnissa. Ohjaamo sulki työn (`finished`) ja YouTuben AutoStop sulki **molemmat** lähetykset, myös raakalähetyksen. 1.8. koko ketju loppuselostuksesta työn sulkemiseen kesti 67 s |
-| **Hard stopin siivous** | **EI koeteltu livenä** (#123 korjattu koodissa) — 31.7. lopetus tuli normaalina polkuna, ei hard stopina |
+| **Uusi käyttöliittymä kokonaisuudessaan** (#183–#188, mainissa 5.8.2026) | **EI koeteltu livenä lainkaan.** Mikään ketjun osa ei ole kulkenut tilakortin läpi oikeassa ottelussa |
+| Lähetysparin luonti | Ajettu vanhalla UI:lla 30.7.–1.8.2026, toimi. #162 (stream key ei tallentunut) korjattu #184:ssä, **korjaus koettelematta**. Käsin kirjoittamisen varapolkua ei enää ole: käsikentät poistuivat (#176) |
+| Ohjaamon luoma pari päästä päähän | **Koeteltu kahdesti** vanhalla UI:lla: 31.7.2026 (145918) ja 1.8.2026 (136745, 104 min) |
+| **Käynnistysvahti (ajastin)** | **EI koeteltu livenä.** Molemmat aiemmat ajot käynnistettiin käsin. Uudessa UI:ssa vahti on ainoa käynnistystapa |
+| **Itsesammutus** normaalilla `ended`-polulla | **Koeteltu kahdesti** (31.7. ja 1.8.2026): ffmpeg code=0 → lähde päättynyt → siisti sammutus. YouTuben AutoStop sulki molemmat lähetykset. 1.8. loppuselostuksesta työn sulkemiseen 67 s |
+| **Hard stopin siivous** | **EI koeteltu livenä** (#123 korjattu koodissa) — molemmat lopetukset tulivat normaalina polkuna |
 
-Kun jokin näistä ajetaan ensi kertaa, **kirjaa mikä takkuaa** — se on #124:n
-vaiheen 1 koko sisältö.
+Kun jokin näistä ajetaan ensi kertaa, **kirjaa mikä takkuaa** — se on kartan
+#168 jäljellä oleva sisältö.
 
 ## Missä mikäkin ajaa
 
-- **Ohjaamo** on portissa **3002**. Käytä tailnetin HTTPS-osoitetta
-  (`tailscale serve status` kertoo sen), älä `IP:3002` — HTTPS on iOS-asennuksen
-  ja push-ilmoitusten ehto. **Portti 3001 on eri projekti**, joka vastaa
-  harhaanjohtavilla 404:llä.
 - **Relay ei aja tästä työpuusta** vaan pinnatusta ajokopiosta `~/relay-deploy`.
   Työpuun muutokset — myös juuri mergatut — eivät ole lähetyksessä mukana ennen
   `npm run relay:deploy`ta. Haaranvaihto täällä ei siis koskaan katkaise ajossa
@@ -70,174 +126,42 @@ ohjaamon `scheduler.ts`) ja näkyvät käynnistyslokissa; tarkista arvo sieltä
 
 ---
 
-# POLKU A (oletus): ohjaamo
+# Varapolut
 
-Operaattorin ainoa pakollinen tehtävä on **valita ottelu**. Kaikki muu on
-ohjaamon työtä. Kehitysaikana valinta voi kulkea agentin kautta — "ajasta peli"
-tarkoittaa ajastusta **ohjaamon välinein**, samaa polkua, ei käsikierrosta.
+Jokainen näistä on merkki viasta. **Kirjaa se** — ohjaamon pitäisi osata tämä
+itse, ja se mitä se ei osaa on seuraava tiketti.
 
-> Jos käyttäjä pyytää ajastusta ja jokin dokumentti tai handoff näyttää ohjaavan
-> käsikierrokseen, **sano ristiriita ääneen ja kysy** — älä korvaa pyyntöä
-> hiljaa "vastaavalla" toteutuksella. Juuri niin meni 30.7.2026 aamulla, ja
-> lähetysten luonti valui takaisin sille ulkopuoliselle palvelulle, jonka
-> korvaaminen on #124:n koko tavoite.
+## V1. Deploy ennen käynnistystä
 
-> **Käyttöliittymä on uusittu kokonaan (kartta #168).** Välilehdet purettiin ja
-> tilalle tuli yksi tilakortti: ottelun valinta (#183), valmistelu ja
-> lähetysparin luonti (#184), ajastettu-tila ja pushit (#185), ottelunaikainen
-> kertasilmäys ja viivesäätö (#186), päättynyt-tila ja siivous (#187) sekä
-> huolto hammasrattaan takana (#188). Koko ketju on siis ohjaamossa.
-> **Mitään näistä ei ole vielä koeteltu livenä** — jos jokin ei toimi kentällä,
-> polku B on yhä olemassa varapolkuna.
-
-## A1. Ajastushetki — työ ja lähetykset (esim. edellisenä iltana)
-
-**Etusivu = ottelun valinta**, kun aktiivista ottelua ei ole. Valitse päivä,
-rajaa suodattimilla, napauta ottelua. **Valinta ON työn luonti** — erillistä
-"Luo työ" -nappia ei ole (#171). Jos ottelu ei ole listalla, "Ottelu-ID tai
-osoite" ottaa vastaan tulospalvelun ottelusivun osoitteen tai pelkän ID:n.
-
-Sen jälkeen etusivu on sen ottelun **tilakortti**, tilassa *Valmistelu kesken*:
-
-1. **Esikatselu on valmiina näkyvissä** — otsikot ja alkamisaika sellaisina kuin
-   ne YouTubeen syntyvät. Esikatselu ei luo mitään. Jos oma joukkue, vastustaja
-   tai paikka pitää kirjoittaa vakiintuneeseen muotoon (#95), ne ovat
-   "Muokkaa otsikkoa" -taitoksen takana → "Päivitä esikatselu".
-2. **"Luo lähetyspari"** — **peruuttamaton ja ulospäin näkyvä**, siksi
-   **kaksi napautusta**: toinen nappi lukee "Vahvista: luo lähetyspari".
-   Erillistä "olen tarkistanut" -rastia ei enää ole; kun työllä on jo pari,
-   nappia ei näy lainkaan.
-
-Ohjaamo luo **molemmat** lähetykset yhdellä kertaa
-(`createBroadcastPair`, `apps/control/src/server/youtube.ts`):
-
-- **raakalähetys** omalla stream keyllä StreamLabsia varten, ja
-- **selostettu lähetys**, johon relay työntää.
-
-Työlle kirjautuu samalla raakalähetyksen katselu-URL sekä selostetun videoId ja
-stream key. **Operaattorin ei tarvitse kopioida mitään käsin** — jos huomaat
-kopioivasi stream keytä, olet vahingossa polulla B.
-
-Molempien katselu-URLit ovat olemassa heti (`liveBroadcasts.insert` palauttaa
-video-id:n saman tien). Kolmas linkki, tulospalvelun ottelusivu, tulee ottelun
-ID:stä.
-
-## A2. Jakoviesti
-
-Ohjaamo muodostaa jakoviestin, jossa on **kolme linkkiä**: raakalähetys,
-selostettu lähetys ja tulospalvelun ottelusivu. Kortti "Jaettava viesti",
-kopiointinappi vieressä.
-
-**Raakalähetys ei ole piilotettu** — sen linkki jaetaan katsojille selostetun
-rinnalla (unlisted = linkin saaneet näkevät). Älä kuvaile sitä "piilotetuksi".
-
-## A3. Kuvaaja
-
-Kuvauspuhelimessa on **StreamLabs**, kirjautuneena samaan YouTube-tiliin kuin
-ohjaamon valtuutus. Kuvaaja **valitsee sovelluksesta ennakkoon ajastetun
-raakalähetyksen listasta** — mitään ei syötetä käsin, eikä kuvaaja luo
-lähetystä itse. Kuvaajan video ilmestyy siihen samaan URLiin, joka on jo
-jakoviestissä.
-
-Tästä syystä "lähde-URLin löytämisongelmaa" ei ole olemassa. Jos joku kuvailee
-sellaista, oletus on väärä.
-
-## A4. Käynnistys
-
-Kaksi tapaa. **Käsikäynnistys on yhä ensisijainen**, kunnes ajastin on nähty
-oikeassa käytössä.
-
-**Käsin.** Käynnistysnappia ei ole uudessa käyttöliittymässä vielä (#186);
-tähän asti käynnistys tehdään polun B ohjeilla (`POST /api/relay/start` tai
-`systemctl --user start`). Valmiustarkistus sen sijaan on tilakortissa:
-
-1. **Lähde ja kohde** ovat oikein päin ilman käsityötä: ohjaamo kirjoitti ne
-   luodessaan lähetysparin. (LÄHDE = raakalähetys, jota *luetaan*. KOHDE =
-   selostettu, johon *pushataan*.)
-2. **Sidonta hoituu itsestään.** "Kirjoita .env.relay" -nappia ei ole (#176):
-   valmiustarkistus korjaa väärän sidonnan itse valittuun otteluun ja sanoo sen
-   rivinä *"Korjattiin: …"*. Jos rivi sanoo sidonnan olevan **ristiriitainen**,
-   korjaus ei pure (sama avain tiedostossa kahdesti) — se on ylläpidon asia.
-3. **Valmiustarkistus** ajetaan itsestään, kun lähetyspari on olemassa; nappi
-   "Tarkista uudelleen" ajaa sen uudelleen. Tämä on ainoa esitarkistus; älä tee käsin
-   `df`/`ps`/`systemctl`-kierrosta. `✓` kunnossa · `⚠` lue mutta ei este ·
-   `✗` este.
-   - `Lähde … ei vielä livenä, ajastettu alkavaksi (~N min) — relay odottaa`
-     on `✓`, ei ongelma.
-   - `Tapahtumat … 0 tapahtumaa — ottelua ei ole vielä avattu` on normaali
-     ennen ottelun alkua.
-   - Levytila-`✗` = globaali pysäytyssääntö.
-   - Sidontarivi on se, joka pysäyttää käynnistyksen ennen kuin selostus menee
-     väärään otteluun (#155). Ilman sitä kaikki muut rivit voivat kuvata
-     eilistä ottelua ja näyttää silti vihreiltä — niin kävi 31.7.2026.
-4. **Deployaa ennen käynnistystä**, jos main on muuttunut sitten viime ajon:
-   `npm run relay:deploy` (oletus `origin/main`; `-- <ref>` muulle). Skripti
-   kieltäytyy, jos relay on ajossa. **Kirjaa deployattu commit ylös** — se on
-   ainoa tapa tietää jälkikäteen mitä koodia lähetys ajoi.
-5. **"Käynnistä relay"**. Nappi on lukossa, jos preflightissä on esteitä tai
-   relay on jo ajossa.
-
-**Ajastimella — Työ-välilehden alaosa, "Ajastin":** ajastin vahtii
-käynnistysikkunassa raakalähetystä ja käynnistää relayn heti kun kuvaaja
-aloittaa. Laukaisin on **lähteen meneminen liveksi, ei kello**.
-
-Ajastin on **oletuksena pois**, ja pois ollessaan se laskee koko päätöksen
-silti näkyviin ("Olisi tehnyt: …"). Se on tarkoitus: **katso että se on
-oikeassa ottelun tai parin ajan ennen kuin kytket sen päälle**
-(`apps/control/src/server/scheduler.ts` kuvaa säännöt). Se ei koskaan käynnistä
-mitään, jos toinen työ on auki, jos preflightissä on esteitä tai jos levytila
-on kriittinen.
-
-## A5. Ajon aikana
-
-Ohjaamon **Live**-välilehti: tila, pisteet, selostuslista, säätimet,
-ilmoitukset. Säädöt menevät samaan control-tiedostoon, jonka relay lukee joka
-pollissa — muutos astuu voimaan ilman uudelleenkäynnistystä.
-
-| Säädin | Mitä tekee |
-|-------|------------|
-| Pelaajanvaihtojen selostus | "Vuorossa X" päälle/pois. Jos ne tulevat väärässä kohtaa, ota pois — palot, pisteet, jaksotapahtumat ja periodinen tilannekuva jatkuvat normaalisti. |
-| Selostusviive | Selostuksen kohdistus kuvaan. Jos kuulet selostuksen **ennen** kuin tilanne näkyy videolla, kasvata. Oikea arvo **varmistetaan kuulemalla**; videopipelinen viive vaihtelee lähetyksittäin. |
-| Delta-haku | Pois palauttaa täyshaut, jos delta käyttäytyy oudosti (selostuksia puuttuu, toistuvia "Delta-epäkonsistenssi → täyshaku" -rivejä). Päälle myös nollaa automaattisen katkaisijan. |
-| Pollausväli | Rajataan koodin alarajaan. |
-
-Ilman ohjaamoa sama onnistuu kirjoittamalla suoraan
-`apps/broadcast/run/.control-<ID>.json` (tarkka polku käynnistyslokissa);
-useita avaimia voi kirjoittaa yhtä aikaa, ja pois jätetyt säilyvät ennallaan:
+Tämä ei ole varapolku vaan ylläpitoa, eikä sitä ole ohjaamossa: jos main on
+muuttunut sitten viime ajon, relay ajaa yhä vanhaa koodia.
 
 ```bash
-echo '{"announceBatterChanges": false, "narrationDelayMs": 5000}' \
-  > apps/broadcast/run/.control-<ID>.json
+npm run relay:deploy          # oletus origin/main; -- <ref> muulle
 ```
 
-**Odotettavaa, ei vikaa:** kokonaisviive tapahtumasta selostukseen ~30–90 s
-(arkkitehtuurinen, `apps/broadcast/README.md`). Respawnien lyhyt äänetön tauko.
-Ensimmäistä selostusta odotetaan hetki ffmpegin ensikytkeytymisestä, jotta
-katsojat ehtivät paikalle.
+Skripti kieltäytyy, jos relay on ajossa. **Kirjaa deployattu commit ylös** — se
+on ainoa tapa tietää jälkikäteen mitä koodia lähetys ajoi.
 
-**Seuranta:** `journalctl --user -u pesisselostaja-relay -f`, ja
-`seuranta-ja-vianetsinta.md` lokirivien tulkintaan.
+## V2. Käsikäynnistys, kun vahti ei laukea
 
-## A6. Lopetus ja siivous
+Vain kun raakalähetys on jo livenä eikä selostus ole käynnistynyt. Katso ensin
+kortin käynnistysvahdin rivit: *"Käynnistysvahti seuraa ottelua X – Y, ei tätä"*
+tarkoittaa että käsikäynnistys menisi väärään otteluun — korjaa sidonta, älä
+ohita sitä.
 
-**Ottelun ollessa kesken älä pysäytä.**
+```bash
+curl -X POST http://127.0.0.1:3002/api/relay/start     # ohjaamon kautta, sidonta ohjaamon tiedosta
+systemctl --user start pesisselostaja-relay.service    # ohjaamon ohi, lukee .env.relay
+```
 
-Kun ottelu on ohi, lopetuksen pitäisi tapahtua itsestään:
+Ensimmäinen on turvallisempi: se ei luota `.env.relay`:n sisältöön, joka voi
+osoittaa eiliseen otteluun (#155). Vahvista:
+`systemctl --user is-active pesisselostaja-relay.service` → `active`.
 
-- Relay sammuttaa itsensä, kun raakalähetys päättyy (`ended`), tai hard stopin
-  takarajalla (#123): ottelu päättynyt **ja** hiljaisuutta **ja** raakalähetys
-  oireilee. Ottelu päättyneenä on ehdoton portti — hard stop ei voi laueta
-  kesken ottelun.
-- Ohjaamo sulkee työn laskevalla reunalla, ja tekee hard stopin siivouksen
-  (selostettu lähetys ja — lipun ollessa päällä — raakalähetys) vain kun telemetria
-  kertoo `endReason === "hard_stop"`. Normaalissa lopetuksessa selostetun sulkee YouTuben
-  `enableAutoStop`, eikä raakalähetykseen kosketa.
+## V3. Pysäytys, kun itsesammutus ei tullut
 
-> **Tarkista silti itse, että ajo todella loppui.** Mitään tästä ketjusta ei ole
-> koeteltu livenä. 30.7.2026 lopetus **ei** toiminut: raakalähetys jäi liveksi
-> ilman dataa, ja operaattori joutui lopettamaan sen käsin.
-
-Jos ajo jää pystyyn:
+**Ottelun ollessa kesken älä pysäytä** (sääntö 2). Ottelun jälkeen:
 
 ```bash
 systemctl --user stop pesisselostaja-relay.service
@@ -246,17 +170,39 @@ ps aux | grep -E "ffmpeg|apps/broadcast/src/index" | grep -v grep   # varmista
 
 Palvelu **ei** ole enabloitu boottiin — se on aina käsikäynnistys per ottelu.
 
+## V4. Säädöt ilman ohjaamoa
+
+Samat kaksi säädintä kuin kortissa, suoraan control-tiedostoon, jonka relay
+lukee joka pollissa. Useita avaimia voi kirjoittaa yhtä aikaa, ja pois jätetyt
+säilyvät ennallaan. Tarkka polku on käynnistyslokissa:
+
+```bash
+echo '{"announceBatterChanges": false, "narrationDelayMs": 5000}' \
+  > apps/broadcast/run/.control-<ID>.json
+```
+
+Ohjaamosta relayyn on **täsmälleen kaksi sallittua kosketuspintaa** —
+`.env.relay` ja tämä control-tiedosto. Uutta HTTP-kanavaa ei rakenneta (#59).
+
+Selostusviive kohdistaa selostuksen kuvaan: jos selostus kuuluu **ennen** kuin
+tilanne näkyy videolla, kasvata. Oikea arvo **varmistetaan kuulemalla**.
+
+**Odotettavaa, ei vikaa:** kokonaisviive tapahtumasta selostukseen ~30–90 s
+(arkkitehtuurinen, `apps/broadcast/README.md`). Respawnien lyhyt äänetön tauko.
+Ensimmäistä selostusta odotetaan hetki ffmpegin ensikytkeytymisestä.
+
+**Seuranta:** `journalctl --user -u pesisselostaja-relay -f`, ja
+`seuranta-ja-vianetsinta.md` lokirivien tulkintaan.
+
 ---
 
-# POLKU B (poikkeus): käsityö YouTube Studiossa
+# V5. Koko ketju käsin YouTube Studiossa
 
-**Käytä tätä vain kun ohjaamo tai sen YouTube-valtuutus ei toimi.** Jos päädyt
-tänne, se on vika — kirjaa se, koska se on #124:n mittari.
-
-Tässä polussa operaattori luo lähetykset itse ja arvot kirjoitetaan käsin
+**Vain kun ohjaamo tai sen YouTube-valtuutus ei toimi.** Tässä polussa
+operaattori luo lähetykset itse ja arvot kirjoitetaan käsin
 `apps/broadcast/.env.relay`:hin.
 
-## B1. Kerää arvot
+## V5.1 Kerää arvot
 
 | Arvo | Mistä | Env-avain |
 |------|-------|-----------|
@@ -268,10 +214,9 @@ Tässä polussa operaattori luo lähetykset itse ja arvot kirjoitetaan käsin
 > **⚠️ Älä sekoita näitä.** Jos käyttäjä antaa vain **yhden** YouTube-linkin,
 > **älä oleta että se on raakalähetys** — kysy kummasta on kyse. Vihje: *stream
 > key*, *"näkyvyys: unlisted"* ja *"thumbnail kopioitu"* kuvaavat **selostettua
-> lähetystä**, eivät raakalähetystä. (Aiemmassa testissä selostetun URL meni
-> vahingossa `RELAY_YOUTUBE_URL`:iin.)
+> lähetystä**, eivät raakalähetystä.
 
-## B2. Luo selostettu lähetys Studiossa
+## V5.2 Luo selostettu lähetys Studiossa
 
 1. Puhelimen oma live käyntiin normaalisti (= raakalähetys). Sen saa myös
    **ajastaa** myöhemmäksi — relay osaa odottaa.
@@ -283,7 +228,7 @@ Tässä polussa operaattori luo lähetykset itse ja arvot kirjoitetaan käsin
      **"Go live" käsin**.
 4. Kopioi **stream key** (ja RTMP-ingest-URL jos ei oletus).
 
-## B3. Kirjoita `.env.relay`
+## V5.3 Kirjoita `.env.relay`
 
 ```
 RELAY_MATCH_ID=<ottelu-id>
@@ -312,7 +257,7 @@ URLia `**`-merkkeihin):
 
 https://studio.youtube.com/video/<VIDEO_ID>/livestreaming
 
-## B4. Preflight ja käynnistys ilman ohjaamoa
+## V5.4 Preflight ja käynnistys ilman ohjaamoa
 
 ```bash
 npm run broadcast:preflight                       # lukee apps/broadcast/.env.relay
@@ -321,7 +266,16 @@ RELAY_MATCH_ID=1234 npm run broadcast:preflight   # pelkkä ottelutarkistus
 ```
 
 Skripti lukee `.env.relay`:n **samalla tavalla kuin systemd** ja päättyy
-itsestään. Tulkinta kuten kohdassa A4.
+itsestään. Rivien tulkinta: `✓` kunnossa · `⚠` lue mutta ei este · `✗` este.
+
+- `Lähde … ei vielä livenä, ajastettu alkavaksi (~N min) — relay odottaa` on
+  `✓`, ei ongelma.
+- `Tapahtumat … 0 tapahtumaa — ottelua ei ole vielä avattu` on normaali ennen
+  ottelun alkua.
+- Levytila-`✗` = globaali pysäytyssääntö.
+- **Sidontarivi on se, joka pysäyttää käynnistyksen** ennen kuin selostus menee
+  väärään otteluun (#155). Ilman sitä kaikki muut rivit voivat kuvata eilistä
+  ottelua ja näyttää silti vihreiltä — niin kävi 31.7.2026.
 
 ```bash
 npm run relay:deploy
@@ -334,17 +288,14 @@ PÄÄLLÄ/POIS (vaihda ajon aikana: …)" **← poimi tästä control-tiedoston 
 talteen**, ottelun nimet, "Selostussilmukka käynnissä…" ja joko "Käynnistetään
 ffmpeg…" tai "Lähde ei ole vielä livenä… Tarkistetaan uudelleen…".
 
-Vahvista: `systemctl --user is-active pesisselostaja-relay.service` → `active`.
-
 Syvempään testiin on `--dry-run` (`apps/broadcast/README.md`), mutta **se ei
 pääty itsestään** — käytä vain jos preflight ei riitä.
 
-## B5. Siivous polun B jälkeen
+## V5.5 Siivous käsipolun jälkeen
 
 **Siivoa päättyneen ottelun arvot pois `.env.relay`:stä**, jotta jämät eivät
 päädy seuraavaan lähetykseen: tyhjennä `RELAY_MATCH_ID`, `RELAY_YOUTUBE_URL`,
 `RELAY_STREAM_KEY` ja kohteen videoId-kommentit, mutta **jätä
 `ELEVENLABS_API_KEY` ja `RELAY_URL_REFRESH_MS` paikalleen**.
 
-Polulla A ohjaamo kirjoittaa nämä itse työn aktivoinnissa, eikä käsin siivousta
-tarvita.
+Ohjaamon polulla ohjaamo kirjoittaa nämä itse, eikä käsin siivousta tarvita.
