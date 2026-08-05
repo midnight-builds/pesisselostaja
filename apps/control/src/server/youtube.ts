@@ -399,13 +399,42 @@ export async function createBroadcastPair(
     autoStart: job.normalAutoStart ?? true,
   });
 
-  const narrated = await createOne("narrated", texts.narratedTitle, {
-    ...shared,
-    // Selostetulla aina oma striimi ja enableAutoStart/enableAutoStop=true:
-    // relay työntää kuvaa ilman että kukaan painaa mitään YouTube Studiossa.
-    withStream: true,
-    autoStart: true,
-  });
+  // Selostetun luonti KOMPENSOIDAAN jos se kaatuu (#204). Ilman tätä
+  // raakalähetys jäi kanavalle orvoksi: `patchJob` ajetaan vasta kun molemmat
+  // ovat valmiit, joten työhön ei jäänyt siitä jälkeä, `hasPair` pysyi
+  // falsena ja seuraava yritys loi TOISEN samannimisen, samaan aikaan
+  // ajastetun raakalähetyksen. Kuvaaja poimii raakalähetyksen kanavan
+  // lähetyslistasta (`CONTEXT.md`), joten kaksi identtistä riviä tarkoittaa
+  // että puolet ajasta valitaan orpo — ja relay katsoo toista lähetystä,
+  // ei näe signaalia eikä käynnisty.
+  let narrated: CreatedBroadcast;
+  try {
+    narrated = await createOne("narrated", texts.narratedTitle, {
+      ...shared,
+      // Selostetulla aina oma striimi ja enableAutoStart/enableAutoStop=true:
+      // relay työntää kuvaa ilman että kukaan painaa mitään YouTube Studiossa.
+      withStream: true,
+      autoStart: true,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    try {
+      await deleteVideo(normal.videoId, { confirm: true });
+      console.warn(
+        `[control] selostetun luonti kaatui — juuri luotu raakalähetys ${normal.videoId} poistettiin kanavalta`
+      );
+    } catch (cleanupErr) {
+      // Poisto epäonnistui: orpo JÄÄ kanavalle, ja silloin sen id on ainoa
+      // asia jonka operaattori tarvitsee. Se sanotaan virheessä, ei lokissa —
+      // loki ei ole ottelupäivän polulla.
+      const why = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+      console.error(`[control] orvon raakalähetyksen ${normal.videoId} poisto epäonnistui: ${why}`);
+      throw new Error(
+        `Selostetun lähetyksen luonti epäonnistui (${detail}). Raakalähetys ${normal.watchUrl} jäi kanavalle — poista se YouTubessa itse ennen kuin luot parin uudelleen.`
+      );
+    }
+    throw err;
+  }
 
   // Sama muotoilu kuin esikatselussa (#95) — vain linkit ovat nyt oikeat.
   const shareMessage = buildShareMessage(
