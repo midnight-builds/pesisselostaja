@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Job, PreflightResult } from "../../shared/types";
 import { hasBroadcastPair } from "../../shared/jobState";
+import type { BroadcastTexts } from "../../server/templates";
 import type { CreatedBroadcastPair, TemplatePreview, TitleOverrides } from "../api";
 import { api, isAuthMissing } from "../api";
 import { ConfirmButton } from "./ConfirmButton";
@@ -147,7 +148,7 @@ export function PrepCard({ job, notify }: Props) {
               <dt>Alkaa</dt>
               <dd>{preview.texts.scheduledLocal}</dd>
             </dl>
-            <TitleFields value={overrides} disabled={busy} onChange={setOverrides} />
+            <TitleFields value={overrides} texts={preview.texts} disabled={busy} onChange={setOverrides} />
             <ConfirmButton
               className="btn--wide btn--tall"
               label="Luo lähetyspari"
@@ -208,13 +209,24 @@ export function PrepCard({ job, notify }: Props) {
 }
 
 /** Otsikon tiedot joita tulospalvelu ei tunne (#95). Kokoon taitettuna, koska
- *  ne ovat oikein useimmiten: normaalipolku on esikatselu + yksi nappi. */
+ *  ne ovat oikein useimmiten: normaalipolku on esikatselu + yksi nappi.
+ *
+ *  Placeholderit tulevat käsillä olevasta ottelusta, eivät esimerkistä (#221).
+ *  Kentät ovat tyhjiä siihen asti että operaattori kirjoittaa niihin, ja
+ *  puhelimen ruudulla harmaa esimerkkiteksti lukeutuu kentän arvoksi: kun se
+ *  oli kovakoodattu toisen ottelun joukkueiksi, vaikutelma oli että ohjaamo on
+ *  sitonut työn väärään otteluun. Palvelin kertoo esikatselussa kumpi joukkue
+ *  on oma ja kumpi vastustaja (`teamPair`), joten päättelyä ei tehdä täällä.
+ *  Tuntematon arvo jätetään tyhjäksi — väärä placeholder on pahempi kuin ei
+ *  placeholderia. */
 function TitleFields({
   value,
+  texts,
   disabled,
   onChange,
 }: {
   value: TitleOverrides;
+  texts: BroadcastTexts;
   disabled: boolean;
   onChange: (next: TitleOverrides) => void;
 }) {
@@ -229,7 +241,7 @@ function TitleFields({
         <input
           className="field__input"
           value={draft.teamLabel ?? ""}
-          placeholder="Pesä Ysit F-pojat"
+          placeholder={texts.ownTeam}
           onChange={(e) => setDraft({ ...draft, teamLabel: trimmed(e.target.value) })}
         />
       </label>
@@ -238,7 +250,7 @@ function TitleFields({
         <input
           className="field__input"
           value={draft.opponent ?? ""}
-          placeholder="IPV"
+          placeholder={texts.opponentTeam}
           onChange={(e) => setDraft({ ...draft, opponent: trimmed(e.target.value) })}
         />
       </label>
@@ -247,7 +259,7 @@ function TitleFields({
         <input
           className="field__input"
           value={draft.shortVenue ?? ""}
-          placeholder="Naperoleiri Liperi"
+          placeholder={texts.thumbnailVenue}
           onChange={(e) => setDraft({ ...draft, shortVenue: trimmed(e.target.value) })}
         />
       </label>

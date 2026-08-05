@@ -315,6 +315,13 @@ export interface BroadcastTexts {
   /** Ottelupari otsikon nimillä ("Pesä Ysit F-pojat - IPV"), jaettavaa viestiä
    *  varten — sama pari jonka otsikkokin saa. */
   matchup: string;
+  /** Ottelupari erikseen, samalla päättelyllä kuin `matchup` (`teamPair`).
+   *  Käyttöliittymän "Muokkaa otsikkoa" -kenttien placeholderit tarvitsevat
+   *  nimenomaan sen kumpi joukkue on oma ja kumpi vastustaja — pariviivan
+   *  irrottaminen `matchup`ista clientissä olisi sama päättely toiseen kertaan
+   *  ja rikkoutuisi heti kun joukkueen nimessä on väliviiva (#221). */
+  ownTeam: string;
+  opponentTeam: string;
   /** videos.recordingDetails.locationDescription -kenttään. */
   venue: string;
   /** Valmiit syötteet renderThumbnail({ headline, datetime, venue, narrated }):lle. */
@@ -616,6 +623,7 @@ export function buildBroadcastTexts(
   // niitä eikä tulospalvelun raakoja nimiä — viesti ja otsikko puhuvat samasta
   // pelistä samoilla nimillä. Lyhennystaso 0: viestissä ei ole pituusrajaa.
   const matchup = buildMatchupLabel(input, 0);
+  const pair = teamPair(input);
   const venue = [input.venue, input.city].filter((v): v is string => Boolean(v)).join(", ");
 
   return {
@@ -631,6 +639,8 @@ export function buildBroadcastTexts(
     scheduledLocal: formatScheduledLocal(date, time),
     matchUrl,
     matchup,
+    ownTeam: nameAtLevel(pair.own, 0),
+    opponentTeam: nameAtLevel(pair.opponent, 0),
     venue: venue || (input.shortVenue ?? ""),
     thumbnailHeadline: buildThumbnailHeadline(input),
     thumbnailDatetime: formatScheduledLocal(date, time),

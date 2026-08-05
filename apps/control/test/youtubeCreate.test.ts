@@ -110,6 +110,8 @@ function texts(): BroadcastTexts {
     scheduledLocal: "ke 5.8.2026 klo 13:00",
     matchUrl: "https://www.pesistulokset.fi/ottelut/146210/",
     matchup: "Ketut - Sudet",
+    ownTeam: "Ketut",
+    opponentTeam: "Sudet",
     venue: "Kenttä",
     thumbnailHeadline: "Ketut - Sudet",
     thumbnailDatetime: "5.8. klo 13:00",
