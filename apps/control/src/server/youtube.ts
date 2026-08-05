@@ -336,6 +336,17 @@ async function createOne(
     );
   }
   const ingestion = stream.cdn?.ingestionInfo ?? {};
+  // Sama sääntö yhtä kenttää syvemmällä (#203). Puuttuva `items`-rivi oli
+  // virhe jo #184:stä lähtien, mutta täytetty rivi ilman `ingestionInfo`a
+  // tuotti hiljaisen nullin täsmälleen kuten ennen korjausta — sama
+  // replikointiviive, sama lopputulos: pari ilman avainta, jolla relayn
+  // preflight estää käynnistyksen aina. Ilman avainta striimillä ei ole
+  // mitään käyttöä, joten se on virhe eikä puuttuva lisätieto.
+  if (!ingestion.streamName || !ingestion.ingestionAddress) {
+    throw new Error(
+      `YouTube ei palauttanut striimin ${streamId} työntötietoja — lähetykset on luotu, mutta stream key jäi saamatta. Yritä luontia uudelleen vasta kun olet poistanut juuri luodut lähetykset.`
+    );
+  }
 
   // Stream key EI päädy lokiin — se on haettavissa liveStreams.list-kutsulla.
   await logCreated({ event: "stream.bound", variant, videoId, streamId, jobId: input.jobId ?? null });
