@@ -52,6 +52,8 @@ vi.mock("../src/server/jobs.js", () => {
     // moduulin, joten puuttuva export kaataisi importin. Vaaraton no-op —
     // testi joka mittaa kirjausta injektoi oman.
     recordJobCleanup: vi.fn(async () => null),
+    // Suljetun työn palautus ajoon (#200). Vaaraton oletus: ei palauta mitään.
+    reopenRunningJob: vi.fn(async () => null),
   };
 });
 vi.mock("../src/server/journal.js", () => ({ readLog: vi.fn(async () => []) }));
@@ -133,6 +135,16 @@ function runStatus(matchId: number | null) {
 /** One aggregator cycle: the poll interval plus the awaits inside it. */
 async function tick(): Promise<void> {
   await vi.advanceTimersByTimeAsync(5000);
+}
+
+async function ticks(n: number): Promise<void> {
+  for (let i = 0; i < n; i += 1) await tick();
+}
+
+/** Relay alhaalla settle-ikkunan (30 s) yli — se on ajon päättymisen ehto
+ *  (#200). Lyhyempi katko on uudelleenkäynnistys, ei lopetus. */
+async function settle(): Promise<void> {
+  await ticks(8); // 40 s
 }
 
 beforeEach(() => {
@@ -312,10 +324,13 @@ describe("relay run starting", () => {
 
 describe("relay run ending", () => {
   it("closes the job when the relay goes away on its own", async () => {
+    // Suljettu työ jää näkyviin (`getActiveJob` palauttaa myös `finished`in),
+    // eli fake käyttäytyy kuten oikea työjono — settlen jälkeiset tikit lukevat
+    // sen yhä.
     let active: Job | null = job();
     const closeRunningJob = vi.fn(async () => {
       const closed: Job = { ...(active as Job), status: "finished" };
-      active = null;
+      active = closed;
       return closed;
     });
 
@@ -327,6 +342,9 @@ describe("relay run ending", () => {
     // The relay self-shuts down: unit goes inactive without anyone asking.
     relayDown();
     await tick();
+    expect(closeRunningJob, "yksi havainto ei ole lopetus (#200)").not.toHaveBeenCalled();
+
+    await settle();
     expect(closeRunningJob).toHaveBeenCalledTimes(1);
     // Nimetty työ: poller sulkee sen ajon jota se seurasi (#118).
     expect(closeRunningJob).toHaveBeenCalledWith("job-1");
@@ -338,6 +356,103 @@ describe("relay run ending", () => {
     await tick();
     await tick();
     expect(closeRunningJob).toHaveBeenCalledTimes(1);
+    live.stop();
+  });
+
+  /** #200: laskeva reuna laukesi YHDESTÄ havainnosta. Relayn uudelleen-
+   *  käynnistys kestää noin neljä sekuntia — vähemmän kuin tikin 5 s — ja
+   *  operaattorilla on nimenomainen lupa tehdä se kesken ottelun. Työ meni
+   *  `finished`iksi eikä palannut, joten ottelun oikeassa lopussa ei tehty
+   *  hard stopin siivousta, kortti näytti EndedCardia kesken ottelun ja
+   *  päättymispush lähti tyhjästä siivousmerkinnästä. */
+  it("ei sulje työtä relayn uudelleenkäynnistyksen ajaksi", async () => {
+    const active: Job = job();
+    const closeRunningJob = vi.fn(async () => null);
+    const recordJobCleanup = vi.fn(async () => null);
+    relayUp();
+
+    const live = startLiveAggregator({
+      getActiveJob: async () => active,
+      closeRunningJob,
+      recordJobCleanup,
+      getRunningStatus: async () => runStatus(relayState.active ? 144980 : null),
+    });
+    await tick();
+
+    // systemctl restart: unit alhaalla yhden tikin verran, sitten takaisin.
+    relayDown();
+    await tick();
+    relayUp();
+    await tick();
+    await tick();
+
+    expect(closeRunningJob, "uudelleenkäynnistys ei ole ajon loppu").not.toHaveBeenCalled();
+    expect(recordJobCleanup, "tyhjä siivousmerkintä estäisi oikean (#187)").not.toHaveBeenCalled();
+    expect(live.current().job).toMatchObject({ status: "live" });
+
+    // Ja ottelun OIKEA loppu sulkee työn yhä.
+    relayDown();
+    await settle();
+    expect(closeRunningJob).toHaveBeenCalledWith("job-1");
+    live.stop();
+  });
+
+  /** Settle-ikkunaa pidempi katko (kaatumissilmukka, käsin tehty korjaus)
+   *  sulkee työn oikeutetusti — mutta jos relay palaa ajamaan SAMAA ottelua,
+   *  ohjaamon on palattava sen mukana. `markRunStarted` vaatii
+   *  `isBlocking`-tilan, joten `finished` oli yksisuuntainen ovi (#200). */
+  it("palauttaa suljetun työn ajoon kun relay ajaa yhä samaa ottelua", async () => {
+    let active: Job = job();
+    const closeRunningJob = vi.fn(async () => {
+      active = { ...active, status: "finished", endedAt: "2026-07-29T10:00:00.000Z" };
+      return active;
+    });
+    const reopenRunningJob = vi.fn(async () => {
+      active = { ...active, status: "live", endedAt: null, cleanup: null };
+      return active;
+    });
+    relayUp();
+
+    const live = startLiveAggregator({
+      getActiveJob: async () => active,
+      closeRunningJob,
+      reopenRunningJob,
+      markRunStarted: async () => null,
+      getRunningStatus: async () => runStatus(relayState.active ? 144980 : null),
+    });
+    await tick();
+
+    // Pitkä katko: työ suljetaan, ja se on tässä vaiheessa oikein.
+    relayDown();
+    await settle();
+    expect(closeRunningJob).toHaveBeenCalledTimes(1);
+
+    // Relay palaa samaan otteluun.
+    relayUp();
+    await tick();
+    await tick();
+
+    expect(reopenRunningJob).toHaveBeenCalledWith(144980);
+    expect(live.current().job).toMatchObject({ status: "live", endedAt: null });
+    live.stop();
+  });
+
+  it("EI palauta työtä ajoon kun relay ajaa eri ottelua", async () => {
+    const active: Job = job({ status: "finished", endedAt: "2026-07-29T10:00:00.000Z" });
+    const reopenRunningJob = vi.fn(async () => null);
+    relayUp();
+
+    const live = startLiveAggregator({
+      getActiveJob: async () => active,
+      closeRunningJob: async () => null,
+      reopenRunningJob,
+      markRunStarted: async () => null,
+      getRunningStatus: async () => runStatus(145900),
+    });
+    await tick();
+    await tick();
+
+    expect(reopenRunningJob).not.toHaveBeenCalled();
     live.stop();
   });
 
@@ -378,10 +493,6 @@ describe("relay run ending", () => {
  *  forever: that is how #118's job survived the night, and why #101's next
  *  activation kept failing. Reconciliation is the level-triggered cure. */
 describe("reconciling the broadcast slot", () => {
-  async function ticks(n: number): Promise<void> {
-    for (let i = 0; i < n; i += 1) await tick();
-  }
-
   it("waits out a short relay restart before treating the slot as stale", async () => {
     const reconcileOpenJobs = vi.fn(async () => []);
     relayDown();
@@ -456,7 +567,7 @@ describe("ottelusta toiseen vaihtaminen", () => {
     // Force-aktivointi: relay pysäytetään ja slotti vaihtaa haltijaa.
     relayDown();
     active = next;
-    await tick();
+    await settle();
 
     expect(closeRunningJob).toHaveBeenCalledWith("job-a");
     expect(closeRunningJob).not.toHaveBeenCalledWith("job-b");
