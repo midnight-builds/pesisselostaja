@@ -258,6 +258,19 @@ export interface LiveState {
    *  state.ts) saa rikkoutua siitä että ohjaamo alkoi julkaista sen. */
   sourceIngest?: SourceIngest | null;
   job: Job | null;
+  /** Ohjaamon työ ja ajossa oleva relay ovat eri otteluista (#118), tai null
+   *  kun ristiriitaa ei ole.
+   *
+   *  Oma kenttänsä eikä datasta pääteltävä (#202): palvelin nollaa
+   *  `telemetry`n ja `narration`in juuri ristiriidassa, koska ne on luettu
+   *  työn ottelulla eli väärän. Selain päätteli ristiriidan siitä samasta
+   *  telemetriasta, joten hälytysrivi ei voinut koskaan näkyä — kummassakaan
+   *  haarassa. Ristiriita on tieto, ei sivutuote, ja se on kannettava
+   *  sellaisena.
+   *
+   *  Valinnainen kuten `sourceIngest`: kenttä lisättiin olemassa olevaan
+   *  sopimukseen. */
+  conflict?: { job: number; running: number } | null;
   /** What the relay says about itself, or null when it has published nothing
    *  for this match (not started, or a deploy older than PR #93). */
   telemetry: RelayTelemetry | null;

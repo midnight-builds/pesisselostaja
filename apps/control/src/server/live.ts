@@ -783,7 +783,11 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     // on historiaa), mutta tässä se piirtäisi toisen ottelun rivit tämän
     // hetken lähetyksenä ilman mitään merkkiä siitä (#118). Ei tietoa on
     // parempi kuin väärän ottelun tieto; otsikko kertoo miksi se on tyhjä.
-    const conflicted = matchIdConflict(snap) !== null;
+    // Ristiriita kannetaan kehyksessä omana kenttänään (#202): se on ainoa
+    // tapa, jolla selain voi tietää siitä sen jälkeen kun telemetria on
+    // nollattu juuri sen takia.
+    const conflict = matchIdConflict(snap);
+    const conflicted = conflict !== null;
     return {
       // Server time: the phone's clock can be off, and "N s sitten" computed
       // against a wrong clock is worse than no timestamp.
@@ -797,6 +801,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       knobs,
       sourceIngest: source.ingest,
       job,
+      conflict,
       telemetry: conflicted ? null : telemetry,
       narration: conflicted ? [] : narration,
       log,
@@ -974,7 +979,13 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
           console.log(
             `[control] hard stop -siivous: ${target.label} ${target.videoId} (${result.lifeCycleStatus ?? "?"}) — ${result.reason}`
           );
-          actions.push({ what: `${capitalize(target.label)} suljettiin.`, ok: true, detail: null });
+          // Tulos LUETAAN (#201). `transitionBroadcast` ei heitä silloin kun se
+          // ei voinut sulkea lähetystä — se palauttaa `{ ok: false, skipped:
+          // true }` ja syyn. Poikkeukseton haara kirjasi "suljettiin, ok"
+          // riippumatta siitä kumpi tapahtui, jolloin kortti sanoi "lähetykset
+          // ovat kiinni" ja lähetys jäi työntämään tyhjää: sama lopputulos kuin
+          // 30.7.2026, mutta nyt ohjaamo vakuutti hoitaneensa asian.
+          actions.push(cleanupAction(target.label, result));
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.error(`[control] hard stop -siivous: ${target.label} ${target.videoId} epäonnistui: ${msg}`);
@@ -1000,6 +1011,33 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       });
     }
     return { at: new Date(now).toISOString(), indicators: endIndicators(snapshot), actions };
+  }
+
+  /** Mitä lopetusyritys oikeasti sai aikaan, operaattorin kielellä (#201).
+   *
+   *  Kolme lopputulosta, ja vain yksi niistä on "suljettiin":
+   *
+   *  - `ok` — transitio tehtiin nyt.
+   *  - ohitettu, mutta lähetys oli jo päättynyt (`complete`/`revoked`) —
+   *    lopputulos on sama, eikä se vaadi operaattorilta mitään.
+   *  - ohitettu muusta syystä — tavallisimmin *"lähetys ei ole tämän kanavan
+   *    omistama"*: Google-tili on vaihtunut, token on kadonnut kanavan alta
+   *    tai lähetys on luotu toisella tilillä. Silloin lähetys on auki eikä
+   *    kukaan sulje sitä, joten se on punainen teko ja käsky. YouTuben oma
+   *    sanamuoto jää lokiin (#176). */
+  function cleanupAction(label: string, result: TransitionResult): JobCleanup["actions"][number] {
+    if (result.ok) {
+      return { what: `${capitalize(label)} suljettiin.`, ok: true, detail: null };
+    }
+    const state = result.lifeCycleStatus;
+    if (state === "complete" || state === "completed" || state === "revoked") {
+      return { what: `${capitalize(label)} oli jo päättynyt.`, ok: true, detail: null };
+    }
+    return {
+      what: `${capitalize(label)} ei sulkeutunut.`,
+      ok: false,
+      detail: `Sulje ${label} YouTubessa itse.`,
+    };
   }
 
   /** Ketjun sanaston termit ovat pieniä kirjaimia lauseen sisällä

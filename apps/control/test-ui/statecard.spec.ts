@@ -122,6 +122,27 @@ test.describe("tilakortti", () => {
     await expect(page.locator(picker)).toBeVisible();
   });
 
+  /** #202: ristiriidassa `bindArmedJob` kieltäytyy sitomasta, eikä `arming`
+   *  renderöi muuta sisältöä. Kortti luki "Ohjaamo tarkkailee raakalähetystä"
+   *  koko ottelun ajan — ilman syytä, ilman säätöjä, ilman selostuslistaa. */
+  test("arming-tila kertoo miksi mitään ei tapahdu, kun relay ajaa eri ottelua", async ({
+    page,
+    openApp,
+  }) => {
+    const armed = fixture.job({ id: "job-arming", status: "arming", startedAt: null });
+    await openApp(
+      fixture.liveState({
+        job: armed,
+        telemetry: null,
+        narration: [],
+        conflict: { job: armed.matchId, running: 999002 },
+      }),
+    );
+
+    await expect(stateWord(page)).toHaveText(jobStateWord("arming").word);
+    await expect(page.getByText("ajaa eri ottelua kuin ohjaamo", { exact: false })).toBeVisible();
+  });
+
   test("palvelin voittaa: uusi SSE-kehys syrjäyttää juuri luodun työn", async ({ page, sse, openApp }) => {
     await openApp(fixture.liveState({ job: null, health: "idle", headline: "Ei aktiivista lähetystä" }));
     await page.locator(".mrow").first().click();

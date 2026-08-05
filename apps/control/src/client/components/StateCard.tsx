@@ -114,7 +114,13 @@ function detailFor(job: Job | null, live: LiveState | null): string {
       // valmistelusta on jo saatu aikaan.
       return "Molemmat lähetykset on luotu ja linkit ovat jaettavissa.";
     case "arming":
-      return "Ohjaamo tarkkailee raakalähetystä. Saat ilmoituksen, kun selostus on käynnissä.";
+      // Ristiriidassa (#118) sidonta kieltäytyy, eikä `arming` renderöi muuta
+      // sisältöä: ilman tätä lausetta kortti lukisi "Ohjaamo tarkkailee
+      // raakalähetystä" koko ottelun ajan, vaikka relay ajaa jotain muuta ja
+      // ohjaamo on lakannut odottamasta mitään (#202).
+      return live?.conflict
+        ? "Lähetys ajaa eri ottelua kuin ohjaamo — selostus ei kiinnity tähän työhön. Pysäytä lähetys ja valitse ottelu uudelleen."
+        : "Ohjaamo tarkkailee raakalähetystä. Saat ilmoituksen, kun selostus on käynnissä.";
     case "live": {
       // Palvelimen `headline` EI kelpaa tähän: se on ketjun tiivistys koneen
       // kielellä ("ffmpeg respawnasi 3×", commit-tunnus), eikä koneen kieltä
