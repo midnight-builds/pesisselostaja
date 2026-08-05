@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ControlKnobs, LiveState, MatchState, RelayTelemetry } from "../../shared/types";
+import { TELEMETRY_STALE_MS } from "../../shared/types";
 import { api } from "../api";
 import { periodName, seconds } from "../format";
 import { NarrationList } from "./NarrationList";
@@ -62,9 +63,12 @@ const QUEUE_WARN_CLIPS = 10;
  *  Relayn oma `source.detail` EI päädy tänne: se puhuu yt-dlp:n ja ffmpegin
  *  kielellä, eikä sellaista näytetä ottelupäivän polulla (#176). Jokaisella
  *  tilalla on täsmälleen yksi operaattorin lause. */
-function sourceFact(telemetry: RelayTelemetry | null): Fact {
+function sourceFact(telemetry: RelayTelemetry | null, relayActive: boolean): Fact {
   const label = "Raakalähetys";
-  if (!telemetry) return { label, value: "Ei tietoa", tone: "warn" };
+  // Ilman ajossa olevaa relayta tilannekuva kertoo menneisyydestä: kukaan ei
+  // juuri nyt katso raakalähetystä. Vihreä "kuva tulee kentältä" pysähtyneen
+  // relayn vieressä olisi täsmälleen se ristiriita, jota ei ehdi lukea kahdesti.
+  if (!relayActive || !telemetry) return { label, value: "Ei tietoa", tone: "warn" };
   switch (telemetry.source.state) {
     case "live":
       return { label, value: "Kuva tulee kentältä", tone: "ok" };
@@ -83,9 +87,35 @@ function sourceFact(telemetry: RelayTelemetry | null): Fact {
         : { label, value: "Kuvaus loppui kesken ottelun", tone: "warn" };
     case "failed":
       return { label, value: "Kuvaa ei saada", tone: "fail" };
-    default:
+    case "unknown":
       return { label, value: "Ei tietoa", tone: "warn" };
+    default: {
+      // Relayn uusi lähdetila EI saa pudota hiljaa "ei tietoa" -riville: juuri
+      // niin kävi `ended`ille (#103) ja `no_signal`ille (#104), ja tilarivi
+      // sanoi "ei tietoa" täsmälleen silloin kun relay kertoi tarkasti. Tämä
+      // rivi kaataa käännöksen sen sijaan — ja ajossa jäljelle jää sama
+      // rehellinen "ei tietoa" eikä poikkeus operaattorin ruudulle.
+      const unreachable: never = telemetry.source.state;
+      void unreachable;
+      return { label, value: "Ei tietoa", tone: "warn" };
+    }
   }
+}
+
+/** Relayn tilannekuva vain silloin kun se on tuore.
+ *
+ *  `RelayTelemetry.at` on relayn oma kirjoitushetki, ja pysähtynyt relay jättää
+ *  viimeisen tilannekuvansa levylle sellaisenaan. Ilman tätä vertailua kortti
+ *  näyttäisi kymmenen minuuttia vanhaa "kuuluu lähetyksessä" -riviä vihreänä —
+ *  sopimus sanoo tämän ääneen (`shared/types.ts`, `TELEMETRY_STALE_MS`), ja
+ *  palvelin ajaa samaa sääntöä omalle puolelleen. Palvelimen kelloa käytetään,
+ *  ei puhelimen: väärässä ajassa oleva puhelin hylkäisi tuoreen kuvan. */
+function freshTelemetry(live: LiveState): RelayTelemetry | null {
+  if (!live.telemetry) return null;
+  const at = Date.parse(live.telemetry.at);
+  const now = Date.parse(live.now);
+  if (!Number.isFinite(at) || !Number.isFinite(now)) return live.telemetry;
+  return now - at > TELEMETRY_STALE_MS ? null : live.telemetry;
 }
 
 /** Pistetilanne, jakso ja palot, sisävuoro — kolme tietoa samasta ottelusta.
@@ -119,51 +149,127 @@ function matchFacts(match: MatchState): Fact[] {
   ];
 }
 
+/** Hälytys: jotain, mikä ei mahdu viiteen tietoon eikä saa jäädä sanomatta.
+ *
+ *  Nämä ovat kortin ainoat rivit, jotka syntyvät muusta kuin ketjun tai ottelun
+ *  tilasta — ja siksi niitä on täsmälleen kaksi. Kumpikin on hiljainen vika:
+ *  ruutu näyttää muuten terveeltä, ja kumpikin päättyy lähetyksen menetykseen
+ *  jos sitä ei huomata. Palvelimen oma `headline` ei kelpaa tähän (#176), joten
+ *  ne johdetaan samasta datasta operaattorin kielelle.
+ *
+ *  Loput huoltoluontoinen — lokit, levylukemat, valtuutus — kuuluu
+ *  huoltoarkkiin (#188), ei ottelupäivän polulle. */
+function alertsFor(live: LiveState): string[] {
+  const out: string[] = [];
+  // Levytila ennen muuta: täysi levy pilaa tallenteen eikä vain hidasta.
+  if (live.system.diskCritical) {
+    out.push("Levytila on lopussa — lähetys katkeaa, ellei tilaa vapauteta.");
+  }
+  // #118: ohjaamon työ ja ajossa oleva relay ovat eri otteluista. Rivit
+  // näyttäisivät muuten vihreää, mutta säädöt kirjoittuvat väärän ottelun
+  // control-tiedostoon eikä ajossa oleva relay näe niitä koskaan — eli juuri
+  // nämä kaksi nappia lakkaavat vaikuttamasta mihinkään, hiljaa.
+  const running = live.telemetry?.matchId;
+  if (live.job && running != null && running !== live.job.matchId) {
+    out.push("Säädöt eivät mene perille: lähetys ajaa eri ottelua kuin ohjaamo.");
+  }
+  return out;
+}
+
+/** Ohjaamon oma leikkaus viiveelle (`server/relay.ts`). Sama raja paikallisesti,
+ *  jotta ruudulla näkyvä luku on se, jonka palvelin oikeasti asettaa — muuten
+ *  ylärajassa naputtelu näyttäisi kasvavaa lukua, jota relay ei koskaan saa. */
+const DELAY_MIN_MS = 0;
+const DELAY_MAX_MS = 15_000;
+
+/** Kuinka kauan paikallista arvoa uskotaan, ellei palvelin vahvista sitä.
+ *
+ *  Ilman määräaikaa jokainen hukkunut vastaus jäädyttäisi luvun ruudulle
+ *  pysyvästi: kortti näyttäisi säätöä, jota relay ei ole koskaan nähnyt.
+ *  Aggregaattori tikittää 5 s välein, joten kaksi kierrosta riittää. */
+const PENDING_GRACE_MS = 10_000;
+
 interface Props {
   live: LiveState;
   notify: (kind: "ok" | "error", text: string) => void;
 }
 
+interface Pending {
+  knobs: ControlKnobs;
+  /** Palvelimen kello, jonka jälkeen paikallisesta arvosta luovutaan. */
+  until: number;
+}
+
 export function MatchGlance({ live, notify }: Props) {
-  const [busy, setBusy] = useState(false);
   /** Juuri lähetetty säätö, jota SSE ei ole vielä ehtinyt kertoa takaisin.
    *  Ilman tätä nappi näyttäisi sekunnin ajan siltä ettei se tehnyt mitään —
    *  ja viivettä säädetään korvakuulolta, monta napautusta peräkkäin. */
-  const [pending, setPending] = useState<ControlKnobs | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  /** Kasvava juokseva numero: vain viimeisimmän napautuksen vastaus saa
+   *  kirjoittaa ruudulle. Neljä nopeaa napautusta lähettää neljä pyyntöä, ja
+   *  ilman tätä hitain vastaus voisi palauttaa ruudulle vanhemman arvon. */
+  const tap = useRef(0);
   const served = live.knobs;
+  const nowMs = Number.isFinite(Date.parse(live.now)) ? Date.parse(live.now) : Date.now();
 
   useEffect(() => {
-    if (!pending || !served) return;
-    if (
-      served.narrationDelayMs === pending.narrationDelayMs &&
-      served.announceBatterChanges === pending.announceBatterChanges
-    ) {
-      setPending(null);
-    }
-  }, [served, pending]);
+    if (!pending) return;
+    const agreed =
+      served != null &&
+      served.narrationDelayMs === pending.knobs.narrationDelayMs &&
+      served.announceBatterChanges === pending.knobs.announceBatterChanges;
+    // Joko palvelin sanoi saman, tai paikallinen arvo on elänyt tarpeeksi
+    // kauan ilman vahvistusta. Kumpikin päättää sen: jäätynyt luku ruudulla on
+    // pahempi kuin hetken välkähdys takaisin palvelimen arvoon.
+    if (agreed || nowMs > pending.until) setPending(null);
+  }, [served, pending, nowMs]);
 
-  const knobs = pending ?? served;
+  const knobs = pending?.knobs ?? served;
 
-  const send = async (call: () => Promise<ControlKnobs>) => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      setPending(await call());
-    } catch (err) {
-      notify("error", err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
+  /** Näytä uusi arvo heti, lähetä se, ja anna vain viimeisimmän vastauksen
+   *  korjata näkymä. */
+  const apply = (optimistic: ControlKnobs, call: () => Promise<ControlKnobs>) => {
+    tap.current += 1;
+    const mine = tap.current;
+    setPending({ knobs: optimistic, until: nowMs + PENDING_GRACE_MS });
+    void call()
+      .then((result) => {
+        if (tap.current === mine) setPending({ knobs: result, until: nowMs + PENDING_GRACE_MS });
+      })
+      .catch((err: unknown) => {
+        if (tap.current === mine) setPending(null);
+        notify("error", err instanceof Error ? err.message : String(err));
+      });
   };
 
+  const nudge = (deltaMs: number) => {
+    if (!knobs) return;
+    const next = Math.min(DELAY_MAX_MS, Math.max(DELAY_MIN_MS, knobs.narrationDelayMs + deltaMs));
+    apply({ ...knobs, narrationDelayMs: next }, () => api.delayNudge(deltaMs));
+  };
+
+  const toggleBatterChanges = () => {
+    if (!knobs) return;
+    const next = !knobs.announceBatterChanges;
+    apply({ ...knobs, announceBatterChanges: next }, () => api.knobs({ announceBatterChanges: next }));
+  };
+
+  const telemetry = freshTelemetry(live);
+  const alerts = alertsFor(live);
   const facts = [
-    narrationFact(live.telemetry, live.relay.active),
-    sourceFact(live.telemetry),
+    narrationFact(telemetry, live.relay.active),
+    sourceFact(telemetry, live.relay.active),
     ...matchFacts(live.match),
   ];
 
   return (
     <div className="glance" data-testid="match-glance">
+      {alerts.map((text) => (
+        <p key={text} className="alert" data-testid="glance-alert">
+          {text}
+        </p>
+      ))}
+
       <dl className="facts">
         {facts.map((fact) => (
           <div key={fact.label} className={`fact fact--${fact.tone}`}>
@@ -190,8 +296,8 @@ export function MatchGlance({ live, notify }: Props) {
             <button
               type="button"
               className="btn btn--nudge"
-              disabled={busy || !knobs}
-              onClick={() => void send(() => api.delayNudge(500))}
+              disabled={!knobs}
+              onClick={() => nudge(500)}
             >
               <span className="btn__big">Puhui liian aikaisin</span>
               <span className="btn__sub">odota kauemmin</span>
@@ -199,8 +305,8 @@ export function MatchGlance({ live, notify }: Props) {
             <button
               type="button"
               className="btn btn--nudge"
-              disabled={busy || !knobs}
-              onClick={() => void send(() => api.delayNudge(-500))}
+              disabled={!knobs}
+              onClick={() => nudge(-500)}
             >
               <span className="btn__big">Puhui liian myöhään</span>
               <span className="btn__sub">puhu aiemmin</span>
@@ -213,10 +319,8 @@ export function MatchGlance({ live, notify }: Props) {
           className={`toggle ${knobs?.announceBatterChanges ? "toggle--on" : ""}`}
           role="switch"
           aria-checked={knobs?.announceBatterChanges ?? false}
-          disabled={busy || !knobs}
-          onClick={() =>
-            void send(() => api.knobs({ announceBatterChanges: !knobs?.announceBatterChanges }))
-          }
+          disabled={!knobs}
+          onClick={toggleBatterChanges}
         >
           <span className="toggle__body">
             <span className="toggle__label">Vaihtoselostus</span>

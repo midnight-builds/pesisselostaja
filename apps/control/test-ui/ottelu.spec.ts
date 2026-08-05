@@ -145,6 +145,50 @@ test.describe("ottelunaikainen", () => {
     }
   });
 
+  test("vanhentunut tilannekuva luetaan tietämättömyytenä eikä vihreänä", async ({
+    page,
+    api,
+    openApp,
+  }) => {
+    api.jobs = [liveJob()];
+    // Relay pysähtyi, mutta sen viimeinen tilannekuva jäi levylle. Ilman
+    // tuoreusvertailua kortti näyttäisi kymmenen minuutin takaista "kuuluu
+    // lähetyksessä" -riviä vihreänä juuri silloin kun mitään ei kuulu.
+    await openLive(openApp, {
+      telemetry: fixture.telemetry({ at: "2026-07-29T05:18:00.000Z" }),
+    });
+
+    await expect(page.locator(".fact").first()).toContainText("Ei tietoa");
+    await expect(page.locator(".fact--ok")).toHaveCount(0);
+  });
+
+  test("väärää ottelua ajava lähetys sanotaan ääneen säätöjen vieressä", async ({
+    page,
+    api,
+    openApp,
+  }) => {
+    api.jobs = [liveJob()];
+    // #118: säädöt kirjoittuvat ohjaamon työn otteluun, mutta ajossa oleva
+    // relay lukee toisen ottelun control-tiedostoa — napit lakkaavat
+    // vaikuttamasta mihinkään, hiljaa.
+    await openLive(openApp, { telemetry: fixture.telemetry({ matchId: 999002 }) });
+
+    await expect(page.getByTestId("glance-alert")).toContainText("Säädöt eivät mene perille");
+  });
+
+  test("neljä nopeaa napautusta näkyy neljänä askeleena", async ({ page, api, openApp }) => {
+    api.jobs = [liveJob()];
+    await openLive(openApp);
+
+    const earlier = page.getByRole("button", { name: /liian aikaisin/i });
+    for (let i = 0; i < 4; i++) await earlier.click();
+
+    // Viivettä kalibroidaan korvakuulolta, monta napautusta peräkkäin: yksikään
+    // ei saa kadota "edellinen pyyntö on kesken" -lukkoon.
+    await expect.poll(() => api.calledWith("POST", "/api/knobs/delay-nudge").length).toBe(4);
+    await expect(page.getByText("6,0 s")).toBeVisible();
+  });
+
   test("selostuslista erottaa kuullun, jonossa olevan ja kuulumattoman", async ({
     page,
     api,
