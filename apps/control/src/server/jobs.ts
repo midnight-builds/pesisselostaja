@@ -108,7 +108,13 @@ function applyPatch(
   // sisällä sitä, ja käsin kirjoitettu runko tekisi työstä joko ikuisen tai
   // heti vanhentuneen.
   const armedAt = patch.status === "arming" ? new Date().toISOString() : current.armedAt;
-  const job: Job = { ...current, ...patch, armedAt };
+  // `undefined` tarkoittaa "älä koske", ei "tyhjennä". Spread kopioi myös
+  // undefined-arvoiset avaimet, jolloin `{ targetStreamKey: x ?? undefined }`
+  // pyyhki kentän työstä kokonaan — ja poissa oleva arvo putoaa myös
+  // sidontatarkistuksen läpi, koska tarkistus ohittaa sitomattoman kentän
+  // (#162). Tyhjennys sanotaan `null`illa, joka säilyy myös levylle.
+  const defined = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+  const job: Job = { ...current, ...defined, armedAt };
   nextJobs = nextJobs.slice();
   nextJobs[idx] = job;
   return { jobs: nextJobs, job };

@@ -441,3 +441,129 @@ select.field__input {
   border-color: rgba(255, 90, 61, 0.6);
   background: #3A1712;
 }
+
+/* ── Valmistelu (#184) ───────────────────────────────────────
+   Tilakortin sisällä, ei omana korttinaan: kortti on yksi "tämä ottelu,
+   tässä tilassa", ja valmistelu on yksi sen tiloista (#173). */
+.prep {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+.prep__note {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.prep__note.is-fail,
+.prep__verdict.is-fail {
+  color: var(--fail-ink);
+  font-weight: 700;
+}
+/* Esikatselu: se mitä YouTubeen oikeasti syntyy, luettavana painikkeen
+   yläpuolella eikä sen takana (#171/1). */
+.prep__texts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+.prep__texts dt {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+  margin-top: 8px;
+}
+.prep__texts dt:first-child {
+  margin-top: 0;
+}
+.prep__texts dd {
+  font-size: 15px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.prep__edit > summary {
+  color: var(--primary);
+  font-weight: 700;
+  padding: 8px 0;
+  cursor: pointer;
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+}
+.prep__edit[open] {
+  padding-bottom: 4px;
+}
+.prep__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* Jaettava viesti kopioidaan sellaisenaan ryhmächattiin, joten rivinvaihdot
+   säilyvät — mutta pitkä linkki ei saa työntää korttia sivusuunnassa. */
+.textblock {
+  font-family: "Hanken Grotesk", sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+.prep__verdict {
+  font-size: 15px;
+  font-weight: 700;
+}
+.checks {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.check__mark {
+  font-weight: 800;
+}
+.check--fail .check__mark,
+.check--fail .check__detail {
+  color: var(--fail-ink);
+}
+.check--warn .check__mark {
+  color: var(--warn);
+}
+/* Ohjaamon oma korjaus: näkyvä teko, ei hiljainen kunnossa-rivi (#176). */
+.check--fixed .check__mark,
+.check--fixed .check__detail {
+  color: var(--ok);
+}
+
+/* Vahvistusnappi: peruuttamaton ja ulospäin näkyvä teko. Viritettynä se
+   vaihtaa väriä, jotta toinen napautus on tietoinen eikä jatkoa liikkeelle. */
+.btn--danger {
+  border-color: rgba(255, 90, 61, 0.5);
+}
+.btn--danger-armed {
+  background: var(--fail);
+  border-color: var(--fail);
+  color: #2A0A05;
+}
+.btn--tall {
+  min-height: 56px;
+}

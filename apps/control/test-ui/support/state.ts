@@ -446,3 +446,31 @@ export function createdPair(texts = broadcastTexts()) {
     thumbnails: { normal: { ok: true }, narrated: { ok: true } },
   };
 }
+
+/** Valmiustarkistus sellaisena kuin ohjaamo sen näyttää valmistelussa (#184):
+ *  yksi ohjaamon itse korjaama rivi, yksi este operaattorin kielellä ja
+ *  kunnossa olevia, jotka kortti laskee yhteen sen sijaan että listaisi ne. */
+export function preflightRepaired(): PreflightResult {
+  return preflightResult({
+    checks: [
+      {
+        name: "Työn sidonta",
+        status: "ok",
+        fixed: true,
+        detail: "Korjattiin: ohjaamo osoitti toiseen otteluun, nyt valittuun (Kuvitteellisen Kylän Veikot – Lapinlahden Peikot).",
+        technical: ".env.relay ei vastaa valittua työtä: ottelu on 145905, pitäisi olla 999001",
+      },
+      { name: "ffmpeg", status: "ok", detail: "löytyy polusta" },
+      { name: "yt-dlp", status: "ok", detail: "2026.07.01" },
+      {
+        name: "Kohde",
+        status: "fail",
+        detail: "Selostetulla lähetyksellä ei ole kohdetta — luo lähetyspari.",
+        technical: "RELAY_STREAM_KEY puuttuu — ei mihin pushata",
+      },
+    ],
+    blockers: 1,
+    warnings: 0,
+    summary: "1 este — älä käynnistä relayta.",
+  });
+}

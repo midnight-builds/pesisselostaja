@@ -323,8 +323,19 @@ async function createOne(
     null,
     "list"
   );
+  // Puuttuva rivi on VIRHE, ei nullien lähde (#162). Juuri luodun striimin
+  // replikointiviive vastaa 200 OK:lla ja tyhjällä items-listalla, jolloin
+  // stream key jäisi nulliksi vaikka videoId on oikein — ja työhön kirjoittuisi
+  // pari, jonka avain ja video ovat eri lähetyksistä. Heittäminen on tässä
+  // turvallista: lähetykset ovat jo olemassa, ja operaattori näkee selvän
+  // virheen sen sijaan että saisi hiljaa vajaan parin.
   const stream = details.items?.[0];
-  const ingestion = stream?.cdn?.ingestionInfo ?? {};
+  if (!stream) {
+    throw new Error(
+      `YouTube ei palauttanut juuri luodun striimin ${streamId} tietoja — lähetykset on luotu, mutta stream key jäi saamatta. Yritä luontia uudelleen vasta kun olet poistanut juuri luodut lähetykset.`
+    );
+  }
+  const ingestion = stream.cdn?.ingestionInfo ?? {};
 
   // Stream key EI päädy lokiin — se on haettavissa liveStreams.list-kutsulla.
   await logCreated({ event: "stream.bound", variant, videoId, streamId, jobId: input.jobId ?? null });
@@ -342,7 +353,7 @@ async function createOne(
     rtmpUrl: ingestion.ingestionAddress ?? null,
     backupUrl: ingestion.backupIngestionAddress ?? null,
     streamKey: ingestion.streamName ?? null,
-    streamStatus: stream?.status?.streamStatus ?? null,
+    streamStatus: stream.status?.streamStatus ?? null,
   };
 }
 

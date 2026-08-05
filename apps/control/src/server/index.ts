@@ -304,7 +304,18 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
     const body = await readJsonBody<{ jobId?: unknown }>(req).catch(() => ({}) as { jobId?: unknown });
     const jobId = typeof body.jobId === "string" ? body.jobId : null;
     const job = jobId ? ((await listJobs()).find((j) => j.id === jobId) ?? null) : null;
-    sendJson(res, 200, await runControlPreflight(job));
+    // Itsekorjaus on sallittu vain operaattorin valitsemaan otteluun, ei koskaan
+    // itse pääteltyyn (#171/3) — ja valinnan totuuslähde on `getActiveJob`, ei
+    // clientin lähettämä id. Näin väärä (tai vanhentunut) id ei voi kirjoittaa
+    // sidontaa toiseen otteluun; se saa vain saman preflightin kuin ennenkin.
+    //
+    // Toinen ehto on relay: ajossa oleva lähetys ei saa saada uutta sidontaa
+    // jalkojensa alle. Ajossa olevalle työlle sidonta on jo oikein, joten tämä
+    // rajaa pois vain sen tilanteen, jossa jokin muu on ajossa — ja se on
+    // operaattorin ratkaistava, ei hiljaa ylikirjoitettava.
+    const mayRepair =
+      job !== null && (await getActiveJob())?.id === job.id && !(await getRelayProcess()).active;
+    sendJson(res, 200, await runControlPreflight(job, mayRepair ? { bindJob: writeRelayEnv } : undefined));
     return;
   }
 
@@ -518,7 +529,11 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
     if (job) {
       await patchJob(job.id, {
         targetVideoId: pair.narrated.videoId,
-        targetStreamKey: pair.narrated.streamKey ?? undefined,
+        // `null` kirjoitetaan sellaisenaan eikä `?? undefined`-muodossa (#162):
+        // undefined levitettäisiin patchissa pois, jolloin työhön jäisi
+        // EDELLISEN lähetyksen avain uuden videoId:n rinnalle. Tyhjä avain on
+        // näkyvä este, väärä avain ei ole.
+        targetStreamKey: pair.narrated.streamKey,
         sourceUrl: pair.normal.watchUrl,
       });
       // Luonti onnistui → työ on ajastettavissa. Palvelin tekee siirron itse

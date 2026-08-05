@@ -19,10 +19,84 @@ import type { Job, PreflightCheck, PreflightResult } from "../shared/types.js";
 import { CONFIG } from "./config.js";
 import { notifyPreflightBlockers } from "./notifications.js";
 
-/** Check and PreflightCheck have the same shape today; the mapping is explicit
- *  so a future field on either side breaks the typecheck instead of leaking. */
-function toWireCheck(check: Check): PreflightCheck {
-  return { name: check.name, status: check.status, detail: check.detail };
+/** Preflightin oma sanasto → operaattorin kieli (#176).
+ *
+ *  Rivit syntyvät relayn omassa preflightissa, joka puhuu komentoriville: se
+ *  nimeää env-avaimia ja tiedostoja, ja niin sen kuuluukin. Ohjaamon
+ *  käyttöliittymä ei mainitse niitä missään — ei edes huoltopinnassa nostettuna
+ *  esiin normaalipolulle — joten käännös tehdään tässä, wire-muodon rajalla, ja
+ *  raaka teksti kulkee mukana `technical`-kentässä huoltoa varten.
+ *
+ *  Sääntö on nimen ja tilan pari, ei tekstin osuma silloin kun sitä ei tarvita:
+ *  jos relayn preflight muotoilee saman rivin uusiksi, käännös seuraa mukana.
+ *  `contains` on mukana vain siellä, missä sama nimi ja tila tarkoittavat kahta
+ *  eri asiaa. */
+interface Rewrite {
+  name: string;
+  status: Check["status"];
+  /** Erottaa saman nimen ja tilan eri tapaukset toisistaan. */
+  contains?: string;
+  text: string;
+}
+
+const REWRITES: Rewrite[] = [
+  {
+    name: "Työn sidonta",
+    status: "ok",
+    text: "Ohjaamo on sidottu valittuun otteluun.",
+  },
+  {
+    name: "Työn sidonta",
+    status: "fail",
+    contains: "useammin kuin kerran",
+    // Ristiriitaa ei voi korjata itse eikä operaattori korjaa sitä puhelimella:
+    // SSH ei ole käytettävissä, joten rivi sanoo rehellisesti mitä voi tehdä.
+    text: "Ohjaamon sidonta on ristiriitainen eikä korjaudu itsestään — ilmoita ylläpitoon.",
+  },
+  {
+    name: "Työn sidonta",
+    status: "fail",
+    text: "Ohjaamo on yhä sidottu toiseen otteluun — valitse ottelu uudelleen.",
+  },
+  { name: "Kohde", status: "fail", text: "Selostetulla lähetyksellä ei ole kohdetta — luo lähetyspari." },
+  { name: "Kohde", status: "warn", text: "Kohteen osoitetta ei ole erikseen asetettu — käytetään oletusta." },
+  { name: "Kohde", status: "ok", text: "Selostettu lähetys on valmis ottamaan kuvaa vastaan." },
+  { name: "Ottelu", status: "fail", contains: "RELAY_MATCH_ID", text: "Ottelua ei ole sidottu — valitse ottelu uudelleen." },
+  { name: "Lähde", status: "fail", contains: "RELAY_YOUTUBE_URL", text: "Raakalähetystä ei ole sidottu — luo lähetyspari." },
+];
+
+/** Viimeinen suoja: rivi jolle ei ole omaa käännöstä ei silti saa vuotaa
+ *  env-avainta ruudulle. Tuntematon `RELAY_*` korvataan yleisellä sanalla, jotta
+ *  uusi tarkistus relayn puolella ei vuoda tänne huomaamatta. */
+const ENV_WORD: Record<string, string> = {
+  RELAY_MATCH_ID: "ottelu",
+  RELAY_YOUTUBE_URL: "raakalähetys",
+  RELAY_STREAM_KEY: "selostetun lähetyksen kohde",
+  RELAY_RTMP_URL: "kohteen osoite",
+};
+
+export function redactEnvKeys(detail: string): string {
+  return detail.replace(/RELAY_[A-Z0-9_]+/g, (key) => ENV_WORD[key] ?? "ohjaamon sidonta");
+}
+
+function operatorDetail(check: Check): string {
+  const rule = REWRITES.find(
+    (r) => r.name === check.name && r.status === check.status && (!r.contains || check.detail.includes(r.contains))
+  );
+  return rule ? rule.text : redactEnvKeys(check.detail);
+}
+
+/** Check → PreflightCheck: operaattorin lause päälle, raaka rivi talteen.
+ *  `technical` jätetään pois kun käännös ei muuttanut mitään — kaksi kertaa
+ *  samaa tekstiä ei ole vianetsintätietoa. */
+export function toOperatorCheck(check: Check): PreflightCheck {
+  const detail = operatorDetail(check);
+  return {
+    name: check.name,
+    status: check.status,
+    detail,
+    ...(detail === check.detail ? {} : { technical: check.detail }),
+  };
 }
 
 /** The one summary sentence, taken from the broadcast module's own summarize()
@@ -139,27 +213,86 @@ export function duplicateEnvKeys(text: string): string[] {
   return [...dupes];
 }
 
+/** Itsekorjaus: sitoo ohjaamon annettuun työhön. Injektoitu eikä tuotu suoraan,
+ *  koska kutsuja on se joka tietää saako korjata — vain operaattorin valitsemaan
+ *  otteluun, ei koskaan itse pääteltyyn (#171/3). Ilman tätä argumenttia
+ *  preflight on entisellään: se katsoo eikä koske.
+ *
+ *  Korjaus EI lähetä pushia (`notifyAutoFix`): itsekorjautuva este on #174:n
+ *  kolmiluokkaisessa säännössä se luokka, josta ei ilmoiteta lainkaan. Se näkyy
+ *  rivinä siellä missä operaattori muutenkin katsoo. */
+export interface PreflightRepair {
+  bindJob(job: Job): Promise<void>;
+}
+
+async function readEnvText(): Promise<string> {
+  try {
+    return await readFile(CONFIG.relayEnvPath, "utf8");
+  } catch {
+    // No file at all: every bound key reads as missing, which is exactly the
+    // blocker the operator needs to see.
+    return "";
+  }
+}
+
 /** @param job the job the operator has open, when there is one. Omitted by
  *  callers that have no job to compare against (the CLI is deliberately
  *  path-based); given one, the binding check goes first, because every row
- *  below it is only meaningful if it holds. */
-export async function runControlPreflight(job?: Job | null): Promise<PreflightResult> {
+ *  below it is only meaningful if it holds.
+ *  @param repair kun annettu, väärä sidonta korjataan ennen muita tarkistuksia
+ *  ja korjaus näkyy rivinä ("Korjattiin: …") — hiljaista itsekorjausta ei tehdä,
+ *  koska sidonta on #155:n viimeinen suoja ja sen teot jäävät näkyviin (#176). */
+export async function runControlPreflight(job?: Job | null, repair?: PreflightRepair): Promise<PreflightResult> {
+  let binding: Check | null = null;
+  /** Operaattorin lause korjatulle sidonnalle. Se ei kulje käännöstaulun kautta:
+   *  taulussa "Työn sidonta"/ok on tavallinen kunnossa-rivi, ja se söisi juuri
+   *  sen tiedon, joka tässä on tärkein — että ohjaamo teki jotain. */
+  let repairedDetail: string | null = null;
+  if (job) {
+    const text = await readEnvText();
+    binding = checkJobBinding(job, parseEnvFile(text), duplicateEnvKeys(text));
+    // Korjaus ENNEN muita tarkistuksia: ne lukevat saman tiedoston, ja korjauksen
+    // jälkeen ajettuina ne kertovat sen todellisuuden, jossa lähetys alkaisi.
+    // Toisin päin rivit kuvaisivat tilaa, jota ei enää ole.
+    if (binding.status === "fail" && repair) {
+      try {
+        await repair.bindJob(job);
+        const after = await readEnvText();
+        const recheck = checkJobBinding(job, parseEnvFile(after), duplicateEnvKeys(after));
+        if (recheck.status === "ok") {
+          binding = recheck;
+          repairedDetail = `Korjattiin: ohjaamo osoitti toiseen otteluun, nyt valittuun (${job.home} – ${job.away}).`;
+        } else {
+          // Korjaus ei purrut (esim. sama avain kahdesti tiedostossa): jäljelle
+          // jää este, ja rivi kertoo sen jälkimmäisen totuuden — ei sitä mitä
+          // yritettiin.
+          binding = recheck;
+        }
+      } catch (err) {
+        binding = {
+          name: binding.name,
+          status: "fail",
+          detail: `${binding.detail} Automaattinen korjaus epäonnistui: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+  }
+
   // The same env file systemd hands the unit — see the runbook: preflight has
   // to check what the service would actually run, not what the UI thinks.
   const checks = await runPreflight(CONFIG.relayEnvPath);
-  if (job) {
-    let text = "";
-    try {
-      text = await readFile(CONFIG.relayEnvPath, "utf8");
-    } catch {
-      // No file at all: every bound key reads as missing, which is exactly the
-      // blocker the operator needs to see.
-    }
-    checks.unshift(checkJobBinding(job, parseEnvFile(text), duplicateEnvKeys(text)));
+  if (binding) {
+    checks.unshift(binding);
+  }
+  const wire = checks.map(toOperatorCheck);
+  // Sidonta on aina ensimmäinen rivi kun se on mukana, joten korjauksen lause
+  // menee siihen — ja raaka rivi säilyy huoltoa varten.
+  if (repairedDetail) {
+    wire[0] = { ...wire[0], detail: repairedDetail, fixed: true, technical: checks[0].detail };
   }
   const result: PreflightResult = {
     ranAt: new Date().toISOString(),
-    checks: checks.map(toWireCheck),
+    checks: wire,
     blockers: checks.filter((c) => c.status === "fail").length,
     warnings: checks.filter((c) => c.status === "warn").length,
     summary: summaryLine(checks),

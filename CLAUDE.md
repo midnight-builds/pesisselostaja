@@ -106,20 +106,23 @@ sulkeutui itsestään.
 stopin siivousta — molemmat lopetukset tulivat normaalina `ended`-polkuna. Älä
 esitä koettelematonta varmana; kerro mikä on koeteltu ja mikä ei.
 
-Löydetyt viat: #154 (kunnarin selostus), #155 (preflight validoi väärää
-ottelua) — molemmat korjattu — sekä #162 ja #165, jotka ovat auki ja osuvat
-**joka** ottelupäivänä:
+Löydetyt viat: #154 (kunnarin selostus) ja #155 (preflight validoi väärää
+ottelua). Myös #162 ja #165 — jotka osuivat **joka** ottelupäivänä — on nyt
+korjattu, mutta **kumpaakaan korjausta ei ole koeteltu livenä**:
 
-- **#162:** lähetysparin luonti onnistuu YouTubessa, mutta stream key ja
-  raakalähetyksen URL eivät tallennu työhön. Arvot on toistaiseksi haettava
-  `liveStreams.list`ista ja kirjoitettava työhön käsin.
-- **#165:** Työ-välilehden oletusvalinta voi osoittaa eiliseen työhön, ja
-  "Kirjoita .env.relay" aktivoi sen — jolloin päättynyt työ palaa
-  `arming`-tilaan ja estää oikean työn aktivoinnin.
+- **#162** (stream key ei tallentunut työhön) korjattiin #184:ssä: puuttuva
+  `liveStreams.list`-rivi on virhe eikä hiljainen null, ja avain kirjoittuu
+  työhön sellaisenaan. Käsin kirjoittamisen varapolkua ei ole — käsikentät
+  poistuivat käyttöliittymästä (#176).
+- **#165** (oletusvalinta osoitti eiliseen työhön) liukeni #183:ssa: valinnan
+  totuuslähde on `getActiveJob`, joka ei tarjoa työtä jonka ottelu alkoi yli
+  kuusi tuntia sitten. Erillistä ".env.relay" -nappia, joka aktivoi väärän työn,
+  ei enää ole.
 
 Molemmissa tapauksissa **#155:n sidontarivi on se, joka pysäyttää
 käynnistyksen** ennen kuin selostus menee väärään otteluun. Se ei ole
-vikailmoitus vaan viimeinen suoja.
+vikailmoitus vaan viimeinen suoja — ja se korjaa nyt myös itse, kun kohteena on
+operaattorin valitsema ottelu (#184).
 
 ## TTS pronunciation
 Speech is read aloud by browser TTS or Piper, which mispronounce some terms.

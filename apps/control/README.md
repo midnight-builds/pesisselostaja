@@ -60,8 +60,9 @@ npm run test:ui -w @pesisselostaja/control -- --headed --project=webkit
 Selain­testit (`test-ui/`, Playwright) ajetaan **WebKitillä ensisijaisesti** —
 kohde on iPhonen Safari, 393×853. Ne kasvavat käyttöliittymän tahdissa: jokainen
 tilan PR tuo oman specinsä (#178). Nyt katettuna on kuori ja tilakortti —
-perusrenderöinti oikealla palvelimella (`smoke.spec.ts`) ja tilakortin tilat +
-ottelun valinta (`statecard.spec.ts`).
+perusrenderöinti oikealla palvelimella (`smoke.spec.ts`), tilakortin tilat +
+ottelun valinta (`statecard.spec.ts`) ja valmistelu: lähetysparin luonti,
+valmiustarkistus ja 393 px:n leveys (`valmistelu.spec.ts`).
 
 Testit käynnistävät oman palvelimen porttiin **3099** ja ohjaavat kaikki
 kirjoitukset hakemistoon `.playwright-tmp/` (`CONTROL_STATE_DIR`,
@@ -109,6 +110,29 @@ sisältö. Etusivu on aina yksi kortti: *tämä ottelu, tässä tilassa*.
   (arming/live) tämä ei koske.
 - Selain pitää juuri luotua työtä näkyvillä siihen asti kunnes palvelin kertoo
   saman (aggregaattori tikittää 5 s välein). Palvelimen kehys voittaa aina.
+
+### Valmistelu (#184)
+
+Luonnos ja ajastettu työ ovat operaattorille **sama hetki** — ottelu on valittu,
+lähetys ei ole alkanut — joten ne ovat yksi kortin sisältö (`PrepCard`), ei kaksi:
+
+- **Esikatselu on pysyvästi painikkeen yläpuolella.** Se ei luo YouTubeen mitään
+  (pelkkää tekstiä), joten sitä ei tarvitse pyytää napista. Otsikkotiedot, joita
+  tulospalvelu ei tunne (#95), ovat kokoon taitettuna — normaalipolku on
+  esikatselu + yksi nappi.
+- **Lähetysparin luonti on ottelupäivän ainoa vahvistusta vaativa teko** (#171):
+  peruuttamaton ja ulospäin näkyvä, siksi kaksoisnapautus. Erillistä "olen
+  tarkistanut" -kytkintä ei ole: tuplaparin estää kone — kun työllä on jo pari,
+  luontia ei tarjota.
+- **Sidonta hoituu itsestään.** Nappia `.env.relay`:n kirjoittamiseen ei ole
+  (#176). Valmiustarkistus (`POST /api/preflight`, aina työn id:llä, #155)
+  korjaa väärän sidonnan **vain operaattorin valitsemaan otteluun** ja vain kun
+  relay ei ole ajossa, ja näyttää tekonsa rivinä *"Korjattiin: …"* — hiljaista
+  itsekorjausta ei tehdä. Itsekorjautuvasta esteestä ei lähde pushia (#174).
+- **Rivit ovat operaattorin kieltä.** Käännös tehdään palvelimella
+  (`toOperatorCheck`, `src/server/preflight.ts`), ja raaka rivi kulkee mukana
+  `PreflightCheck.technical`-kentässä huoltoarkkia varten (#188). Env-avainten
+  nimiä, tiedostopolkuja tai stream keytä ei näy käyttöliittymässä missään.
 
 Tilakohtainen sisältö kasvaa tilakoneen järjestyksessä omissa PR:issään (#178):
 valmistelu ja lähetysparin luonti (#184) → ajastettu-tila ja pushit (#185) →
@@ -256,11 +280,12 @@ tulospalvelun raakoja nimiä. Tulospalvelun osoite on monikkomuodossa
 (`/ottelut/<id>`), kuten palvelu itse sen kirjoittaa.
 
 Viestin saa **milloin tahansa** työn elinkaaren aikana:
-`GET /api/jobs/:id/share` (#131); tilakortin kopiointinappi tulee valmistelutilan
-mukana (#184). Se muodostetaan uudelleen työn linkeistä eikä talleteta luontihetkellä,
+`GET /api/jobs/:id/share` (#131); tilakortin kopiointinappi on valmistelutilassa
+(#184). Se muodostetaan uudelleen työn linkeistä eikä talleteta luontihetkellä,
 joten mallin vaihtaminen kesken leiripäivän näkyy myös jo luoduissa töissä.
 Ennen lähetysten luontia viestissä on paikkamerkit ja `linksReady` on `false` —
-käyttöliittymä sanoo silloin "älä jaa sitä vielä".
+silloin tilakortti ei näytä viestiä lainkaan: puolivalmis viesti ryhmächatissa on
+pahempi kuin viesti, jota ei vielä ole.
 
 ## Pysyväisasetukset
 
