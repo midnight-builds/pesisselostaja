@@ -40,6 +40,7 @@ import {
   markRunStarted,
   recordJobCleanup,
   reconcileOpenJobs,
+  reopenRunningJob,
 } from "./jobs.js";
 import { readLog } from "./journal.js";
 import { getMatchState } from "./matches.js";
@@ -725,6 +726,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
   const readActiveJob = opts.getActiveJob ?? getActiveJob;
   const closeRunningJobFn = opts.closeRunningJob ?? closeRunningJob;
   const markRunStartedFn = opts.markRunStarted ?? markRunStarted;
+  const reopenRunningJobFn = opts.reopenRunningJob ?? reopenRunningJob;
   const getRunningStatusFn = opts.getRunningStatus ?? (() => readRunningStatus());
   const reconcileOpenJobsFn = opts.reconcileOpenJobs ?? reconcileOpenJobs;
   const transitionBroadcastFn = opts.transitionBroadcast ?? ((videoId: string) => transitionBroadcast(videoId));
@@ -1068,6 +1070,25 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
    *  joka 30.7.2026 sitoi ottelun 145900 ajon edellisen illan työhön (#118). */
   async function bindArmedJob(): Promise<void> {
     const current = job;
+    // Suljettu työ takaisin ajoon, kun relay ajaa samaa ottelua (#200).
+    // Sama näyttö kuin sidonnalla, ja ilman tätä `finished` on yksisuuntainen
+    // ovi: settle-ikkunaa pidempi katko (kaatumissilmukka, käsin tehty
+    // korjaus) jättäisi loppuottelun ilman siivousta ja ilman säätimiä,
+    // vaikka lähetys jatkuu katsojille normaalisti.
+    if (
+      current?.status === "finished" &&
+      runningMatchId !== null &&
+      runningMatchId === current.matchId
+    ) {
+      const reopened = await reopenRunningJobFn(runningMatchId);
+      if (reopened) {
+        console.warn(
+          `[control] työ ${reopened.id} (ottelu ${reopened.matchId}) palautettiin ajoon — relay ajaa sitä yhä`
+        );
+        job = reopened;
+      }
+      return;
+    }
     if (current?.status !== "arming") return;
     if (runningMatchId === null) return; // ei näyttöä vielä — uusi yritys seuraavalla tikillä
     if (runningMatchId !== current.matchId) {
