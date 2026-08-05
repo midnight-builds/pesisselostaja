@@ -79,10 +79,10 @@ korvattu tällä; älä palauta sitä. Sama teksti on `.claude/skills/relay-otte
 
 ## Ottelupäivä: ohjaamo omistaa ketjun
 
-**Ohjaamo on oletus koko ketjulle** — ottelun valinta, molempien YouTube-
-lähetysten luonti, jakoviesti, käynnistys, ajonaikainen ohjaus ja siivous
-(issue #124). Käsityökierros YouTube Studiossa on **poikkeuspolku**, jota
-käytetään vain kun ohjaamo tai sen YouTube-valtuutus ei toimi — ei runbook.
+**Ohjaamo omistaa koko ketjun** — ottelun valinta, molempien YouTube-
+lähetysten luonti, jakoviesti, käynnistys, ajonaikainen ohjaus ja siivous.
+Käsityökierros YouTube Studiossa on **poikkeuspolku**, jota käytetään vain kun
+ohjaamo tai sen YouTube-valtuutus ei toimi — ei runbook.
 
 **Ajaminen tapahtuu ohjaamon käyttöliittymästä, ei agentin kautta.** Kartta
 #168 vei ketjun käyttöliittymään asti: yksi tilakortti puhelimen ruudulla,
@@ -98,38 +98,34 @@ Kaksi asiaa, jotka ovat menneet väärin nimenomaan tässä:
   tai dokumentti näyttää ohjaavan käsikierrokseen, sano ristiriita ääneen ja
   kysy — älä korvaa käyttäjän eksplisiittistä pyyntöä hiljaa "vastaavalla"
   toteutuksella. 30.7.2026 niin tehtiin, ja lähetysten luonti valui takaisin
-  sille ulkopuoliselle palvelulle, jonka korvaaminen on #124:n koko tavoite.
+  sille ulkopuoliselle palvelulle, jonka korvaaminen oli koko tavoite.
 - **Ketjun termit ovat repon juuren `CONTEXT.md`:ssä** (raakalähetys,
   selostettu lähetys, tulospalvelun ottelusivu, ajastushetki,
   käynnistysikkuna). Lue se ennen kuin kirjoitat ketjusta issueen, dokumenttiin
   tai koodikommenttiin; paljas "lähde-URL" on jo kaatanut kaksi dokumenttia.
 
-Ketju **on ajettu läpi ohjaamon luomalla lähetysparilla kahdesti**: 31.7.2026
-(ottelu 145918) ja 1.8.2026 (ottelu 136745, 104 min). Luonti, käsikäynnistys,
-ajo ja itsesammutus toimivat molemmilla kerroilla, ja 1.8. myös raakalähetys
-sulkeutui itsestään.
+### Mikä on koeteltu livenä ja mikä ei
 
-**Ajastimen automaattikäynnistystä ei ole yhä koeteltu livenä**, eikä hard
-stopin siivousta — molemmat lopetukset tulivat normaalina `ended`-polkuna. Älä
-esitä koettelematonta varmana; kerro mikä on koeteltu ja mikä ei.
+Älä esitä koettelematonta varmana; kerro kumpaa jokin on.
 
-Löydetyt viat: #154 (kunnarin selostus) ja #155 (preflight validoi väärää
-ottelua). Myös #162 ja #165 — jotka osuivat **joka** ottelupäivänä — on nyt
-korjattu, mutta **kumpaakaan korjausta ei ole koeteltu livenä**:
+**Koeteltu** (kahdesti, 31.7. ja 1.8.2026, vanhalla käyttöliittymällä):
+lähetysparin luonti, käsikäynnistys, ajo ja itsesammutus normaalilla
+`ended`-polulla. 1.8. myös raakalähetys sulkeutui itsestään.
 
-- **#162** (stream key ei tallentunut työhön) korjattiin #184:ssä: puuttuva
-  `liveStreams.list`-rivi on virhe eikä hiljainen null, ja avain kirjoittuu
-  työhön sellaisenaan. Käsin kirjoittamisen varapolkua ei ole — käsikentät
-  poistuivat käyttöliittymästä (#176).
-- **#165** (oletusvalinta osoitti eiliseen työhön) liukeni #183:ssa: valinnan
-  totuuslähde on `getActiveJob`, joka ei tarjoa työtä jonka ottelu alkoi yli
-  kuusi tuntia sitten. Erillistä ".env.relay" -nappia, joka aktivoi väärän työn,
-  ei enää ole.
+**Ei koeteltu kertaakaan:**
 
-Molemmissa tapauksissa **#155:n sidontarivi on se, joka pysäyttää
-käynnistyksen** ennen kuin selostus menee väärään otteluun. Se ei ole
-vikailmoitus vaan viimeinen suoja — ja se korjaa nyt myös itse, kun kohteena on
-operaattorin valitsema ottelu (#184).
+- **Koko uusi käyttöliittymä.** Yksikään rivi tilakortista ei ole ollut
+  oikeassa ottelussa.
+- **Käynnistysvahdin automaattinen käynnistys** — molemmat aiemmat ajot
+  käynnistettiin käsin. Uudessa käyttöliittymässä vahti on ainoa
+  käynnistystapa.
+- **Hard stopin siivous** — molemmat lopetukset tulivat normaalina polkuna.
+
+**Valmiustarkistuksen sidontarivi on viimeinen suoja** ennen kuin selostus
+menee väärään otteluun: se pysäyttää käynnistyksen, jos `.env.relay` osoittaa
+muuhun kuin valittuun työhön. Se ei ole vikailmoitus. Nykyään se myös korjaa
+sidonnan itse — mutta vain operaattorin valitsemaan otteluun ja vain relayn
+ollessa pysähdyksissä — ja näyttää tekonsa rivinä *"Korjattiin: …"*.
 
 ## TTS pronunciation
 Speech is read aloud by browser TTS or Piper, which mispronounce some terms.

@@ -184,12 +184,14 @@ echo '{"announceBatterChanges": false, "narrationDelayMs": 5000}' \
 Ohjaamosta relayyn on **täsmälleen kaksi sallittua kosketuspintaa** —
 `.env.relay` ja tämä control-tiedosto. Uutta HTTP-kanavaa ei rakenneta (#59).
 
-Selostusviive kohdistaa selostuksen kuvaan: jos selostus kuuluu **ennen** kuin
-tilanne näkyy videolla, kasvata. Oikea arvo **varmistetaan kuulemalla**.
+Selostusviive kohdistaa selostuksen kuvaan, ja **selostus voi osua kuvan
+kummallekin puolelle**: jos se kuuluu *ennen* kuin tilanne näkyy videolla,
+kasvata; jos se laahaa, pienennä. Oikea arvo **varmistetaan kuulemalla kesken
+lähetyksen** — videopolun oma viive vaihtelee lähetyksittäin, joten älä säädä
+ennakkoon minkään kirjatun luvun perusteella.
 
-**Odotettavaa, ei vikaa:** kokonaisviive tapahtumasta selostukseen ~30–90 s
-(arkkitehtuurinen, `apps/broadcast/README.md`). Respawnien lyhyt äänetön tauko.
-Ensimmäistä selostusta odotetaan hetki ffmpegin ensikytkeytymisestä.
+**Odotettavaa, ei vikaa:** respawnien lyhyt äänetön tauko, ja hetki ffmpegin
+ensikytkeytymisestä ennen ensimmäistä selostusta.
 
 **Seuranta:** `journalctl --user -u pesisselostaja-relay -f`, ja
 `seuranta-ja-vianetsinta.md` lokirivien tulkintaan.
