@@ -116,6 +116,9 @@ export interface LiveAggregatorOptions {
    *  edges without a job file on disk. */
   closeRunningJob?: (jobId: string | null) => Promise<Job | null>;
   markRunStarted?: (matchId: number) => Promise<Job | null>;
+  /** Suljetun työn palautus ajoon kun relay ajaa samaa ottelua (#200).
+   *  Injektoitava samasta syystä kuin muutkin työjonon kirjoitukset. */
+  reopenRunningJob?: (matchId: number) => Promise<Job | null>;
   /** Mitä ottelua relay OIKEASTI ajaa (relay.ts:n readRunningStatus, lähteenä
    *  relayn oma status-tiedosto). Tämä on se havainto jota vasten työ sidotaan
    *  — ilman sitä sidonta oli pelkkä arvaus jonon järjestyksestä (#118).
