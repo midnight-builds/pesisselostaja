@@ -252,6 +252,43 @@ export async function markRunStarted(matchId: number): Promise<Job | null> {
   return started;
 }
 
+/** Palauttaa suljetun työn takaisin ajoon, kun relay havaitaan ajamassa
+ *  SAMAA ottelua — tai null, jos sellaista työtä ei ole.
+ *
+ *  Työ suljetaan sillä hetkellä kun relay havaitaan alhaalla, ja siihen asti
+ *  se on oikein. Väärin se on silloin kun relay palaa ja jatkaa samaa ottelua:
+ *  kuva ja selostus palaavat katsojille, mutta ohjaamo ei palannut koskaan.
+ *  `markRunStarted` vaatii `isBlocking`-tilan, joten `finished` oli
+ *  yksisuuntainen ovi — ja sen takana ottelun oikea lopetus jäi tekemättä:
+ *  ei hard stopin siivousta, ei säätimiä kortissa, ja päättymispush oli jo
+ *  lähtenyt kesken ottelun (#200).
+ *
+ *  Näyttö on sama kuin sidonnalla: kutsuja on todennut relayn ajavan tätä
+ *  ottelua (`trustedRunningMatchId` — unit ajossa, status-tiedosto tämän ajon
+ *  kirjoittama). Arvaus tässä ei kelpaa; se avaisi eilisen työn uudelleen.
+ *
+ *  Siivousmerkintä nollataan tarkoituksella: se kirjattiin ajosta, joka ei
+ *  ollutkaan ohi, ja `recordJobCleanup` kirjoittaa vain kerran. Ilman
+ *  nollausta ottelun OIKEA siivous ei mahtuisi työhön enää lainkaan. */
+export async function reopenRunningJob(matchId: number): Promise<Job | null> {
+  let reopened: Job | null = null;
+  await store.update((jobs) => {
+    const idx = jobs.findIndex(
+      (j) => j.matchId === matchId && j.status === "finished" && j.startedAt
+    );
+    if (idx === -1) return jobs;
+    // Lähetyspaikan on oltava vapaa. Jos joku muu työ pitää sitä, oikea vastaus
+    // on ristiriitavaroitus eikä toisen työn syrjäyttäminen — ajossa olevaa ei
+    // kosketa automaattisesti.
+    if (jobs.some((j) => isBlocking(j.status))) return jobs;
+    const next = jobs.slice();
+    next[idx] = { ...jobs[idx], status: "live", endedAt: null, cleanup: null };
+    reopened = next[idx];
+    return next;
+  });
+  return reopened;
+}
+
 /** Closes the job that holds the broadcast slot, and returns it — or null if
  *  the slot was already free.
  *

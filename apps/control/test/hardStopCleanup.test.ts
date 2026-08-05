@@ -53,6 +53,8 @@ vi.mock("../src/server/jobs.js", () => {
     // moduulin, joten puuttuva export kaataisi importin. Vaaraton no-op —
     // testi joka mittaa kirjausta injektoi oman.
     recordJobCleanup: vi.fn(async () => null),
+    // Suljetun työn palautus ajoon (#200). Vaaraton oletus: ei palauta mitään.
+    reopenRunningJob: vi.fn(async () => null),
   };
 });
 vi.mock("../src/server/journal.js", () => ({ readLog: vi.fn(async () => []) }));
@@ -209,7 +211,9 @@ async function runFallingEdge(options: {
   });
   await tick();
   relayState = { ...relayState, activeState: "inactive", active: false };
-  await tick();
+  // Settle-ikkuna (#200): ajon päättyminen vaatii relayn pysyvän alhaalla yli
+  // 30 s. Yksi havainto on uudelleenkäynnistys, ei lopetus.
+  for (let i = 0; i < 8; i += 1) await tick();
   live.stop();
   return { transition, closeRunningJob, cleanup };
 }
@@ -405,7 +409,7 @@ describe("hard stop -siivous: oletuspolku lukee statuksen työn ottelutunnuksell
     });
     await tick();
     relayState = { ...relayState, activeState: "inactive", active: false };
-    await tick();
+    for (let i = 0; i < 8; i += 1) await tick(); // settle-ikkuna (#200)
     live.stop();
 
     expect(readRelayStatusMock).toHaveBeenCalledWith(145900);
