@@ -801,6 +801,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       knobs,
       sourceIngest: source.ingest,
       job,
+      conflict,
       telemetry: conflicted ? null : telemetry,
       narration: conflicted ? [] : narration,
       log,
