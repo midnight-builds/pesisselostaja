@@ -169,8 +169,13 @@ function alertsFor(live: LiveState): string[] {
   // näyttäisivät muuten vihreää, mutta säädöt kirjoittuvat väärän ottelun
   // control-tiedostoon eikä ajossa oleva relay näe niitä koskaan — eli juuri
   // nämä kaksi nappia lakkaavat vaikuttamasta mihinkään, hiljaa.
-  const running = live.telemetry?.matchId;
-  if (live.job && running != null && running !== live.job.matchId) {
+  //
+  // Luetaan kehyksen omasta kentästä (#202). Ennen tämä pääteltiin
+  // telemetriasta — jonka palvelin nollaa nimenomaan ristiriidassa, koska se
+  // on luettu työn ottelulla eli väärän. Rivi ei siis voinut näkyä koskaan:
+  // kun ristiriita oli, telemetria oli null; kun telemetria ei ollut null,
+  // ristiriitaa ei ollut.
+  if (live.conflict) {
     out.push("Säädöt eivät mene perille: lähetys ajaa eri ottelua kuin ohjaamo.");
   }
   return out;
