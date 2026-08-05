@@ -541,7 +541,14 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
       // (#180, #171:n linja): clientin PATCH-kierros olisi tilalogiikan vuoto,
       // ja ilman siirtoa ajastin ei koskaan poimi työtä
       // automaattikäynnistyksen ehdokkaaksi.
-      await markJobScheduled(job.id);
+      //
+      // Vain avaimen kanssa (#203). `scheduled` on se tila, joka lähettää
+      // lukitusnäytölle "Lähetyspari valmiina" ja lupaa leipätekstissä että
+      // "selostus käynnistyy itsestään, kun raakalähetys alkaa". Ilman stream
+      // keytä lupaus on väärä: relayn preflight estää käynnistyksen aina.
+      // Työ jää silloin luonnokseksi, jolloin kortti pitää luonnin tarjolla
+      // eikä puhelin piippaa turhaan.
+      if (pair.narrated.streamKey) await markJobScheduled(job.id);
     }
     const thumbnails = await uploadPairThumbnails(pair, texts);
     sendJson(res, 201, { ...pair, texts, thumbnails });
