@@ -19,7 +19,7 @@
 
 import type { LiveState, NotificationPrefs, PreflightResult } from "../shared/types.js";
 import { blockedPushTitle, jobArrivalPush, jobEndedPush } from "../shared/jobState.js";
-import { sendPush } from "./push.js";
+import { sendPushDetailed } from "./push.js";
 import { createStore } from "./store.js";
 
 /** How long health must stay "fail" before we call it broken. The fast poll is
@@ -55,16 +55,41 @@ export async function setNotificationPrefs(patch: Partial<NotificationPrefs>): P
 // ------------------------------------------------------------- send with tag
 
 const lastSentAt = new Map<string, number>();
+/** Milloin tagia viimeksi YRITETTIIN turhaan. Erillään onnistuneesta
+ *  lähetyksestä, koska se rajoittaa eri asiaa: toistoa, ei vaimennusta. */
+const lastFailedAt = new Map<string, number>();
 
-/** Fire-and-forget send with the repeat guard. Returns whether it actually
- *  went out, which the callers use to decide follow-up state (e.g. not
- *  announcing a recovery for a failure we never announced). */
+/** Kuinka kauan odotetaan ennen kuin epäonnistunutta lähetystä yritetään
+ *  uudelleen. Ilman tätä katkoksen aikana yritettäisiin joka tikillä (5 s) —
+ *  mutta 10 minuutin vaimennus taas olisi sama vika kuin ennenkin. Minuutti on
+ *  lyhyt suhteessa otteluun ja pitkä suhteessa push-palvelun huonoon hetkeen. */
+const RETRY_AFTER_FAIL_MS = 60_000;
+
+/** Send with the repeat guard. Returns whether it actually went out.
+ *
+ *  Vaimennusleima asetetaan VASTA onnistuneen toimituksen jälkeen (#205).
+ *  Ennen se asetettiin ennen lähetystä ja palautusarvo oli aina `true`, vaikka
+ *  `sendPush` nielee 5xx:t, aikakatkaisut ja DNS-virheet. Yksi hukkunut
+ *  "Lähetys katkesi" vaiensi siis myös "Lähetys rikki" -pushin koko episodin
+ *  ajaksi: puhelin ei piipannut kertaakaan, vaikka lähetys oli kuollut ja
+ *  ottelu kesken — juuri se tapaus, jota varten koko mekanismi on olemassa.
+ *
+ *  "Meni perille" = vähintään yksi tilaus otti sen vastaan. Nolla tilausta on
+ *  siis myös epäonnistuminen; se on rehellisempi kuin merkitä ilmoitetuksi
+ *  jotain, jota kukaan ei nähnyt. */
 async function notify(tag: string, title: string, body: string): Promise<boolean> {
   const previous = lastSentAt.get(tag);
   const now = Date.now();
   if (previous !== undefined && now - previous < REPEAT_SUPPRESS_MS) return false;
+  const failed = lastFailedAt.get(tag);
+  if (failed !== undefined && now - failed < RETRY_AFTER_FAIL_MS) return false;
+  const result = await sendPushDetailed(title, body, { tag });
+  if (result.sent === 0) {
+    lastFailedAt.set(tag, now);
+    return false;
+  }
   lastSentAt.set(tag, now);
-  await sendPush(title, body, { tag });
+  lastFailedAt.delete(tag);
   return true;
 }
 
@@ -107,6 +132,7 @@ export function resetNotificationState(): void {
   memory.jobKey = undefined;
   memory.endedKey = undefined;
   lastSentAt.clear();
+  lastFailedAt.clear();
 }
 
 function matchLabel(state: LiveState): string {
@@ -275,7 +301,10 @@ async function observe(state: LiveState): Promise<void> {
  *  trigger exists: nobody is looking at the screen at that moment. A manual
  *  re-run within the suppression window stays quiet, because the operator who
  *  tapped the button is already reading the result. */
-export async function notifyPreflightBlockers(result: PreflightResult): Promise<void> {
+export async function notifyPreflightBlockers(
+  result: PreflightResult,
+  jobId: string | null = null
+): Promise<void> {
   if (result.blockers === 0) return;
   const prefs = await getNotificationPrefs();
   if (!prefs.startup) return;
@@ -285,8 +314,13 @@ export async function notifyPreflightBlockers(result: PreflightResult): Promise<
   const failed = result.checks.filter((check) => check.status === "fail");
   const subject = failed[0]?.name ?? `${result.blockers} estettä`;
   const detail = failed.map((check) => check.detail).join(" ");
+  // Tagi on työkohtainen (#205): kiinteä tagi vaimensi seuraavan esteen 10
+  // minuutiksi, ja PrepCard ajaa valmiustarkistuksen joka mountissa. Klo 9:00
+  // avattu ohjaamo saattoi siis vaientaa klo 9:05 tulevan käynnistyksen
+  // esteen kokonaan — eikä ajastin lähetä omaa pushia, koska se luottaa
+  // preflightin lähettävän täsmälleen yhden.
   await notify(
-    "preflight-blocked",
+    `preflight-blocked:${jobId ?? "-"}`,
     blockedPushTitle(subject),
     detail.length > 0 ? detail : result.summary
   );
