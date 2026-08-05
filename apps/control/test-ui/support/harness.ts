@@ -63,6 +63,20 @@ export class ApiMock {
   /** Ajastimen tila. Oletus pois päältä, kuten palvelimellakin. */
   scheduler = fixture.schedulerState();
   authHealth = fixture.authHealth();
+  /** Laitevirran vastaukset (#188): huoltoarkin uusintanappi käynnistää virran
+   *  ja jää pollaamaan, joten molemmat päät on voitava käsikirjoittaa. */
+  deviceFlow = {
+    userCode: "ABCD-EFGH",
+    verificationUrl: "https://www.google.com/device",
+    expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+    intervalSec: 5,
+    instructions: "Avaa osoite ja syötä koodi.",
+  };
+  devicePoll: { status: string; message: string; intervalSec: number } = {
+    status: "pending",
+    message: "Odotetaan kirjautumista.",
+    intervalSec: 5,
+  };
   broadcasts: unknown[] = [];
   playlists: unknown[] = [];
   /** Routes to answer with an error, e.g. { "POST /api/relay/start": "..." }.
@@ -316,6 +330,15 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
     // makes AuthMissingNotice appear. Mirroring that here means the tab is
     // tested in the state it actually ships in today: no credentials on the box.
     if (path === "/api/youtube/health") return void (await send(api.authHealth));
+    // Laitevirta vastaa myös ilman yhteyttä — se on nimenomaan se reitti,
+    // jolla yhteys syntyy. Sama poikkeus kuin palvelimella (index.ts), ja
+    // ilman sitä huoltoarkin uusintanappi törmäisi alempaan 409-porttiin.
+    if (path === "/api/youtube/auth/start" && method === "POST") {
+      return void (await send(api.deviceFlow));
+    }
+    if (path === "/api/youtube/auth/poll" && method === "POST") {
+      return void (await send(api.devicePoll));
+    }
     if (path.startsWith("/api/youtube/") || path.startsWith("/api/thumbnail/")) {
       if (!api.authHealth.connected) {
         return void (await send({ error: "Google-tiliä ei ole yhdistetty." }, 409));
@@ -455,7 +478,13 @@ export interface Overflow {
 
 /** Any element whose content is wider than its box — i.e. anything that would
  *  make the operator swipe sideways. Text inputs are excluded: a long value in
- *  a fixed-width input legitimately overflows its own scroll box. */
+ *  a fixed-width input legitimately overflows its own scroll box.
+ *
+ *  Niin ovat myös elementit, jotka LEIKKAAVAT ylivuotonsa itse (`overflow-x:
+ *  hidden|clip`) — kolmen pisteen katkaisu on suunniteltu lopputulos eikä
+ *  vaakavieritys, eikä leikattu sisältö voi työntää sivua leveäksi. Ilman tätä
+ *  rajausta mittari kaatuisi topbarin ellipsoituun rivin (`.topbar__meta`)
+ *  kohdalla heti kun riville lisätään mitä tahansa (#188:n hammasratas). */
 export async function horizontalOverflow(page: Page): Promise<Overflow[]> {
   return page.evaluate(() => {
     const bad: Array<{ selector: string; scrollWidth: number; clientWidth: number }> = [];
@@ -465,6 +494,8 @@ export async function horizontalOverflow(page: Page): Promise<Overflow[]> {
     };
     for (const el of Array.from(document.querySelectorAll("*"))) {
       if (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) continue;
+      const overflowX = getComputedStyle(el).overflowX;
+      if (overflowX === "hidden" || overflowX === "clip") continue;
       if (el.scrollWidth > el.clientWidth + 1) {
         bad.push({ selector: describe(el), scrollWidth: el.scrollWidth, clientWidth: el.clientWidth });
       }

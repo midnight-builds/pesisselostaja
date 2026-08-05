@@ -33,6 +33,7 @@ import {
   MatchNotFoundError,
 } from "./jobs.js";
 import { getSchedulerState, setSchedulerEnabled, startScheduler } from "./scheduler.js";
+import { startAuthWatch } from "./authWatch.js";
 import { addSubscription, getSubscriptionCount, getVapidPublicKey, sendPushDetailed } from "./push.js";
 import { getNotificationPrefs, observeLiveState, setNotificationPrefs } from "./notifications.js";
 import {
@@ -733,6 +734,12 @@ async function main(): Promise<void> {
   // only records what it would have done.
   const scheduler = startScheduler();
 
+  // Google-yhteyden vartija (#188). Oma ajastimensa, kaukana ottelupäivän
+  // poluista: se varoittaa vanhenevasta yhteydestä ja loppuvasta kiintiöstä
+  // ottelupäivien VÄLISSÄ, jolloin kukaan ei katso ohjaamoa. Ilman tokenia se
+  // ei koske verkkoon eikä siis kuluta kiintiötä.
+  const authWatch = startAuthWatch();
+
   const server = createServer((req, res) => {
     // A single route's error must never take the whole server down — every
     // request funnels through this try/catch, on top of whatever a handler
@@ -771,6 +778,7 @@ async function main(): Promise<void> {
     // riippumaton, eikä kesken oleva YouTube-kutsu saa pitää prosessia
     // pystyssä sammutuksen jälkeen.
     sourceIngest.stop();
+    authWatch();
     live.stop();
     server.close(() => process.exit(0));
   };

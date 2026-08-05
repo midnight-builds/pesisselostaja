@@ -314,6 +314,19 @@ export async function notifySchedulerAction(
   return notify(`scheduler:${tag}`, title, body);
 }
 
+/** Google-yhteys vaatii tekoa: vanheneminen tai kiintiö (#176, #188).
+ *
+ *  Luokitellaan `startup`-preferenssin alle, koska tämä on valmistelun este —
+ *  se estää lähetysparin luonnin, ei käynnissä olevaa lähetystä. Tagi on
+ *  lajikohtainen, jotta vanhenemisvaroitus ei vaienna kiintiövaroitusta:
+ *  ne vaativat eri teon. Reunaehdon (ei toistoa kun tilanne pysyy samana)
+ *  hoitaa vartija itse, tämä vain lähettää. */
+export async function notifyAuthAlert(kind: string, title: string, body: string): Promise<boolean> {
+  const prefs = await getNotificationPrefs();
+  if (!prefs.startup) return false;
+  return notify(`auth:${kind}`, title, body);
+}
+
 /** An automatic repair was carried out.
  *
  *  Nothing calls this yet — automatic repair is phase B (DESIGN.md: "UI korjaa

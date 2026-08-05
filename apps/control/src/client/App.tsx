@@ -3,6 +3,7 @@ import type { Job, LiveState } from "../shared/types";
 import { isJobClosed } from "../shared/jobState";
 import { connectLive, type LiveConnectionStatus } from "./api";
 import { MatchPicker } from "./components/MatchPicker";
+import { ServiceSheet } from "./components/ServiceSheet";
 import { StateCard } from "./components/StateCard";
 import { Toast, type ToastMessage } from "./components/Toast";
 import { fiTime } from "./format";
@@ -29,6 +30,9 @@ export function App() {
   /** Tässä käyttöliittymässä peruttu työ: sitä ei näytetä vaikka palvelimen
    *  edellinen tikki kertoisi sen vielä olevan valinta. */
   const [dismissed, setDismissed] = useState<string | null>(null);
+  /** Huoltoarkki auki (#188). Ei reittiä eikä tilaa palvelimella: arkki on
+   *  ohikiitävä ja sen sulkeminen palauttaa aina ottelupäivän polulle. */
+  const [service, setService] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => connectLive({ onState: setLive, onStatus: setConnection }), []);
@@ -81,6 +85,17 @@ export function App() {
         <span className={`conn conn--${connection}`}>
           {connection === "open" ? "yhteys ok" : connection === "connecting" ? "yhdistetään" : "yhteys poikki"}
         </span>
+        {/* Ainoa navigaatio koko sovelluksessa, ja se johtaa pois ottelupäivän
+            polulta: huolto on olemassa vain kun jokin on rikki (#173). */}
+        <button
+          type="button"
+          className="gear"
+          aria-label="Huolto"
+          onClick={() => setService(true)}
+          data-testid="gear"
+        >
+          <span aria-hidden="true">⚙</span>
+        </button>
       </header>
 
       {/* Ottelun aikana näkymä EI vieri: viisi tietoa ja kaksi säätöä pysyvät
@@ -110,6 +125,8 @@ export function App() {
           )}
         </div>
       </main>
+
+      {service && <ServiceSheet live={live} notify={notify} onClose={() => setService(false)} />}
 
       <Toast toast={toast} onDismiss={() => setToast(null)} />
     </div>

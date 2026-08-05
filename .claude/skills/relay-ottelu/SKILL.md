@@ -82,12 +82,13 @@ tarkoittaa ajastusta **ohjaamon välinein**, samaa polkua, ei käsikierrosta.
 > lähetysten luonti valui takaisin sille ulkopuoliselle palvelulle, jonka
 > korvaaminen on #124:n koko tavoite.
 
-> **Käyttöliittymä on kesken (kartta #168).** Välilehdet on purettu ja tilalle
-> on tullut yksi tilakortti (#183); valmistelu ja lähetysparin luonti ovat
-> uudessa kortissa (#184). **Käynnistystä, ottelunaikaista ohjausta ja huoltoa
-> EI vielä ole käyttöliittymässä** (#185–#188) — niiden osalta ottelupäivä
-> ajetaan polulla B tai palvelinreittejä käyttäen. Alla oleva teksti kuvaa
-> kunkin vaiheen kohdalla, kummasta on kyse.
+> **Käyttöliittymä on uusittu kokonaan (kartta #168).** Välilehdet purettiin ja
+> tilalle tuli yksi tilakortti: ottelun valinta (#183), valmistelu ja
+> lähetysparin luonti (#184), ajastettu-tila ja pushit (#185), ottelunaikainen
+> kertasilmäys ja viivesäätö (#186), päättynyt-tila ja siivous (#187) sekä
+> huolto hammasrattaan takana (#188). Koko ketju on siis ohjaamossa.
+> **Mitään näistä ei ole vielä koeteltu livenä** — jos jokin ei toimi kentällä,
+> polku B on yhä olemassa varapolkuna.
 
 ## A1. Ajastushetki — työ ja lähetykset (esim. edellisenä iltana)
 
