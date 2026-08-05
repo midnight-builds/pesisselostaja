@@ -4,6 +4,7 @@ import { NO_JOB_STATE, jobStateWord } from "../../shared/jobState";
 import { api } from "../api";
 import { fiTime } from "../format";
 import { PrepCard } from "./PrepCard";
+import { StartGuard } from "./StartGuard";
 
 /** Tilakortti — ohjaamon etusivu (#173, variantti A).
  *
@@ -52,11 +53,16 @@ export function StateCard({ job, live, notify, onCleared }: Props) {
       {/* Valmistelu kattaa molemmat sitä edeltävät tilat: luonnoksen, jolla
           lähetysparia ei vielä ole, ja ajastetun työn, jolla se on. Ne ovat sama
           hetki operaattorille — ottelu on valittu, lähetys ei ole alkanut —
-          eivätkä kaksi korttia (#170). Ajastimen ja käynnistysikkunan oma
-          sisältö tulee #185:ssä. */}
+          eivätkä kaksi korttia (#170). */}
       {job && (job.status === "draft" || job.status === "scheduled") && (
         <PrepCard job={job} notify={notify} />
       )}
+
+      {/* Käynnistysvahti tulee valmiustarkistuksen JÄLKEEN: se on lupaus siitä
+          mitä tapahtuu seuraavaksi, ja "korjaa yllä olevat rivit" osoittaa
+          ylöspäin. Vasta ajastetulla työllä on lupaus annettavana — luonnokselta
+          puuttuu lähetyspari, jota käynnistää (#185). */}
+      {job?.status === "scheduled" && <StartGuard job={job} now={live?.now ?? new Date().toISOString()} />}
 
       {/* Luonnos on työ, jolle ei ole vielä luotu lähetysparia, joten sen saa
           hylätä ilman ulospäin näkyviä seurauksia — ottelunvaihto ON vahvistus
@@ -80,9 +86,10 @@ function detailFor(job: Job | null, live: LiveState | null): string {
         ? `Ottelu valittu, alkaa ${kickoff}. Lähetyspari on vielä luomatta.`
         : "Ottelu valittu. Lähetyspari on vielä luomatta.";
     case "scheduled":
-      return kickoff
-        ? `Lähetyspari on luotu. Selostus käynnistyy itsestään, kun raakalähetys alkaa — ottelu alkaa ${kickoff}.`
-        : "Lähetyspari on luotu. Selostus käynnistyy itsestään, kun raakalähetys alkaa.";
+      // Käynnistyslupaus ja alkuaika ovat käynnistysvahdin rivejä (#185) —
+      // sama lause kahdesti peräkkäin lukisi kuin virhe. Tähän jää se, mitä
+      // valmistelusta on jo saatu aikaan.
+      return "Molemmat lähetykset on luotu ja linkit ovat jaettavissa.";
     case "arming":
       return "Ohjaamo tarkkailee raakalähetystä. Saat ilmoituksen, kun selostus on käynnissä.";
     case "live":

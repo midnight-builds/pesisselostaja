@@ -178,8 +178,11 @@ function build(opts: {
     listJobs: vi.fn(async () => opts.jobs),
     getSystemState: vi.fn(async () => opts.system ?? system()),
   };
-  const scheduler = mod.createScheduler({ now: () => NOW, ...calls });
-  return { scheduler, calls };
+  // Siirrettävä kello: takalukko (RETRY_AFTER_BLOCK_MS) on aikaan sidottu, eikä
+  // sen yli pääse muuten kuin kelaamalla.
+  let clock = NOW;
+  const scheduler = mod.createScheduler({ now: () => clock, ...calls });
+  return { scheduler, calls, advance: (ms: number) => (clock += ms) };
 }
 
 /** Every dep that changes something outside the process. If none of these fired,
@@ -299,14 +302,16 @@ describe("ajastin päällä", () => {
     expect(calls.setJobStatus).not.toHaveBeenCalledWith("job-a", "scheduled");
   });
 
-  it("ilmoittaa käynnistyksestä, koska kukaan ei katso ruutua sillä hetkellä", async () => {
+  it("ei ilmoita käynnistyksestä itse — se on työn tilasiirtymän push (#174)", async () => {
     const { scheduler, calls } = build({ jobs: [job()], source: SOURCE.liveFull });
     await scheduler.setEnabled(true);
 
     await scheduler.tick();
 
-    expect(calls.notify).toHaveBeenCalledOnce();
-    expect(calls.notify.mock.calls[0][1]).toBe("Ajastin käynnisti lähetyksen");
+    // Käynnistys ilmoitetaan yhdestä sanamuotolähteestä (`shared/jobState.ts`)
+    // silloin kun työ siirtyy `live`-tilaan, jotta lukitusnäytöllä lukee sama
+    // teksti riippumatta siitä käynnistikö ajastin vai operaattori.
+    expect(calls.notify).not.toHaveBeenCalled();
   });
 
   it("käynnistää myös heikkolaatuisen lähteen — vajaa lähetys on parempi kuin ei lähetystä", async () => {
@@ -336,7 +341,10 @@ describe("portit", () => {
     // Työ jää "scheduled"-tilaan: jono ei saa jäädä varatuksi työstä joka ei aja.
     expect(calls.setJobStatus).not.toHaveBeenCalled();
     expect(state.lastAction).toMatchObject({ decision: "blocked-preflight", applied: false });
-    expect(calls.notify.mock.calls[0][1]).toBe("Ajastin: käynnistys estyi");
+    // Ei omaa pushia: preflight lähettää jo yhden käskymuotoisen ilmoituksen
+    // jäljelle jääneistä esteistä, ja toinen piippaus samasta esteestä ei
+    // kantaisi uutta tietoa (#174).
+    expect(calls.notify).not.toHaveBeenCalled();
   });
 
   it("ei yritä samaa estettä uudelleen joka 30 sekunti", async () => {
@@ -386,8 +394,8 @@ describe("portit", () => {
     expect(calls.setJobStatus).not.toHaveBeenCalled();
     expect(calls.activateJob).not.toHaveBeenCalled();
     expect(state.lastAction).toMatchObject({ decision: "blocked-busy", jobId: "job-b" });
-    expect(calls.notify.mock.calls[0][1]).toBe("Ajastin: lähetys jonossa");
-    expect(calls.notify.mock.calls[0][2]).toContain("Aamu – Ilta");
+    // Käskymuotoinen otsikko: tämä este odottaa operaattoria (#174).
+    expect(calls.notify.mock.calls[0][1]).toBe("Valmistelu odottaa: toinen lähetys on ajossa");
   });
 
   it("lähde ei vielä livenä: ei tehdä mitään eikä se ole virhe", async () => {
@@ -424,6 +432,29 @@ describe("portit", () => {
 
     expect(calls.setJobStatus).toHaveBeenCalledWith("job-a", "scheduled");
     expect(state.lastAction).toMatchObject({ decision: "start-failed", applied: false });
+  });
+
+  it("ensimmäinen kaatunut käynnistys ei piippaa puhelinta, toinen peräkkäinen piippaa", async () => {
+    // Kolmen luokan sääntö (#174): itsestään korjautuva este on hiljainen.
+    // Uusi yritys ajetaan viiden minuutin päästä, joten yksi kaatuminen EI ole
+    // operaattorin asia — kaksi peräkkäistä on, koska silloin se ei korjaannu.
+    const { scheduler, calls, advance } = build({
+      jobs: [job()],
+      source: SOURCE.liveFull,
+      startThrows: new Error("Job for pesisselostaja-relay.service failed"),
+    });
+    await scheduler.setEnabled(true);
+
+    await scheduler.tick();
+    expect(calls.notify).not.toHaveBeenCalled();
+
+    // Takalukko estää yrityksen viideksi minuutiksi; kello eteenpäin.
+    advance(6 * 60_000);
+    const state = await scheduler.tick();
+
+    expect(state.lastAction).toMatchObject({ decision: "start-failed" });
+    expect(calls.notify).toHaveBeenCalledOnce();
+    expect(calls.notify.mock.calls[0][1]).toBe("Valmistelu odottaa: käynnistys ei onnistu");
   });
 });
 

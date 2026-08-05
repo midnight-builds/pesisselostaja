@@ -554,6 +554,34 @@ select.field__input {
   color: var(--ok);
 }
 
+/* ── Käynnistysvahti (#185) ──────────────────────────────────
+   Ajastetun työn oma sisältö: yksi lupaus ("käynnistyy itsestään") ja
+   korkeintaan muutama rivi siitä, mikä sen tiellä on. Ei nappeja —
+   käynnistysikkuna on ilmoitushetki, ei vuorovaikutushetki (#170). */
+.guard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.guard__lead {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.guard__when {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+/* Odottava rivi on tarkoituksella vaisu: se kertoo että kone tekee työtä,
+   eikä se saa kilpailla huomiosta käskyrivin kanssa. */
+.check--wait .check__mark {
+  color: var(--faint);
+}
+
 /* Vahvistusnappi: peruuttamaton ja ulospäin näkyvä teko. Viritettynä se
    vaihtaa väriä, jotta toinen napautus on tietoinen eikä jatkoa liikkeelle. */
 .btn--danger {

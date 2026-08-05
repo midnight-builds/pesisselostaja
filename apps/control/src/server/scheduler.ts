@@ -35,6 +35,7 @@ import type {
   SchedulerState,
   SystemState,
 } from "../shared/types.js";
+import { blockedPushTitle } from "../shared/jobState.js";
 import { activateJob, listJobs, markRunStarted, setJobStatus } from "./jobs.js";
 import { notifySchedulerAction } from "./notifications.js";
 import { runControlPreflight } from "./preflight.js";
@@ -265,6 +266,11 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
   let retryAfter = 0;
   /** Last ETA yt-dlp gave us, used to tighten the cadence. */
   let sourceStartsInMs: number | null = null;
+  /** Peräkkäisten kaatuneiden käynnistysyritysten määrä ja työ, jota ne
+   *  koskevat — kolmen luokan säännön (#174) laskuri: ensimmäinen yritys on
+   *  itsestään korjautuva, toinen ei. */
+  let startFailures = 0;
+  let failingJobId: string | null = null;
 
   async function isEnabled(): Promise<boolean> {
     const persisted = await store.read();
@@ -376,14 +382,20 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
     const jobId = p.job?.id ?? null;
 
     if (p.decision === "blocked-disk") {
-      await deps.notify("disk", "Ajastin: levytila lopussa", p.reason);
+      // Este-pushit ovat käskymuodossa ja kertovat mitä operaattorin on tehtävä
+      // (#174) — `p.reason` on ajastimen omaa kirjanpitoa ja jää lokiin.
+      await deps.notify(
+        "disk",
+        blockedPushTitle("levytila"),
+        "Levytila on lopussa. Vapauta tilaa, tai lähetystä ei aloiteta."
+      );
       return { at, decision: p.decision, jobId, reason: p.reason, applied: false };
     }
     if (p.decision === "blocked-busy") {
       await deps.notify(
         `busy:${jobId ?? "-"}`,
-        "Ajastin: lähetys jonossa",
-        `${p.reason} Lopeta ajossa oleva käsin, jos haluat vaihtaa.`
+        blockedPushTitle("toinen lähetys on ajossa"),
+        "Lopeta ajossa oleva lähetys käsin, jos haluat vaihtaa. Ajossa olevaa ei katkaista automaattisesti."
       );
       return { at, decision: p.decision, jobId, reason: p.reason, applied: false };
     }
@@ -401,15 +413,12 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
       await deps.writeRelayEnv(job);
       const preflight = await deps.runPreflight(job);
       if (preflight.blockers > 0) {
-        // runControlPreflight sends its own "Preflight: N estettä" push, so this
-        // one adds the piece that push cannot know: the start was refused.
+        // Ei omaa pushia: runControlPreflight lähettää jo täsmälleen yhden
+        // käskymuotoisen "Valmistelu odottaa: X" -ilmoituksen jäljelle jääneistä
+        // esteistä (#174). Toinen piippaus samasta esteestä kantaisi vain sen
+        // tiedon, ettei käynnistetty — minkä ensimmäinen jo sanoo.
         retryAfter = deps.now() + RETRY_AFTER_BLOCK_MS;
         const reason = `${label(job)}: preflightissa ${preflight.blockers} estettä — EI käynnistetty.`;
-        await deps.notify(
-          `preflight:${job.id}`,
-          "Ajastin: käynnistys estyi",
-          `${reason} ${preflight.summary}`
-        );
         return { at, decision: "blocked-preflight", jobId, reason, applied: false };
       }
 
@@ -432,11 +441,11 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
           `[scheduler] työtä ${job.id} (ottelu ${job.matchId}) ei saatu leimattua käyntiin — poller yrittää uudelleen`
         );
       }
-      await deps.notify(
-        `started:${job.id}`,
-        "Ajastin käynnisti lähetyksen",
-        `${p.reason} Preflight puhdas.`
-      );
+      // Käynnistyksen push tulee työn tilasiirtymästä (`live`) yhdestä
+      // sanamuotolähteestä, ei täältä (#174): ajastin ja käsikäynnistys ovat
+      // operaattorille sama tapahtuma, eikä lukitusnäytöllä lue eri tekstiä sen
+      // mukaan kumpi niistä sen teki.
+      startFailures = 0;
       return { at, decision: "start", jobId, reason: p.reason, applied: true };
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
@@ -451,7 +460,21 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
         // error behind a second one.
       }
       const reason = `${label(job)}: käynnistys kaatui — ${detail}`;
-      await deps.notify(`failed:${job.id}`, "Ajastin: käynnistys kaatui", reason).catch(() => undefined);
+      // Kolmen luokan sääntö (#174): ensimmäinen kaatuminen on itsestään
+      // korjautuva, koska uusi yritys ajetaan viiden minuutin päästä — se ei
+      // ansaitse pushia. Toinen peräkkäinen samalle työlle ei enää korjaannu
+      // itsestään, ja silloin operaattorin on tiedettävä.
+      startFailures = failingJobId === job.id ? startFailures + 1 : 1;
+      failingJobId = job.id;
+      if (startFailures >= 2) {
+        await deps
+          .notify(
+            `failed:${job.id}`,
+            blockedPushTitle("käynnistys ei onnistu"),
+            "Ohjaamo yritti käynnistää selostuksen kahdesti eikä se lähtenyt. Käynnistä käsin."
+          )
+          .catch(() => undefined);
+      }
       return { at, decision: "start-failed", jobId, reason, applied: false };
     }
   }

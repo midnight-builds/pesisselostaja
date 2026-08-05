@@ -93,7 +93,9 @@ test.describe("valmistelu", () => {
     // kertoisi totuuden jostain toisesta ottelusta.
     expect(api.calledWith("POST", "/api/preflight")[0].body).toEqual({ jobId: "job-valmistelu" });
 
-    await expect(page.getByText("Korjattiin:", { exact: false })).toBeVisible();
+    // Nimenomaan valmiustarkistuksen korjaus: käynnistysvahti (#185) kertoo
+    // omansa samalla sanamuodolla, joten pelkkä "Korjattiin:" osuisi kahteen.
+    await expect(page.getByText("Korjattiin: ohjaamo osoitti", { exact: false })).toBeVisible();
     await expect(page.getByText("Selostetulla lähetyksellä ei ole kohdetta", { exact: false })).toBeVisible();
     // Kunnossa olevat rivit eivät täytä ruutua; niistä kerrotaan lukuna.
     await expect(page.getByText("löytyy polusta")).toHaveCount(0);

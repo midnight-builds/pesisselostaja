@@ -72,6 +72,24 @@ export function since(iso: string | null | undefined, now: string): string {
   return `${h} h ${min % 60} min sitten`;
 }
 
+/** "42 min kuluttua" / "alkoi 5 min sitten" — sama kello kuin `since`, toiseen
+ *  suuntaan. Ajastettu-tila tarvitsee tämän: kellonaika yksin ei kerro onko
+ *  odotus vielä pitkä, ja ottelun alku valuu rutiininomaisesti kymmenisen
+ *  minuuttia ilmoitetusta (#170). */
+export function untilOrSince(iso: string | null | undefined, now: string): string | null {
+  const then = parse(iso);
+  const ref = parse(now) ?? new Date();
+  if (!then) return null;
+  const sec = Math.round((then.getTime() - ref.getTime()) / 1000);
+  if (sec <= 0) return `alkoi ${since(iso, now)}`;
+  if (sec < 60) return "alkaa hetkenä minä hyvänsä";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} min kuluttua`;
+  const h = Math.floor(min / 60);
+  const rest = min % 60;
+  return rest === 0 ? `${h} h kuluttua` : `${h} h ${rest} min kuluttua`;
+}
+
 export function duration(sec: number | null): string {
   if (sec == null) return "–";
   if (sec < 60) return `${Math.round(sec)} s`;
