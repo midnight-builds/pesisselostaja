@@ -15,8 +15,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Job, JobCleanup, LiveState, MatchState, RelayProcess } from "../src/shared/types.js";
 import { jobStateWord } from "../src/shared/jobState.js";
 
-const sendPush = vi.hoisted(() => vi.fn(async () => undefined));
-vi.mock("../src/server/push.js", () => ({ sendPush }));
+// `sendPushDetailed` kertoo montako tilausta otti ilmoituksen vastaan, ja
+// vasta se tekee vaimennusleimasta luotettavan (#205). Oletus: yksi puhelin
+// otti sen vastaan.
+const sendPush = vi.hoisted(() => vi.fn(async () => ({ sent: 1, failed: 0, removed: 0 })));
+vi.mock("../src/server/push.js", () => ({
+  sendPushDetailed: sendPush,
+  sendPush: vi.fn(async () => undefined),
+}));
 
 type Notifications = typeof import("../src/server/notifications.js");
 
@@ -362,6 +368,95 @@ describe("repeat suppression", () => {
     // Four full stop/start cycles inside the window produce two notifications
     // in total — one per subject — instead of eight.
     expect(titles()).toEqual(["Lähetys käynnistyi", "Lähetys katkesi"]);
+  });
+});
+
+/** #205: vaimennusleima asetettiin ENNEN lähetystä, ja `notify` palautti aina
+ *  `true` — vaikka `sendPush` nielee 5xx:t, aikakatkaisut ja DNS-virheet. Yksi
+ *  hukkunut "Lähetys katkesi" merkitsi episodin ilmoitetuksi ja esti "Lähetys
+ *  rikki" -pushin kokonaan: puhelin ei piipannut kertaakaan, vaikka lähetys
+ *  oli kuollut ja ottelu kesken. */
+describe("epäonnistunut toimitus", () => {
+  it("ei vaimenna seuraavaa ilmoitusta kun mikään puhelin ei ottanut edellistä vastaan", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(ORIGIN);
+    // Katkos: "Lähetys katkesi" ei mene perille.
+    sendPush.mockResolvedValueOnce({ sent: 0, failed: 1, removed: 0 });
+
+    await notifications.observeLiveState(state({ at: at(0), relayActive: true, health: "ok" }));
+    await notifications.observeLiveState(state({ at: at(5), relayActive: false, health: "fail" }));
+    expect(titles()).toEqual(["Lähetys katkesi"]); // yritettiin, ei mennyt perille
+
+    // Yli minuutin päästä episodi on yhä käynnissä — ja koska mitään ei
+    // koskaan ilmoitettu, "Lähetys rikki" on yhä lähetettävä.
+    vi.setSystemTime(ORIGIN + 90_000);
+    for (let t = 10; t <= 90; t += 5) {
+      await notifications.observeLiveState(state({ at: at(t), relayActive: false, health: "fail" }));
+    }
+    expect(titles()).toContain("Lähetys rikki");
+  });
+
+  it("ei yritä epäonnistunutta uudelleen joka tikillä", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(ORIGIN);
+    sendPush.mockResolvedValue({ sent: 0, failed: 1, removed: 0 });
+
+    await notifications.observeLiveState(state({ at: at(0), relayActive: true, health: "ok" }));
+    for (let t = 5; t <= 45; t += 5) {
+      await notifications.observeLiveState(state({ at: at(t), relayActive: false, health: "fail" }));
+    }
+
+    // Yhdeksän havaintoa 45 sekunnissa, yksi yritys: katkos ei saa muuttua
+    // vasaraksi push-palvelua kohti.
+    expect(titles()).toEqual(["Lähetys katkesi"]);
+    sendPush.mockResolvedValue({ sent: 1, failed: 0, removed: 0 });
+  });
+
+  it("nolla tilausta ei ole onnistunut ilmoitus", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(ORIGIN);
+    // Yksikään puhelin ei ole tilannut ilmoituksia: sendPushDetailed palaa
+    // rauhassa nollilla. Sitä ei saa kirjata ilmoitetuksi.
+    sendPush.mockResolvedValueOnce({ sent: 0, failed: 0, removed: 0 });
+
+    await notifications.observeLiveState(state({ at: at(0), relayActive: false, health: "idle" }));
+    await notifications.observeLiveState(state({ at: at(5), relayActive: true }));
+    expect(titles()).toEqual(["Lähetys käynnistyi"]);
+
+    // Minuutin päästä sama tapahtuma menee taas läpi — vaimennusta ei ole,
+    // koska mitään ei toimitettu.
+    vi.setSystemTime(ORIGIN + 61_000);
+    notifications.resetNotificationState();
+    await notifications.observeLiveState(state({ at: at(60), relayActive: false, health: "idle" }));
+    await notifications.observeLiveState(state({ at: at(65), relayActive: true }));
+    expect(titles()).toEqual(["Lähetys käynnistyi", "Lähetys käynnistyi"]);
+  });
+});
+
+/** #205:n sukulaisvika: preflight-esteillä oli kiinteä tagi ilman työn id:tä,
+ *  ja `PrepCard` ajaa valmiustarkistuksen JOKA mountissa. Klo 9:00 avattu
+ *  ohjaamo saattoi siis vaientaa klo 9:05 tulevan käynnistyksen esteen —
+ *  eikä ajastin lähetä omaa pushia, koska se luottaa preflightin lähettävän
+ *  täsmälleen yhden. Hiljaisuus kesti ~10 min, mikä on aloituspotkun mittainen. */
+describe("preflight-esteen tagi", () => {
+  const blocked = {
+    ranAt: new Date(ORIGIN).toISOString(),
+    checks: [{ name: "Kohde", status: "fail" as const, detail: "stream key puuttuu" }],
+    blockers: 1,
+    warnings: 0,
+    summary: "1 este",
+  };
+
+  it("eri työn este ei jää edellisen työn vaimennuksen taakse", async () => {
+    await notifications.notifyPreflightBlockers(blocked, "job-a");
+    await notifications.notifyPreflightBlockers(blocked, "job-b");
+    expect(titles()).toHaveLength(2);
+  });
+
+  it("saman työn sama este ei toistu ikkunan sisällä", async () => {
+    await notifications.notifyPreflightBlockers(blocked, "job-a");
+    await notifications.notifyPreflightBlockers(blocked, "job-a");
+    expect(titles()).toHaveLength(1);
   });
 });
 
