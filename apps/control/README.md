@@ -446,38 +446,3 @@ pohja — oletukset levylle käynnistyksessä, luku joka pyynnöllä:
 
 Vain kirjaimellinen `false` sammuttaa säännön; roska tai merkkijono `"false"`
 tarkoittaa oletusta. Kytkimet ovat huoltoarkissa (#133, #188).
-
-## Vaiheet
-
-Tämä on **historia**: mitä oli rakennettu 29.7. mennessä. Palvelinpuoli on yhä
-tämä, mutta clientin rakenne on sen jälkeen piirretty uusiksi — välilehdet ovat
-poissa, ks. "Käyttöliittymä: yksi tilakortti" yllä.
-
-**Vaihe A (tehty ensin):** ottelun valinta, `.env.relay`, preflight, relayn
-käynnistys/pysäytys/uudelleenkäynnistys, live-näkymä ilman relay-muutoksia,
-ajonaikaiset ohjaimet nykyisillä control-avaimilla.
-
-**Vaihe B, tehty 29.7.:** Google-auth ja YouTube-osio omalla välilehdellään
-(yhteys, lähetysparin luonti, menneet videot), thumbnailit, sekä ajastimen
-kortti Työ-välilehdellä. Ajastin pysyy **oletuksena pois päältä**: kortti
-näyttää `wouldHaveDone`-kuivaharjoituksen, ja päälle kytkeminen vaatii
-vahvistuksen. YouTube-osiota ei ole vielä ajettu oikeita tunnuksia vasten —
-Google Cloud -projekti ja OAuth-client puuttuvat.
-
-**Vaihe B, relayn telemetria (29.7.):** relay kirjoittaa nyt
-`run/status-<ID>.json`n ja `run/timeline-<ID>.ndjson`n, ja jokainen lokirivi
-kantaa pysyvää tapahtumakoodia ja oikeaa tasoa (syslog-prioriteetti
-journaldiin). `journal.ts`:n sanahaku on kutistunut varajärjestelmäksi, joka
-koskee enää koodittomia rivejä — eli vanhempia relay-buildeja, joita journald
-yhä säilöö. **Vaatii `npm run relay:deploy`n** ennen kuin ohjaamo näkee
-koodeja.
-
-**Vaihe B, kaksivaiheinen selostuslista (29.7.):** lista luetaan relayn
-aikajanasta, ja `buildNarrationLines` + `NarrationCache` on poistettu
-kokonaan — ks. "Yksi totuuslähde" yllä.
-
-**Vaihe B, yhä tekemättä:** uudet control-avaimet (mykistys, äänenvoimakkuus,
-oma selostus), jono, jälkityöt, ElevenLabs-osio ja passkey-suojaus.
-
-Vaiheen B relay-muutokset vaativat `npm run relay:deploy` — ja se kieltäytyy
-ajamasta lähetyksen aikana. Se on tarkoituksellinen este, ei vika.
