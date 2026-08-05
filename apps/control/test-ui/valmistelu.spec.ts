@@ -127,6 +127,41 @@ test.describe("valmistelu", () => {
     expect(body).not.toContain(".env.relay");
   });
 
+  // #221: "Muokkaa otsikkoa" -kenttien placeholderit olivat kovakoodattuja
+  // esimerkkejä TOISESTA ottelusta. Puhelimen ruudulla harmaa esimerkki
+  // lukeutuu kentän arvoksi, joten näkymä väitti työn olevan sidottu väärään
+  // otteluun — juuri se pelko jota vastaan valmiustarkistus on rakennettu.
+  test("otsikkokenttien placeholderit tulevat käsillä olevasta ottelusta", async ({ page, api, openApp }) => {
+    api.authHealth = fixture.authHealthConnected();
+    await openApp(fixture.liveState({ job: draftJob(), health: "idle", headline: "Ei aktiivista lähetystä" }));
+
+    await page.getByText("Muokkaa otsikkoa").click();
+    const texts = fixture.broadcastTexts();
+    const own = page.getByLabel("Oma joukkue");
+    const opponent = page.getByLabel("Vastustaja");
+    const venue = page.getByLabel("Paikka lyhyesti");
+
+    // Arvot ovat tyhjiä — otsikko muodostuu ilman muokkausta.
+    await expect(own).toHaveValue("");
+    await expect(opponent).toHaveValue("");
+    await expect(venue).toHaveValue("");
+
+    // ...ja se mitä kentissä lukee on TÄMÄN ottelun pari oikein päin
+    // (oma ensin, `teamPair`) sekä tämän ottelun paikka.
+    await expect(own).toHaveAttribute("placeholder", texts.ownTeam);
+    await expect(opponent).toHaveAttribute("placeholder", texts.opponentTeam);
+    await expect(venue).toHaveAttribute("placeholder", texts.thumbnailVenue);
+
+    // Yksikään vieraan ottelun nimi ei saa esiintyä missään kortilla.
+    const body = await page.locator("body").innerText();
+    for (const stranger of ["Pesä Ysit F-pojat", "IPV", "Naperoleiri Liperi"]) {
+      expect(body).not.toContain(stranger);
+    }
+    for (const stranger of ["Pesä Ysit F-pojat", "IPV", "Naperoleiri Liperi"]) {
+      expect(await page.locator(`css=input[placeholder="${stranger}"]`).count()).toBe(0);
+    }
+  });
+
   test("valmistelu mahtuu puhelimen leveyteen ilman vaakavieritystä", async ({ page, api, openApp }) => {
     api.authHealth = fixture.authHealthConnected();
     api.jobs = [scheduledJob()];
