@@ -17,7 +17,7 @@ import {
   nudgeDelay,
 } from "./relay.js";
 import { readLog } from "./journal.js";
-import { runControlPreflight } from "./preflight.js";
+import { mayRepairBinding, runControlPreflight } from "./preflight.js";
 import { startLiveAggregator } from "./live.js";
 import { createSourceIngestPoller } from "./sourceIngest.js";
 import { getDayMatches, getMatch } from "./matches.js";
@@ -330,9 +330,11 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
     // ohjaamo avataan noiden sekuntien aikana.
     const mayRepair =
       job !== null &&
-      !isSchedulerStarting() &&
-      (await getActiveJob())?.id === job.id &&
-      !(await getRelayProcess()).active;
+      mayRepairBinding({
+        isSelectedJob: (await getActiveJob())?.id === job.id,
+        relayActive: (await getRelayProcess()).active,
+        schedulerStarting: isSchedulerStarting(),
+      });
     sendJson(res, 200, await runControlPreflight(job, mayRepair ? { bindJob: writeRelayEnv } : undefined));
     return;
   }
