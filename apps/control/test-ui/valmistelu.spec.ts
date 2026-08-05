@@ -78,6 +78,27 @@ test.describe("valmistelu", () => {
     expect(api.called("POST", "/api/youtube/templates/preview")).toBe(false);
   });
 
+  // #203: pari ilman stream keytä ei ole pari. `hasPair` laskettiin pelkästä
+  // videoId:stä, joten kortti siirtyi "pari on olemassa" -haaraan ja
+  // luontipainike katosi pysyvästi — samalla kun valmiustarkistus neuvoi
+  // luomaan lähetysparin. Käsikenttiä ei ole enää (#176), joten kentällä ei
+  // ollut mitään tehtävissä.
+  test("ilman stream keytä luonti pysyy tarjolla", async ({ page, api, openApp }) => {
+    const vajaa = fixture.job({
+      id: "job-valmistelu",
+      status: "draft",
+      targetVideoId: "SELOSTETTU",
+      targetStreamKey: null,
+      sourceUrl: "https://www.youtube.com/watch?v=NORMAALI",
+      startedAt: null,
+    });
+    api.authHealth = fixture.authHealthConnected();
+    api.jobs = [vajaa];
+    await openApp(fixture.liveState({ job: vajaa, health: "idle", headline: "Ei aktiivista lähetystä" }));
+
+    await expect(page.getByRole("button", { name: CREATE })).toBeVisible();
+  });
+
   test("valmiustarkistus näyttää korjauksen tekona ja esteen operaattorin kielellä", async ({
     page,
     api,

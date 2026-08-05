@@ -43,7 +43,13 @@ export function PrepCard({ job, notify }: Props) {
   // että palvelimen seuraava kehys on sekunteja päässä eikä luonti saa näyttää
   // menneen hukkaan sillä välin.
   const videoId = job.targetVideoId ?? created?.narrated.videoId ?? null;
-  const hasPair = videoId !== null;
+  const streamKey = job.targetStreamKey ?? created?.narrated.streamKey ?? null;
+  // Pari on olemassa vasta kun sillä on MOLEMMAT: video ja avain (#203).
+  // Pelkkä videoId siirsi kortin "pari on olemassa" -haaraan, jolloin
+  // luontipainike katosi pysyvästi samalla kun valmiustarkistus neuvoi
+  // luomaan lähetysparin — teon, jonka käyttöliittymä oli juuri poistanut.
+  // Käsikenttiä ei ole enää (#176), joten kentällä ei ollut mitään tehtävissä.
+  const hasPair = videoId !== null && streamKey !== null;
   const narratedUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : null;
   const rawUrl = job.sourceUrl ?? created?.normal.watchUrl ?? null;
 
