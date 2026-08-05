@@ -288,6 +288,16 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
    *  itsestään korjautuva, toinen ei. */
   let startFailures = 0;
   let failingJobId: string | null = null;
+  /** Käynnistysikkuna: `.env.relay` on kirjoitettu tälle työlle, mutta relay ei
+   *  ole vielä käynnissä. Ikkuna kestää valmiustarkistuksen ajan (~10 s), ja
+   *  sen sisällä tiedosto oli suojaamaton (#209): `POST /api/preflight` korjaa
+   *  sidonnan `getActiveJob`in työhön aina kun relay ei ole aktiivinen, ja
+   *  PrepCard ajaa tarkistuksen automaattisesti mountissa — riitti siis että
+   *  ohjaamo avataan tai PWA herää taustalta noiden sekuntien aikana.
+   *  Ajastimen oma sidontatarkistus on jo ajettu ennen ylikirjoitusta, joten
+   *  #155:n suoja ei laukea, ja `systemctl start` lukee tiedoston sellaisena
+   *  kuin se sillä hetkellä on. */
+  let starting = false;
 
   async function isEnabled(): Promise<boolean> {
     const persisted = await store.read();
@@ -422,6 +432,10 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
     }
 
     const job = p.job;
+    // Ikkuna aukeaa ENNEN ensimmäistä kirjoitusta ja sulkeutuu vasta kun relay
+    // on käynnistetty (tai yritys on kaatunut): siinä välissä `.env.relay`
+    // kuuluu tälle työlle eikä sitä saa korjata kukaan muu.
+    starting = true;
     try {
       // Preflight checks what systemd would actually run, which means it reads
       // `.env.relay` — so the file has to point at THIS job before the gate can
@@ -493,6 +507,8 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
           .catch(() => undefined);
       }
       return { at, decision: "start-failed", jobId, reason, applied: false };
+    } finally {
+      starting = false;
     }
   }
 
@@ -566,6 +582,14 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
   return {
     tick,
 
+    /** Onko ajastin juuri nyt käynnistämässä lähetystä (#209). Kysytään
+     *  ennen kuin `.env.relay`:n sidontaa korjataan muualta: ikkunan sisällä
+     *  tiedosto kuuluu ajastimen valitsemalle työlle, ja ylikirjoitus menisi
+     *  läpi ilman että #155:n tarkistus enää laukeaa. */
+    isStarting(): boolean {
+      return starting;
+    },
+
     async getState(): Promise<SchedulerState> {
       return snapshot(await isEnabled());
     },
@@ -623,6 +647,11 @@ const scheduler = createScheduler();
 
 export function startScheduler(): { stop(): void } {
   return scheduler.start();
+}
+
+/** Ks. `isStarting` yllä — HTTP-kerroksen portti käynnistysikkunaan. */
+export function isSchedulerStarting(): boolean {
+  return scheduler.isStarting();
 }
 
 export async function getSchedulerState(): Promise<SchedulerState> {

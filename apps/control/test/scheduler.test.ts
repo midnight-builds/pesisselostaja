@@ -291,6 +291,50 @@ describe("ajastin päällä", () => {
     });
   });
 
+  // #209: `.env.relay` kirjoitetaan, sitten ajetaan valmiustarkistus (~10 s),
+  // ja vasta sitten käynnistetään relay. Siinä ikkunassa tiedosto oli
+  // suojaamaton: POST /api/preflight korjaa sidonnan getActiveJobin työhön
+  // aina kun relay ei ole aktiivinen — ja PrepCard ajaa tarkistuksen
+  // automaattisesti mountissa. Ajastimen oma sidontatarkistus on jo ajettu,
+  // joten #155:n suoja ei enää laukea.
+  it("kertoo olevansa käynnistämässä koko kirjoitus–tarkistus–käynnistys-ketjun ajan", async () => {
+    const { scheduler, calls } = build({ jobs: [job()], source: SOURCE.liveFull });
+    await scheduler.setEnabled(true);
+
+    const seen: boolean[] = [];
+    calls.writeRelayEnv.mockImplementation(async () => {
+      seen.push(scheduler.isStarting());
+    });
+    calls.runPreflight.mockImplementation(async () => {
+      seen.push(scheduler.isStarting());
+      return preflight(0);
+    });
+    calls.startRelay.mockImplementation(async () => {
+      seen.push(scheduler.isStarting());
+      return undefined;
+    });
+
+    expect(scheduler.isStarting(), "ikkuna on kiinni ennen tikkiä").toBe(false);
+    await scheduler.tick();
+
+    expect(seen).toEqual([true, true, true]);
+    expect(scheduler.isStarting(), "ikkuna sulkeutuu käynnistyksen jälkeen").toBe(false);
+  });
+
+  it("sulkee käynnistysikkunan myös kun käynnistys kaatuu", async () => {
+    const { scheduler } = build({
+      jobs: [job()],
+      source: SOURCE.liveFull,
+      startThrows: new Error("systemctl kaatui"),
+    });
+    await scheduler.setEnabled(true);
+
+    const state = await scheduler.tick();
+
+    expect(state.lastAction).toMatchObject({ decision: "start-failed" });
+    expect(scheduler.isStarting()).toBe(false);
+  });
+
   it("ei kaada käynnistystä vaikka leimaus ei löytäisi työtä — relay on jo ajossa", async () => {
     const { scheduler, calls } = build({ jobs: [job()], source: SOURCE.liveFull });
     calls.markRunStarted.mockImplementationOnce(async () => null);

@@ -225,6 +225,28 @@ export interface PreflightRepair {
   bindJob(job: Job): Promise<void>;
 }
 
+/** Saako `.env.relay`:n sidonnan korjata juuri nyt? Kolme ehtoa, joista
+ *  jokainen on oma vikansa jos se puuttuu — siksi tämä on nimetty sääntö eikä
+ *  kolme ehtoa HTTP-reitin sisällä.
+ *
+ *  - **Työ on operaattorin valitsema** (`getActiveJob`, ei clientin id):
+ *    vanhentunut id ei saa kirjoittaa sidontaa toiseen otteluun (#171/3).
+ *  - **Relay ei ole ajossa:** ajossa oleva lähetys ei saa saada uutta sidontaa
+ *    jalkojensa alle.
+ *  - **Ajastin ei ole käynnistämässä mitään** (#209): käynnistysikkunassa
+ *    `.env.relay` on juuri kirjoitettu ajastimen valitsemalle työlle, relay ei
+ *    ole vielä ajossa — eli edellinen ehto täyttyy — ja ajastimen oma
+ *    sidontatarkistus on jo ajettu. Korjaus menisi läpi tasan siinä ikkunassa,
+ *    jossa #155:n suoja ei enää laukea. */
+export function mayRepairBinding(input: {
+  /** Onko tarkistettava työ sama kuin operaattorin valitsema. */
+  isSelectedJob: boolean;
+  relayActive: boolean;
+  schedulerStarting: boolean;
+}): boolean {
+  return input.isSelectedJob && !input.relayActive && !input.schedulerStarting;
+}
+
 async function readEnvText(): Promise<string> {
   try {
     return await readFile(CONFIG.relayEnvPath, "utf8");
