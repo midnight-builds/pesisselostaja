@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { writeFileSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, rmSync } from "node:fs";
 
 // Mock ONLY the network call; everything else (speech helpers, state,
 // formatHelsinkiTimestamp) stays real.
@@ -79,6 +79,8 @@ interface LoopInternals {
   lastPollSummaryAtMs: number;
   recordPollFailure(err: unknown, cycleStartedAt: number): void;
   recordPollSuccess(): void;
+  writeControlFile(): void;
+  announceBatterChanges: boolean;
 }
 
 function makeLoop(overrides: Partial<RelayConfig> = {}): LoopInternals {
@@ -520,6 +522,56 @@ describe("CommentaryLoop runtime controls: deltaFetch + pollIntervalMs", () => {
     await loop.refreshRuntimeControls();
     expect(loop.deltaFetch).toBe(true);
     expect(loop.pollIntervalMs).toBe(5000); // omitted key leaves the setting alone
+  });
+
+  /** #206: käynnistys kirjoitti control-tiedoston kokonaan yli omasta
+   *  configistaan. Sääntö oli järkevä kun tiedosto oli varapolku; nyt se on
+   *  ohjaamon ainoa ottelunaikainen ohjauskanava ja relayn uudelleenkäynnistys
+   *  on odotettu tapahtuma. Operaattori kalibroi viiveen korvakuulolta
+   *  4000 → 6000 ms, relay käynnistyi uudelleen, ja arvo palasi oletukseen
+   *  ilman että mikään sanoi mitään. */
+  it("säilyttää operaattorin ajonaikaiset säädöt käynnistyksessä", () => {
+    writeFileSync(
+      controlFile,
+      JSON.stringify({ narrationDelayMs: 6000, announceBatterChanges: false, pollIntervalMs: 5000 }),
+    );
+    const loop = makeLoop({ controlFile, narrationDelayMs: 4000, announceBatterChanges: true });
+    expect(loop.narrationDelayMs, "config on vielä voimassa ennen käynnistystä").toBe(4000);
+
+    loop.writeControlFile();
+
+    expect(loop.narrationDelayMs).toBe(6000);
+    expect(loop.announceBatterChanges).toBe(false);
+    expect(loop.pollIntervalMs).toBe(5000);
+    // Ja tiedostoon jää se mitä käytetään, ei se mitä config sanoi.
+    expect(JSON.parse(readFileSync(controlFile, "utf8"))).toMatchObject({
+      narrationDelayMs: 6000,
+      announceBatterChanges: false,
+      pollIntervalMs: 5000,
+    });
+  });
+
+  it("säilyttää ohjaamon kirjoittamat vieraat avaimet", () => {
+    // Ohjaamo kirjoittaa samaan tiedostoon lähteen tilahavainnon (#104).
+    // Ylikirjoitus pyyhki senkin.
+    writeFileSync(controlFile, JSON.stringify({ sourceIngest: { state: "live", at: "2026-08-05T10:00:00.000Z" } }));
+    const loop = makeLoop({ controlFile });
+
+    loop.writeControlFile();
+
+    expect(JSON.parse(readFileSync(controlFile, "utf8")).sourceIngest).toEqual({
+      state: "live",
+      at: "2026-08-05T10:00:00.000Z",
+    });
+  });
+
+  it("kirjoittaa configin arvot kun tiedostoa ei ole", () => {
+    rmSync(controlFile, { force: true });
+    const loop = makeLoop({ controlFile, narrationDelayMs: 4000 });
+
+    loop.writeControlFile();
+
+    expect(JSON.parse(readFileSync(controlFile, "utf8"))).toMatchObject({ narrationDelayMs: 4000 });
   });
 
   it("clamps pollIntervalMs to the 2000 ms floor", async () => {
