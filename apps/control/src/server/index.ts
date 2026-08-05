@@ -32,7 +32,12 @@ import {
   getActiveJob,
   MatchNotFoundError,
 } from "./jobs.js";
-import { getSchedulerState, setSchedulerEnabled, startScheduler } from "./scheduler.js";
+import {
+  getSchedulerState,
+  isSchedulerStarting,
+  setSchedulerEnabled,
+  startScheduler,
+} from "./scheduler.js";
 import { startAuthWatch } from "./authWatch.js";
 import { addSubscription, getSubscriptionCount, getVapidPublicKey, sendPushDetailed } from "./push.js";
 import { getNotificationPrefs, observeLiveState, setNotificationPrefs } from "./notifications.js";
@@ -314,8 +319,20 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
     // jalkojensa alle. Ajossa olevalle työlle sidonta on jo oikein, joten tämä
     // rajaa pois vain sen tilanteen, jossa jokin muu on ajossa — ja se on
     // operaattorin ratkaistava, ei hiljaa ylikirjoitettava.
+    //
+    // Kolmas ehto on ajastimen käynnistysikkuna (#209). `.env.relay` on siinä
+    // välissä kirjoitettu ajastimen valitsemalle työlle, mutta relay ei ole
+    // vielä käynnissä — eli toinen ehto täyttyy — ja ajastimen oma
+    // sidontatarkistus on jo ajettu. Korjaus menisi siis läpi juuri siinä
+    // ikkunassa, jossa #155:n suoja ei enää laukea, ja `systemctl start`
+    // lukisi tiedoston sellaisena kuin se on. Kutsu ei vaadi operaattorilta
+    // nappia: PrepCard ajaa valmiustarkistuksen mountissa, joten riittää että
+    // ohjaamo avataan noiden sekuntien aikana.
     const mayRepair =
-      job !== null && (await getActiveJob())?.id === job.id && !(await getRelayProcess()).active;
+      job !== null &&
+      !isSchedulerStarting() &&
+      (await getActiveJob())?.id === job.id &&
+      !(await getRelayProcess()).active;
     sendJson(res, 200, await runControlPreflight(job, mayRepair ? { bindJob: writeRelayEnv } : undefined));
     return;
   }
