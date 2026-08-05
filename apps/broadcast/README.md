@@ -537,14 +537,24 @@ npm run broadcast:dev -- --match-id 123456 --youtube-url "https://..." --dry-run
 This runs the same commentary poll loop against real match data, logs what
 would be synthesized, and never starts ffmpeg or touches RTMP.
 
-## Expected latency
+## Narration timing
 
-Total delay between a real event and hearing it on the second broadcast is
-roughly **30–90 seconds** — the original stream's own latency, plus this
-relay's pull/mix/encode time, plus the second broadcast's own YouTube ingest
-latency, all stack. This is inherent to the pull-back architecture (chosen so
-the original broadcast can never be affected by this subsystem crashing) and
-is not something to try to eliminate.
+Narration is not fired the instant an event is seen: it is held by
+`narrationDelayMs` (`DEFAULT_NARRATION_DELAY_MS = 4000`, `src/config.ts:89`) so
+that it lands with the picture rather than ahead of it.
+
+**It can end up on either side of the picture**, which is why the operator's
+control is a relative nudge (±500 ms) named after the symptom — "puhui liian
+aikaisin" — and not an absolute number. The right value is settled **by ear
+during the broadcast**, because the video path's own latency varies from one
+broadcast to the next. Do not pre-set it from a figure written down here or
+anywhere else.
+
+The pull-back architecture does add latency of its own (the original stream's
+delay, this relay's pull/mix/encode, and the second broadcast's ingest all
+stack). That is inherent to the design — chosen so the original broadcast can
+never be affected by this subsystem crashing — and is what the delay knob
+calibrates against, not something to try to eliminate.
 
 ## Troubleshooting
 

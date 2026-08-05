@@ -24,7 +24,10 @@ Kaksi vaihtoehtoa punnittiin:
   tuloksen toisena lähetyksenä. Alkuperäinen lähetys säilyy täysin
   koskemattomana — vaikka relay kaatuisi, alkuperäinen live jatkuu. Hintana
   kertautuva viive (alkuperäisen striimin viive + oma käsittely + toisen
-  lähetyksen ingest-viive, arviolta **30–90 s**), joka hyväksyttiin tietoisesti.
+  lähetyksen ingest-viive), joka hyväksyttiin tietoisesti. Selostuksen
+  kohdistus kuvaan hoidetaan `narrationDelayMs`-viiveellä, joka kalibroidaan
+  korvakuulolta kesken lähetyksen — selostus voi osua kuvan kummallekin
+  puolelle, joten säätö on kaksisuuntainen.
 - **B (hylätty):** kuvauspuhelin striimaisi ensin omalle relepalvelimelle (esim.
   MediaMTX), joka miksaisi ja työntäisi YouTubeen vain kerran. Pienempi viive
   ja vankempi, mutta alkuperäinen live olisi riippuvainen relaystä — käyttäjä
