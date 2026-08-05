@@ -100,6 +100,24 @@ export function blockedPushTitle(subject: string): string {
   return `Valmistelu odottaa: ${subject}`;
 }
 
+/** Onko työllä lähetyspari — **yksi sääntö molemmille puolille**.
+ *
+ *  Pari on olemassa vasta kun sillä on video JA stream key (#203): pelkkä
+ *  videoId siirsi kortin "pari on olemassa" -haaraan, jolloin luontipainike
+ *  katosi pysyvästi samalla kun valmiustarkistus neuvoi luomaan parin.
+ *
+ *  Sama sääntö on palvelimen tuplaparin esto (#204). Ennen se oli kolme ehtoa
+ *  `PrepCard`issa, ja ne kaikki elävät yhdessä selainistunnossa — kaksi avointa
+ *  näkymää tuottaa kaksi paria, eli kaksi samannimistä raakalähetystä kanavan
+ *  lähetyslistassa. Kaksi eri rajaa tuottaisi tässä sen umpikujan, jossa
+ *  käyttöliittymä tarjoaa luontia jonka palvelin torjuu (tai päinvastoin). */
+export function hasBroadcastPair(job: {
+  targetVideoId: string | null;
+  targetStreamKey: string | null;
+}): boolean {
+  return job.targetVideoId !== null && job.targetStreamKey !== null;
+}
+
 /** Tiloja, joissa ottelupäivä on ohi tämän työn osalta ja seuraava ottelu saa
  *  valita. Sama sääntö ratkaisee sekä sen, näytetäänkö ottelunvalinta kortin
  *  alla, että sen, saako uuden työn luonti syrjäyttää tämän. */

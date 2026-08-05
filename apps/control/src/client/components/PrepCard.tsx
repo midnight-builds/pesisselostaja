@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Job, PreflightResult } from "../../shared/types";
+import { hasBroadcastPair } from "../../shared/jobState";
 import type { CreatedBroadcastPair, TemplatePreview, TitleOverrides } from "../api";
 import { api, isAuthMissing } from "../api";
 import { ConfirmButton } from "./ConfirmButton";
@@ -49,7 +50,10 @@ export function PrepCard({ job, notify }: Props) {
   // luontipainike katosi pysyvästi samalla kun valmiustarkistus neuvoi
   // luomaan lähetysparin — teon, jonka käyttöliittymä oli juuri poistanut.
   // Käsikenttiä ei ole enää (#176), joten kentällä ei ollut mitään tehtävissä.
-  const hasPair = videoId !== null && streamKey !== null;
+  //
+  // Sääntö on jaettu palvelimen tuplaparin eston kanssa (#204): kaksi eri
+  // rajaa tuottaisi tilan, jossa kortti tarjoaa luontia jonka palvelin torjuu.
+  const hasPair = hasBroadcastPair({ targetVideoId: videoId, targetStreamKey: streamKey });
   const narratedUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : null;
   const rawUrl = job.sourceUrl ?? created?.normal.watchUrl ?? null;
 

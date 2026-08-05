@@ -18,6 +18,8 @@ import {
 } from "./relay.js";
 import { readLog } from "./journal.js";
 import { mayRepairBinding, runControlPreflight } from "./preflight.js";
+import { watchUrlForVideo } from "./youtubeUrl.js";
+import { hasBroadcastPair } from "../shared/jobState.js";
 import { startLiveAggregator } from "./live.js";
 import { createSourceIngestPoller } from "./sourceIngest.js";
 import { getDayMatches, getMatch } from "./matches.js";
@@ -527,6 +529,24 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
       return;
     }
     const { texts, job } = resolved;
+    // Tuplaparin estää KONE, ei kytkin (#204). Ennen tätä esto oli kolme ehtoa
+    // PrepCardissa, ja ne kaikki elävät yhdessä selainistunnossa: ohjaamo
+    // kotinäytöllä ja auki myös Safarissa (tai puhelin ja läppäri) näyttävät
+    // saman työn, ja molemmissa nappi on aktiivinen. Kaksi paria tarkoittaa
+    // kahta samannimistä raakalähetystä kanavan lähetyslistassa, josta kuvaaja
+    // valitsee puolet ajasta väärän (`CONTEXT.md`).
+    //
+    // Sama sääntö kuin kortin `hasPair`illa: pari on olemassa vasta kun sillä
+    // on molemmat, video JA avain (#203). Vajaa pari saa siis luoda uudelleen —
+    // se on se umpikuja, josta kentällä ei muuten pääse pois.
+    if (job && hasBroadcastPair(job)) {
+      sendError(
+        res,
+        409,
+        `Työllä on jo lähetyspari (${watchUrlForVideo(job.targetVideoId ?? "")}). Jos pari on väärä, poista lähetykset YouTubessa ja valitse ottelu uudelleen.`
+      );
+      return;
+    }
     const pair = await createBroadcastPair(
       {
         matchId: resolved.matchId,

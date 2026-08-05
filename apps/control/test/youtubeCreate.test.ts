@@ -165,6 +165,64 @@ describe("lähetysparin luonti", () => {
     await expect(yt.createBroadcastPair(jobInput(), texts())).rejects.toThrow(/stream key jäi saamatta/);
   });
 
+  // #204: `createOne("normal")` ajetaan kokonaan ennen selostettua, ilman
+  // transaktiota, ja `patchJob` vasta kun molemmat ovat valmiit. Jos
+  // selostetun luonti kaatui, raakalähetys jäi kanavalle orvoksi eikä työhön
+  // jäänyt siitä jälkeä — ja seuraava yritys loi TOISEN samannimisen. Kuvaaja
+  // poimii raakalähetyksen kanavan lähetyslistasta, joten kaksi identtistä
+  // riviä tarkoittaa että puolet ajasta valitaan orpo.
+  it("poistaa juuri luodun raakalähetyksen kun selostetun luonti kaatuu", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mockFetch();
+    await connect();
+    const deleted: string[] = [];
+    const inner = vi.mocked(fetch).getMockImplementation();
+    let broadcastInserts = 0;
+    vi.mocked(fetch).mockImplementation(async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("youtube/v3/videos") && method === "DELETE") {
+        deleted.push(new URL(url).searchParams.get("id") ?? "");
+        return jsonResponse(204, {});
+      }
+      if (url.includes("youtube/v3/liveBroadcasts") && method === "POST" && !url.includes("bind")) {
+        broadcastInserts += 1;
+        // Selostettu on toinen luonti — se kaatuu.
+        if (broadcastInserts === 2) return jsonResponse(500, { error: { message: "YouTube hikkasi" } });
+      }
+      return inner!(input as string, init);
+    });
+
+    await expect(yt.createBroadcastPair(jobInput(), texts())).rejects.toThrow();
+
+    expect(deleted, "orpo raakalähetys ei jää kanavalle").toEqual(["VIDEO-1"]);
+  });
+
+  it("nimeää orvon lähetyksen kun senkään poisto ei onnistu", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockFetch();
+    await connect();
+    const inner = vi.mocked(fetch).getMockImplementation();
+    let broadcastInserts = 0;
+    vi.mocked(fetch).mockImplementation(async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("youtube/v3/videos") && method === "DELETE") {
+        return jsonResponse(403, { error: { message: "ei oikeuksia" } });
+      }
+      if (url.includes("youtube/v3/liveBroadcasts") && method === "POST" && !url.includes("bind")) {
+        broadcastInserts += 1;
+        if (broadcastInserts === 2) return jsonResponse(500, { error: { message: "YouTube hikkasi" } });
+      }
+      return inner!(input as string, init);
+    });
+
+    // Kentällä seisovalle ihmiselle jää yksi asia tehtäväksi, ja sen on
+    // näyttävä virheessä — ei lokissa.
+    await expect(yt.createBroadcastPair(jobInput(), texts())).rejects.toThrow(/VIDEO-1.*jäi kanavalle/s);
+  });
+
   it("heittää kun rivi puuttuu kokonaan (#184, ennallaan)", async () => {
     mockFetch();
     await connect();
