@@ -66,22 +66,21 @@ export function App() {
     <div className="app">
       <div className="safe-top" />
       <header className="topbar">
-        <span className="topbar__id">
-          {job ? (
-            <>
-              <span className="topbar__title">
-                {job.home} – {job.away}
-              </span>
-              <span className="topbar__meta">
-                {[job.seriesName, job.stadium, job.startsAt ? `klo ${fiTime(job.startsAt)}` : null]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            </>
-          ) : (
-            <span className="topbar__title">Ohjaamo</span>
-          )}
-        </span>
+        {/* Otsikko ja meta ovat topbarin ruudukossa omina soluinaan, eivät
+            sisäkkäisessä sarakkeessa: metarivi saa koko leveyden, joten
+            ajastushetki ei katkea kolmeen pisteeseen sen takia, että riville
+            lisättiin hammasratas (#188). Kellonaika on rivin viimeisenä ja
+            oikeat sarja- ja kenttänimet ovat fixtuureja pidempiä. */}
+        <span className="topbar__title">{job ? `${job.home} – ${job.away}` : "Ohjaamo"}</span>
+        {job && (
+          <span className="topbar__meta">
+            {/* Kellonaika ensin: jos rivi jostain syystä katkeaa, katkeaa
+                kenttänimen häntä eikä ajastushetki. */}
+            {[job.startsAt ? `klo ${fiTime(job.startsAt)}` : null, job.seriesName, job.stadium]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        )}
         <span className={`conn conn--${connection}`}>
           {connection === "open" ? "yhteys ok" : connection === "connecting" ? "yhdistetään" : "yhteys poikki"}
         </span>

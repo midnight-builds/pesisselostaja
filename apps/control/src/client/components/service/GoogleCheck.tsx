@@ -37,6 +37,9 @@ export function GoogleCheck({ notify }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<DeviceFlowStart | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Estää saman kesken olevan laitevirran pollaamisen kahdesti, kun kortti
+   *  lukee tilan uudelleen. */
+  const polling = useRef(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Arkin sulkeminen purkaa tämän komponentin, mutta kesken oleva pollauskutsu
    *  ei tiedä siitä: ilman lippua sen `.then` ajastaisi uuden kierroksen, jota
@@ -62,6 +65,15 @@ export function GoogleCheck({ notify }: Props) {
     };
   }, [read]);
 
+  /** Palvelimella kesken oleva laitevirta, jos se on yhä voimassa.
+   *
+   *  `expiresAt` on tässä pakko lukea. Ilman sitä kortti näytti palvelimen
+   *  muistiin jäänyttä koodia ikuisesti ja piilotti uusintanapin — eli
+   *  ainoa tie takaisin olisi ollut SSH, jota ei käytetä (#176), ja seuraavana
+   *  ottelupäivänä lähetysparia ei olisi voinut luoda lainkaan. */
+  const serverFlow = health?.pending ?? null;
+  const serverFlowLive = serverFlow !== null && Date.parse(serverFlow.expiresAt) > Date.now();
+
   /** Laitevirran pollaus. Google kertoo itse millä välillä sitä saa kysyä
    *  (`intervalSec`), ja sitä noudatetaan — tiheämpi pollaus vastataan
    *  `slow_down`illa, joka pidentäisi kirjautumista eikä nopeuttaisi. */
@@ -71,12 +83,14 @@ export function GoogleCheck({ notify }: Props) {
         const result = await api.youtubeAuthPoll();
         if (!alive.current) return;
         if (result.status === "connected") {
+          polling.current = false;
           setPending(null);
           notify("ok", "Google-yhteys muodostettu.");
           await read();
           return;
         }
         if (result.status === "expired" || result.status === "denied" || result.status === "none") {
+          polling.current = false;
           setPending(null);
           notify("error", result.message);
           await read();
@@ -86,12 +100,22 @@ export function GoogleCheck({ notify }: Props) {
         pollTimer.current = setTimeout(() => void poll(next), next * 1000);
       } catch (err) {
         if (!alive.current) return;
+        polling.current = false;
         setPending(null);
         notify("error", err instanceof Error ? err.message : String(err));
       }
     },
     [notify, read],
   );
+
+  /** Kesken jäänyt kirjautuminen jatkuu itsestään, kun arkki avataan uudelleen
+   *  tai sivu ladataan: laitevirta elää palvelimella eikä tässä komponentissa,
+   *  ja ilman tätä pollaus olisi käynnistynyt vain napin painalluksesta. */
+  useEffect(() => {
+    if (!serverFlowLive || polling.current) return;
+    polling.current = true;
+    pollTimer.current = setTimeout(() => void poll(5), 5000);
+  }, [serverFlowLive, poll]);
 
   const startFlow = async () => {
     setBusy(true);
@@ -100,6 +124,7 @@ export function GoogleCheck({ notify }: Props) {
       // ei ole, koska UI ei kysy eikä näytä tunnisteita (#176).
       const started = await api.youtubeAuthStart({});
       setPending(started);
+      polling.current = true;
       pollTimer.current = setTimeout(() => void poll(started.intervalSec), started.intervalSec * 1000);
     } catch (err) {
       notify("error", err instanceof Error ? err.message : String(err));
@@ -127,9 +152,10 @@ export function GoogleCheck({ notify }: Props) {
   }
 
   const ok = health.connected && health.health === "ok";
-  const live = pending ?? (health.pending
-    ? { ...health.pending, intervalSec: 5, instructions: "" }
-    : null);
+  // Vain VOIMASSA oleva laitevirta piilottaa napin. Vanhentunut koodi ei ole
+  // näkymä vaan umpikuja: siitä kerrotaan yhdellä rivillä ja tarjotaan nappi.
+  const live = pending ?? (serverFlowLive && serverFlow ? { ...serverFlow, intervalSec: 5, instructions: "" } : null);
+  const staleFlow = serverFlow !== null && !serverFlowLive && pending === null;
 
   return (
     <section className="sheet__section" data-testid="google-check">
@@ -157,6 +183,12 @@ export function GoogleCheck({ notify }: Props) {
       )}
 
       <p className="sheet__note">{quotaLine(health)}</p>
+
+      {staleFlow && (
+        <p className="sheet__note" data-testid="google-stale-flow">
+          Edellinen kirjautuminen jäi kesken ja sen koodi on vanhentunut. Aloita uudelleen.
+        </p>
+      )}
 
       {live ? (
         <div className="sheet__flow" data-testid="google-flow">

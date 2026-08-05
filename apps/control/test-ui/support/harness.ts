@@ -480,11 +480,11 @@ export interface Overflow {
  *  make the operator swipe sideways. Text inputs are excluded: a long value in
  *  a fixed-width input legitimately overflows its own scroll box.
  *
- *  Niin ovat myös elementit, jotka LEIKKAAVAT ylivuotonsa itse (`overflow-x:
- *  hidden|clip`) — kolmen pisteen katkaisu on suunniteltu lopputulos eikä
- *  vaakavieritys, eikä leikattu sisältö voi työntää sivua leveäksi. Ilman tätä
- *  rajausta mittari kaatuisi topbarin ellipsoituun rivin (`.topbar__meta`)
- *  kohdalla heti kun riville lisätään mitä tahansa (#188:n hammasratas). */
+ *  Mittari on tarkoituksella ANKARA myös elementeille, jotka leikkaavat oman
+ *  ylivuotonsa: kolmen pisteen katkaisu ei vieritä sivua, mutta se piilottaa
+ *  tekstiä, ja juuri sitä tämä mittari on kerran jo pysäyttänyt (#188:n
+ *  hammasratas puristi topbarin metarivin, jonka hännässä on ajastushetki).
+ *  Jos jokin rivi katkeaa, korjataan asettelu — ei mittaria. */
 export async function horizontalOverflow(page: Page): Promise<Overflow[]> {
   return page.evaluate(() => {
     const bad: Array<{ selector: string; scrollWidth: number; clientWidth: number }> = [];
@@ -494,8 +494,6 @@ export async function horizontalOverflow(page: Page): Promise<Overflow[]> {
     };
     for (const el of Array.from(document.querySelectorAll("*"))) {
       if (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) continue;
-      const overflowX = getComputedStyle(el).overflowX;
-      if (overflowX === "hidden" || overflowX === "clip") continue;
       if (el.scrollWidth > el.clientWidth + 1) {
         bad.push({ selector: describe(el), scrollWidth: el.scrollWidth, clientWidth: el.clientWidth });
       }

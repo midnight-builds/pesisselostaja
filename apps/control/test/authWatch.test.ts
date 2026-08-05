@@ -25,6 +25,7 @@ function health(p: Partial<AuthHealth> = {}): AuthHealth {
     warnings: [],
     quota: { day: "2026-08-05", used: 100, limit: 10_000, remaining: 9900 },
     pending: null,
+    checkFailed: false,
     ...p,
   };
 }
@@ -39,7 +40,10 @@ describe("authAlert", () => {
   });
 
   it("varoittaa vanhenevasta yhteydestä ennen kuin se katkeaa", () => {
-    const alert = authAlert(health({ daysSinceSuccess: 6.2 }));
+    // Ikä myöntämisestä, EI viimeisestä onnistuneesta päivityksestä: ohjaamo
+    // uusii access tokenin tunneittain, joten daysSinceSuccess ei kasva ja
+    // pelkkään siihen nojaava sääntö ei laukeaisi koskaan.
+    const alert = authAlert(health({ tokenAgeDays: 6.2, daysSinceSuccess: 0.1 }));
     expect(alert?.kind).toBe("expiry");
     // Käskymuoto (#174): lukijan on tehtävä jotain, ja teko on ohjaamon huollossa.
     expect(alert?.title).toBe("Uusi Google-yhteys");
@@ -53,18 +57,50 @@ describe("authAlert", () => {
     expect(alert?.body).toContain("82 %");
   });
 
-  it("nostaa vanhenemisen kiintiön edelle: katkennut yhteys estää enemmän kuin loppuva kiintiö", () => {
+  // Tämä on se tapaus, joka lähetti väärän pushin: loppunut kiintiö nostaa
+  // terveyden failiin, ja fail-ehto luki sen vanhenemiseksi. Neuvo "uusi
+  // Google-yhteys" olisi saanut operaattorin purkamaan toimivan valtuutuksen
+  // ottelupäivän aattona — ja samalla oikea kiintiövaroitus olisi vaiennut,
+  // koska reunamuisti oli jo merkitty.
+  it("loppunut kiintiö tunnistetaan kiintiöksi eikä vanhenemiseksi", () => {
     const alert = authAlert(
-      health({ health: "fail", daysSinceSuccess: 7.5, quota: { day: "d", used: 9500, limit: 10_000, remaining: 500 } }),
+      health({ health: "fail", quota: { day: "d", used: 10_000, limit: 10_000, remaining: 0 } }),
     );
-    expect(alert?.kind).toBe("expiry");
+    expect(alert?.kind).toBe("quota");
+    expect(alert?.title).toBe("YouTube-kiintiö on lopussa");
+  });
+
+  it("epäonnistunut terveystarkistus ei ole vanheneminen", () => {
+    // Verkkopiikki nostaa terveyden failiin ja jättää tokenin iän ennalleen.
+    // Ilman omaa bittiään tämä lähti ulos tekstillä "katkeaa lähipäivinä,
+    // 0 vrk" — ja pahimmillaan tunnin välein, koska tila palaa välissä okiksi.
+    expect(authAlert(health({ health: "fail", checkFailed: true }))).toBeNull();
+  });
+
+  it("tavoittamattomuudesta varoitetaan vasta kun se on kestänyt tunnin", () => {
+    const broken = health({ health: "fail", checkFailed: true });
+    expect(authAlert(broken, 1)).toBeNull();
+    expect(authAlert(broken, 2)?.kind).toBe("unreachable");
+  });
+
+  it("kiintiö menee vanhenemisen edelle: ne vaativat eri teon", () => {
+    const alert = authAlert(
+      health({
+        health: "fail",
+        tokenAgeDays: 7.5,
+        quota: { day: "d", used: 9500, limit: 10_000, remaining: 500 },
+      }),
+    );
+    // Kiintiön loppuminen on tämän päivän este; vanheneminen kertautuu
+    // seuraavassa tarkistuksessa kun kiintiö on nollautunut.
+    expect(alert?.kind).toBe("quota");
   });
 });
 
 describe("vartijan reuna", () => {
   it("lähettää varoituksen kerran, ei joka tunti", async () => {
     const send = vi.fn(async () => undefined);
-    const watch = createAuthWatch({ readHealth: async () => health({ daysSinceSuccess: 6.5 }), send });
+    const watch = createAuthWatch({ readHealth: async () => health({ tokenAgeDays: 6.5 }), send });
 
     await watch.check();
     await watch.check();
@@ -75,13 +111,13 @@ describe("vartijan reuna", () => {
 
   it("varoittaa uudelleen sen jälkeen kun tilanne on korjaantunut", async () => {
     const send = vi.fn(async () => undefined);
-    let current = health({ daysSinceSuccess: 6.5 });
+    let current = health({ tokenAgeDays: 6.5 });
     const watch = createAuthWatch({ readHealth: async () => current, send });
 
     await watch.check();
     current = health();
     await watch.check(); // paluu kuntoon ei piippaa
-    current = health({ daysSinceSuccess: 6.5 });
+    current = health({ tokenAgeDays: 6.5 });
     await watch.check();
 
     expect(send).toHaveBeenCalledTimes(2);
@@ -90,7 +126,7 @@ describe("vartijan reuna", () => {
   it("erottaa kiintiövaroituksen vanhenemisvaroituksesta — eri teko, oma piippaus", async () => {
     const kinds: string[] = [];
     const send = vi.fn(async (alert: AuthAlert) => void kinds.push(alert.kind));
-    let current = health({ daysSinceSuccess: 6.5 });
+    let current = health({ tokenAgeDays: 6.5 });
     const watch = createAuthWatch({ readHealth: async () => current, send });
 
     await watch.check();
@@ -99,6 +135,24 @@ describe("vartijan reuna", () => {
 
     expect(send).toHaveBeenCalledTimes(2);
     expect(kinds).toEqual(["expiry", "quota"]);
+  });
+
+  it("laskee peräkkäiset epäonnistuneet tarkistukset ja piippaa vasta toisesta", async () => {
+    const send = vi.fn(async () => undefined);
+    let current = health({ health: "fail", checkFailed: true });
+    const watch = createAuthWatch({ readHealth: async () => current, send });
+
+    await watch.check();
+    expect(send).not.toHaveBeenCalled();
+    await watch.check();
+    expect(send).toHaveBeenCalledTimes(1);
+
+    // Yksi onnistunut tarkistus nollaa laskurin: seuraava piikki alkaa alusta.
+    current = health();
+    await watch.check();
+    current = health({ health: "fail", checkFailed: true });
+    await watch.check();
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it("on hiljaa kun terveystarkistus itse kaatuu: verkkovirhe ei ole vanheneminen", async () => {

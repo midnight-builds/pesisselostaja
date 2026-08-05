@@ -52,6 +52,9 @@ export function ShareSettings({ notify }: Props) {
   }
 
   const dirty = draft !== toText(settings.shareTemplate);
+  // Tyhjä pohja ei ole muokkaus vaan vahinko: jakoviesti muodostuu siitä, ja
+  // tyhjänä ryhmään lähtisi tyhjä viesti ilman linkkejä.
+  const empty = draft.trim().length === 0;
 
   const save = async () => {
     setBusy(true);
@@ -98,12 +101,17 @@ export function ShareSettings({ notify }: Props) {
       <button
         type="button"
         className="btn btn--primary btn--wide"
-        disabled={busy || !dirty}
+        disabled={busy || !dirty || empty}
         onClick={() => void save()}
         data-testid="share-save"
       >
         {dirty ? "Tallenna jakoviesti" : "Tallennettu"}
       </button>
+      {empty && (
+        <p className="sheet__lead is-warn" data-testid="share-empty">
+          Jakoviesti ei voi olla tyhjä — silloin ryhmään lähtisi viesti ilman linkkejä.
+        </p>
+      )}
 
       <div className="sheet__toggles">
         <button

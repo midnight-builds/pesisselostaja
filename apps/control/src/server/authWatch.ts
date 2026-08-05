@@ -30,7 +30,7 @@ import { notifyAuthAlert } from "./notifications.js";
  *  tehtävä ennen ottelua eikä sen jälkeen. */
 const QUOTA_WARN_SHARE = 0.8;
 
-export type AuthAlertKind = "expiry" | "quota";
+export type AuthAlertKind = "expiry" | "quota" | "unreachable";
 
 export interface AuthAlert {
   kind: AuthAlertKind;
@@ -38,33 +38,68 @@ export interface AuthAlert {
   body: string;
 }
 
+/** Kuinka monta peräkkäistä epäonnistunutta terveystarkistusta vaaditaan ennen
+ *  kuin siitä piipataan. Tarkistusväli on tunti, joten kaksi tarkoittaa "vika
+ *  on kestänyt tunnin" — DNS-piikki tai YouTuben hetkellinen häiriö ei ylitä
+ *  tätä, katkennut valtuutus ylittää aina. */
+const UNREACHABLE_CONFIRM_CHECKS = 2;
+
 /** Puhdas päättelysääntö: terveysraportti sisään, varoitus tai hiljaisuus ulos.
  *
  *  Erillään ajastimesta, koska juuri tämä on se osa, joka on oltava oikein:
- *  liian herkkä sääntö kouluttaa operaattorin pyyhkäisemään varoitukset pois. */
-export function authAlert(health: AuthHealth): AuthAlert | null {
+ *  liian herkkä sääntö kouluttaa operaattorin pyyhkäisemään varoitukset pois,
+ *  ja **väärään tekoon neuvova varoitus on pahempi kuin ei varoitusta**.
+ *
+ *  Järjestys on merkitsevä eikä satunnainen. `health === "fail"` EI kelpaa
+ *  vanhenemisen tunnusmerkiksi, koska sen nostavat myös loppunut kiintiö ja
+ *  epäonnistunut tarkistus — kumpikaan ei parane uudelleenkirjautumisella, ja
+ *  neuvo "uusi yhteys" johtaisi operaattorin purkamaan toimivan valtuutuksen
+ *  ottelupäivän aattona. Siksi jokainen laji tunnistetaan omasta
+ *  havainnostaan: kiintiö kiintiöluvuista, vanheneminen tokenin iästä ja
+ *  tavoittamattomuus `checkFailed`istä. */
+export function authAlert(health: AuthHealth, consecutiveCheckFailures = 0): AuthAlert | null {
   // Yhdistämätön ohjaamo ei varoita: se on valmistelun este (preflight), ei
   // yllättävä muutos huonompaan.
   if (!health.connected) return null;
 
-  const days = health.daysSinceSuccess;
-  if (health.health === "fail" || (days !== null && days >= TOKEN_WARN_AGE_DAYS)) {
+  // Kiintiö ensin: se on ainoa laji, jonka voi tunnistaa suoraan luvuista, ja
+  // se nostaa terveyden failiin ilman että yhteydessä on mitään vikaa.
+  const { used, limit } = health.quota;
+  if (limit > 0 && used / limit >= QUOTA_WARN_SHARE) {
+    const share = Math.round((used / limit) * 100);
     return {
-      kind: "expiry",
-      title: "Uusi Google-yhteys",
+      kind: "quota",
+      title: share >= 100 ? "YouTube-kiintiö on lopussa" : "Varaudu kiintiön loppumiseen",
       body:
-        days !== null
-          ? `Yhteys on ollut ${Math.round(days)} vrk ilman onnistunutta päivitystä ja katkeaa lähipäivinä. Uusi se ohjaamon huollosta.`
-          : "Google-yhteys ei ole kunnossa. Uusi se ohjaamon huollosta.",
+        share >= 100
+          ? "Päivän YouTube-kiintiö on käytetty loppuun — lähetysparia ei voi luoda ennen kuin se nollautuu."
+          : `Päivän YouTube-kiintiöstä on käytetty ${share} % — lähetysparin luonti voi epäonnistua tänään.`,
     };
   }
 
-  const { used, limit } = health.quota;
-  if (limit > 0 && used / limit >= QUOTA_WARN_SHARE) {
+  // Vanheneminen mitataan tokenin IÄSTÄ myöntämisestä, ei viimeisestä
+  // onnistuneesta päivityksestä. Ohjaamo pollaa lähteen tilaa taustalla ja
+  // uusii access tokenin noin tunnin välein, joten `daysSinceSuccess` ei
+  // käytännössä koskaan kasva — pelkkään siihen nojaava sääntö olisi kuollutta
+  // koodia, ja koko lupaus "varoitus ENNEN katkeamista" jäisi lunastamatta.
+  // Testing-tilan refresh token kuolee 7 vrk myöntämisestä (googleAuth.ts).
+  const age = Math.max(health.tokenAgeDays ?? 0, health.daysSinceSuccess ?? 0);
+  if (age >= TOKEN_WARN_AGE_DAYS) {
     return {
-      kind: "quota",
-      title: "Varaudu kiintiön loppumiseen",
-      body: `Päivän YouTube-kiintiöstä on käytetty ${Math.round((used / limit) * 100)} % — lähetysparin luonti voi epäonnistua tänään.`,
+      kind: "expiry",
+      title: "Uusi Google-yhteys",
+      body: `Google-yhteyden myöntämisestä on ${Math.round(age)} vrk ja se voi katketa lähipäivinä. Uusi se ohjaamon huollosta ennen seuraavaa ottelua.`,
+    };
+  }
+
+  // Tavoittamattomuus vasta kun se on kestänyt: yksittäinen verkkopiikki ei
+  // kerro mitään, mutta peruutettu valtuutus näyttää täsmälleen samalta eikä
+  // saa jäädä huomaamatta ottelupäivien välissä.
+  if (health.checkFailed && consecutiveCheckFailures >= UNREACHABLE_CONFIRM_CHECKS) {
+    return {
+      kind: "unreachable",
+      title: "Tarkista Google-yhteys",
+      body: "Google-yhteyttä ei ole saatu tarkistettua tuntiin. Avaa ohjaamon huolto ja katso, toimiiko yhteys.",
     };
   }
 
@@ -91,6 +126,7 @@ interface WatchDeps {
  *  läpi askel kerrallaan. */
 export function createAuthWatch(deps: Pick<WatchDeps, "readHealth" | "send">) {
   let announced: AuthAlertKind | null = null;
+  let checkFailures = 0;
 
   return {
     async check(): Promise<AuthAlert | null> {
@@ -98,12 +134,14 @@ export function createAuthWatch(deps: Pick<WatchDeps, "readHealth" | "send">) {
       try {
         health = await deps.readHealth();
       } catch {
-        // Verkkovirhe ei ole yhteyden vanheneminen. Hiljaisuus on tässä oikein:
-        // seuraava tarkistus tulee tunnin päästä, ja jos vika on oikea, se
-        // näkyy ottelupäivän preflightissa joka tapauksessa.
+        // getAuthHealth ei heitä verkkovirheestä — se raportoi sen
+        // `checkFailed`inä — joten tänne päätyy vain odottamaton vika.
+        // Hiljaisuus on silloin oikein: seuraava tarkistus tulee tunnin
+        // päästä, ja ottelupäivänä preflight sanoo saman.
         return null;
       }
-      const alert = authAlert(health);
+      checkFailures = health.checkFailed ? checkFailures + 1 : 0;
+      const alert = authAlert(health, checkFailures);
       if (!alert) {
         announced = null;
         return null;

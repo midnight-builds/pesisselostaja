@@ -220,7 +220,11 @@ silmäyksenä.
 - **Google-yhteys on yksi kuittausrivi**: "Google-yhteys kunnossa" ja kanavan
   nimi. Scopet, tokenin ikä ja client id eivät näy missään (#176), eikä
   käsisyöttökenttiä ole — uusinta käynnistää laitevirran, joka näyttää koodin ja
-  osoitteen ja huomaa itse kun kirjautuminen valmistuu.
+  osoitteen ja huomaa itse kun kirjautuminen valmistuu. **Kesken jäänyt
+  laitevirta jatkuu itsestään** kun arkki avataan uudelleen, ja **vanhentunut
+  koodi näytetään nappina eikä näkymänä**: muuten kortti jäisi tuijottamaan
+  kuollutta koodia, eikä yhteyttä voisi enää uusia lainkaan — SSH-varapolkua ei
+  ole.
 - **Vanhenemisesta ja kiintiöstä tulee push, ei punainen rivi arkissa**
   (`src/server/authWatch.ts`). Refresh token vanhenee Testing-tilassa 7
   vuorokaudessa eli tyypillisesti ottelupäivien *välissä*, jolloin kukaan ei
@@ -228,6 +232,16 @@ silmäyksenä.
   varoitus ei toistu tunneittain) eikä koske verkkoon lainkaan ilman tokenia —
   yhdistämätön ohjaamo ei siis kuluta kiintiötä eikä varoita puuttumisesta,
   koska se on valmistelun este ja siitä kertoo preflight.
+
+  **Jokainen laji tunnistetaan omasta havainnostaan, ei terveydestä.**
+  `health === "fail"` ei kelpaa vanhenemisen tunnusmerkiksi, koska sen nostavat
+  myös loppunut kiintiö ja epäonnistunut tarkistus: silloin puhelimeen tulisi
+  "uusi Google-yhteys" vaikka yhteydessä ei ole vikaa, ja jos operaattori
+  tottelee, hän purkaa toimivan valtuutuksen ottelupäivän aattona. Siksi
+  kiintiö luetaan kiintiöluvuista **ensin**, vanheneminen `tokenAgeDays`istä
+  (ei `daysSinceSuccess`istä, joka ei enää kasva kun ohjaamo uusii access
+  tokenin tunneittain) ja tavoittamattomuus omasta `checkFailed`-bitistään
+  vasta kun se on kestänyt kaksi tarkistusta.
 - **Loki on ohjaamon ainoa tekninen taso.** SSH:ta ei käytetä koskaan (#176),
   joten vianetsinnän on onnistuttava täältä: rivit näytetään koneen kielellä,
   ja mukana on palvelimen `headline` sekä levytila — samat, jotka ovat
@@ -256,7 +270,7 @@ jota ei kirjoiteta itse). Neljä laukaisijaa, kaikki kytkettävissä pois
 | Valmistelu ja käynnistys | relay siirtyi ajoon, tai preflightissä oli esteitä |
 | Lähetys katkesi | relay poistui ajosta kesken ottelun |
 | Selostettu lähetys päättyi | työn **siivous kirjattiin** (`Job.cleanup`, #187) — ei siitä että työ sulkeutui |
-| Google-yhteys vaatii tekoa | yhteys vanhenemassa tai päivän kiintiöstä käytetty 80 % (`authWatch.ts`, #188) — `startup`-preferenssin alla, koska se estää valmistelun |
+| Google-yhteys vaatii tekoa | tokenin ikä ≥ 6 vrk, päivän kiintiöstä käytetty 80 %, tai yhteys tavoittamattomissa kaksi tarkistusta (`authWatch.ts`, #188) — `startup`-preferenssin alla, koska se estää valmistelun |
 
 Hyvänä päivänä puhelin piippaa täsmälleen kolme kertaa (#174): *Lähetyspari
 valmiina* → *Lähetys käynnistyi* → *Selostettu lähetys päättyi*. Otsikot tulevat

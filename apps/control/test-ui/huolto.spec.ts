@@ -108,6 +108,74 @@ test.describe("huoltoarkki", () => {
     expect(api.settings.shareTemplate.opening).toBe("Uusi avaus {matchup}");
   });
 
+  test("kesken jäänyt kirjautuminen jatkuu itsestään, eikä vanhentunut koodi lukitse korttia", async ({
+    page,
+    api,
+    openApp,
+  }) => {
+    // Palvelimella on kesken oleva laitevirta, jonka koodi on yhä voimassa:
+    // arkin avaaminen jatkaa pollausta ilman että mitään painetaan.
+    api.authHealth = fixture.authHealth({
+      pending: {
+        userCode: "WXYZ-1234",
+        verificationUrl: "https://www.google.com/device",
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+      },
+    });
+    await openApp();
+    await openSheet(page);
+
+    await expect(page.getByTestId("google-flow")).toContainText("WXYZ-1234");
+    await expect.poll(() => api.called("POST", "/api/youtube/auth/poll"), { timeout: 15_000 }).toBe(true);
+  });
+
+  test("vanhentunut laitevirta ei jätä korttia umpikujaan", async ({ page, api, openApp }) => {
+    // Sama kesken jäänyt kirjautuminen, mutta koodi on vanhentunut. Ilman
+    // expiresAt:n lukemista kortti näytti kuollutta koodia ikuisesti eikä
+    // yhteyttä voinut enää uusia — ohjaamosta ei ole SSH-varapolkua (#176).
+    api.authHealth = fixture.authHealth({
+      pending: {
+        userCode: "VANHA-KOODI",
+        verificationUrl: "https://www.google.com/device",
+        expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      },
+    });
+    await openApp();
+    await openSheet(page);
+
+    await expect(page.getByTestId("google-stale-flow")).toBeVisible();
+    await expect(page.getByTestId("google-flow")).toHaveCount(0);
+    await expect(page.getByTestId("google-renew")).toBeVisible();
+  });
+
+  test("tyhjää jakoviestiä ei voi tallentaa", async ({ page, api, openApp }) => {
+    await openApp();
+    await openSheet(page);
+
+    await page.getByTestId("share-template").fill("   ");
+
+    await expect(page.getByTestId("share-empty")).toBeVisible();
+    await expect(page.getByTestId("share-save")).toBeDisabled();
+    expect(api.called("PATCH", "/api/settings")).toBe(false);
+  });
+
+  test("ajastushetki pysyy topbarissa pitkilläkin sarja- ja kenttänimillä", async ({ page, openApp }) => {
+    // Hammasratas puristi metarivin kolmeen pisteeseen, ja kellonaika oli
+    // rivin hännässä: ottelupäivänä ajastushetki olisi kadonnut oikeilla,
+    // fixtuureja pidemmillä nimillä.
+    await openApp(
+      fixture.liveState({
+        job: fixture.job({
+          seriesName: "Miesten Superpesis, alkusarjan kotiottelu",
+          stadium: "Kuvitteellisen Kylän keskuskenttä, tekonurmi",
+        }),
+      })
+    );
+
+    await expect(page.locator(".topbar__meta")).toContainText("klo");
+    expect(await horizontalOverflow(page)).toEqual([]);
+  });
+
   test("arkki sulkeutuu ja palauttaa ottelupäivän polulle", async ({ page, openApp }) => {
     await openApp();
     await openSheet(page);

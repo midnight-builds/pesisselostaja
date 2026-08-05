@@ -532,6 +532,15 @@ export interface AuthHealth {
   quota: { day: string; used: number; limit: number; remaining: number };
   /** Laitevirta kesken — puhelin voi jatkaa pollausta. */
   pending: { userCode: string; verificationUrl: string; expiresAt: string } | null;
+  /** Terveystarkistus itse epäonnistui (verkko, token, YouTuben oma vika).
+   *
+   *  Oma kenttänsä eikä pääteltävissä `health === "fail"`istä, koska ne ovat
+   *  eri asioita ja sekoittaminen maksoi jo: kiintiön loppuminen ja
+   *  hetkellinen DNS-piikki nostavat molemmat tilan failiin, ja vartija
+   *  (`authWatch.ts`) lähetti niistä "uusi Google-yhteys" -pushin, joka
+   *  neuvoo väärään tekoon. Tässä kentässä on se yksi bitti, jonka avulla
+   *  ohimenevä vika erotetaan pysyvästä. */
+  checkFailed: boolean;
 }
 
 export interface AuthHealthInput {
@@ -604,6 +613,7 @@ export function buildAuthHealth(input: AuthHealthInput): AuthHealth {
       warnings,
       quota,
       pending,
+      checkFailed: false,
     };
   }
 
@@ -718,6 +728,7 @@ export function buildAuthHealth(input: AuthHealthInput): AuthHealth {
     warnings,
     quota,
     pending,
+    checkFailed: Boolean(input.error),
   };
 }
 
