@@ -39,6 +39,40 @@ async function pageScrolls(page: import("@playwright/test").Page): Promise<boole
   });
 }
 
+/** Se ruutu, joka iPhonella oikeasti jää sovellukselle.
+ *
+ *  Playwrightin WebKit antaa `env(safe-area-inset-*)`:lle nollan, joten spec
+ *  mittasi ruutua jota laitteessa ei ole (#207): `index.html` on
+ *  `viewport-fit=cover` + `black-translucent`, ja kotivalikosta avatussa
+ *  sovelluksessa yläreuna vie ~59 px ja kotipalkki ~34 px. Turva-aluetta ei voi
+ *  testiympäristössä syöttää `env()`:iin, joten sama tila mitataan siltä
+ *  puolelta jolta voi: pienennetään ruutua tasan noiden kaistojen verran.
+ *  CSS lukee lisäksi `--safe-top`/`--safe-bottom`-muuttujat `env()`:n rinnalla,
+ *  jotta kaistat voi myös piirtää näkyviin. */
+const SAFE_TOP = 59;
+const SAFE_BOTTOM = 34;
+
+async function withSafeAreas(page: import("@playwright/test").Page): Promise<void> {
+  const size = page.viewportSize();
+  await page.setViewportSize({
+    width: size?.width ?? 393,
+    height: (size?.height ?? 853) - SAFE_TOP - SAFE_BOTTOM,
+  });
+}
+
+/** Onko elementti kokonaan ruudun sisällä. Näkyvyys ei riitä: ruudun
+ *  alapuolelle työntynyt nappi on Playwrightille yhä "visible". */
+async function fullyOnScreen(
+  page: import("@playwright/test").Page,
+  testId: string | { role: "switch"; name: RegExp },
+): Promise<boolean> {
+  const locator =
+    typeof testId === "string" ? page.getByTestId(testId) : page.getByRole("switch", { name: testId.name });
+  const box = await locator.boundingBox();
+  const height = page.viewportSize()?.height ?? 0;
+  return box !== null && box.y >= 0 && box.y + box.height <= height;
+}
+
 test.describe("ottelunaikainen", () => {
   test("viisi tietoa ja kaksi säätöä mahtuvat ruudulle ilman vieritystä", async ({
     page,
@@ -77,6 +111,37 @@ test.describe("ottelunaikainen", () => {
     expect(list?.height ?? 0).toBeGreaterThan(120);
     const toggle = await page.getByRole("switch", { name: /vaihtoselostus/i }).boundingBox();
     expect((toggle?.y ?? 0) + (toggle?.height ?? 0)).toBeLessThanOrEqual(853);
+  });
+
+  /** #207: 393 px:n lupaus mitattiin ilman turva-alueita ja ilman
+   *  hälytysrivejä — eli siinä tilassa, jossa budjetti on väljimmillään.
+   *  Ruutua oikeasti katsotaan siinä toisessa tilassa: kaksi yhtaikaista
+   *  hälytystä ja monirivinen arvo. Silloin `.narration` kutistui nollaan ja
+   *  säätimet työntyivät ruudun alapuolelle — eivät hankalasti saataville vaan
+   *  tavoittamattomiin, koska `.app` on `overflow: hidden` eikä sivu vieri. */
+  test("säätimet pysyvät ruudulla myös turva-alueiden ja hälytysten kanssa", async ({
+    page,
+    api,
+    openApp,
+  }) => {
+    api.jobs = [liveJob()];
+    await openLive(openApp, {
+      system: fixture.systemState({ diskCritical: true }),
+      telemetry: null,
+      narration: [],
+      conflict: { job: 999001, running: 999002 },
+    });
+    await withSafeAreas(page);
+
+    // Molemmat hälytykset päällä — se on tämän testin koko pointti.
+    await expect(page.getByTestId("glance-alert")).toHaveCount(2);
+
+    // Säätimet ovat kokonaan ruudulla, eivät vain "visible".
+    expect(await fullyOnScreen(page, { role: "switch", name: /vaihtoselostus/i })).toBe(true);
+    // Selostuslista ei ole puristunut nollaan saadakseen muun mahtumaan.
+    const list = await page.getByTestId("narration-list").boundingBox();
+    expect(list?.height ?? 0).toBeGreaterThan(120);
+    expect(await horizontalOverflow(page)).toEqual([]);
   });
 
   test("viiveen nudge menee control-tiedoston reittiä ja uusi arvo näkyy heti", async ({

@@ -81,7 +81,19 @@ body {
 }
 
 .safe-top {
-  height: env(safe-area-inset-top);
+  /* var() ensin, env() varana (#207): Playwrightin WebKit antaa
+     `env(safe-area-inset-*)`:lle nollan, joten spec mittasi ruutua jota
+     laitteessa ei ole — kotivalikosta avatussa sovelluksessa yläreuna vie
+     ~47–59 px. Muuttuja on testin sauma; laitteella se on asettamatta ja
+     env() ratkaisee kuten ennenkin. */
+  height: var(--safe-top, env(safe-area-inset-top));
+  flex: none;
+}
+
+/* Alareunaa ei varattu lainkaan. iPhonen kotipalkki peittää ~34 px, ja se on
+   tasan se kaista, jossa vaihtoselostuksen kytkin on. */
+.safe-bottom {
+  height: var(--safe-bottom, env(safe-area-inset-bottom));
   flex: none;
 }
 
@@ -618,6 +630,15 @@ select.field__input {
   gap: 10px;
   flex: 1;
   min-height: 0;
+  /* Turvaventtiili (#207). Budjetti on laskettu nollalle hälytysriville ja
+     yksiriviselle arvolle; kaksi yhtaikaista hälytystä (levytila + ottelun
+     ristiriita) ja monirivinen `fact__value` vievät yhdessä yli sata pikseliä.
+     Ilman tätä ylivuoto työnsi säätimet ruudun alapuolelle — eivät hankalasti
+     saataville vaan tavoittamattomiin, koska `.app` on `overflow: hidden` eikä
+     sivu vieri. Vieritys on huonompi kuin mahtuminen, mutta se on ainoa
+     vaihtoehto joka ei hukkaa nappeja. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* Hälytys: hiljainen vika, joka ei mahdu viiteen tietoon. Punainen ja ylinnä,
@@ -797,7 +818,10 @@ select.field__input {
 /* ── Selostuslista ─────────────────────────────────────────── */
 .narration {
   flex: 1;
-  min-height: 0;
+  /* Ei kutistu luettavuuden alle (#207): lista on tämän tilan diagnoosiväline,
+     ja nollaksi puristuessaan se olisi vain tyhjä laatikko. Tila loppuu ennen
+     sitä, ja silloin `.glance` vierii. */
+  min-height: 140px;
   display: flex;
   flex-direction: column;
   padding: 12px;
