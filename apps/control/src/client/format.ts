@@ -98,6 +98,16 @@ export function duration(sec: number | null): string {
   return `${Math.floor(min / 60)} h ${min % 60} min`;
 }
 
+/** Millisekunnit sekunteina, suomalaisittain: "4,0 s".
+ *
+ *  Selostusviive on ainoa luku, jota ottelun aikana säädetään, ja se luetaan
+ *  kentällä yhdellä vilkaisulla. Millisekunnit ovat koneen yksikkö — neljä
+ *  numeroa, jotka on luettava ajatuksella — eikä koneen kieltä näytetä
+ *  ottelupäivän polulla (#176). */
+export function seconds(ms: number): string {
+  return `${(ms / 1000).toFixed(1).replace(".", ",")} s`;
+}
+
 export function bytes(n: number): string {
   if (!Number.isFinite(n)) return "–";
   const gb = n / 1024 ** 3;

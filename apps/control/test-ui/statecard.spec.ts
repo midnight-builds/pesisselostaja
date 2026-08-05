@@ -98,9 +98,12 @@ test.describe("tilakortti", () => {
     await openApp(live);
 
     await expect(stateWord(page)).toHaveText(jobStateWord("live").word);
-    // Palvelimen yhden lauseen tiivistys näkyy kortissa (#186 korvaa sen
-    // kertasilmäyksellä).
-    await expect(page.getByText(live.headline, { exact: false }).first()).toBeVisible();
+    // Kortin sisältö on ottelunaikainen kertasilmäys (#186), ei palvelimen
+    // yhden lauseen tiivistys: `headline` puhuu työkaluista, eikä koneen kieli
+    // kuulu ottelupäivän polulle (#176). Rivit itsessään ovat ottelu.spec.ts:n
+    // asia — tässä varmistetaan vain että kortti vaihtaa sisältönsä.
+    await expect(page.getByTestId("match-glance")).toBeVisible();
+    await expect(page.getByText(live.headline, { exact: false })).toHaveCount(0);
     await expect(page.locator(picker)).toHaveCount(0);
     // Otsikko nimeää ottelun, ei sovellusta.
     await expect(page.locator(".topbar__title")).toContainText(live.job!.home);
