@@ -649,6 +649,11 @@ export function startScheduler(): { stop(): void } {
   return scheduler.start();
 }
 
+/** Ks. `isStarting` yllä — HTTP-kerroksen portti käynnistysikkunaan. */
+export function isSchedulerStarting(): boolean {
+  return scheduler.isStarting();
+}
+
 export async function getSchedulerState(): Promise<SchedulerState> {
   return scheduler.getState();
 }
