@@ -30,12 +30,22 @@ Kaksi vaihtoehtoa punnittiin:
   ja vankempi, mutta alkuperäinen live olisi riippuvainen relaystä — käyttäjä
   valitsi A:n nimenomaan siksi, että originaali lähetys säilyy itsenäisenä.
 
-### Käsinpariutus, ei YouTube API -automaatiota
+### Käsinpariutus, ei YouTube API -automaatiota — **kumottu (#124)**
 
-Käyttäjä luo toisen lähetyksen käsin YouTube Studiossa ja antaa sen
-RTMP-osoitteen + avaimen `.env.relay`-tiedostossa. YouTube Live Data API +
-Google OAuth -automaatio hylättiin: paljon monimutkaisempi (OAuth-virrat,
-kiintiöt) eikä tarpeen, kun lähetyksiä luodaan yksi per ottelu käsin.
+> **Tämä päätös ei ole enää voimassa.** Ohjaamo (`apps/control`) tekee
+> nimenomaan sen, mikä tässä hylättiin: YouTube Live Data API + Google OAuth,
+> `createBroadcastPair` luo molemmat lähetykset ja kirjoittaa sidonnan itse.
+> Käsinpariutus on varapolku, jota käytetään vain kun ohjaamo tai sen
+> valtuutus ei toimi. Päätös on jätetty näkyviin, koska se selittää miksi
+> relay lukee yhä `.env.relay`:tä — ohjaamosta relayyn on täsmälleen kaksi
+> kosketuspintaa, tuo tiedosto ja control-tiedosto, eikä kolmatta rakenneta
+> (#59). Älä palauta alkuperäistä perustelua ohjeeksi.
+
+Alkuperäinen perustelu: käyttäjä luo toisen lähetyksen käsin YouTube Studiossa
+ja antaa sen RTMP-osoitteen + avaimen `.env.relay`-tiedostossa. YouTube Live
+Data API + Google OAuth -automaatio hylättiin: paljon monimutkaisempi
+(OAuth-virrat, kiintiöt) eikä tarpeen, kun lähetyksiä luodaan yksi per ottelu
+käsin.
 
 ### Oma hakemisto + oma palvelu samassa repossa
 

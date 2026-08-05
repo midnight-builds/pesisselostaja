@@ -1,7 +1,12 @@
 # Relay: lokin luku ja vianetsintä
 
-Lue tämä kun relay on jo ajossa ja lokia seurataan, tai kun jokin näyttää
-väärältä. Käynnistys ja ajonaikaiset säätimet ovat `SKILL.md`:ssä.
+Lue tämä kun relay on jo ajossa ja jokin näyttää väärältä. Käynnistys ja
+ajonaikaiset säätimet ovat `SKILL.md`:ssä.
+
+**Tämä on diagnoosia, ei ottelupäivän polkua.** Normaalisti operaattori ei
+lue journaldia lainkaan: ohjaamon tilakortti kertoo tilan, ja loki on
+huoltoarkin takana ohjaamon ainoana teknisenä tasona (#176, #188). Jos joudut
+tänne, jokin ei näkynyt kortissa — se on kirjaamisen arvoinen havainto.
 
 ```bash
 journalctl --user -u pesisselostaja-relay -f

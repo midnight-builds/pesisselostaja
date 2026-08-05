@@ -37,7 +37,10 @@ Sovellus käyttää pesistulokset.fi-palvelun otteludataa. Tämä projekti on it
 Pesisselostaja turns live Finnish pesäpallo match updates into spoken Finnish announcements. The public web UI runs in the browser and can speak important match events with the Web Speech API. You can pick which voice to use in the settings, including an optional **advanced neural voice (Piper)** that produces a more natural Finnish voice entirely in the browser.
 
 The repository also contains a broadcast pipeline (`apps/broadcast`) that can
-republish a live YouTube stream with the same Finnish narration mixed on top.
+republish a live YouTube stream with the same Finnish narration mixed on top,
+and a control app (`apps/control`, "ohjaamo") that runs the whole broadcast
+day from the operator's phone — picking the match, creating both YouTube
+broadcasts, starting the relay and cleaning up afterwards.
 
 ## Screenshots
 
@@ -60,6 +63,7 @@ What works now:
 - Selectable speech voice: the browser's own voices, an advanced neural voice (Piper) that runs fully in the browser, or ElevenLabs cloud TTS with the user's own API key.
 - Favorites and local settings stored in the browser.
 - A YouTube broadcast pipeline that mixes synthesized narration over a live stream (`apps/broadcast`).
+- A phone-sized control app (`apps/control`) that drives that pipeline end to end: one state card per match, from picking the game to cleaning up after it.
 
 Known limitations:
 
@@ -98,6 +102,7 @@ An npm-workspaces monorepo: one platform-agnostic domain core, three thin apps.
 | `packages/core` | Pure domain logic: types, pesistulokset API client, speech text generation, scoring, pronunciation substitution. No localStorage, no fs, no DOM. |
 | `apps/web` | The mobile browser app (Vite). Browser adapters: localStorage persistence, Web Speech / Piper-WASM voices. Deployed to GitHub Pages. |
 | `apps/broadcast` | The YouTube broadcast pipeline: pulls a live stream with yt-dlp, mixes synthesized narration (ElevenLabs API, native-Piper fallback) with ffmpeg, republishes over RTMP. Node adapters: file persistence, ElevenLabs/Piper TTS. See [`apps/broadcast/README.md`](apps/broadcast/README.md). |
+| `apps/control` | The ohjaamo: mobile control app on :3002 that owns the broadcast chain — match selection, creating the YouTube broadcast pair, the start guard, in-match controls and cleanup. This is how a match day is run; nobody edits config files or runs `systemctl` on the normal path. See [`apps/control/README.md`](apps/control/README.md). |
 | `apps/server` | Minimal static file server hosting the built web app on :3000. |
 
 Persistence goes behind small ports defined in core (`WatcherStateStore`,

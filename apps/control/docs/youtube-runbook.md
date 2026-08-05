@@ -2,17 +2,23 @@
 
 Last updated: 2026-07-17
 
-> **Luettava näin (issue #124, 30.7.2026):** tämä tiedosto on yhä **kanoninen
-> lähde lähetysten SISÄLLÖLLE** — nimeämismallit, kuvaukset, thumbnail-käytäntö,
-> jaettavan viestin muoto, tilit ja aikakäsittely. `src/server/templates.ts` ja
-> `test/templates.test.ts` tarkistavat kaavat tätä vasten, joten älä muuta
-> kaavoja päivittämättä niitä.
+> **Luettava näin (issue #124, päivitetty 5.8.2026):** tämä tiedosto on
+> **kanoninen lähde lähetysten SISÄLLÖLLE** — nimeämismallit, kuvaukset,
+> thumbnail-käytäntö, jaettavan viestin muoto, tilit ja aikakäsittely.
+> `src/server/templates.ts` ja `test/templates.test.ts` tarkistavat kaavat tätä
+> vasten, joten älä muuta kaavoja päivittämättä niitä.
 >
-> **TYÖNKULKU sen sijaan on ohjaamon**, ei tämän tiedoston eikä ulkopuolisen
-> palvelun. Alla oleva "Workflow"-osio ja tiedostopolut (`/root/clawd/...`)
-> kuvaavat maailmaa ennen ohjaamoa. Ottelupäivän ajaminen: `/relay-ottelu`
-> (polku A = ohjaamo, polku B = käsityö poikkeuksena). Ketjun termit:
-> repon juuren `CONTEXT.md`.
+> **Työnkulku ei ole tässä tiedostossa eikä missään ohjeessa: se on ohjaamon
+> käyttöliittymässä.** Operaattori valitsee ottelun tilakortista, napauttaa
+> "Luo lähetyspari" kahdesti, ja ohjaamo tekee kaikki alla kuvatut vaiheet
+> itse — otsikot, kuvaukset, thumbnailit, molemmat lähetykset, soittolistan ja
+> jakoviestin. **Älä aja näitä vaiheita käsin agenttina** äläkä palauta
+> stream keytä käyttäjälle: käsikentät poistettiin käyttöliittymästä (#176),
+> ja jos huomaat kopioivasi stream keytä, olet varapolulla.
+>
+> Varapolku — vain kun ohjaamo tai sen Google-valtuutus ei toimi — on
+> `/relay-ottelu`-taidon osio **V5 (käsikierros Studiossa)**. Sama taito ei ole
+> ottelupäivän ajotapa vaan varapolku. Ketjun termit: repon juuren `CONTEXT.md`.
 
 Tama on kanoninen yhden tiedoston ohje Pesä Ysit -YouTube-ajastuksiin.
 Jos muu ohje on ristiriidassa taman kanssa, noudata tata tiedostoa.
@@ -41,10 +47,17 @@ Siksi ohje pidetaan yhtena master-ohjeena, jossa on:
 
 ## Tiedostot
 
-- OAuth env: `/root/clawd/integrations/youtube/.env`
-- OAuth token: `/root/clawd/integrations/youtube/token.json`
-- Luontiloki: `/root/clawd/brain/pesis-ai/logs/youtube-created.jsonl`
-- Hyvaksytty thumbnail-tausta: `/root/.openclaw/media/pesaysit-bg-raw-001.png`
+Nämä ovat ohjaamon omia — operaattori ei kosketa niihin, eikä niitä lueta
+käsin ottelupäivänä. Kaikki asuu `apps/control/run/`-hakemistossa
+(`CONTROL_STATE_DIR`):
+
+- OAuth-token: `google-token.json`. Valtuutus uusitaan huoltoarkin
+  laitevirralla, ei tiedostoa muokkaamalla.
+- Työt (ottelu, lähetyspari, stream key, siivous): `jobs.json`.
+- Thumbnail-tausta: `apps/control/assets/pesaysit-bg-raw-001.png`.
+
+Aiemmat `/root/clawd/...`-polut kuuluivat ulkopuoliselle palvelulle, jonka
+korvaaminen oli #124:n koko tavoite. Ne ovat poissa; älä palauta niitä.
 
 ## Lahdeaineisto
 
@@ -58,88 +71,48 @@ Siksi ohje pidetaan yhtena master-ohjeena, jossa on:
 - Kun ajat vietaan YouTube API:lle, anna skriptille sama paivamaara ja kellonaika seka oletusvyohyke `Europe/Helsinki`. Skripti tekee vain API:n vaatiman teknisen ISO/UTC-esityksen.
 - Kayttajalle, thumbnailiin, otsikkoon, kuvaukseen ja jaettavaan viestiin palautetaan aina alkuperainen paikallisaika, esimerkiksi `15.7.2026 klo 13:30`.
 
-## Workflow
+## Mitä luonti tekee
 
-### 1. Poimi ottelutiedot
+**Tämä ei ole tarkistuslista ajettavaksi.** Luonnin tekee ohjaamo yhtenä tekona
+(`createBroadcastPair`, `src/server/youtube.ts`) kun operaattori napauttaa
+"Luo lähetyspari". Osio kuvaa mitä siinä syntyy, jotta alla olevat
+sisältösäännöt on helppo sijoittaa oikeaan kohtaan.
 
-Tarvittavat kentat:
-- joukkue / sarja
-- vastustaja
-- paivamaara
-- kellonaika
-- tarkka pelipaikka
-- kaupunki tai lyhyt paikkamuoto titlea varten
-- tapahtuma
-- vaihe
-- oikea soittolista
+**Lähtötiedot** tulevat tulospalvelun ottelusta, eivät kyselemällä: joukkue ja
+sarja, vastustaja, päivämäärä ja kellonaika, pelipaikka, kaupunki otsikkoa
+varten, tapahtuma, vaihe ja soittolista. Soittolista valitaan **nimellä**,
+automaattisesti — PL-tunnistetta ei näytetä eikä kysytä (#176).
 
-### 2. Esita tekstit ennen luontia
+**Esikatselu on pysyvästi näkyvissä** tilakortissa ennen luontia: otsikot,
+alkamisaika ja thumbnail sellaisina kuin ne YouTubeen syntyvät. Se ei ole
+erillinen hyväksymisvaihe eikä siinä ole rastia — vahvistus on itse
+kaksoisnapautus, koska luonti on peruuttamaton ja ulospäin näkyvä (#171).
+Jos joukkue, vastustaja tai paikka pitää kirjoittaa vakiintuneeseen muotoon,
+se tehdään "Muokkaa otsikkoa" -taitoksessa ennen luontia.
 
-Ennen kuin mitaan luodaan, nayta kayttajalle:
-- otsikkoehdotus
-- soittolista
-- kuvaus
-- thumbnail-tekstit
+**Syntyvä pari** on aina molemmat lähetykset kerralla:
 
-Odota vahvistus.
+- **raakalähetys** omalla stream keyllään StreamLabsia varten, ja
+- **selostettu lähetys**, johon relay työntää: otsikon alussa sana
+  `Selostettu`, sama kuvaus, oma thumbnail-variantti badgella
+  `Selostettu tekoälyllä` vasemmassa yläkulmassa, oma streami ja stream key,
+  sekä `enableAutoStart=true` ja `enableAutoStop=true`.
 
-### 3. Renderoi thumbnail-preview
+`enableAutoStart` **ei ole kytkettävissä päälle jälkikäteen** — siksi se
+asetetaan luonnissa. Ilman sitä selostettu lähetys jää tilaan *"Waiting for
+stream"* vaikka relay pushaa oikein.
 
-- Kayta aina taustaa `/root/.openclaw/media/pesaysit-bg-raw-001.png`.
-- Ala koskaan kayta vanhoja taustoja, joissa on valmiiksi aiempien pelien teksteja.
-- Laheta preview kayttajalle hyvaksyttavaksi ennen YouTube-luontia.
+**Thumbnail** renderöidään aina taustasta
+`apps/control/assets/pesaysit-bg-raw-001.png`. Vanhoja taustoja, joissa on
+valmiina aiempien pelien tekstejä, ei käytetä koskaan.
 
-### 4. Luo normaali ajastus
+**Stream key kirjoittuu työhön, ei viestiin.** Sitä ei palauteta operaattorille
+eikä sitä kopioida mihinkään: relayn sidonnan tekee ohjaamo. Jos puuttuva
+stream key jää huomaamatta, seuraus on #162 — siksi puuttuva
+`liveStreams.list`-rivi on virhe eikä hiljainen null (#184).
 
-- Luo ensin normaali YouTube-ajastus.
-- Aseta thumbnail.
-- Kirjaa tiedot lokiin.
-
-### 5. Palauta kayttajalle kaksi viestia
-
-Laheta aina erikseen:
-- onnistumisviesti + YouTube-linkki + mahdolliset huomiot
-- valmis copy-paste jaettava viesti
-
-Tama vaihe on pakollinen, sita ei saa jattaa valista.
-
-### 6. Kysy selostus-versiosta
-
-Kun normaali ajastus on valmis, kysy aina:
-
-`Tehdaanko myos selostettu versio?`
-
-Jos vastaus on kylla:
-- luo toinen ajastus samalle ottelulle
-- kayta samaa kuvausta
-- renderoi selostetulle oma thumbnail-variantti
-- lisaa vasempaan ylareunaan badge `Selostettu tekoälyllä`
-- lisaa otsikon alkuun sana `Selostettu`
-- luo ajastukselle oma streami / stream key
-- laita selostetulle broadcastille `enableAutoStart=true` ja `enableAutoStop=true`
-
-Sen jalkeen palauta kayttajalle:
-- RTMP URL
-- backup URL
-- video id
-- Stream Key
-
-`watchUrl` on hyodyllinen lisa, mutta nuo nelja ovat pakolliset.
-
-Palautusviestin vakiorunko on:
-
-```text
-YouTube: <youtube-linkki>
-YouTube selostettu: <selostettu-youtube-linkki>
-Tulospalvelu: <pesistulokset-linkki>
-
-Broadcast:
-Otsikko: <selostetun broadcastin otsikko>
-RTMP URL: <primary ingestion url>
-Backup URL: <backup ingestion url>
-Video ID: <broadcast id>
-Stream Key: <stream name>
-```
+**Jakoviesti** muodostuu samalla, kolmella linkillä: raakalähetys, selostettu
+lähetys ja tulospalvelun ottelusivu. Muoto on osiossa "Jaettava viesti".
 
 ## Otsikointisaannot
 
@@ -236,34 +209,20 @@ Esimerkkiasettelu:
 
 Kaikki vuoden 2026 videot kuuluvat oikeaan ika-luokan 2026-soittolistaan.
 
-## Skriptit
+## Missä koodi on
 
-### Normaali ajastus
+Ulkopuolisen palvelun skriptejä (`/root/clawd/tools/...`) ei enää ole. Sama työ
+tehdään ohjaamossa:
 
-- Broadcast: `/root/clawd/tools/youtube-create-broadcast.js`
-- Thumbnail render: `/root/clawd/tools/pesaysit-render-thumbnail.sh`
-- Thumbnail upload: `/root/clawd/tools/youtube-set-thumbnail.js`
+- Lähetysparin luonti ja soittolista: `src/server/youtube.ts`
+- Otsikot, kuvaukset ja soittolistan valinta: `src/server/templates.ts`
+  (kaavat tarkistetaan `test/templates.test.ts`:ssä tätä ohjetta vasten)
+- Thumbnailin renderöinti ja badge: `src/server/thumbnail.ts`
 
-### Selostus-versio
-
-- Broadcast + oma streami: `/root/clawd/tools/youtube-create-broadcast-with-stream.js`
-- Thumbnail render: `/root/clawd/tools/pesaysit-render-thumbnail.sh --selostettu`
-- Thumbnail upload: `/root/clawd/tools/youtube-set-thumbnail.js`
-
-## Selostus-version palautettavat tiedot
-
-Kun selostettu versio on luotu, palauta kayttajalle ainakin:
-
-```text
-RTMP URL: <primary ingestion url>
-Backup URL: <backup ingestion url>
-Video ID: <broadcast id>
-Stream Key: <stream name>
-```
-
-Tarvittaessa voit lisata myos:
-- `YouTube: <watchUrl>`
-- `Stream ID: <liveStream id>`
+**Selostetun lähetyksen ingest-tietoja (RTMP URL, backup URL, video id, stream
+key) ei palauteta käyttäjälle.** Ne kirjoittuvat työhön ja ohjaamo sitoo relayn
+niillä itse. Käsin kopiointi kuuluu vain varapolulle V5, ja se on vika, joka
+kuuluu kirjata.
 
 ## Jaettava viesti
 
@@ -307,22 +266,15 @@ Listaa ottelut aikajarjestyksessa.
 
 ## Lokitus
 
-Kirjaa luodut broadcastit tiedostoon:
-
-`/root/clawd/brain/pesis-ai/logs/youtube-created.jsonl`
-
-Tallenna mahdollisuuksien mukaan:
-- `createdAtUtc`
-- `videoId`
-- `watchUrl`
-- `title`
-- `scheduledLocal`
-- `thumbnail`
-- `sourceMatchId`
-- `sourceMatchUrl`
-- mahdollinen `streamId` selostus-versiolle
+Erillistä luontilokia ei kirjoiteta. Työ itse **on** kirjaus: ottelu,
+molempien lähetysten video-id:t ja katselu-URLit, stream key, suunniteltu
+alkuaika, soittolista ja siivouksen tiedot elävät `apps/control/run/jobs.json`
+-tiedostossa, ja ohjaamon loki (huoltoarkin takana) kantaa tapahtumakoodit.
 
 ## Turvasaanto
 
 - Ala poista tai muuta olemassa olevia videoita haitallisesti ilman erillista vahvistusta.
 - Thumbnail-paivitykset ovat ok, kun ne on pyydetty tai kuuluvat normaaliin luontiin.
+- **Raakalähetykseen ei kirjoiteta ottelun ollessa kesken.** Ainoa sallittu
+  kirjoitus on hard stopin siivous päättyneen ottelun jälkeen (#123), ja sen
+  tekee ohjaamo — ei agentti käsin.

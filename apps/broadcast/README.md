@@ -26,7 +26,19 @@ decisions behind it. This file is the day-to-day operator runbook.
 2. `cp apps/broadcast/.env.relay.example apps/broadcast/.env.relay` and confirm `piper --help`
    and `yt-dlp --version` both work.
 
-## Per-match workflow
+## Per-match workflow — fallback only
+
+> **The ohjaamo (control app) runs match day, not this section.** The operator
+> picks the match on their phone and taps "Luo lähetyspari"; the ohjaamo creates
+> both broadcasts, writes the binding, starts the relay from its start guard
+> when the raw broadcast goes live, and cleans up afterwards. None of the steps
+> below are part of that path — no one edits `.env.relay`, copies a stream key,
+> or runs `systemctl` on a normal match day.
+>
+> Use this section only when the ohjaamo or its Google authorization is broken.
+> The same fallback, with the traps it has actually hit, is written up in the
+> `/relay-ottelu` skill under **V5**. If you end up here, that is a defect worth
+> filing — the ohjaamo should have handled it.
 
 1. Start the phone's YouTube livestream as usual — this is the original
    broadcast, and the relay never modifies it.
