@@ -389,9 +389,11 @@ uudelleenkäynnistystä. Paikkamerkit: `{time}`, `{matchup}`, `{watchUrl}`,
 `{narratedWatchUrl}`, `{matchUrl}`. Tuntematon paikkamerkki jää näkyviin, jotta
 kirjoitusvirhe huomataan esikatselusta eikä lähetetystä viestistä.
 
-Ottelupari on **sama kuin otsikossa**: kun luontikortissa on annettu oma
-joukkue ja vastustaja ("Pesä Ysit F-pojat", "IPV"), viesti käyttää niitä eikä
-tulospalvelun raakoja nimiä. Tulospalvelun osoite on monikkomuodossa
+Ottelupari on **sama kuin otsikossa**, eli **kotijoukkue ensin ja vierasjoukkue
+toisena** myös silloin kun Pesä Ysit on vieraana (#223). Kun luontikortissa on
+annettu koti- ja vierasjoukkueen esitysnimet ("IPV", "Pesä Ysit F-pojat"),
+viesti käyttää niitä eikä tulospalvelun raakoja nimiä; kentät vaihtavat vain
+nimen, eivät järjestystä. Tulospalvelun osoite on monikkomuodossa
 (`/ottelut/<id>`), kuten palvelu itse sen kirjoittaa.
 
 Viestin saa **milloin tahansa** työn elinkaaren aikana:

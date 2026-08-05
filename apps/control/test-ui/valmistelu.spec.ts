@@ -137,19 +137,19 @@ test.describe("valmistelu", () => {
 
     await page.getByText("Muokkaa otsikkoa").click();
     const texts = fixture.broadcastTexts();
-    const own = page.getByLabel("Oma joukkue");
-    const opponent = page.getByLabel("Vastustaja");
+    const home = page.getByLabel("Kotijoukkue");
+    const away = page.getByLabel("Vierasjoukkue");
     const venue = page.getByLabel("Paikka lyhyesti");
 
     // Arvot ovat tyhjiä — otsikko muodostuu ilman muokkausta.
-    await expect(own).toHaveValue("");
-    await expect(opponent).toHaveValue("");
+    await expect(home).toHaveValue("");
+    await expect(away).toHaveValue("");
     await expect(venue).toHaveValue("");
 
     // ...ja se mitä kentissä lukee on TÄMÄN ottelun pari oikein päin
-    // (oma ensin, `teamPair`) sekä tämän ottelun paikka.
-    await expect(own).toHaveAttribute("placeholder", texts.ownTeam);
-    await expect(opponent).toHaveAttribute("placeholder", texts.opponentTeam);
+    // (koti ensin, `teamPair`) sekä tämän ottelun paikka.
+    await expect(home).toHaveAttribute("placeholder", texts.homeTeam);
+    await expect(away).toHaveAttribute("placeholder", texts.awayTeam);
     await expect(venue).toHaveAttribute("placeholder", texts.thumbnailVenue);
 
     // Yksikään vieraan ottelun nimi ei saa esiintyä missään kortilla.

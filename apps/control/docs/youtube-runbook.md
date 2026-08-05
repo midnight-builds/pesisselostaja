@@ -120,11 +120,19 @@ lähetys ja tulospalvelun ottelusivu. Muoto on osiossa "Jaettava viesti".
 
 Kanavan nykyinen toimiva muoto on:
 
-`<Pesa Ysit joukkue/sarja> - <vastustaja>, <pvm> <lyhyt paikka>`
+`<kotijoukkue> - <vierasjoukkue>, <pvm> <lyhyt paikka>`
 
-Esimerkki:
+**Kotijoukkue on aina ensin ja vierasjoukkue toisena** (#223) — myös silloin kun
+Pesä Ysit on vieraana. Aiempi sääntö "oma joukkue on aina vasemmalla" on
+poistettu 5.8.2026 operaattorin päätöksellä; ala palauttaa sita.
 
-`Pesä Ysit E-tytöt kilpa - Hyvinkään Tahko, 15.7.2026 Tenavaleiri Kempele`
+Esimerkki (Pesä Ysit vieraana):
+
+`Hyvinkään Tahko - Pesä Ysit E-tytöt kilpa, 15.7.2026 Tenavaleiri Kempele`
+
+Ohjaamon "Muokkaa otsikkoa" -kentat ovat samasta syysta **Kotijoukkue** ja
+**Vierasjoukkue**: ne nimeavat paikan otsikossa, eivat sita kumpi joukkue on
+oma. Ne vaihtavat vain esitysnimen, eivat jarjestysta.
 
 Jos otsikko uhkaa venya liian pitkaksi mobiilinakaymaa tai YouTuben merkkirajaa ajatellen, pitkia joukkue- tai seuranimia saa lyhentaa yleisesti tunnettuun muotoon.
 
@@ -152,7 +160,7 @@ Selostus-version otsikko on sama kuin normaalin, mutta alkuun lisataan:
 
 Esimerkki:
 
-`Selostettu Pesä Ysit E-tytöt kilpa - Hyvinkään Tahko, 15.7.2026 Tenavaleiri Kempele`
+`Selostettu Hyvinkään Tahko - Pesä Ysit E-tytöt kilpa, 15.7.2026 Tenavaleiri Kempele`
 
 ## Kuvausmalli
 
