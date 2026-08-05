@@ -19,6 +19,7 @@ import {
 import { readLog } from "./journal.js";
 import { mayRepairBinding, runControlPreflight } from "./preflight.js";
 import { watchUrlForVideo } from "./youtubeUrl.js";
+import { hasBroadcastPair } from "../shared/jobState.js";
 import { startLiveAggregator } from "./live.js";
 import { createSourceIngestPoller } from "./sourceIngest.js";
 import { getDayMatches, getMatch } from "./matches.js";
@@ -538,11 +539,11 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
     // Sama sääntö kuin kortin `hasPair`illa: pari on olemassa vasta kun sillä
     // on molemmat, video JA avain (#203). Vajaa pari saa siis luoda uudelleen —
     // se on se umpikuja, josta kentällä ei muuten pääse pois.
-    if (job?.targetVideoId && job.targetStreamKey) {
+    if (job && hasBroadcastPair(job)) {
       sendError(
         res,
         409,
-        `Työllä on jo lähetyspari (${watchUrlForVideo(job.targetVideoId)}). Jos pari on väärä, poista lähetykset YouTubessa ja valitse ottelu uudelleen.`
+        `Työllä on jo lähetyspari (${watchUrlForVideo(job.targetVideoId ?? "")}). Jos pari on väärä, poista lähetykset YouTubessa ja valitse ottelu uudelleen.`
       );
       return;
     }
