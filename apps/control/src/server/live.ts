@@ -783,7 +783,11 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     // on historiaa), mutta tässä se piirtäisi toisen ottelun rivit tämän
     // hetken lähetyksenä ilman mitään merkkiä siitä (#118). Ei tietoa on
     // parempi kuin väärän ottelun tieto; otsikko kertoo miksi se on tyhjä.
-    const conflicted = matchIdConflict(snap) !== null;
+    // Ristiriita kannetaan kehyksessä omana kenttänään (#202): se on ainoa
+    // tapa, jolla selain voi tietää siitä sen jälkeen kun telemetria on
+    // nollattu juuri sen takia.
+    const conflict = matchIdConflict(snap);
+    const conflicted = conflict !== null;
     return {
       // Server time: the phone's clock can be off, and "N s sitten" computed
       // against a wrong clock is worse than no timestamp.
