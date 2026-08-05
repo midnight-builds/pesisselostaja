@@ -267,11 +267,14 @@ describe("hard stop -siivous laskevalla reunalla", () => {
     expect(transition).not.toHaveBeenCalled();
   });
 
-  it("lähde ei ole omalla kanavalla: kohde sammuu ja lähteestä jää selkeä syy lokiin", async () => {
+  // #201: tämä testi ajoi täsmälleen oikean tapauksen mutta asserttoi vain
+  // lokirivin, joten vika eli siinä testissä jonka piti sulkea se pois.
+  // Merkitsevä väite on TEKO: kortti lukee `cleanup.actions`ia, ei lokia.
+  it("lähde ei ole omalla kanavalla: kohde sammuu ja lähde kirjataan sulkematta jääneeksi", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-    const { transition, closeRunningJob } = await runFallingEdge({
+    const { transition, closeRunningJob, cleanup } = await runFallingEdge({
       endReason: "hard_stop",
       hardStopSource: true,
       // Tyhjä id-haku = video ei ole omalla kanavalla. Siisti tulos, ei heitto.
@@ -290,6 +293,35 @@ describe("hard stop -siivous laskevalla reunalla", () => {
     expect(transition).toHaveBeenCalledTimes(2);
     expect(closeRunningJob).toHaveBeenCalledTimes(1);
     expect(log.mock.calls.map((c) => c.join(" ")).join("\n")).toContain("ei ole tämän kanavan omistama");
+    // Kohde suljettiin, raakalähetys EI — ja se on punainen teko ja käsky,
+    // koska lähetys on auki eikä kukaan sulje sitä.
+    expect(cleanup?.actions).toEqual([
+      { what: "Selostettu lähetys suljettiin.", ok: true, detail: null },
+      { what: "Raakalähetys ei sulkeutunut.", ok: false, detail: "Sulje raakalähetys YouTubessa itse." },
+    ]);
+  });
+
+  it("jo päättynyt lähetys ei ole epäonnistunut teko", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const { cleanup } = await runFallingEdge({
+      endReason: "hard_stop",
+      hardStopSource: false,
+      // Idempotenssi: siivous ajettiin jo, tai operaattori lopetti käsin.
+      transition: async (videoId: string) => ({
+        videoId,
+        ok: false,
+        skipped: true,
+        reason: "lähetys ei ole live (lifeCycleStatus=complete) — ei lopetettavaa",
+        lifeCycleStatus: "complete",
+      }),
+    });
+
+    expect(cleanup?.actions).toEqual([
+      { what: "Selostettu lähetys oli jo päättynyt.", ok: true, detail: null },
+      { what: "Raakalähetys jätettiin koskematta.", ok: true, detail: null },
+    ]);
   });
 
   it("transitio kaatuu: työ suljetaan silti", async () => {

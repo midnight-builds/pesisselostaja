@@ -171,7 +171,17 @@ test.describe("ottelunaikainen", () => {
     // #118: säädöt kirjoittuvat ohjaamon työn otteluun, mutta ajossa oleva
     // relay lukee toisen ottelun control-tiedostoa — napit lakkaavat
     // vaikuttamasta mihinkään, hiljaa.
-    await openLive(openApp, { telemetry: fixture.telemetry({ matchId: 999002 }) });
+    //
+    // Kehys on se, jonka OIKEA palvelin tuottaa (#202): ristiriidassa
+    // `telemetry` on null, koska se on luettu työn ottelulla eli väärän, ja
+    // ristiriita kulkee omassa kentässään. Aiempi versio tästä testistä työnsi
+    // eri ottelun telemetrian — kehyksen jota palvelin ei voi tuottaa — ja
+    // antoi siksi väärän turvan.
+    await openLive(openApp, {
+      telemetry: null,
+      narration: [],
+      conflict: { job: 999001, running: 999002 },
+    });
 
     await expect(page.getByTestId("glance-alert")).toContainText("Säädöt eivät mene perille");
   });
