@@ -72,6 +72,16 @@ export interface NarrationLine {
  *  rather than imported, because this is the client contract and the relay
  *  writing it may be an older deploy (~/relay-deploy moves only on
  *  `npm run relay:deploy`). Everything is parsed defensively on the way in. */
+/** Kuinka vanha relayn tilannekuva saa olla ennen kuin se on tietämättömyyttä.
+ *
+ *  Sopimuksen osa eikä palvelimen sisäinen luku: `RelayTelemetry.at` lähetetään
+ *  asiakkaalle sellaisenaan, ja BOTH sides have to apply the same rule — muuten
+ *  toinen puoli näyttää vihreää tilannekuvasta, jonka toinen on jo hylännyt
+ *  vanhentuneena. Relay kirjoittaa tilannekuvansa joka pollilla (sekunteja),
+ *  joten puolitoista minuuttia hiljaisuutta on jo relay joka lakkasi
+ *  raportoimasta. */
+export const TELEMETRY_STALE_MS = 90_000;
+
 export interface RelayTelemetry {
   /** When the relay wrote this snapshot. The client compares it against
    *  LiveState.now: a stale snapshot is a relay that stopped reporting. */

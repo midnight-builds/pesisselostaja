@@ -83,8 +83,13 @@ export function App() {
         </span>
       </header>
 
+      {/* Ottelun aikana näkymä EI vieri: viisi tietoa ja kaksi säätöä pysyvät
+          paikoillaan 393 px:n ruudulla, ja ainoa vierivä lohko on selostuslista
+          oman laatikkonsa sisällä (#173, #186). Siksi sarake venytetään
+          ruudun mittaiseksi vain siinä tilassa — muissa tiloissa sisältö saa
+          kasvaa ja sivu vierii normaalisti. */}
       <main className="scroll">
-        <div className="view">
+        <div className={`view ${job?.status === "live" ? "view--glance" : ""}`}>
           <StateCard
             job={job}
             live={live}

@@ -31,6 +31,7 @@ import type {
   SourceIngest,
   SystemState,
 } from "../shared/types.js";
+import { TELEMETRY_STALE_MS } from "../shared/types.js";
 import { closeRunningJob, getActiveJob, markRunStarted, reconcileOpenJobs } from "./jobs.js";
 import { readLog } from "./journal.js";
 import { getMatchState } from "./matches.js";
@@ -54,12 +55,12 @@ const MATCH_POLL_MS = 10_000;
  *  pushing a fat payload to a phone on mobile data every 5 s. */
 const LOG_LINES = 50;
 
-/** How old a relay snapshot may be before we stop treating it as fact. The
- *  relay rewrites it every poll (3 s by default, 60 s at the configurable
- *  ceiling), so a minute and a half is "several missed writes", not "one slow
- *  cycle". Past this we fall back to outside evidence instead of showing a
- *  stopped relay's last good state as current. */
-const TELEMETRY_STALE_MS = 90_000;
+/** How old a relay snapshot may be before we stop treating it as fact.
+ *
+ *  Luettu jaetusta sopimuksesta (`shared/types.ts`), koska sama sääntö on
+ *  ajettava myös selaimessa: ottelunaikainen kertasilmäys näyttää relayn
+ *  tilannekuvaa suoraan (#186), ja kaksi eri tuoreusrajaa tarkoittaisi että
+ *  toinen puoli näyttää vihreää tilannekuvasta, jonka toinen on jo hylännyt. */
 /** Kuinka paljon relayn oma aloitushetki saa olla työn aloitushetkeä aiempi
  *  ennen kuin status tulkitaan eri ajoksi (#123:n siivouksen tuoreusvartija).
  *  Relay käynnistyy ja kirjoittaa ensimmäisen statuksensa sekunteja ennen kuin

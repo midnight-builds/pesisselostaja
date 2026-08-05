@@ -59,10 +59,15 @@ npm run test:ui -w @pesisselostaja/control -- --headed --project=webkit
 
 Selain­testit (`test-ui/`, Playwright) ajetaan **WebKitillä ensisijaisesti** —
 kohde on iPhonen Safari, 393×853. Ne kasvavat käyttöliittymän tahdissa: jokainen
-tilan PR tuo oman specinsä (#178). Nyt katettuna on kuori ja tilakortti —
-perusrenderöinti oikealla palvelimella (`smoke.spec.ts`), tilakortin tilat +
-ottelun valinta (`statecard.spec.ts`) ja valmistelu: lähetysparin luonti,
-valmiustarkistus ja 393 px:n leveys (`valmistelu.spec.ts`).
+tilan PR tuo oman specinsä (#178). Nyt katettuna:
+
+| Spec | Mitä se lukitsee |
+|------|------------------|
+| `smoke.spec.ts` | perusrenderöinti oikealla palvelimella, SSE-virta, käännetty nide |
+| `statecard.spec.ts` | tilakortin tilat ja ottelun valinta |
+| `valmistelu.spec.ts` | lähetysparin luonti, valmiustarkistus, 393 px:n leveys |
+| `ajastettu.spec.ts` | käynnistysvahti, itsekorjaus, este käskymuodossa |
+| `ottelu.spec.ts` | ottelunaikainen kertasilmäys: viisi tietoa, kaksi säätöä ja selostuslista **ilman sivun vieritystä** 393×853:ssa |
 
 Testit käynnistävät oman palvelimen porttiin **3099** ja ohjaavat kaikki
 kirjoitukset hakemistoon `.playwright-tmp/` (`CONTROL_STATE_DIR`,
@@ -133,6 +138,41 @@ lähetys ei ole alkanut — joten ne ovat yksi kortin sisältö (`PrepCard`), ei
   (`toOperatorCheck`, `src/server/preflight.ts`), ja raaka rivi kulkee mukana
   `PreflightCheck.technical`-kentässä huoltoarkkia varten (#188). Env-avainten
   nimiä, tiedostopolkuja tai stream keytä ei näy käyttöliittymässä missään.
+
+### Ottelun aikana (#186)
+
+Ottelun aikana ohjaamo on **vianepäilyn kertasilmäys**, ei työpöytä (#170).
+Kortin sisältö (`MatchGlance`) on täsmälleen se, mitä inventaario (#169) löysi
+ottelun aikana katsotuksi ja kosketuksi — **viisi tietoa** (selostuksen tila,
+raakalähetys, pistetilanne, jakso ja palot, sisävuoro) ja **kaksi säätöä**
+(selostuksen ajoitus, vaihtoselostus) — sekä selostuslista diagnoosivälineenä.
+Kaikki mahtuu 393 px:n ruudulle **ilman sivun vieritystä**; selostuslista on
+ainoa vierivä lohko, koska sen pituutta ei voi tietää etukäteen.
+
+- **Ohjaamosta relayyn on kaksi kosketuspintaa, ei kolmatta** (#172, #59):
+  `.env.relay` ja relayn control-tiedosto. Säädöt menevät jälkimmäistä tietä
+  (`POST /api/knobs`, `POST /api/knobs/delay-nudge`) ja purevat ajossa olevaan
+  relayhin ilman uudelleenkäynnistystä. **Uutta HTTP-kanavaa relayyn ei saa
+  rakentaa** — relay ajetaan pinnatusta deployista, joka voi olla ohjaamoa
+  vanhempi.
+- **Viiveen napit ovat suhteellisia** (±500 ms), eivät absoluuttisia:
+  kalibrointi tehdään korvakuulolta kesken lähetyksen, joten nappi nimeää
+  *oireen* ("Puhui liian aikaisin"), ei arvoa. Uusi arvo näkyy heti, leikattuna
+  samaan 0…15 s -väliin kuin palvelimella, ja vanhenee kymmenessä sekunnissa
+  ellei palvelin vahvista sitä.
+- **Relayn tilannekuva uskotaan vain tuoreena.** `RelayTelemetry.at` verrataan
+  palvelimen kelloon rajalla `TELEMETRY_STALE_MS` (`src/shared/types.ts`) —
+  sama vakio molemmilla puolilla, koska pysähtyneen relayn levylle jättämä
+  status näyttäisi muuten vihreää sen jälkeen kun mitään ei enää kuulu.
+- **Koneen kieltä ei näytetä** (#176): palvelimen `headline` ja relayn
+  `source.detail` (yt-dlp:n ja ffmpegin sanamuodot) eivät päädy korttiin.
+  Jokaisella lähdetilalla on täsmälleen yksi operaattorin lause, ja uusi
+  relayn lähdetila kaataa käännöksen typecheckissä sen sijaan että putoaisi
+  hiljaa "ei tietoa" -riville (#103, #104).
+- **Kaksi hälytysriviä** viiden tiedon yläpuolella, molemmat hiljaisia vikoja:
+  levytilan loppuminen ja se, että ajossa oleva relay ajaa eri ottelua kuin
+  ohjaamon työ (#118) — jolloin juuri nämä kaksi nappia lakkaavat vaikuttamasta
+  mihinkään.
 
 Tilakohtainen sisältö kasvaa tilakoneen järjestyksessä omissa PR:issään (#178):
 valmistelu ja lähetysparin luonti (#184) → ajastettu-tila ja pushit (#185) →

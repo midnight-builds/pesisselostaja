@@ -2,7 +2,8 @@ import { useState } from "react";
 import type { Job, LiveState } from "../../shared/types";
 import { NO_JOB_STATE, jobStateWord } from "../../shared/jobState";
 import { api } from "../api";
-import { fiTime } from "../format";
+import { duration, fiTime } from "../format";
+import { MatchGlance } from "./MatchGlance";
 import { PrepCard } from "./PrepCard";
 import { StartGuard } from "./StartGuard";
 
@@ -64,6 +65,11 @@ export function StateCard({ job, live, notify, onCleared }: Props) {
           puuttuu lähetyspari, jota käynnistää (#185). */}
       {job?.status === "scheduled" && <StartGuard job={job} now={live?.now ?? new Date().toISOString()} />}
 
+      {/* Ottelun aikana kortti on kertasilmäys: viisi tietoa, kaksi säätöä ja
+          selostuslista (#186). Ilman SSE-kehystä ei ole mitään näytettävää —
+          silloin jää otsikko ja sen alla oleva lause. */}
+      {job?.status === "live" && live && <MatchGlance live={live} notify={notify} />}
+
       {/* Luonnos on työ, jolle ei ole vielä luotu lähetysparia, joten sen saa
           hylätä ilman ulospäin näkyviä seurauksia — ottelunvaihto ON vahvistus
           (#171/5). Pidemmällä olevan työn toipumispolut tulevat niiden
@@ -75,6 +81,17 @@ export function StateCard({ job, live, notify, onCleared }: Props) {
       )}
     </section>
   );
+}
+
+/** Sekunteja `from`-hetkestä palvelimen kelloon. Selaimen omaa kelloa ei
+ *  käytetä: puhelin voi olla väärässä ajassa, ja "ajossa 3 h" kesken ottelun
+ *  olisi juuri se luku, joka lähettäisi operaattorin etsimään olematonta vikaa. */
+function elapsedSec(from: string | null, now: string | null | undefined): number | null {
+  if (!from) return null;
+  const started = Date.parse(from);
+  const ref = now ? Date.parse(now) : Date.now();
+  if (!Number.isFinite(started) || !Number.isFinite(ref)) return null;
+  return Math.max(0, Math.round((ref - started) / 1000));
 }
 
 function detailFor(job: Job | null, live: LiveState | null): string {
@@ -92,11 +109,16 @@ function detailFor(job: Job | null, live: LiveState | null): string {
       return "Molemmat lähetykset on luotu ja linkit ovat jaettavissa.";
     case "arming":
       return "Ohjaamo tarkkailee raakalähetystä. Saat ilmoituksen, kun selostus on käynnissä.";
-    case "live":
-      // Palvelimen oma yhden lauseen tiivistys ketjun tilasta — sama teksti
-      // jonka vanha Live-näkymä näytti. Ottelunaikainen kertasilmäys (viisi
-      // tietoa, kaksi säätöä, selostuslista) tulee tämän tilalle #186:ssa.
-      return live?.headline ?? "Selostus on ajossa.";
+    case "live": {
+      // Palvelimen `headline` EI kelpaa tähän: se on ketjun tiivistys koneen
+      // kielellä ("ffmpeg respawnasi 3×", commit-tunnus), eikä koneen kieltä
+      // näytetä ottelupäivän polulla (#176). Ketjun tila luetaan kertasilmäyksen
+      // riveiltä; tähän jää se, mitä otsikko ei kerro — kuinka kauan on menty.
+      const ran = elapsedSec(job.startedAt, live?.now);
+      return ran == null
+        ? "Selostus on ajossa."
+        : `Selostus on ollut ajossa ${duration(ran)}.`;
+    }
     case "finished":
       return job.endedAt
         ? `Selostus ja lähetykset päättyivät klo ${fiTime(job.endedAt)}. Tallenne on soittolistassa.`
