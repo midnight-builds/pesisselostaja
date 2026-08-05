@@ -39,7 +39,7 @@ import {
 } from "./nodePronunciation.js";
 import type { LiveEvent, MatchMetadata } from "@pesisselostaja/core";
 import type { SlateSituation, SourceIngestObservation } from "./ffmpegMixer.js";
-import { writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import type { RelayConfig } from "./config.js";
@@ -575,16 +575,44 @@ export class CommentaryLoop {
     return `pollit ${s.polls} (delta ${s.deltaMerges}, täyshaku ${s.fullFetches}, 304 ${s.notModified}, reset ${s.deltaResets}, hakuvirheitä ${s.fetchFailures}${breaker})`;
   }
 
-  /** Writes the current setting to the control file so there is always a
-   *  discoverable, editable file. Called once at startup, so the config value
-   *  (env/CLI/default) is authoritative on start; runtime edits take over
-   *  after. */
+  /** Käynnistyksessä: OTTAA käyttöön control-tiedostossa jo olevat arvot ja
+   *  kirjoittaa tiedoston takaisin niiden kanssa.
+   *
+   *  Ennen tämä kirjoitti tiedoston kokonaan yli omasta configistaan, ja
+   *  sääntö oli *"the config value (env/CLI/default) is authoritative on
+   *  start"*. Se oli järkevä silloin kun tiedosto oli varapolku. Nyt se on
+   *  ohjaamon ainoa ottelunaikainen ohjauskanava, ja relayn uudelleen-
+   *  käynnistys on odotettu tapahtuma: operaattori kalibroi selostusviiveen
+   *  korvakuulolta (4000 → 6000 ms), relay käynnistyy uudelleen, ja arvo palasi
+   *  oletukseen ilman että mikään sanoi mitään (#206). Ajonaikainen kalibrointi
+   *  on operaattorin tuoreinta tietoa, ei jäänne.
+   *
+   *  Tuntemattomat avaimet säilyvät: ohjaamo kirjoittaa samaan tiedostoon
+   *  `sourceIngest`in (#104), ja ylikirjoitus pyyhki senkin.
+   *
+   *  Kirjoitus on atominen (temp + rename), kuten ohjaamon puolella
+   *  (`relay.ts:writeRelayEnv`). Ei-atominen kirjoitus jätti ikkunan, jossa
+   *  ohjaamon yhtaikainen säätö luki puolikkaan tiedoston. */
   private writeControlFile(): void {
+    let existing: Record<string, unknown> = {};
     try {
+      const parsed: unknown = JSON.parse(readFileSync(this.config.controlFile, "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        existing = parsed as Record<string, unknown>;
+        this.applyControlValues(existing, "käynnistyksessä");
+      }
+    } catch {
+      // Ei tiedostoa tai puolikas JSON: configin arvot kelpaavat sellaisenaan,
+      // ja tiedosto kirjoitetaan alta pois. Sama sietokyky kuin
+      // refreshRuntimeControlsilla.
+    }
+    try {
+      const temp = `${this.config.controlFile}.tmp`;
       writeFileSync(
-        this.config.controlFile,
+        temp,
         JSON.stringify(
           {
+            ...existing,
             announceBatterChanges: this.announceBatterChanges,
             narrationDelayMs: this.narrationDelayMs,
             deltaFetch: this.deltaFetch,
@@ -594,6 +622,7 @@ export class CommentaryLoop {
           2
         ) + "\n"
       );
+      renameSync(temp, this.config.controlFile);
     } catch (err) {
       logWarn("control.write_failed", `Control-tiedoston kirjoitus epäonnistui: ${err instanceof Error ? err.message : err}`);
     }
@@ -671,9 +700,18 @@ export class CommentaryLoop {
     } catch {
       return;
     }
+    this.applyControlValues(parsed, "ajon aikana");
+  }
+
+  /** Ottaa käyttöön control-tiedoston arvot. Sama koodi molemmilla poluilla —
+   *  käynnistyksessä (#206) ja joka pollilla — koska kelpuutussäännöt ovat
+   *  samat: virheellinen arvo jätetään huomiotta eikä koskaan kaadeta silmukkaa
+   *  puolikkaan editin takia. `when` on vain lokirivin sana; se erottaa
+   *  operaattorille säilytetyn asetuksen kesken ajon tehdystä muutoksesta. */
+  private applyControlValues(parsed: Record<string, unknown>, when: "käynnistyksessä" | "ajon aikana"): void {
     if (typeof parsed.announceBatterChanges === "boolean" && parsed.announceBatterChanges !== this.announceBatterChanges) {
       this.announceBatterChanges = parsed.announceBatterChanges;
-      logInfo("control.batter_changes", `Pelaajanvaihtojen selostus vaihdettu ajon aikana: ${this.announceBatterChanges ? "PÄÄLLÄ" : "POIS"} (control-tiedostosta).`);
+      logInfo("control.batter_changes", `Pelaajanvaihtojen selostus ${when === "käynnistyksessä" ? "säilytetty" : "vaihdettu"} ${when}: ${this.announceBatterChanges ? "PÄÄLLÄ" : "POIS"} (control-tiedostosta).`);
     }
     // Runtime narration-delay override: the control-file value wins over the
     // env/CLI seed once set. Ignore invalid/negative values so a half-written
@@ -682,7 +720,7 @@ export class CommentaryLoop {
       const next = Math.max(0, Math.round(parsed.narrationDelayMs));
       if (next !== this.narrationDelayMs) {
         this.narrationDelayMs = next;
-        logInfo("control.narration_delay", `Selostusviive vaihdettu ajon aikana: ${next} ms (control-tiedostosta).`);
+        logInfo("control.narration_delay", `Selostusviive ${when === "käynnistyksessä" ? "säilytetty" : "vaihdettu"} ${when}: ${next} ms (control-tiedostosta).`);
       }
     }
     // Delta polling on/off live — false reverts to plain full fetches on the
@@ -696,7 +734,7 @@ export class CommentaryLoop {
         this.consecutiveUnexplainedResets = 0;
         this.deltaBreakerTripped = false;
       }
-      logInfo("control.delta_fetch", `Delta-haku vaihdettu ajon aikana: ${this.deltaFetch ? "PÄÄLLÄ" : "POIS (täyshaut)"} (control-tiedostosta).`);
+      logInfo("control.delta_fetch", `Delta-haku ${when === "käynnistyksessä" ? "säilytetty" : "vaihdettu"} ${when}: ${this.deltaFetch ? "PÄÄLLÄ" : "POIS (täyshaut)"} (control-tiedostosta).`);
     }
     // Ohjaamon julkaisema havainto lähteen syötteestä (#104 vaihe 1). Luetaan
     // täällä, koska tämä on ainoa control-tiedoston lukija; loop ei tee sillä
@@ -710,7 +748,7 @@ export class CommentaryLoop {
       const next = Math.max(MIN_POLL_INTERVAL_MS, Math.round(parsed.pollIntervalMs));
       if (next !== this.pollIntervalMs) {
         this.pollIntervalMs = next;
-        logInfo("control.poll_interval", `Pollausväli vaihdettu ajon aikana: ${next} ms (control-tiedostosta).`);
+        logInfo("control.poll_interval", `Pollausväli ${when === "käynnistyksessä" ? "säilytetty" : "vaihdettu"} ${when}: ${next} ms (control-tiedostosta).`);
       }
     }
   }
