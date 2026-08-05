@@ -272,7 +272,9 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
   // `{ enabled: false }` is both the initial value and the fallback for a
   // missing or corrupt file (see store.ts): every failure mode of the storage
   // layer lands on "off", never on "on".
-  const store = createStore<{ enabled: boolean }>("scheduler.json", { enabled: false });
+  const store = createStore<{ enabled: boolean; disabledByOperator?: boolean }>("scheduler.json", {
+    enabled: false,
+  });
 
   let lastCheckAt: string | null = null;
   let lastAction: SchedulerAction | null = null;
@@ -304,6 +306,13 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
     // Strict `=== true`: a hand-edited file with "enabled": "false" (a string,
     // which is truthy) must not arm the scheduler.
     return persisted.enabled === true;
+  }
+
+  /** Onko "pois" operaattorin päätös vai pelkkä oletustila (#208). Ohjaamo saa
+   *  korjata oletuksen itse; päätöstä se ei saa ohittaa. */
+  async function isDisabledByOperator(): Promise<boolean> {
+    const persisted = await store.read();
+    return persisted.enabled !== true && persisted.disabledByOperator === true;
   }
 
   /** Read-only. Reads the job store, the machine vitals and — only when there is
@@ -525,8 +534,16 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
     };
   }
 
-  function snapshot(enabled: boolean): SchedulerState {
-    return { enabled, lastCheckAt, nextJob, lastAction, wouldHaveDone, nextCheckInMs };
+  function snapshot(enabled: boolean, disabledByOperator = false): SchedulerState {
+    return {
+      enabled,
+      disabledByOperator,
+      lastCheckAt,
+      nextJob,
+      lastAction,
+      wouldHaveDone,
+      nextCheckInMs,
+    };
   }
 
   async function tick(): Promise<SchedulerState> {
@@ -576,7 +593,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
       sourceStartsInMs,
     });
 
-    return snapshot(enabled);
+    return snapshot(enabled, await isDisabledByOperator());
   }
 
   return {
@@ -591,11 +608,14 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
     },
 
     async getState(): Promise<SchedulerState> {
-      return snapshot(await isEnabled());
+      return snapshot(await isEnabled(), await isDisabledByOperator());
     },
 
     async setEnabled(enabled: boolean): Promise<SchedulerState> {
-      await store.update(() => ({ enabled }));
+      // Pois kytkeminen on operaattorin PÄÄTÖS, ei tila johon ajaudutaan
+      // (#208): ilman tätä merkintää käynnistysvahti kytkisi sen takaisin
+      // päälle seuraavalla pollilla, eikä käsiajoa voisi suojata lainkaan.
+      await store.update(() => ({ enabled, disabledByOperator: !enabled }));
       if (!enabled) {
         // Turning it off never stops anything that is already running (uptime
         // first) — it only stops the scheduler from acting again. Clearing the
@@ -605,7 +625,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
       } else {
         wouldHaveDone = null;
       }
-      return snapshot(enabled);
+      return snapshot(enabled, !enabled);
     },
 
     /** Self-rescheduling loop: the interval changes between ticks, so this is a

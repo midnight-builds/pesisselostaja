@@ -69,8 +69,10 @@ export function StartGuard({ job, now }: Props) {
   const [scheduler, setScheduler] = useState<SchedulerState | null>(null);
   const [repaired, setRepaired] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** Päälle kytketään korkeintaan kerran per mount: jos kytkentä ei mene läpi,
-   *  uudelleenyritys joka pollilla tekisi rikkinäisestä oikeudesta silmukan. */
+  /** Onnistunut päälle kytkentä. Vain onnistunut (#208): leima asetettiin
+   *  ennen `await`ia, joten kaatunut kytkentä jätti vahdin pois päältä koko
+   *  mountin ajaksi — seuraava poll korjasi TEKSTIN mutta ei yrittänyt
+   *  kytkentää uudelleen, ja ainoa merkki oli yksi rivi kortissa. */
   const armed = useRef(false);
 
   useEffect(() => {
@@ -79,9 +81,15 @@ export function StartGuard({ job, now }: Props) {
     const read = async () => {
       try {
         let state = await api.scheduler();
-        if (!state.enabled && !armed.current) {
-          armed.current = true;
+        // Itsekorjaus koskee OLETUSTA, ei päätöstä (#208): jos operaattori on
+        // kytkenyt vahdin nimenomaan pois huoltoarkista, sitä ei kytketä
+        // takaisin päälle — muuten käsiajoa ei voisi suojata automatiikalta
+        // lainkaan, mikä on koko syy siihen että ajastin on oletuksena pois.
+        if (!state.enabled && !state.disabledByOperator && !armed.current) {
           state = await api.schedulerEnable(true);
+          // Leima vasta onnistumisen jälkeen: heitto jättää sen pois, jolloin
+          // seuraava poll yrittää uudelleen.
+          armed.current = true;
           if (state.enabled && !stopped) setRepaired(true);
         }
         if (!stopped) {

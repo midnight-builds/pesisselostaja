@@ -33,6 +33,7 @@ export const NOW = "2026-07-29T05:30:00.000Z"; // 08:30 Suomen aikaa
 export function schedulerState(p: Partial<SchedulerState> = {}): SchedulerState {
   return {
     enabled: false,
+    disabledByOperator: false,
     lastCheckAt: NOW,
     nextJob: {
       id: "job-1",

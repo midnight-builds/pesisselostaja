@@ -433,6 +433,14 @@ export interface SchedulerState {
   /** OFF by default and only ever turned on from the UI: an automatic start
    *  must never surprise an operator who is running a broadcast by hand. */
   enabled: boolean;
+  /** Operaattori kytki vahdin nimenomaan POIS (#208).
+   *
+   *  Ero on olennainen: "ei vielä päällä" on tila, jonka ohjaamo saa korjata
+   *  itse (käynnistysvahti tekee sen, #185), mutta "kytkettiin pois" on
+   *  päätös, ja sen ohittaminen tarkoittaisi ettei käsiajoa voi suojata
+   *  automatiikalta lainkaan — juuri sen säännön, jonka takia ajastin on
+   *  oletuksena pois päältä. */
+  disabledByOperator: boolean;
   lastCheckAt: string | null;
   nextJob: SchedulerNextJob | null;
   /** Viimeisin päätös ajastimen ollessa PÄÄLLÄ. */

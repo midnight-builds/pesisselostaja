@@ -77,6 +77,24 @@ test.describe("ajastettu", () => {
     await expect(page.getByText("Korjattiin:", { exact: false })).toBeVisible();
   });
 
+  /** #208: itsekorjaus koskee OLETUSTA, ei päätöstä. Ilman tätä eroa
+   *  huoltoarkista pois kytketty vahti kytkeytyi takaisin päälle heti kun
+   *  kortti renderöityi — eikä käsiajoa voinut suojata automatiikalta
+   *  lainkaan, mikä on koko syy siihen että ajastin on oletuksena pois. */
+  test("operaattorin pois kytkemää vahtia ei kytketä takaisin päälle", async ({
+    page,
+    api,
+    openApp,
+  }) => {
+    api.authHealth = fixture.authHealthConnected();
+    api.jobs = [scheduledJob()];
+    api.scheduler = watching({ enabled: false, disabledByOperator: true });
+    await openScheduled(openApp);
+
+    await expect(page.getByTestId("start-guard")).toContainText("Käynnistysvahti ei ole päällä");
+    expect(api.called("POST", "/api/scheduler/enable")).toBe(false);
+  });
+
   test("jo päällä olevaa vahtia ei kirjoiteta uudelleen", async ({ page, api, openApp }) => {
     api.authHealth = fixture.authHealthConnected();
     api.jobs = [scheduledJob()];

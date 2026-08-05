@@ -320,7 +320,9 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
       if (typeof enabled !== "boolean") {
         return void (await send({ error: "enabled puuttuu tai ei ole tosi/epätosi" }, 400));
       }
-      api.scheduler = { ...api.scheduler, enabled };
+      // Sama sääntö kuin palvelimella (#208): pois kytkeminen on operaattorin
+      // päätös, jota käynnistysvahti ei saa ohittaa.
+      api.scheduler = { ...api.scheduler, enabled, disabledByOperator: !enabled };
       return void (await send(api.scheduler));
     }
 
