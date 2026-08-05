@@ -1022,10 +1022,11 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
    *  /api/relay/stop. This poller is the only always-on observer of that
    *  moment, so it is the one that lets go of the broadcast slot.
    *
-   *  Falling edge only. "Relay is inactive" on its own is the normal state of a
-   *  job that has been armed but not started yet, and closing that would cancel
-   *  the next broadcast before it began (#101). */
-  let relayWasActive = false;
+   *  Portti on `runningJob`, ei reuna: "relay is inactive" on its own is the
+   *  normal state of a job that has been armed but not started yet, and closing
+   *  that would cancel the next broadcast before it began (#101). Ja alhaalla
+   *  olon on kestettävä settle-ikkunan yli, koska uudelleenkäynnistys on
+   *  odotettu tapahtuma (#200). */
   /** Työ jonka kanssa relay viimeksi nähtiin ajossa; ks. followRunEdges. */
   let runningJob: Job | null = null;
   /** Ottelu jonka ristiriidasta on jo varoitettu lokiin. Ilman tätä 5 s tikki
@@ -1115,8 +1116,6 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
 
   async function followRunEdges(): Promise<void> {
     const now = Date.now();
-    const wasActive = relayWasActive;
-    relayWasActive = relay.active;
     if (relay.active) relayDownSince = null;
     else if (relayDownSince === null) relayDownSince = now;
 
@@ -1130,12 +1129,26 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     }
 
     try {
-      // Falling edge: the run is over. Edge-triggered on purpose — "relay is
-      // inactive" on its own is the normal state of a job that has been armed
-      // but not started yet, and closing that would cancel the next broadcast
-      // before it began (#101).
+      // Ajon päättyminen: relay on ollut alhaalla settle-ikkunan yli.
+      //
+      // `runningJob` on portti, ei reuna (#101): pelkkä "relay ei ole ajossa"
+      // on armatun mutta käynnistämättömän työn normaalitila, ja sen
+      // sulkeminen peruisi seuraavan lähetyksen ennen kuin se alkoi. Vain työ,
+      // jonka kanssa relay on NÄHTY ajossa, voi päätyä tänne, ja se nollataan
+      // sulkemisen yhteydessä — joten tämä laukeaa ajoa kohti kerran.
+      //
+      // Settle-ikkuna on se, mikä puuttui (#200). Yksi havainto riitti
+      // sulkemaan työn, ja uudelleenkäynnistys kestää noin neljä sekuntia —
+      // eli vähemmän kuin tikin 5 s. Relay palasi ja jatkoi samaa ottelua,
+      // mutta työ jäi `finished`iksi: hard stopin siivousta ei enää tehty
+      // ottelun oikeassa lopussa, kortti näytti EndedCardia kesken ottelun ja
+      // päättymispush lähti tyhjästä siivousmerkinnästä — joka `recordJobCleanup`in
+      // kertakirjoituksen takia esti myös oikean kirjauksen. Sama ikkuna kuin
+      // sovittelulla, samasta syystä.
       const current = runningJob;
-      if (wasActive && !relay.active && current) {
+      const settled =
+        !relay.active && relayDownSince !== null && now - relayDownSince >= RECONCILE_SETTLE_MS;
+      if (settled && current) {
         // Hard stopin siivous ENNEN sulkemista: closeRunningJob nollaa
         // aktiivisen työn, jolloin sekä targetVideoId että sourceUrl katoavat
         // käsistä. Oma try/catch, koska siivous ei saa koskaan estää työn
