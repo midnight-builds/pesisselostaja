@@ -18,6 +18,7 @@
  *  it cannot change what the phone renders. */
 
 import type { LiveState, NotificationPrefs, PreflightResult } from "../shared/types.js";
+import { blockedPushTitle, jobArrivalPush } from "../shared/jobState.js";
 import { sendPush } from "./push.js";
 import { createStore } from "./store.js";
 
@@ -77,9 +78,14 @@ interface Memory {
   failSince: number | null;
   /** Whether this fail episode has already been announced. */
   failNotified: boolean;
+  /** `<jobId>:<status>` of the previous observation, `null` when there was no
+   *  job. `undefined` until the first observation — same restart rule as
+   *  `relayActive`: a control-server restart while a job is already scheduled
+   *  must not read as "the pair was just created". */
+  jobKey: string | null | undefined;
 }
 
-const memory: Memory = { relayActive: null, failSince: null, failNotified: false };
+const memory: Memory = { relayActive: null, failSince: null, failNotified: false, jobKey: undefined };
 
 /** Test seam: the module keeps process-lifetime state, so a test that drives
  *  two scenarios in a row needs a way back to a clean slate. */
@@ -87,6 +93,7 @@ export function resetNotificationState(): void {
   memory.relayActive = null;
   memory.failSince = null;
   memory.failNotified = false;
+  memory.jobKey = undefined;
   lastSentAt.clear();
 }
 
@@ -94,6 +101,33 @@ function matchLabel(state: LiveState): string {
   const job = state.job;
   if (!job) return "Ei aktiivista työtä";
   return `${job.home} – ${job.away}`;
+}
+
+/** Käynnistys on yksi tapahtuma kahdella reunalla (työn tila / relayn tila),
+ *  joten sillä on yksi tagi. Muut siirtymät ovat työkohtaisia. */
+const BROADCAST_STARTED_TAG = "broadcast-started";
+
+function pushTag(state: LiveState): string {
+  if (!state.job) return BROADCAST_STARTED_TAG;
+  return state.job.status === "live" ? BROADCAST_STARTED_TAG : `job:${state.job.id}:${state.job.status}`;
+}
+
+/** Ilmoituksen leipäteksti työn saapuessa tilaan.
+ *
+ *  Otsikko nimeää subjektin, leipäteksti lupaa mitä seuraavaksi tapahtuu (#174).
+ *  "Käynnistyy itsestään" on tarkoituksella suora lupaus: se on koko syy, miksi
+ *  operaattorin ei tarvitse jäädä katsomaan ruutua käynnistysikkunassa — ja
+ *  lupauksen kattaa käynnistysvahti kortin puolella (#185). */
+function arrivalBody(state: LiveState): string {
+  const who = matchLabel(state);
+  switch (state.job?.status) {
+    case "scheduled":
+      return `${who} — selostus käynnistyy itsestään, kun raakalähetys alkaa.`;
+    case "live":
+      return `${who} — selostettu lähetys on ajossa.`;
+    default:
+      return who;
+  }
 }
 
 /** Called for every state the aggregator publishes.
@@ -118,11 +152,33 @@ async function observe(state: LiveState): Promise<void> {
   const isActive = state.relay.active;
   memory.relayActive = isActive;
 
-  // --- Valmistelu ja käynnistys: relay siirtyi ajoon.
+  // --- Työ siirtyi tilasta toiseen: push on tilakortin siirtymän projektio.
+  //
+  // Sama sanamuotolähde kuin kortilla (`shared/jobState.ts`, #174): mitä
+  // operaattori näkee lukitusnäytöllä, sen hän näkee kortin otsikkona kun avaa
+  // ohjaamon. Tiloja on seitsemän mutta pusheja kaksi — arvo `null` on oletus,
+  // ja hiljaisuus on siksi tämän kohdan tavallisin lopputulos.
+  const jobKey = state.job ? `${state.job.id}:${state.job.status}` : null;
+  const previousJobKey = memory.jobKey;
+  memory.jobKey = jobKey;
+  if (prefs.startup && previousJobKey !== undefined && jobKey !== null && jobKey !== previousJobKey) {
+    const title = state.job ? jobArrivalPush(state.job.status) : null;
+    if (title) {
+      await notify(pushTag(state), title, arrivalBody(state));
+    }
+  }
+
+  // --- Relay siirtyi ajoon.
+  //
+  // Sama tapahtuma kuin työn siirtymä `live`-tilaan, mutta eri reunalta nähtynä:
+  // ajastimen ajossa nämä osuvat eri pollille (relay käynnistetään ennen kuin
+  // työ leimataan käyntiin), ja käsikierroksella työtä ei ole lainkaan. Siksi
+  // MOLEMMAT käyttävät samaa tagia: toistosuoja päästää läpi sen, kumpi ehti
+  // ensin, eikä puhelin piippaa yhdestä käynnistyksestä kahdesti.
   if (prefs.startup && wasActive === false && isActive) {
     await notify(
-      "relay-started",
-      "Lähetys käynnistyi",
+      BROADCAST_STARTED_TAG,
+      jobArrivalPush("live") ?? "Lähetys käynnistyi",
       `${matchLabel(state)} — relay on ajossa.`
     );
   }
@@ -187,11 +243,16 @@ export async function notifyPreflightBlockers(result: PreflightResult): Promise<
   if (result.blockers === 0) return;
   const prefs = await getNotificationPrefs();
   if (!prefs.startup) return;
-  const failed = result.checks.filter((check) => check.status === "fail").map((check) => check.name);
+  // Kolmen luokan sääntö (#174): ohjaamon itse korjaamat rivit eivät ole
+  // esteitä eivätkä piippaa — `blockers` laskee vain ne, jotka jäivät.
+  // Jäljelle jäävä on käskymuodossa, koska se odottaa nimenomaan operaattoria.
+  const failed = result.checks.filter((check) => check.status === "fail");
+  const subject = failed[0]?.name ?? `${result.blockers} estettä`;
+  const detail = failed.map((check) => check.detail).join(" ");
   await notify(
     "preflight-blocked",
-    `Preflight: ${result.blockers} estettä`,
-    failed.length > 0 ? `${failed.join(", ")} — älä käynnistä ennen korjausta.` : result.summary
+    blockedPushTitle(subject),
+    detail.length > 0 ? detail : result.summary
   );
 }
 

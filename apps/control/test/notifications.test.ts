@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Job, LiveState, MatchState, RelayProcess } from "../src/shared/types.js";
+import { jobStateWord } from "../src/shared/jobState.js";
 
 const sendPush = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock("../src/server/push.js", () => ({ sendPush }));
@@ -160,6 +161,63 @@ describe("relay lifecycle triggers", () => {
   it("does not report an ending for a relay that was never running a job", async () => {
     await notifications.observeLiveState(state({ at: at(0), relayActive: true, job: null, health: "warn" }));
     await notifications.observeLiveState(state({ at: at(5), relayActive: false, job: null, health: "idle" }));
+    expect(titles()).toEqual([]);
+  });
+});
+
+describe("työn tilasiirtymät (#185)", () => {
+  const draft = (): Job => ({ ...baseJob(), status: "draft" });
+  const scheduled = (): Job => ({ ...baseJob(), status: "scheduled" });
+
+  it("ilmoittaa lähetysparista kun työ siirtyy valmisteluun valmiiksi — kortin omalla otsikolla", async () => {
+    await notifications.observeLiveState(state({ at: at(0), relayActive: false, health: "idle", job: draft() }));
+    await notifications.observeLiveState(
+      state({ at: at(5), relayActive: false, health: "idle", job: scheduled() })
+    );
+    // Sama teksti kuin tilakortin otsikossa: yksi sanamuotolähde (#174).
+    expect(titles()).toEqual([jobStateWord("scheduled").word]);
+  });
+
+  it("ei ilmoita mitään ensimmäisestä havainnosta — ohjaamon uudelleenkäynnistys ei ole uusi lähetyspari", async () => {
+    await notifications.observeLiveState(
+      state({ at: at(0), relayActive: false, health: "idle", job: scheduled() })
+    );
+    await notifications.observeLiveState(
+      state({ at: at(5), relayActive: false, health: "idle", job: scheduled() })
+    );
+    expect(titles()).toEqual([]);
+  });
+
+  it("ei toista samaa tilaa joka pollilla", async () => {
+    await notifications.observeLiveState(state({ at: at(0), relayActive: false, health: "idle", job: draft() }));
+    for (const sec of [5, 10, 15, 20]) {
+      await notifications.observeLiveState(
+        state({ at: at(sec), relayActive: false, health: "idle", job: scheduled() })
+      );
+    }
+    expect(titles()).toEqual([jobStateWord("scheduled").word]);
+  });
+
+  it("käynnistys piippaa kerran, vaikka relayn ja työn reunat osuvat eri pollille", async () => {
+    // Ajastimen ajossa relay käynnistetään ennen kuin työ leimataan käyntiin,
+    // joten kaksi reunaa kertoo yhdestä tapahtumasta. Yksi yhteinen tagi pitää
+    // puhelimen piippaukset yhdessä.
+    await notifications.observeLiveState(
+      state({ at: at(0), relayActive: false, health: "idle", job: scheduled() })
+    );
+    await notifications.observeLiveState(
+      state({ at: at(5), relayActive: true, job: { ...baseJob(), status: "arming" } })
+    );
+    await notifications.observeLiveState(state({ at: at(10), relayActive: true, job: baseJob() }));
+    expect(titles()).toEqual(["Lähetys käynnistyi"]);
+  });
+
+  it("ei ilmoita luonnoksesta eikä perumisesta — ne ovat operaattorin omia tekoja", async () => {
+    await notifications.observeLiveState(state({ at: at(0), relayActive: false, health: "idle", job: null }));
+    await notifications.observeLiveState(state({ at: at(5), relayActive: false, health: "idle", job: draft() }));
+    await notifications.observeLiveState(
+      state({ at: at(10), relayActive: false, health: "idle", job: { ...baseJob(), status: "cancelled" } })
+    );
     expect(titles()).toEqual([]);
   });
 });

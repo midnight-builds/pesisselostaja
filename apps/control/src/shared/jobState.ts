@@ -31,7 +31,11 @@ export const NO_JOB_STATE: JobStateWord = { word: "Ei aktiivista ottelua", tone:
 
 const WORDS: Record<JobStatus, JobStateWord> = {
   draft: { word: "Valmistelu kesken", tone: "prep" },
-  scheduled: { word: "Ajastettu", tone: "wait" },
+  // "Ajastettu" kertoi kellosta, ei siitä mikä on valmiina. Tila, johon työ
+  // siirtyy lähetysparin luonnista, ON pari — ja koska pushin otsikko on saman
+  // siirtymän projektio samasta sanamuotolähteestä (#174), kortin otsikon on
+  // oltava se teksti, jonka operaattori näkee myös lukitusnäytöllä.
+  scheduled: { word: "Lähetyspari valmiina", tone: "wait" },
   arming: { word: "Odottaa kuvausta", tone: "wait" },
   live: { word: "Selostettu lähetys käynnissä", tone: "live" },
   finished: { word: "Selostettu lähetys päättyi", tone: "done" },
@@ -41,6 +45,49 @@ const WORDS: Record<JobStatus, JobStateWord> = {
 
 export function jobStateWord(status: JobStatus): JobStateWord {
   return WORDS[status];
+}
+
+/** Pushin otsikko silloin kun työ SAAPUU tähän tilaan (#174).
+ *
+ *  Hyvänä päivänä puhelin piippaa täsmälleen kolme kertaa: lähetyspari on
+ *  valmiina, lähetys käynnistyi, selostettu lähetys päättyi. Tässä ovat kaksi
+ *  ensimmäistä; päättymisen push kuuluu #187:aan, koska se saa tulla vasta kun
+ *  siivous on tehty — sitä tietoa ei ole työn tilassa vaan siivouspolussa.
+ *
+ *  Otsikko on tilan oma sana silloin kun se kelpaa lukitusnäytölle sellaisenaan
+ *  ("Lähetyspari valmiina"). Käynnistyksessä ei kelpaa: kortti kuvaa vallitsevaa
+ *  tilaa ("Selostettu lähetys käynnissä"), push kertoo että jokin juuri
+ *  tapahtui. Molemmat asuvat tässä samassa taulukossa, jotta niitä ei voi
+ *  päivittää eri suuntiin.
+ *
+ *  `null` = tähän tilaan saapuminen ei ole pushin arvoinen. Se on oletus:
+ *  jokainen ilmoitus, joka ei kerro mitään uutta, opettaa operaattorin
+ *  pyyhkäisemään ilmoitukset lukematta. */
+const ARRIVAL_PUSH: Record<JobStatus, string | null> = {
+  draft: null, // operaattori valitsi ottelun juuri itse — hän tietää.
+  scheduled: WORDS.scheduled.word,
+  arming: null, // sekunteja ennen käynnistystä; oma pushinsa olisi kohinaa.
+  live: "Lähetys käynnistyi",
+  finished: null, // #187: vasta siivouksen jälkeen.
+  failed: null, // este-pushit kulkevat blockedPushTitle():n kautta.
+  cancelled: null, // operaattorin oma teko.
+};
+
+export function jobArrivalPush(status: JobStatus): string | null {
+  return ARRIVAL_PUSH[status];
+}
+
+/** Esteen push-otsikko (#174, kolmen luokan sääntö).
+ *
+ *  Itsestään korjautuva este ei tuota pushia lainkaan; operaattoria vaativa
+ *  tuottaa täsmälleen yhden, ja se on käskymuotoinen. Kriittisyys kannetaan
+ *  otsikon verbimuodolla: toteava otsikko on tiedoksi, käskevä tarkoittaa
+ *  "katso nyt". `subject` on se yksi asia, jota odotetaan — ei virheen teksti.
+ *
+ *  Sama muotti kummallakin puolella, jotta lukitusnäytön otsikot ovat
+ *  tunnistettavasti samaa perhettä eivätkä satunnaisia lauseita. */
+export function blockedPushTitle(subject: string): string {
+  return `Valmistelu odottaa: ${subject}`;
 }
 
 /** Tiloja, joissa ottelupäivä on ohi tämän työn osalta ja seuraava ottelu saa
