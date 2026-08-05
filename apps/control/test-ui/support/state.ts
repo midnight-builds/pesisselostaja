@@ -13,6 +13,7 @@ import type {
   DayMatches,
   Health,
   Job,
+  JobCleanup,
   LiveState,
   LogLine,
   MatchOption,
@@ -188,9 +189,35 @@ export function job(p: Partial<Job> = {}): Job {
     armedAt: null,
     startedAt: "2026-07-29T05:29:00.000Z",
     endedAt: null,
+    cleanup: null,
     note: null,
     ...p,
   };
+}
+
+/** Siivousmerkintä sellaisena kuin ohjaamo sen kirjoittaa ajon päätyttyä
+ *  (#187). Oletus on normaali lopetus: mitään ei tarvinnut tehdä, ja lopetus
+ *  tunnistettiin kahdesta riippumattomasta lähteestä. */
+export function jobCleanup(p: Partial<JobCleanup> = {}): JobCleanup {
+  return {
+    at: "2026-07-29T07:12:00.000Z",
+    indicators: ["Raakalähetys päättyi.", "Tulospalvelu kirjasi ottelun päättyneeksi."],
+    actions: [],
+    ...p,
+  };
+}
+
+/** Päättynyt työ: ajo kesti 102 minuuttia ja siivous on kirjattu. */
+export function finishedJob(p: Partial<Job> = {}): Job {
+  return job({
+    id: "job-paattynyt",
+    status: "finished",
+    targetVideoId: "SELOSTETTU",
+    startedAt: "2026-07-29T05:30:00.000Z",
+    endedAt: "2026-07-29T07:12:00.000Z",
+    cleanup: jobCleanup(),
+    ...p,
+  });
 }
 
 export function narration(): NarrationLine[] {

@@ -174,6 +174,37 @@ ainoa vierivä lohko, koska sen pituutta ei voi tietää etukäteen.
   ohjaamon työ (#118) — jolloin juuri nämä kaksi nappia lakkaavat vaikuttamasta
   mihinkään.
 
+### Päättynyt (#187)
+
+Ottelupäivän viimeinen näkymä (`EndedCard`) vastaa **yhteen kysymykseen: jäikö
+jotain päälle?** Hard stopin siivous tehdään ilman operaattorin vahvistusta
+(#171), joten ainoa asia joka pitää sen rehellisenä on että teot näkyvät
+jälkikäteen — teko jota ei näytetä on teko jota ei voi tarkistaa.
+
+- **Siivous on kirjattu tietona, ei pääteltävissä tilasta.** `Job.cleanup`
+  (`src/shared/types.ts`) kertoo *milloin*, *mistä lopetus pääteltiin*
+  (`indicators`) ja *mitä tehtiin* (`actions`). Työ suljetaan sillä sekunnilla
+  kun relay sammuu, ja lähetykset ovat silloin vielä auki — siksi ehto on tämä
+  kenttä eikä `status === "finished"`.
+- **Tyhjä tekolista ei ole puuttuva siivous** vaan tavallisin lopputulos:
+  normaalissa lopetuksessa selostetun lähetyksen sulkee YouTuben
+  `enableAutoStop`, eikä raakalähetykseen kosketa. Kortti sanoo sen ääneen,
+  koska "ei rivejä" näyttäisi unohdukselta.
+- **Useampi riippumaton päättymisindikaattori** (#171): relayn oma lopetussyy,
+  relayn havainto raakalähetyksestä ja tulospalvelun kirjaus ovat eri lähteitä,
+  ja kortti luettelee ne erikseen. Vanhentuneesta status-tiedostosta ei väitetä
+  lopetussyytä lainkaan — sama tuoreusvartija kuin siivouksella (#123).
+- **Epäonnistunut teko on kortin ainoa käskymuotoinen rivi** ("Sulje selostettu
+  lähetys YouTubessa itse"): silloin lähetys on yhä auki eikä sitä sulje kukaan
+  muu. YouTuben oma virheteksti jää lokiin (#176).
+- **Ilman siivousmerkintää kortti myöntää sen**: ajo päättyi ohjaamon ollessa
+  alhaalla, sovittelu sulki työn jälkikäteen (#118), eikä lähetysten tilasta ole
+  näyttöä. Vihreä "kaikki kiinni" olisi siinä tilanteessa valhe.
+- **Jälkihoitoa ei ole** (#170): soittolista valitaan jo luontihetkellä (#177),
+  joten kortissa ei ole nappeja — vain linkki tallenteeseen. Seuraavan ottelun
+  valitsin on kortin alla, ja `getActiveJob` pitää juuri päättyneen työn
+  näkyvissä saman kuuden tunnin säännön mukaan kuin keskeneräiset.
+
 Tilakohtainen sisältö kasvaa tilakoneen järjestyksessä omissa PR:issään (#178):
 valmistelu ja lähetysparin luonti (#184) → ajastettu-tila ja pushit (#185) →
 ottelunaikainen kertasilmäys, viivesäätö ja selostuslista (#186) →
@@ -200,7 +231,13 @@ jota ei kirjoiteta itse). Neljä laukaisijaa, kaikki kytkettävissä pois
 | Lähetys rikki | `health` on ollut `fail` yhtäjaksoisesti 60 s |
 | Automaattinen korjaus | `notifyAutoFix()` — rajapinta valmiina, kutsuja tulee vaiheessa B |
 | Valmistelu ja käynnistys | relay siirtyi ajoon, tai preflightissä oli esteitä |
-| Lähetys päättyi | relay siirtyi pois ajosta kun työ oli aktiivinen |
+| Lähetys katkesi | relay poistui ajosta kesken ottelun |
+| Selostettu lähetys päättyi | työn **siivous kirjattiin** (`Job.cleanup`, #187) — ei siitä että työ sulkeutui |
+
+Hyvänä päivänä puhelin piippaa täsmälleen kolme kertaa (#174): *Lähetyspari
+valmiina* → *Lähetys käynnistyi* → *Selostettu lähetys päättyi*. Otsikot tulevat
+samasta sanamuotolähteestä kuin kortin otsikko (`src/shared/jobState.ts`), joten
+kahta eriävää listaa ei voi syntyä.
 
 Ilmoitus lähtee vain **tilan muutoksesta**, ei joka pollilla, ja sama aihe
 enintään kerran 10 minuutissa (`src/server/notifications.ts`). Liika

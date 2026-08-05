@@ -46,6 +46,7 @@ function job(overrides: Partial<Job> = {}): Job {
     armedAt: null,
     startedAt: null,
     endedAt: null,
+    cleanup: null,
     note: null,
     ...overrides,
   };

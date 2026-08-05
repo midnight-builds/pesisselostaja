@@ -22,6 +22,8 @@ import type {
   ControlKnobs,
   Health,
   Job,
+  JobCleanup,
+  JobCleanupAction,
   LiveState,
   LogLine,
   MatchState,
@@ -32,7 +34,13 @@ import type {
   SystemState,
 } from "../shared/types.js";
 import { TELEMETRY_STALE_MS } from "../shared/types.js";
-import { closeRunningJob, getActiveJob, markRunStarted, reconcileOpenJobs } from "./jobs.js";
+import {
+  closeRunningJob,
+  getActiveJob,
+  markRunStarted,
+  recordJobCleanup,
+  reconcileOpenJobs,
+} from "./jobs.js";
 import { readLog } from "./journal.js";
 import { getMatchState } from "./matches.js";
 import { getRelayProcess, readKnobs, readRunningStatus, type RunningStatus } from "./relay.js";
@@ -130,6 +138,9 @@ export interface LiveAggregatorOptions {
   readTelemetry?: (matchId: number) => Promise<RelayTelemetry | null>;
   /** Saako raakalähetykseen koskea. Oletus CONFIG.hardStopSource (false). */
   hardStopSource?: boolean;
+  /** Päätössiivouksen kirjaus työhön (#187). Injektoitava samasta syystä kuin
+   *  muutkin työjonon kirjoitukset: testi ei saa kirjoittaa oikeaan jonoon. */
+  recordJobCleanup?: (id: string, cleanup: JobCleanup) => Promise<Job | null>;
 }
 
 // ------------------------------------------------------------ empty defaults
@@ -715,6 +726,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
   const reconcileOpenJobsFn = opts.reconcileOpenJobs ?? reconcileOpenJobs;
   const transitionBroadcastFn = opts.transitionBroadcast ?? ((videoId: string) => transitionBroadcast(videoId));
   const readTelemetryFn = opts.readTelemetry ?? readRelayStatus;
+  const recordCleanupFn = opts.recordJobCleanup ?? recordJobCleanup;
   const hardStopSourceEnabled = opts.hardStopSource ?? CONFIG.hardStopSource;
   const subscribers = new Set<(state: LiveState) => void>();
   const errors = new Map<SourceKey, string>();
@@ -836,18 +848,55 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     return null;
   }
 
-  /** Hard stopin siivous (#123). Ajetaan vain kun relayn oma telemetria kertoo
-   *  että se sammutti itsensä takarajan takia (`endReason === "hard_stop"`) —
-   *  siis ottelu oli päättynyt ja raakalähetys oireili. Normaalissa
-   *  lopetuksessa ei tehdä mitään: selostetun lähetyksen sulkee YouTuben
-   *  `enableAutoStop`, eikä raakalähetykseen kosketa lainkaan.
+  /** Miksi ajon pääteltiin päättyneen — riippumattomat indikaattorit (#171).
+   *
+   *  Kolme eri lähdettä: relayn oma lopetussyy, relayn havainto
+   *  raakalähetyksestä ja tulospalvelun kirjaus. Ne eivät ole toistensa
+   *  varmistuksia vaan eri asioita, ja juuri siksi ne luetellaan operaattorille
+   *  erikseen: yksi indikaattori on arvaus siitä mitä tapahtui, kolme on
+   *  havainto. Mitään ei keksitä — puuttuva tieto jää pois listalta. */
+  function endIndicators(snapshot: RelayTelemetry | null): string[] {
+    const out: string[] = [];
+    if (!relay.active) out.push("Selostus ei ole enää ajossa.");
+    switch (snapshot?.endReason) {
+      case "ended":
+      case "exhausted":
+        out.push("Raakalähetys päättyi.");
+        break;
+      case "hard_stop":
+        // Relay ajoi takarajaan asti: ottelu oli ohi, mutta raakalähetys ei
+        // sulkeutunut itsestään. Tämä on se tila, jonka takia siivous on
+        // olemassa (#123) — sitä ei saa lukea normaalina lopetuksena.
+        out.push("Selostus ajoi takarajaan asti, koska raakalähetys ei päättynyt.");
+        break;
+      default:
+        break;
+    }
+    if (snapshot?.source.state === "ended") out.push("Kuvauspuhelimen lähetystä ei enää näy.");
+    if (snapshot?.match.finished || match.finished) {
+      out.push("Tulospalvelu kirjasi ottelun päättyneeksi.");
+    }
+    return out;
+  }
+
+  /** Ajon päätössiivous (#123, #187). Palauttaa AINA kirjattavan tiedon siitä
+   *  mitä havaittiin ja mitä tehtiin — myös silloin kun tehtävää ei ollut.
+   *
+   *  Lähetyksiä kosketaan vain kun relayn oma telemetria kertoo että se
+   *  sammutti itsensä takarajan takia (`endReason === "hard_stop"`) — siis
+   *  ottelu oli päättynyt ja raakalähetys oireili. Normaalissa lopetuksessa ei
+   *  tehdä mitään: selostetun lähetyksen sulkee YouTuben `enableAutoStop`, eikä
+   *  raakalähetykseen kosketa lainkaan. Tyhjä tekolista on siis tavallisin
+   *  lopputulos eikä puuttuva siivous.
    *
    *  Raakalähetyksen sammutus on lisäksi lipun takana
    *  (CONTROL_HARD_STOP_SOURCE) — se on toisen ihmisen lähetys.
    *
    *  Ei koskaan heitä: kaikki menee errors-Mappiin ja lokiin, jotta työn
    *  sulkeminen ehtii tapahtua joka tapauksessa. */
-  async function runHardStopCleanup(current: Job, now: number): Promise<void> {
+  async function runEndCleanup(current: Job, now: number): Promise<JobCleanup> {
+    const actions: JobCleanupAction[] = [];
+    let snapshot: RelayTelemetry | null = null;
     try {
       // Vain oikeasti käynnissä ollut ajo. Ehto on `startedAt` eikä status
       // "live", jotta sama siivous kelpaa myös sovittelun sulkemalle työlle
@@ -857,10 +906,11 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       // tarkoittaa ettei relay koskaan päässyt liikkeelle — sen ajon hard
       // stopia ei ole olemassa, ja levyllä oleva syy on silloin väistämättä
       // EDELLISEN ajon.
-      if (!current.startedAt) return;
-      const snapshot = await readTelemetryFn(current.matchId);
+      if (!current.startedAt) return { at: new Date(now).toISOString(), indicators: [], actions };
+      snapshot = await readTelemetryFn(current.matchId);
       if (snapshot?.endReason !== "hard_stop") {
-        return; // normaali lopetus (tai vanha deploy joka ei kerro syytä)
+        // normaali lopetus (tai vanha deploy joka ei kerro syytä)
+        return { at: new Date(now).toISOString(), indicators: endIndicators(snapshot), actions };
       }
       // Tuoreusvartija. Relay kirjoittaa statuksen kokonaan yli heti
       // käynnistyessään, joten normaali uusi ajo nollaa vanhan syyn — mutta jos
@@ -875,7 +925,10 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
         console.warn(
           `[control] hard stop -siivous ohitettu: status-tiedoston syy ei kuulu tähän ajoon (${staleReason})`
         );
-        return;
+        // Vanhentunut näyttö = ei siivousta JA ei myöskään sen lopetussyytä:
+        // indikaattorit luetaan silloin ilman snapshotia, jottei kortti väitä
+        // tästä ajosta sitä mitä edellinen ajo kertoi itsestään.
+        return { at: new Date(now).toISOString(), indicators: endIndicators(null), actions };
       }
       const sourceVideoId = parseYouTubeVideoId(current.sourceUrl);
       const targets: Array<{ label: string; videoId: string | null; allowed: boolean; why: string }> = [
@@ -890,12 +943,25 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       for (const target of targets) {
         if (!target.videoId) {
           console.warn(`[control] hard stop -siivous: ${target.label} — video id ei tiedossa, ohitetaan`);
+          // Ohitus näkyy kortissa käskynä: lähetys on tuolloin auki eikä
+          // kukaan sulje sitä, ja hiljainen ohitus on juuri se vika, jonka
+          // takia lähetys jäi ottelussa 145900 työntämään roskaa (#121).
+          actions.push({
+            what: `${capitalize(target.label)} jäi sulkematta.`,
+            ok: false,
+            detail: `Sulje ${target.label} YouTubessa itse.`,
+          });
           continue;
         }
         if (!target.allowed) {
           console.warn(
             `[control] hard stop -siivous: ${target.label} ${target.videoId} EI kosketa — ${target.why}`
           );
+          actions.push({
+            what: `${capitalize(target.label)} jätettiin koskematta.`,
+            ok: true,
+            detail: null,
+          });
           continue;
         }
         try {
@@ -903,16 +969,51 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
           console.log(
             `[control] hard stop -siivous: ${target.label} ${target.videoId} (${result.lifeCycleStatus ?? "?"}) — ${result.reason}`
           );
+          actions.push({ what: `${capitalize(target.label)} suljettiin.`, ok: true, detail: null });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.error(`[control] hard stop -siivous: ${target.label} ${target.videoId} epäonnistui: ${msg}`);
           errors.set("target", `hard stop -siivous (${target.label}) epäonnistui: ${msg}`);
+          // YouTuben oma virheteksti jää lokiin (#176): kortissa on teko ja
+          // käsky, koska sellaisenaan se sanoisi "403 forbidden" kentällä
+          // seisovalle ihmiselle.
+          actions.push({
+            what: `${capitalize(target.label)} ei sulkeutunut.`,
+            ok: false,
+            detail: `Sulje ${target.label} YouTubessa itse.`,
+          });
         }
       }
     } catch (err) {
       // Telemetrian luku tai muu odottamaton: siivous jää tekemättä, työ
       // suljetaan silti.
       errors.set("target", `hard stop -siivous kaatui: ${err instanceof Error ? err.message : String(err)}`);
+      actions.push({
+        what: "Lähetysten sulkemista ei saatu tehtyä.",
+        ok: false,
+        detail: "Tarkista YouTubesta, että molemmat lähetykset ovat päättyneet.",
+      });
+    }
+    return { at: new Date(now).toISOString(), indicators: endIndicators(snapshot), actions };
+  }
+
+  /** Ketjun sanaston termit ovat pieniä kirjaimia lauseen sisällä
+   *  (`CONTEXT.md`), mutta virkkeen aloittavana ne alkavat isolla. */
+  function capitalize(text: string): string {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  /** Siivous ja sen kirjaus yhtenä tekona. Kirjaus on se, mikä tekee
+   *  siivouksesta näkyvän — sekä kortissa että päättymispushin ehtona (#187) —
+   *  eikä se saa jäädä tekemättä siksi, että YouTube-kutsu kaatui: `runEndCleanup`
+   *  kertoo epäonnistumisen tekona, ja juuri se on operaattorille se tärkeä rivi. */
+  async function cleanUpAndRecord(current: Job, now: number): Promise<Job | null> {
+    const cleanup = await runEndCleanup(current, now);
+    try {
+      return await recordCleanupFn(current.id, cleanup);
+    } catch (err) {
+      errors.set("job", `siivouksen kirjaus epäonnistui: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
     }
   }
 
@@ -1007,8 +1108,8 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       // vartijat (oikea ottelu, tuore status, oikea ajo) päättävät edelleen
       // tehdäänkö mitään. Vanhentunut näyttö tarkoittaa että siivous jää
       // tekemättä; se on tarkoituksellista, ei unohdus.
-      await runHardStopCleanup(c, now);
-      if (job?.id === c.id) job = c;
+      const recorded = await cleanUpAndRecord(c, now);
+      if (job?.id === c.id) job = recorded ?? c;
     }
   }
 
@@ -1040,7 +1141,12 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
         // käsistä. Oma try/catch, koska siivous ei saa koskaan estää työn
         // sulkemista — muuten yksi YouTube-virhe jättäisi työn "live"-tilaan ja
         // lukitsisi seuraavan ottelun.
-        await runHardStopCleanup(current, now);
+        //
+        // Kirjaus tehdään ENNEN sulkemista, jotta työ ei ole hetkeäkään
+        // `finished` ilman siivousmerkintää: päättymispush lähtee siitä että
+        // molemmat ovat totta (#187), ja väärässä järjestyksessä puhelin
+        // piippaisi ennen kuin lähetykset on suljettu.
+        await cleanUpAndRecord(current, now);
         // Nimetty työ: poller sulkee sen ajon jota se seurasi, ei sitä joka
         // sattuu olemaan slotissa sulkemishetkellä.
         const closed = await closeRunningJobFn(current.id);

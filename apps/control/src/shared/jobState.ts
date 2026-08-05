@@ -51,8 +51,8 @@ export function jobStateWord(status: JobStatus): JobStateWord {
  *
  *  Hyvänä päivänä puhelin piippaa täsmälleen kolme kertaa: lähetyspari on
  *  valmiina, lähetys käynnistyi, selostettu lähetys päättyi. Tässä ovat kaksi
- *  ensimmäistä; päättymisen push kuuluu #187:aan, koska se saa tulla vasta kun
- *  siivous on tehty — sitä tietoa ei ole työn tilassa vaan siivouspolussa.
+ *  ensimmäistä; kolmas on `jobEndedPush()`, koska sen ehto ei ole tilaan
+ *  saapuminen vaan siivouksen valmistuminen (#187).
  *
  *  Otsikko on tilan oma sana silloin kun se kelpaa lukitusnäytölle sellaisenaan
  *  ("Lähetyspari valmiina"). Käynnistyksessä ei kelpaa: kortti kuvaa vallitsevaa
@@ -68,13 +68,23 @@ const ARRIVAL_PUSH: Record<JobStatus, string | null> = {
   scheduled: WORDS.scheduled.word,
   arming: null, // sekunteja ennen käynnistystä; oma pushinsa olisi kohinaa.
   live: "Lähetys käynnistyi",
-  finished: null, // #187: vasta siivouksen jälkeen.
+  finished: null, // ks. jobEndedPush(): ehtona on siivous, ei tila (#187).
   failed: null, // este-pushit kulkevat blockedPushTitle():n kautta.
   cancelled: null, // operaattorin oma teko.
 };
 
 export function jobArrivalPush(status: JobStatus): string | null {
   return ARRIVAL_PUSH[status];
+}
+
+/** Päättymisen push — päivän kolmas ja viimeinen (#174).
+ *
+ *  Sama sana kuin kortin otsikossa, mutta oma funktionsa eikä `ARRIVAL_PUSH`in
+ *  rivi: se ei saa lähteä siitä että työ siirtyi `finished`-tilaan, vaan vasta
+ *  kun siivous on tehty (`Job.cleanup`). Ero on olennainen — työ suljetaan sillä
+ *  sekunnilla kun relay sammuu, ja lähetykset ovat silloin vielä auki. */
+export function jobEndedPush(): string {
+  return WORDS.finished.word;
 }
 
 /** Esteen push-otsikko (#174, kolmen luokan sääntö).

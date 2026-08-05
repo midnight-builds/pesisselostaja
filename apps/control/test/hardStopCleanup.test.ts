@@ -14,7 +14,7 @@
  *  Joukkueiden nimet ovat keksittyjä (julkinen repo). */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Job, RelayProcess, RelayTelemetry } from "../src/shared/types.js";
+import type { Job, JobCleanup, RelayProcess, RelayTelemetry } from "../src/shared/types.js";
 import type { TransitionResult } from "../src/server/youtube.js";
 
 let relayState: RelayProcess = {
@@ -49,6 +49,10 @@ vi.mock("../src/server/jobs.js", () => {
     closeRunningJob: vi.fn(forbidden("closeRunningJob")),
     markRunStarted: vi.fn(forbidden("markRunStarted")),
     reconcileOpenJobs: vi.fn(async () => []),
+    // Siivouksen kirjaus (#187) ajetaan joka sulkemisella; mock korvaa koko
+    // moduulin, joten puuttuva export kaataisi importin. Vaaraton no-op —
+    // testi joka mittaa kirjausta injektoi oman.
+    recordJobCleanup: vi.fn(async () => null),
   };
 });
 vi.mock("../src/server/journal.js", () => ({ readLog: vi.fn(async () => []) }));
@@ -129,6 +133,7 @@ function job(overrides: Partial<Job> = {}): Job {
     armedAt: null,
     startedAt: isoAgo(60 * 60 * 1000),
     endedAt: null,
+    cleanup: null,
     note: null,
     ...overrides,
   };
@@ -171,12 +176,22 @@ async function runFallingEdge(options: {
   transition?: (videoId: string) => Promise<TransitionResult>;
   telemetryOverrides?: Partial<RelayTelemetry>;
   jobOverrides?: Partial<Job>;
-}): Promise<{ transition: ReturnType<typeof vi.fn>; closeRunningJob: ReturnType<typeof vi.fn> }> {
+}): Promise<{
+  transition: ReturnType<typeof vi.fn>;
+  closeRunningJob: ReturnType<typeof vi.fn>;
+  /** Se mitä työhön kirjattiin ajon päätyttyä (#187), tai null jos ei mitään. */
+  cleanup: JobCleanup | null;
+}> {
   let active: Job | null = job(options.jobOverrides);
   const closeRunningJob = vi.fn(async () => {
     const closed: Job = { ...(active as Job), status: "finished" };
     active = null;
     return closed;
+  });
+  let cleanup: JobCleanup | null = null;
+  const recordJobCleanup = vi.fn(async (_id: string, record: JobCleanup) => {
+    cleanup = record;
+    return null;
   });
   const transition = vi.fn(options.transition ?? (async (videoId: string) => ok(videoId)));
 
@@ -190,12 +205,13 @@ async function runFallingEdge(options: {
     transitionBroadcast: transition,
     readTelemetry: async () => telemetry(options.endReason, options.telemetryOverrides),
     hardStopSource: options.hardStopSource ?? false,
+    recordJobCleanup,
   });
   await tick();
   relayState = { ...relayState, activeState: "inactive", active: false };
   await tick();
   live.stop();
-  return { transition, closeRunningJob };
+  return { transition, closeRunningJob, cleanup };
 }
 
 beforeEach(() => {
@@ -448,5 +464,76 @@ describe("hard stop -siivous sovittelun polulla", () => {
 
     expect(transition).not.toHaveBeenCalled();
     live.stop();
+  });
+});
+
+/** Siivouksen kirjaus (#187).
+ *
+ *  Siivous, jota ei kirjata, on siivous jota kukaan ei näe: tilakortti näyttää
+ *  tämän kentän sisällön sellaisenaan, ja päättymispush odottaa nimenomaan sen
+ *  ilmestymistä (#174). Siksi kirjauksen on tapahduttava JOKA lopetuksessa —
+ *  myös silloin kun tehtävää ei ollut — ja sen on kerrottava sekä teot että se,
+ *  mistä lopetus pääteltiin. */
+describe("siivouksen kirjaus työhön (#187)", () => {
+  it("kirjaa myös normaalin lopetuksen: tyhjä tekolista ei ole puuttuva siivous", async () => {
+    const { cleanup, transition } = await runFallingEdge({ endReason: "ended" });
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(cleanup).not.toBeNull();
+    expect(cleanup?.actions).toEqual([]);
+    // Kaksi riippumatonta indikaattoria: relayn oma lopetussyy ja
+    // tulospalvelun kirjaus (#171).
+    expect(cleanup?.indicators).toContain("Raakalähetys päättyi.");
+    expect(cleanup?.indicators).toContain("Tulospalvelu kirjasi ottelun päättyneeksi.");
+  });
+
+  it("kirjaa hard stopissa sen mitä oikeasti tehtiin ja mihin ei koskettu", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const { cleanup } = await runFallingEdge({ endReason: "hard_stop", hardStopSource: false });
+
+    expect(cleanup?.actions.map((a) => [a.what, a.ok])).toEqual([
+      ["Selostettu lähetys suljettiin.", true],
+      ["Raakalähetys jätettiin koskematta.", true],
+    ]);
+  });
+
+  it("auki jäänyt lähetys kirjataan käskynä, koska sen sulkee vain ihminen", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const { cleanup, closeRunningJob } = await runFallingEdge({
+      endReason: "hard_stop",
+      hardStopSource: false,
+      transition: async () => {
+        throw new Error("YouTube API liveBroadcasts/transition -> HTTP 403");
+      },
+    });
+
+    const failed = cleanup?.actions.filter((a) => !a.ok) ?? [];
+    expect(failed).toHaveLength(1);
+    expect(failed[0].detail).toBe("Sulje selostettu lähetys YouTubessa itse.");
+    // YouTuben oma virheteksti EI päädy operaattorin riville (#176).
+    expect(JSON.stringify(cleanup)).not.toContain("HTTP 403");
+    // Ja työ suljetaan silti: yksi YouTube-virhe ei saa lukita seuraavaa ottelua.
+    expect(closeRunningJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("ei väitä lopetussyytä vanhentuneesta status-tiedostosta", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    // Sama vartija kuin siivouksella: toisen ottelun status ei kerro tästä
+    // ajosta mitään, joten sen lopetussyy ei saa päätyä kortille perusteeksi.
+    const { cleanup, transition } = await runFallingEdge({
+      endReason: "hard_stop",
+      hardStopSource: true,
+      telemetryOverrides: { matchId: 999999 },
+    });
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(cleanup?.actions).toEqual([]);
+    expect(cleanup?.indicators).not.toContain("Raakalähetys päättyi.");
   });
 });

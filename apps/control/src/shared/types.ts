@@ -301,6 +301,40 @@ export type JobStatus =
   | "failed"
   | "cancelled";
 
+/** Yksi teko, jonka ohjaamo teki ajon päätyttyä (#187).
+ *
+ *  Teot ovat operaattorin kieltä ja mennyttä aikamuotoa — ne kertovat mitä
+ *  KONE teki, ei mitä ihmisen pitäisi tehdä (#171: "teot näkyviin UI:hin").
+ *  Epäonnistunut teko on ainoa, joka kääntyy käskyksi: silloin lähetys jäi
+ *  päälle, ja sen sulkeminen jää operaattorille. */
+export interface JobCleanupAction {
+  /** Teko sellaisena kuin se tapahtui: "Selostettu lähetys suljettiin." */
+  what: string;
+  ok: boolean;
+  /** Käskymuotoinen jatko kun teko ei mennyt läpi; null kun meni. Ei koskaan
+   *  YouTuben raakaa virhettä — se kuuluu lokiin ja huoltoarkkiin (#176). */
+  detail: string | null;
+}
+
+/** Mitä ajon päättyessä havaittiin ja tehtiin (#187).
+ *
+ *  Kirjoitetaan työhön silloin kun ajo suljetaan, ja se on nimenomaan tieto
+ *  siitä että **siivous on tehty** — sitä ei voi päätellä työn tilasta, koska
+ *  `finished` syntyy jo ennen kuin YouTubelle on puhuttu. Päättymispush (#174)
+ *  odottaa tätä kenttää, ja tilakortti näyttää sen sisällön sellaisenaan.
+ *
+ *  Tyhjä `actions` EI ole puuttuva siivous vaan tavallisin lopputulos:
+ *  normaalissa lopetuksessa ohjaamo ei kosketa lähetyksiin lainkaan. */
+export interface JobCleanup {
+  at: string;
+  /** Riippumattomat päättymisindikaattorit (#171): relayn oma lopetussyy,
+   *  raakalähetyksen tila ja tulospalvelun kirjaus ovat eri lähteitä, ja
+   *  operaattorin on nähtävä MISTÄ lopetus pääteltiin — yksi indikaattori on
+   *  arvaus, kolme on havainto. */
+  indicators: string[];
+  actions: JobCleanupAction[];
+}
+
 export interface Job {
   id: string;
   status: JobStatus;
@@ -327,6 +361,11 @@ export interface Job {
   /** Set when the relay ran, for the post-run report. */
   startedAt: string | null;
   endedAt: string | null;
+  /** Ajon päätyttyä: mitä havaittiin ja mitä tehtiin (#187). `null` = ajo on
+   *  yhä kesken, TAI se päättyi ohjaamon ollessa alhaalla eikä kukaan ollut
+   *  katsomassa. Jälkimmäinen on rehellinen tyhjä, ei virhe — mutta silloin
+   *  päättymispushiakaan ei lähetetä, koska siivouksesta ei ole näyttöä. */
+  cleanup: JobCleanup | null;
   note: string | null;
 }
 

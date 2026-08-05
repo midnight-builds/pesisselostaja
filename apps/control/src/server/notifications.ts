@@ -18,7 +18,7 @@
  *  it cannot change what the phone renders. */
 
 import type { LiveState, NotificationPrefs, PreflightResult } from "../shared/types.js";
-import { blockedPushTitle, jobArrivalPush } from "../shared/jobState.js";
+import { blockedPushTitle, jobArrivalPush, jobEndedPush } from "../shared/jobState.js";
 import { sendPush } from "./push.js";
 import { createStore } from "./store.js";
 
@@ -83,9 +83,20 @@ interface Memory {
    *  `relayActive`: a control-server restart while a job is already scheduled
    *  must not read as "the pair was just created". */
   jobKey: string | null | undefined;
+  /** Sen työn id, jonka siivous on nähty kirjattuna, `null` kun sellaista ei
+   *  ole. `undefined` ensimmäiseen havaintoon asti — sama uudelleen-
+   *  käynnistyssääntö kuin yllä: eilen päättyneen ottelun siivousmerkintä ei
+   *  ole tänään uutinen. */
+  endedKey: string | null | undefined;
 }
 
-const memory: Memory = { relayActive: null, failSince: null, failNotified: false, jobKey: undefined };
+const memory: Memory = {
+  relayActive: null,
+  failSince: null,
+  failNotified: false,
+  jobKey: undefined,
+  endedKey: undefined,
+};
 
 /** Test seam: the module keeps process-lifetime state, so a test that drives
  *  two scenarios in a row needs a way back to a clean slate. */
@@ -94,6 +105,7 @@ export function resetNotificationState(): void {
   memory.failSince = null;
   memory.failNotified = false;
   memory.jobKey = undefined;
+  memory.endedKey = undefined;
   lastSentAt.clear();
 }
 
@@ -128,6 +140,21 @@ function arrivalBody(state: LiveState): string {
     default:
       return who;
   }
+}
+
+/** Päättymispushin leipäteksti (#174, #187).
+ *
+ *  Kaksi lajia, ja järjestys on tärkeä: jos jokin jäi tekemättä, se on ainoa
+ *  asia jonka operaattorin pitää lukea — auki jäänyt lähetys työntää tyhjää
+ *  kunnes joku sulkee sen. Muuten kerrotaan MISTÄ lopetus pääteltiin, koska
+ *  juuri se erottaa hallitun lopetuksen katkenneesta yhteydestä. */
+function endedBody(state: LiveState): string {
+  const who = matchLabel(state);
+  const cleanup = state.job?.cleanup;
+  const failed = cleanup?.actions.find((action) => !action.ok);
+  if (failed) return `${who} — ${failed.detail ?? failed.what}`;
+  const indicators = cleanup?.indicators ?? [];
+  return indicators.length > 0 ? `${who} — ${indicators.join(" ")}` : `${who} — ottelu on ohi.`;
 }
 
 /** Called for every state the aggregator publishes.
@@ -183,23 +210,32 @@ async function observe(state: LiveState): Promise<void> {
     );
   }
 
-  // --- Lähetys päättyi: relay siirtyi pois ajosta kun ottelu oli käynnissä.
-  // Two very different endings share this edge, and the wording has to tell
-  // them apart: the relay shutting itself down after the source ended is the
-  // normal, expected finish (uptime first — we never cut it short), while
-  // going away mid-match is a problem the operator has to walk to the phone
-  // for.
+  // --- Selostus katkesi kesken ottelun.
+  //
+  // Relayn poistuminen ajosta on kaksi hyvin eri asiaa. Kun ottelu on ohi, se
+  // on normaali lopetus, eikä siitä piipata tässä: päivän kolmas push lähtee
+  // vasta siivouksen jälkeen (alempana, #174). Kesken ottelun sama reuna on
+  // vika, jonka takia operaattorin on käveltävä puhelimen luo nyt.
   let announcedMidMatchStop = false;
-  if (prefs.ended && wasActive === true && !isActive && state.job) {
-    const midMatch = !state.match.finished;
-    const sent = await notify(
+  if (prefs.ended && wasActive === true && !isActive && state.job && !state.match.finished) {
+    announcedMidMatchStop = await notify(
       "relay-ended",
-      midMatch ? "Lähetys katkesi" : "Lähetys päättyi",
-      midMatch
-        ? `${matchLabel(state)} — relay ei ole enää ajossa, mutta ottelu on kesken.`
-        : `${matchLabel(state)} — ottelu päättyi ja relay sammui.`
+      "Lähetys katkesi",
+      `${matchLabel(state)} — selostus ei ole enää ajossa, mutta ottelu on kesken.`
     );
-    announcedMidMatchStop = sent && midMatch;
+  }
+
+  // --- Selostettu lähetys päättyi: päivän kolmas ja viimeinen push (#174).
+  //
+  // Ehto EI ole työn siirtyminen `finished`-tilaan vaan siivouksen kirjaus
+  // (#187): työ suljetaan sillä sekunnilla kun relay sammuu, ja lähetykset ovat
+  // silloin vielä auki. Siivouksesta kertova push ennen siivousta olisi lupaus,
+  // jonka operaattori tarkistaa vasta kotona.
+  const endedKey = state.job?.status === "finished" && state.job.cleanup ? state.job.id : null;
+  const previousEndedKey = memory.endedKey;
+  memory.endedKey = endedKey;
+  if (prefs.ended && previousEndedKey !== undefined && endedKey !== null && endedKey !== previousEndedKey) {
+    await notify(`job:${endedKey}:ended`, jobEndedPush(), endedBody(state));
   }
 
   // --- Lähetys rikki eikä korjaantunut.

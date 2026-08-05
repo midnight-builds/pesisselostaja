@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Job, LiveState, MatchState, RelayProcess } from "../src/shared/types.js";
+import type { Job, JobCleanup, LiveState, MatchState, RelayProcess } from "../src/shared/types.js";
 import { jobStateWord } from "../src/shared/jobState.js";
 
 const sendPush = vi.hoisted(() => vi.fn(async () => undefined));
@@ -93,6 +93,7 @@ function baseJob(): Job {
     armedAt: null,
     startedAt: null,
     endedAt: null,
+    cleanup: null,
     note: null,
   };
 }
@@ -150,12 +151,21 @@ describe("relay lifecycle triggers", () => {
     expect(titles()).toEqual(["Lähetys käynnistyi"]);
   });
 
-  it("distinguishes a finished match from a stream that dropped mid-match", async () => {
+  it("vaikenee normaalista lopetuksesta: päättymispush odottaa siivousta (#187)", async () => {
+    // Relayn sammuminen päättyneen ottelun jälkeen ON odotettu lopetus, mutta
+    // lähetykset ovat sillä sekunnilla vielä auki. Tästä reunasta ei siis
+    // piipata lainkaan — päivän kolmas push lähtee vasta siivouksen kirjauksesta.
     await notifications.observeLiveState(state({ at: at(0), relayActive: true, matchFinished: true }));
     await notifications.observeLiveState(
       state({ at: at(5), relayActive: false, matchFinished: true, health: "idle" })
     );
-    expect(titles()).toEqual(["Lähetys päättyi"]);
+    expect(titles()).toEqual([]);
+  });
+
+  it("ilmoittaa kesken ottelun katkenneesta selostuksesta", async () => {
+    await notifications.observeLiveState(state({ at: at(0), relayActive: true }));
+    await notifications.observeLiveState(state({ at: at(5), relayActive: false, health: "warn" }));
+    expect(titles()).toEqual(["Lähetys katkesi"]);
   });
 
   it("does not report an ending for a relay that was never running a job", async () => {
@@ -219,6 +229,70 @@ describe("työn tilasiirtymät (#185)", () => {
       state({ at: at(10), relayActive: false, health: "idle", job: { ...baseJob(), status: "cancelled" } })
     );
     expect(titles()).toEqual([]);
+  });
+});
+
+describe("päättymispush (#187)", () => {
+  const finished = (): Job => ({ ...baseJob(), status: "finished", endedAt: at(300) });
+  const cleaned = (overrides: Partial<JobCleanup> = {}): Job => ({
+    ...finished(),
+    cleanup: {
+      at: at(305),
+      indicators: ["Tulospalvelu kirjasi ottelun päättyneeksi."],
+      actions: [],
+      ...overrides,
+    },
+  });
+
+  it("lähtee vasta kun siivous on kirjattu, ei siitä että työ sulkeutui", async () => {
+    await notifications.observeLiveState(state({ at: at(0), relayActive: true, matchFinished: true }));
+    // Työ suljettiin: lähetykset voivat olla vielä auki, joten hiljaisuus.
+    await notifications.observeLiveState(
+      state({ at: at(5), relayActive: false, matchFinished: true, health: "idle", job: finished() })
+    );
+    expect(titles()).toEqual([]);
+    // Siivous kirjattiin: nyt lupaus on katettu.
+    await notifications.observeLiveState(
+      state({ at: at(10), relayActive: false, matchFinished: true, health: "idle", job: cleaned() })
+    );
+    expect(titles()).toEqual([jobStateWord("finished").word]);
+  });
+
+  it("ei toistu joka pollilla eikä ohjaamon uudelleenkäynnistyksestä", async () => {
+    await notifications.observeLiveState(
+      state({ at: at(0), relayActive: false, matchFinished: true, health: "idle", job: finished() })
+    );
+    for (const sec of [5, 10, 15]) {
+      await notifications.observeLiveState(
+        state({ at: at(sec), relayActive: false, matchFinished: true, health: "idle", job: cleaned() })
+      );
+    }
+    expect(titles()).toEqual([jobStateWord("finished").word]);
+
+    // Uudelleenkäynnistys: eilen päättyneen ottelun siivousmerkintä on
+    // ensimmäinen havainto, eikä ensimmäinen havainto ole koskaan uutinen.
+    notifications.resetNotificationState();
+    await notifications.observeLiveState(
+      state({ at: at(600), relayActive: false, matchFinished: true, health: "idle", job: cleaned() })
+    );
+    expect(titles()).toEqual([jobStateWord("finished").word]);
+  });
+
+  it("nostaa auki jääneen lähetyksen leipätekstiin, koska se on ainoa jäljellä oleva teko", async () => {
+    const stuck = cleaned({
+      actions: [
+        { what: "Selostettu lähetys ei sulkeutunut.", ok: false, detail: "Sulje selostettu lähetys YouTubessa itse." },
+      ],
+    });
+    await notifications.observeLiveState(
+      state({ at: at(0), relayActive: false, matchFinished: true, health: "idle", job: finished() })
+    );
+    await notifications.observeLiveState(
+      state({ at: at(5), relayActive: false, matchFinished: true, health: "idle", job: stuck })
+    );
+    const bodies = sendPush.mock.calls.map((call) => (call as unknown as string[])[1]);
+    expect(titles()).toEqual([jobStateWord("finished").word]);
+    expect(bodies[0]).toContain("Sulje selostettu lähetys YouTubessa itse.");
   });
 });
 

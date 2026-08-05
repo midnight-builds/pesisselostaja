@@ -54,6 +54,7 @@ const {
   patchJob,
   getActiveJob,
   listJobs,
+  recordJobCleanup,
   setJobStatus,
   JobClashError,
   MatchNotFoundError,
@@ -187,6 +188,38 @@ describe("single active job invariant", () => {
     expect((await getActiveJob())?.id).toBe(running.id);
   });
 
+  // #187: ottelupäivä ei lopu siihen että relay sammui. Päättynyt-tila kertoo
+  // mitä siivouksessa tehtiin ja jäikö jotain päälle — eikä se voi kertoa
+  // mitään, jos valinta katoaa samalla sekunnilla kun ajo suljettiin.
+  it("getActiveJob pitää juuri päättyneen työn näkyvissä", async () => {
+    const job = await createJob({ matchId: 1 });
+    await activateJob(job.id);
+    await markRunStarted(1);
+    await closeRunningJob();
+
+    const active = await getActiveJob();
+    expect(active?.id).toBe(job.id);
+    expect(active?.status).toBe("finished");
+  });
+
+  it("getActiveJob ei enää tarjoa eilen päättynyttä työtä", async () => {
+    const job = await createJob({ matchId: 1 });
+    await patchJob(job.id, { startsAt: new Date(Date.now() - 20 * 60 * 60_000).toISOString() });
+    await setJobStatus(job.id, "live");
+    await closeRunningJob();
+
+    expect(await getActiveJob()).toBeNull();
+  });
+
+  it("uusi valinta syrjäyttää päättyneen työn kortissa", async () => {
+    const done = await createJob({ matchId: 1 });
+    await setJobStatus(done.id, "live");
+    await closeRunningJob();
+    const next = await createJob({ matchId: 2 });
+
+    expect((await getActiveJob())?.id).toBe(next.id);
+  });
+
   it("getActiveJob hylkää vanhan luonnoksen jolla ei ole aloitusaikaa lainkaan", async () => {
     // startsAt puuttuu (käsin syötetty ottelu-ID, jolle tulospalvelu ei antanut
     // aikaa) — silloin luontihetki on ainoa aikaleima jolla vanhentuminen voi
@@ -205,6 +238,44 @@ describe("single active job invariant", () => {
 // the source ended — has to let go of the broadcast slot. Left holding it, the
 // job blocks the NEXT match, and the operator finds out only when activation
 // fails with the camera already moving.
+describe("siivouksen kirjaus (#187)", () => {
+  it("kirjaa siivouksen päättyneeseen työhön", async () => {
+    const job = await createJob({ matchId: 1 });
+    await activateJob(job.id);
+    await markRunStarted(1);
+    await closeRunningJob();
+
+    const record = {
+      at: new Date().toISOString(),
+      indicators: ["Raakalähetys päättyi."],
+      actions: [{ what: "Selostettu lähetys suljettiin.", ok: true, detail: null }],
+    };
+    const updated = await recordJobCleanup(job.id, record);
+    expect(updated?.cleanup).toEqual(record);
+    expect((await getActiveJob())?.cleanup).toEqual(record);
+  });
+
+  // Toinen kirjaus samalle työlle olisi ohjaamon uudelleenkäynnistyksen
+  // jälkeinen toisinto — ja se lähettäisi päättymispushin uudelleen ottelusta,
+  // joka päättyi tunteja sitten.
+  it("ei ylikirjoita jo kirjattua siivousta", async () => {
+    const job = await createJob({ matchId: 1 });
+    await activateJob(job.id);
+    await markRunStarted(1);
+    await closeRunningJob();
+
+    const first = { at: "2026-08-05T10:00:00.000Z", indicators: ["Raakalähetys päättyi."], actions: [] };
+    await recordJobCleanup(job.id, first);
+    const again = await recordJobCleanup(job.id, {
+      at: "2026-08-05T11:00:00.000Z",
+      indicators: [],
+      actions: [{ what: "Selostettu lähetys suljettiin.", ok: true, detail: null }],
+    });
+
+    expect(again?.cleanup).toEqual(first);
+  });
+});
+
 describe("closing a run", () => {
   it("closes a run that made it on air as finished, stamping endedAt", async () => {
     const job = await createJob({ matchId: 1 });
