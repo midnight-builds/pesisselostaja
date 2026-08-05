@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { createStore } from "./store.js";
 import { DEFAULT_RTMP_URL } from "../shared/api.js";
-import type { Job, JobStatus } from "../shared/types.js";
+import type { Job, JobCleanup, JobStatus } from "../shared/types.js";
 import type { CreateJobRequest, PatchJobRequest } from "../shared/api.js";
 import { isSelectableStart } from "../shared/jobState.js";
 import { getMatch } from "./matches.js";
@@ -167,6 +167,7 @@ export async function createJob(req: CreateJobRequest): Promise<Job> {
     armedAt: null,
     startedAt: null,
     endedAt: null,
+    cleanup: null,
     note: req.note ?? null,
   };
   await store.update((jobs) => [...jobs, job]);
@@ -276,6 +277,34 @@ export async function closeRunningJob(jobId: string | null = null): Promise<Job 
   return closed;
 }
 
+/** Kirjaa työhön mitä ajon päätyttyä havaittiin ja tehtiin (#187).
+ *
+ *  Oma kirjoituksensa eikä `closeRunningJob`in parametri, koska siivous
+ *  tapahtuu MOLEMMILLA sulkemispoluilla eri järjestyksessä: laskevalla reunalla
+ *  ennen sulkemista (työn kentät tarvitaan), sovittelussa vasta sen jälkeen
+ *  (slotin vapautuminen ei saa jäädä YouTube-kutsun taakse). Yksi kirjaustapa
+ *  molemmille tarkoittaa, ettei kentän merkitys riipu siitä kumpi polku ajoi.
+ *
+ *  Kirjoitetaan vain kerran: toinen kirjaus samalle työlle olisi ohjaamon
+ *  uudelleenkäynnistyksen jälkeinen toisinto, ja se lähettäisi päättymispushin
+ *  uudelleen ottelusta joka päättyi eilen. */
+export async function recordJobCleanup(id: string, cleanup: JobCleanup): Promise<Job | null> {
+  let updated: Job | null = null;
+  await store.update((jobs) => {
+    const idx = jobs.findIndex((j) => j.id === id);
+    if (idx === -1) return jobs;
+    if (jobs[idx].cleanup) {
+      updated = jobs[idx];
+      return jobs;
+    }
+    const next = jobs.slice();
+    next[idx] = { ...jobs[idx], cleanup };
+    updated = next[idx];
+    return next;
+  });
+  return updated;
+}
+
 /** Closes every job that holds the broadcast slot without being the run that is
  *  actually happening, and returns what it closed.
  *
@@ -358,8 +387,18 @@ export async function getActiveJob(): Promise<Job | null> {
   const blocking = jobs.find((j) => isBlocking(j.status));
   if (blocking) return blocking;
   const now = Date.now();
+  // `finished` on mukana, koska ottelupäivä ei lopu siihen että relay sammui:
+  // tilakortin päättynyt-tila kertoo mitä siivouksessa tehtiin ja jäikö jotain
+  // päälle (#187). Ilman tätä kortti palaisi "Ei aktiivista ottelua" -tilaan
+  // sillä sekunnilla kun ajo suljettiin, eikä yksikään teko olisi koskaan
+  // näkyvissä. Se ei estä seuraavan ottelun valintaa: päättynyt työ ei pidä
+  // lähetyspaikkaa (`isBlocking`), ja kuori näyttää valitsimen kortin alla
+  // (`isJobClosed`). Sama vanhenemissääntö kuin keskeneräisillä — eilinen
+  // ottelu ei ole tämän päivän näkymä.
   const open = jobs.filter(
-    (j) => (j.status === "scheduled" || j.status === "draft") && !isForgottenOpenJob(j, now)
+    (j) =>
+      (j.status === "scheduled" || j.status === "draft" || j.status === "finished") &&
+      !isForgottenOpenJob(j, now)
   );
   if (open.length === 0) return null;
   // "Viimeisin" = most recently created. startsAt can be null (not every

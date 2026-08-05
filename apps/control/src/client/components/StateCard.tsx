@@ -3,6 +3,7 @@ import type { Job, LiveState } from "../../shared/types";
 import { NO_JOB_STATE, jobStateWord } from "../../shared/jobState";
 import { api } from "../api";
 import { duration, fiTime } from "../format";
+import { EndedCard } from "./EndedCard";
 import { MatchGlance } from "./MatchGlance";
 import { PrepCard } from "./PrepCard";
 import { StartGuard } from "./StartGuard";
@@ -70,6 +71,11 @@ export function StateCard({ job, live, notify, onCleared }: Props) {
           silloin jää otsikko ja sen alla oleva lause. */}
       {job?.status === "live" && live && <MatchGlance live={live} notify={notify} />}
 
+      {/* Päättynyt ajo: mitä ohjaamo teki, mistä lopetus pääteltiin ja missä
+          tallenne on (#187). Vain `finished` — `failed` ja `cancelled` ovat
+          eri asia: niissä ajoa ei koskaan ollut, eikä siivottavaakaan. */}
+      {job?.status === "finished" && <EndedCard job={job} live={live} />}
+
       {/* Luonnos on työ, jolle ei ole vielä luotu lähetysparia, joten sen saa
           hylätä ilman ulospäin näkyviä seurauksia — ottelunvaihto ON vahvistus
           (#171/5). Pidemmällä olevan työn toipumispolut tulevat niiden
@@ -120,9 +126,11 @@ function detailFor(job: Job | null, live: LiveState | null): string {
         : `Selostus on ollut ajossa ${duration(ran)}.`;
     }
     case "finished":
-      return job.endedAt
-        ? `Selostus ja lähetykset päättyivät klo ${fiTime(job.endedAt)}. Tallenne on soittolistassa.`
-        : "Selostus ja lähetykset päättyivät. Tallenne on soittolistassa.";
+      // Päättymisaika, kesto ja tallenne ovat kortin omalla lohkolla (#187);
+      // sama tieto kahteen kertaan lukisi kuin virhe. Tähän jää se, mitä
+      // lohko ei kerro: päivä on tämän ottelun osalta ohi, ja seuraavan saa
+      // valita alta.
+      return "Ottelupäivä on tämän ottelun osalta ohi.";
     case "failed":
       return job.note ?? "Ajo päättyi virheeseen. Katso loki ennen kuin yrität uudelleen.";
     case "cancelled":

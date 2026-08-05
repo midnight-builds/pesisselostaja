@@ -856,3 +856,68 @@ select.field__input {
 .btn--tall {
   min-height: 56px;
 }
+
+/* ── Päättynyt-tila (#187) ───────────────────────────────────
+   Ottelupäivän viimeinen näkymä vastaa yhteen kysymykseen: jäikö jotain
+   päälle? Siksi teot ovat ylinnä ja perusteet niiden alla vaisumpina —
+   perustelu on tarkistettavissa, mutta se ei ole se rivi, jonka takia
+   puhelin kaivetaan taskusta. */
+.ended {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.ended__lead {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+/* Siivouksesta ei ole näyttöä: sama sävy kuin hälytyksellä, koska
+   lopputulos on sama — joku joutuu tarkistamaan lähetykset itse. */
+.ended__note {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 176, 32, 0.5);
+  background: rgba(255, 176, 32, 0.12);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.ended__why {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ended__whyLabel {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+}
+.ended__list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+/* Tehty teko on kunnossa-rivi, ei korjaus: sama vihreä kuin muualla, jotta
+   ruudulla on yksi merkitys per väri. */
+.check--ok .check__mark,
+.check--ok .check__detail {
+  color: var(--muted);
+}
+/* Tallennelinkki on nappi, mutta se on <a>: samat mitat, jotta rivi ei
+   kutistu sormea pienemmäksi. */
+a.btn--wide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}

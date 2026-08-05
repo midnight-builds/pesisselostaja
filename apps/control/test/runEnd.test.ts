@@ -48,6 +48,10 @@ vi.mock("../src/server/jobs.js", () => {
     // Sovittelu ajetaan joka tikillä, joten oletus on vaaraton no-op; testit
     // jotka mittaavat sitä injektoivat oman.
     reconcileOpenJobs: vi.fn(async () => []),
+    // Siivouksen kirjaus (#187) ajetaan joka sulkemisella; mock korvaa koko
+    // moduulin, joten puuttuva export kaataisi importin. Vaaraton no-op —
+    // testi joka mittaa kirjausta injektoi oman.
+    recordJobCleanup: vi.fn(async () => null),
   };
 });
 vi.mock("../src/server/journal.js", () => ({ readLog: vi.fn(async () => []) }));
@@ -104,6 +108,7 @@ function job(overrides: Partial<Job> = {}): Job {
     armedAt: null,
     startedAt: "2026-07-29T09:05:00.000Z",
     endedAt: null,
+    cleanup: null,
     note: null,
     ...overrides,
   };
