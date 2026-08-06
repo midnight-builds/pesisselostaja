@@ -721,6 +721,18 @@ select.field__input {
   letter-spacing: 0.06em;
   color: var(--faint);
 }
+/* Otsikko linkkinä lähetykseen (#228). Kosketusalue täyttää --tapin
+   pystysuunnassa, vaikka teksti on pientä: sormella osutaan rivin korkeuteen,
+   ei kirjainten korkeuteen. Alleviivaus on tässä toiminnallinen — se on ainoa
+   merkki joka erottaa linkin muista otsikoista myös ilman väriä. */
+.fact__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap);
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .fact__value {
   flex: 1;
   min-width: 0;
