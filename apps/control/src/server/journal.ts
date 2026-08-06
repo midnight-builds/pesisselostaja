@@ -27,9 +27,30 @@ function unitBase(unit: string): string {
   return unit.replace(/\.service$/, "");
 }
 
+/** Kumman unitin rivi tämä on.
+ *
+ *  Kaksi eri kirjoittajaa, kaksi eri kenttää:
+ *
+ *  - **Prosessin oma rivi** kantaa `_SYSTEMD_USER_UNIT`in — sen unitin, jonka
+ *    stdout rivin tuotti. Tämä on ohjaamon ja relayn omat rivit.
+ *  - **systemdin oma rivi unitista** ("Started …", "Consumed … CPU time") tulee
+ *    managerilta, jolloin `_SYSTEMD_USER_UNIT` on `init.scope` ja unit, JOSTA
+ *    rivi kertoo, on `USER_UNIT`issa. Ilman tätä jälkimmäistä ohjaamon omat
+ *    käynnistys- ja pysäytysrivit merkittäisiin relayn riveiksi — eli
+ *    lokinäkymä valehtelisi juuri siitä, kumpi prosessi teki mitä.
+ *
+ *  Tuntematon → "relay": näkymä on ollut relayn loki koko olemassaolonsa ajan,
+ *  ja väärä "ohjaamo"-merkintä väittäisi ohjaamon tehneen jotain (#232). */
 function unitOf(record: JournalRecord): LogUnit {
-  const raw = record._SYSTEMD_USER_UNIT ?? record._SYSTEMD_UNIT ?? "";
-  return unitBase(raw) === unitBase(CONFIG.controlUnit) ? "control" : "relay";
+  const control = unitBase(CONFIG.controlUnit);
+  const relay = unitBase(CONFIG.relayUnit);
+  for (const raw of [record._SYSTEMD_USER_UNIT, record.USER_UNIT, record._SYSTEMD_UNIT, record.UNIT]) {
+    if (!raw) continue;
+    const name = unitBase(raw);
+    if (name === control) return "control";
+    if (name === relay) return "relay";
+  }
+  return "relay";
 }
 
 /** journald can hand back a lot; the phone renders a scrollback, not an
@@ -49,10 +70,14 @@ export interface JournalRecord {
   MESSAGE?: string | number[];
   PRIORITY?: string;
   __REALTIME_TIMESTAMP?: string;
-  /** Kumpi unit rivin kirjoitti. Käyttäjän unitilla journald täyttää
+  /** Rivin KIRJOITTANUT unit. Käyttäjän unitilla journald täyttää
    *  `_SYSTEMD_USER_UNIT`in; järjestelmäunitilla vain `_SYSTEMD_UNIT`in. */
   _SYSTEMD_USER_UNIT?: string;
   _SYSTEMD_UNIT?: string;
+  /** Unit, JOSTA rivi kertoo. systemd itse asettaa nämä omiin viesteihinsä
+   *  ("Started …"), joiden kirjoittaja on manager eikä unit. */
+  USER_UNIT?: string;
+  UNIT?: string;
 }
 
 /** journald emits MESSAGE as an array of bytes when the line isn't valid UTF-8.

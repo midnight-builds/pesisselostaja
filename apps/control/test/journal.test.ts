@@ -26,6 +26,9 @@ describe("coded lines from the current relay", () => {
     expect(line).toEqual({
       ts: "2026-07-29T08:00:00.000Z",
       level: "warn",
+      // Ilman unit-kenttää rivi ei enää kelpaa: loki lomittaa relayn ja
+      // ohjaamon (#232), ja tietue ilman unitia luetaan relayksi.
+      unit: "relay",
       code: "ffmpeg.respawn",
       msg: "Uudelleenyritys 2000ms kuluttua…",
     });

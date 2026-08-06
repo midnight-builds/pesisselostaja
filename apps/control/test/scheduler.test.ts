@@ -731,3 +731,142 @@ describe("kytkin", () => {
     expect(writes(calls)).toEqual([]);
   });
 });
+
+/** Ottelupäivän jälkikäteinen rekonstruktio (#232).
+ *
+ *  5.8.2026 vahti käynnisti lähetyksen itse, ja koko ottelun ajalta ohjaamon
+ *  journalissa oli kymmenen riviä — kaikki systemdin omia. Näytön puuttuminen ei
+ *  ole sama asia kuin näyttö siitä ettei mitään tapahtunut, ja juuri siihen
+ *  #118:n koettelu kaatui. Nämä testit pitävät kiinni siitä, että jokainen
+ *  merkittävä ajastimen teko jättää rivin — ja että hiljaisina hetkinä samaa
+ *  riviä ei toisteta 30 s välein, koska hukutettu loki on yhtä käyttökelvoton
+ *  kuin tyhjä. */
+describe("ajastin jättää lokiin jäljen", () => {
+  function capture() {
+    const lines: string[] = [];
+    const push = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
+    const spies = [
+      vi.spyOn(console, "log").mockImplementation(push),
+      vi.spyOn(console, "warn").mockImplementation(push),
+      vi.spyOn(console, "error").mockImplementation(push),
+    ];
+    return { lines, restore: () => spies.forEach((s) => s.mockRestore()) };
+  }
+
+  it("kirjaa päätöksen kerran, ei joka tikillä", async () => {
+    const { scheduler } = build({ jobs: [job()], source: SOURCE.scheduled });
+    const log = capture();
+    try {
+      await scheduler.tick();
+      await scheduler.tick();
+      await scheduler.tick();
+    } finally {
+      log.restore();
+    }
+
+    const decisions = log.lines.filter((l) => l.includes("scheduler.decision"));
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toContain("waiting");
+    // Kytkimen tila on rivillä mukana: sama päätös tarkoittaa eri asiaa sen
+    // molemmin puolin.
+    expect(decisions[0]).toContain("vahti pois päältä");
+  });
+
+  it("kirjaa uuden rivin kun päätös muuttuu", async () => {
+    const jobs = [job()];
+    const { scheduler, calls } = build({ jobs, source: SOURCE.scheduled });
+    await scheduler.tick();
+
+    const log = capture();
+    try {
+      calls.checkSource.mockResolvedValue(SOURCE.liveFull);
+      await scheduler.tick();
+    } finally {
+      log.restore();
+    }
+
+    expect(log.lines.filter((l) => l.includes("scheduler.decision"))).toHaveLength(1);
+    expect(log.lines.join("\n")).toContain("start");
+  });
+
+  it("kirjaa käynnistysikkunan ja relayn käynnistyksen", async () => {
+    const { scheduler } = build({ jobs: [job()], source: SOURCE.liveFull });
+    await scheduler.setEnabled(true);
+
+    const log = capture();
+    try {
+      await scheduler.tick();
+    } finally {
+      log.restore();
+    }
+
+    const starts = log.lines.filter((l) => l.includes("scheduler.start"));
+    expect(starts).toHaveLength(2);
+    expect(starts[0]).toContain("Käynnistysikkuna auki");
+    expect(starts[1]).toContain("Relay käynnistetty");
+    // Ottelu on rivillä, koska jälkikäteen kysytään nimenomaan "mikä ottelu".
+    expect(starts[1]).toContain("146210");
+  });
+
+  it("kirjaa kaatuneen käynnistyksen virheenä", async () => {
+    const { scheduler } = build({
+      jobs: [job()],
+      source: SOURCE.liveFull,
+      startThrows: new Error("systemctl ei vastannut"),
+    });
+    await scheduler.setEnabled(true);
+
+    const log = capture();
+    try {
+      await scheduler.tick();
+    } finally {
+      log.restore();
+    }
+
+    expect(log.lines.join("\n")).toContain("scheduler.start_failed");
+    expect(log.lines.join("\n")).toContain("systemctl ei vastannut");
+  });
+
+  it("kirjaa preflightin esteet, ei pelkkää lukumäärää", async () => {
+    const { scheduler } = build({
+      jobs: [job()],
+      source: SOURCE.liveFull,
+      preflight: {
+        ranAt: new Date(NOW).toISOString(),
+        checks: [{ name: "Kohde", status: "fail", detail: "Kohdetta ei ole" }],
+        blockers: 1,
+        warnings: 0,
+        summary: "1 este",
+      },
+    });
+    await scheduler.setEnabled(true);
+
+    const log = capture();
+    try {
+      await scheduler.tick();
+    } finally {
+      log.restore();
+    }
+
+    const blocked = log.lines.filter((l) => l.includes("scheduler.blocked"));
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]).toContain("Kohdetta ei ole");
+  });
+
+  it("kirjaa kytkimen kääntämisen", async () => {
+    const { scheduler } = build({ jobs: [job()], source: SOURCE.scheduled });
+
+    const log = capture();
+    try {
+      await scheduler.setEnabled(true);
+      await scheduler.setEnabled(false);
+    } finally {
+      log.restore();
+    }
+
+    const flips = log.lines.filter((l) => l.includes("scheduler.enabled"));
+    expect(flips).toHaveLength(2);
+    expect(flips[0]).toContain("PÄÄLLE");
+    expect(flips[1]).toContain("POIS");
+  });
+});
