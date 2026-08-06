@@ -17,12 +17,16 @@ import { CONFIG } from "../src/server/config.js";
 /** 2026-08-05T15:00:00Z journaldin mikrosekunteina. */
 const USEC = "1785942000000000";
 
-function record(message: string, opts: { priority?: string; unit?: string } = {}): JournalRecord {
+function record(
+  message: string,
+  opts: { priority?: string; unit?: string; aboutUnit?: string } = {}
+): JournalRecord {
   return {
     MESSAGE: message,
     PRIORITY: opts.priority,
     __REALTIME_TIMESTAMP: USEC,
     _SYSTEMD_USER_UNIT: opts.unit,
+    USER_UNIT: opts.aboutUnit,
   };
 }
 
@@ -86,5 +90,20 @@ describe("kumpi unit rivin kirjoitti", () => {
    *  vastakohta. */
   it("ei väitä tuntematonta riviä ohjaamon kirjoittamaksi", () => {
     expect(toLogLine(record("[1.00.00] ffmpeg.exit: x", { priority: "6" }))?.unit).toBe("relay");
+  });
+
+  /** systemdin oma rivi ohjaamon unitista tulee managerilta: kirjoittaja on
+   *  `init.scope`, ja unit josta rivi kertoo on `USER_UNIT`issa. Ilman sitä
+   *  ohjaamon käynnistys- ja pysäytysrivit näkyisivät relayn riveinä — havaittu
+   *  livenä lokinäkymää tarkistettaessa. */
+  it("lukee systemdin oman rivin siitä unitista, JOSTA rivi kertoo", () => {
+    const line = toLogLine(
+      record(`Started ${CONFIG.controlUnit} - Pesisselostaja Ohjaamo.`, {
+        priority: "6",
+        unit: "init.scope",
+        aboutUnit: CONFIG.controlUnit,
+      })
+    );
+    expect(line?.unit).toBe("control");
   });
 });
