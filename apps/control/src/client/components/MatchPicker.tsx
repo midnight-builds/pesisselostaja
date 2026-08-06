@@ -33,7 +33,13 @@ export function MatchPicker({ notify, onSelected }: Props) {
   const [series, setSeries] = useState(ALL);
   const [showPast, setShowPast] = useState(false);
   const [manual, setManual] = useState("");
-  const [busy, setBusy] = useState(false);
+  /** Luonnissa olevan ottelun id, tai null. Sekä lukko että ilmaisin (#220):
+   *  `busy` yksin esti tuplaklikin mutta ei kertonut mistään, koska sen ainoa
+   *  vaikutus oli nappien harmaantuminen — ja harmaantuminen luetaan
+   *  kaatumiseksi. Id eikä boolean, jotta ruudulla näkyy MIKÄ ottelu on
+   *  luonnissa: leiripäivänä listassa on toistasataa riviä. */
+  const [creating, setCreating] = useState<number | null>(null);
+  const busy = creating !== null;
 
   const load = useCallback(
     async (target: string) => {
@@ -58,7 +64,7 @@ export function MatchPicker({ notify, onSelected }: Props) {
 
   const select = async (matchId: number) => {
     if (busy) return;
-    setBusy(true);
+    setCreating(matchId);
     try {
       const job = await api.createJob({ matchId });
       // Käsin syötetyn ottelu-ID:n aloitusaika tiedetään vasta nyt: jos ottelu
@@ -75,7 +81,7 @@ export function MatchPicker({ notify, onSelected }: Props) {
     } catch (err) {
       notify("error", err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
+      setCreating(null);
     }
   };
 
@@ -144,6 +150,7 @@ export function MatchPicker({ notify, onSelected }: Props) {
                selitystä. Rivi jää näkyviin, koska päivän kulku on tietoa. */
             tooLate={!isSelectableStart(m.startsAt, nowMs)}
             disabled={busy}
+            creating={creating === m.id}
             onSelect={() => void select(m.id)}
           />
         ))}
@@ -186,7 +193,10 @@ export function MatchPicker({ notify, onSelected }: Props) {
           disabled={busy || manualId == null}
           onClick={() => manualId != null && void select(manualId)}
         >
-          Valitse tämä ottelu
+          {/* Käsin syötetyllä id:llä ei ole riviä listassa, joten ilmaisin
+              kuuluu nappiin — muuten tämä polku jäisi juuri siihen tilaan,
+              josta #220 kertoo. */}
+          {creating !== null && creating === manualId ? "Luodaan lähetyksiä…" : "Valitse tämä ottelu"}
         </button>
       </div>
     </section>
@@ -197,25 +207,43 @@ function MatchRow({
   match,
   tooLate,
   disabled,
+  creating,
   onSelect,
 }: {
   match: MatchOption;
   tooLate: boolean;
   disabled: boolean;
+  /** Tästä ottelusta luodaan juuri nyt lähetysparia. */
+  creating: boolean;
   onSelect: () => void;
 }) {
   return (
     <li>
-      <button type="button" className="mrow" disabled={disabled || tooLate} onClick={onSelect}>
+      <button
+        type="button"
+        className={`mrow ${creating ? "mrow--busy" : ""}`}
+        disabled={disabled || tooLate}
+        aria-busy={creating}
+        onClick={onSelect}
+      >
         <span className="mrow__time num">{fiTime(match.startsAt)}</span>
         <span className="mrow__body">
           <span className="mrow__teams">
             {match.home} – {match.away}
           </span>
           <span className="mrow__meta">
-            {tooLate
-              ? "Alkoi liian kauan sitten — ei enää selostettavissa"
-              : [match.seriesName, match.stadium].filter(Boolean).join(" · ") || "—"}
+            {/* Odotus on tuntuva (kaksi YouTube-lähetystä, sekunteja), joten
+                teksti kertoo MITÄ odotetaan — "hetki…" ei erotu kaatumisesta. */}
+            {creating ? (
+              <>
+                <span className="mrow__pulse" aria-hidden="true" />
+                Luodaan lähetyksiä YouTubeen…
+              </>
+            ) : tooLate ? (
+              "Alkoi liian kauan sitten — ei enää selostettavissa"
+            ) : (
+              [match.seriesName, match.stadium].filter(Boolean).join(" · ") || "—"
+            )}
           </span>
         </span>
         {match.status === "live" && <span className="tag tag--live">LIVE</span>}

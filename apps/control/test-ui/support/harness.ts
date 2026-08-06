@@ -83,6 +83,11 @@ export class ApiMock {
    *  A bare string is a 500; give `{ status, error }` when the status itself
    *  is part of what's under test (404 for an unknown match id). */
   failures = new Map<string, string | { status: number; error: string }>();
+  /** Keinotekoinen viive reitille, ms — avaimet kuten `failures`
+   *  ("POST /api/jobs"). Ilman tätä odottamisen ajan näkyvää tilaa ei voi
+   *  testata lainkaan: mockattu vastaus palaa niin nopeasti, ettei väliaikaa
+   *  ole olemassa. Juuri se väliaika on #220. */
+  delays = new Map<string, number>();
 
   calledWith(method: string, path: string): ApiCall[] {
     return this.calls.filter((c) => c.method === method && c.path === path);
@@ -195,6 +200,9 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
       await route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ error }) });
       return;
     }
+
+    const delayMs = api.delays.get(`${method} ${path}`);
+    if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
 
     const send = (value: unknown, status = 200) =>
       route.fulfill({ status, contentType: "application/json", body: JSON.stringify(value) });
