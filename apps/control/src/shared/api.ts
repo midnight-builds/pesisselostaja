@@ -34,6 +34,8 @@
  *  GET  /api/youtube/broadcasts   -> menneet ja tulevat lähetykset
  *  POST /api/youtube/broadcasts   {jobId|matchId, overrides?, privacy?, playlistId?}
  *                                  -> luo normaalin JA "Selostettu"-version
+ *                                  (tuntematon overrides-avain -> 400, ks.
+ *                                   TITLE_OVERRIDE_KEYS alla)
  *  PATCH  /api/youtube/videos/:id {confirm} -> metatietojen muokkaus
  *  DELETE /api/youtube/videos/:id {confirm} -> poisto (tuhoava)
  *  GET  /api/youtube/playlists    -> soittolistat
@@ -72,3 +74,71 @@ export type PatchKnobsRequest = Partial<ControlKnobs>;
 /** The RTMP ingest that has worked for every broadcast so far; the UI offers
  *  it as the default so the operator only ever pastes a stream key. */
 export const DEFAULT_RTMP_URL = "rtmp://a.rtmp.youtube.com/live2";
+
+/** Otsikon ohitukset: **yksi luettelo, jota molemmat puolet käyttävät** (#231).
+ *
+ *  Palvelin otti ohitukset muodossa `Partial<MatchTemplateInput>` ja levitti ne
+ *  sellaisenaan, joten tuntematon avain meni hiljaa läpi — ja clientin oma
+ *  `TitleOverrides` oli käsin tehty osajoukko, jota ei sitonut mikään yhteinen
+ *  sopimus. Se oli lähellä purra: #223 nimesi `teamLabel`/`opponent` →
+ *  `homeTeam`/`awayTeam`, ja jos vain toinen puoli olisi nimetty, mikään ei
+ *  olisi huutanut — kenttä olisi jäänyt huomiotta ja otsikko syntynyt
+ *  tulospalvelun raakanimillä. Yksikään testi ei olisi huomannut:
+ *  `test-ui/support/state.ts` fake-toteuttaa palvelimen, joten selaintesti
+ *  näkisi väärän avaimen läpimenneenä.
+ *
+ *  Luettelossa on kahdenlaisia avaimia, ja molemmat kuuluvat tänne:
+ *
+ *  - **`homeTeam`, `awayTeam`, `shortVenue`** — ne, joita käyttöliittymän
+ *    "Muokkaa otsikkoa" lähettää. Nimet ovat PAIKKOJA otsikossa (koti ensin,
+ *    vieras toisena, #223), eivät omistajuutta.
+ *  - **`localDate`, `localTime`** — dokumentoitu varatie sille ottelulle, joka
+ *    on listalla ilman kellonaikaa: ilman niitä tekstien muodostus kaatuu
+ *    "alkuaika puuttuu" -virheeseen eikä sitä voi mistään korjata. Ei
+ *    käyttöliittymässä, mutta ei myöskään poistettavissa hiljaa. */
+export const TITLE_OVERRIDE_KEYS = [
+  "homeTeam",
+  "awayTeam",
+  "shortVenue",
+  "localDate",
+  "localTime",
+] as const;
+
+export type TitleOverrideKey = (typeof TITLE_OVERRIDE_KEYS)[number];
+
+export type TitleOverrides = Partial<Record<TitleOverrideKey, string>>;
+
+/** Kelpaako runko-osan `overrides` sellaisenaan malleille.
+ *
+ *  Torjuu tuntemattoman avaimen 400:lla sen sijaan että ohittaisi sen: hiljaa
+ *  huomiotta jäävä ohitus näkyy vasta valmiissa YouTube-otsikossa, ja siihen
+ *  mennessä lähetys on jo olemassa ja linkki jaettu. Virheilmoitus nimeää
+ *  avaimen, koska sen kirjoittaja on joko toinen kehittäjä tai curl. */
+export function validateTitleOverrides(
+  raw: unknown
+): { ok: true; value: TitleOverrides } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: {} };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, error: "overrides on oltava objekti." };
+  }
+  const value: Record<string, string> = {};
+  for (const [key, item] of Object.entries(raw as Record<string, unknown>)) {
+    // Puuttuva arvo on sama kuin puuttuva avain: JSON.stringify pudottaa
+    // `undefined`in, joten tähän päätyy vain nimenomaisesti kirjoitettu.
+    if (item === undefined) continue;
+    if (!(TITLE_OVERRIDE_KEYS as readonly string[]).includes(key)) {
+      return {
+        ok: false,
+        error: `Tuntematon otsikon ohitus "${key}". Sallitut: ${TITLE_OVERRIDE_KEYS.join(", ")}.`,
+      };
+    }
+    if (typeof item !== "string") {
+      return { ok: false, error: `Otsikon ohituksen "${key}" on oltava merkkijono.` };
+    }
+    // Tyhjä merkkijono ei ole ohitus vaan tyhjä kenttä: se tuottaisi otsikon,
+    // jossa joukkueen nimen paikalla ei lue mitään.
+    if (item.trim() === "") continue;
+    value[key] = item.trim();
+  }
+  return { ok: true, value: value as TitleOverrides };
+}

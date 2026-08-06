@@ -70,13 +70,13 @@ import {
   buildJobShareMessage,
   templateInputFromMatch,
   type BroadcastTexts,
-  type MatchTemplateInput,
   type ShareTemplate,
 } from "./templates.js";
 import { ensureShareTemplateFile, readShareTemplate, writeShareTemplate } from "./shareTemplate.js";
 import { ensureVenueSettingsFile, readVenueSettings, writeVenueSettings } from "./venueSettings.js";
 import { uploadPairThumbnails } from "./broadcastThumbnails.js";
 import type { CreateJobRequest, PatchJobRequest, PatchKnobsRequest } from "../shared/api.js";
+import { validateTitleOverrides } from "../shared/api.js";
 import type { ControlSettings, Job, LiveState, NotificationPrefs } from "../shared/types.js";
 
 type LiveAggregator = {
@@ -156,7 +156,10 @@ async function serveApp(pathname: string, res: ServerResponse): Promise<void> {
 interface YoutubeCreateRequest {
   jobId?: string;
   matchId?: number;
-  overrides?: Partial<MatchTemplateInput>;
+  /** `unknown`, koska tämä tulee verkosta: muoto tarkistetaan
+   *  `validateTitleOverrides`illa, eikä tyyppiväite saa esittää tarkistettuna
+   *  jotain mitä ei ole tarkistettu (#231). */
+  overrides?: unknown;
   privacy?: PrivacyStatus;
   playlistId?: string | null;
   streamForNormal?: boolean;
@@ -185,9 +188,15 @@ async function resolveTemplateContext(body: YoutubeCreateRequest): Promise<Templ
   const match = await getMatch(matchId);
   if (!match) return { error: `Ottelua ${matchId} ei löytynyt tulospalvelusta.`, status: 404 };
 
+  // Ohitukset tarkistetaan ENNEN levitystä. Aiemmin ne levitettiin
+  // sellaisenaan (`...overrides`), joten kirjoitusvirhe avaimessa jäi
+  // huomiotta hiljaa ja otsikko syntyi tulospalvelun raakanimillä — vika, joka
+  // näkyy vasta valmiissa YouTube-lähetyksessä (#231).
+  const overrides = validateTitleOverrides(body.overrides);
+  if (!overrides.ok) return { error: overrides.error, status: 400 };
   const input = templateInputFromMatch(
     { ...match, startsAt: job?.startsAt ?? match.startsAt },
-    body.overrides ?? {},
+    overrides.value,
     venueOptions
   );
   try {
