@@ -3,7 +3,7 @@
  *  Everything the UI does to the server goes through here, so error handling
  *  and the SSE reconnect policy live in exactly one place. */
 
-import type { ApiError, CreateJobRequest, PatchJobRequest, PatchKnobsRequest } from "../shared/api";
+import type { ApiError, CreateJobRequest, PatchJobRequest, PatchKnobsRequest, TitleOverrides } from "../shared/api";
 import { DEFAULT_RTMP_URL } from "../shared/api";
 import type {
   ControlKnobs,
@@ -132,13 +132,13 @@ export interface CreatedBroadcastPair extends BroadcastPair {
  *  raakamuoto ("Pesä Ysit, Lappeenranta - Espoon Pesis, 29.7.2026 04 - Liperin
  *  kirkonkylän kenttä 4| LEIRITUOTANTO") vakiintuneen muodon sijaan (#95).
  *
- *  Kentät nimeävät **paikan otsikossa**, eivät omistajuutta: otsikossa on aina
- *  koti ensin ja vieras toisena riippumatta siitä kumpi on oma joukkue (#223). */
-export interface TitleOverrides {
-  homeTeam?: string;
-  awayTeam?: string;
-  shortVenue?: string;
-}
+ *  Tyyppi tulee `shared/api.ts`:stä eikä ole enää käsin tehty osajoukko (#231):
+ *  palvelin torjuu tuntemattoman avaimen 400:lla samasta luettelosta, joten
+ *  uudelleennimeäminen kaataa käännöksen sen sijaan että kenttä jäisi hiljaa
+ *  huomiotta. Kentät nimeävät **paikan otsikossa**, eivät omistajuutta:
+ *  otsikossa on aina koti ensin ja vieras toisena riippumatta siitä kumpi on
+ *  oma joukkue (#223). */
+export type { TitleOverrides };
 
 export interface CreateBroadcastsBody {
   jobId?: string;
