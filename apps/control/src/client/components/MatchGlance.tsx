@@ -118,6 +118,55 @@ function freshTelemetry(live: LiveState): RelayTelemetry | null {
   return now - at > TELEMETRY_STALE_MS ? null : live.telemetry;
 }
 
+/** Ottelun tilanne pesäpallona, ei juoksujen summana (#229).
+ *
+ *  `totalHome`/`totalAway` ovat koko ottelun juoksusummat, ja ne ovat oikea
+ *  luku vain silloin kun jaksoja on yksi — juuri sellaisia olivat kaikki
+ *  koeajot ennen 5.8.2026, joten vika ei voinut näkyä aiemmin. Jaksopelissä
+ *  summa ei ole ottelun tilanne missään vaiheessa: ratkaisevat jaksovoitot, ja
+ *  käynnissä olevalla jaksolla on oma lukunsa. Kortti sanoi 6–12 samalla kun
+ *  selostus sanoi oikein "toinen jakso, tilanne 0–2".
+ *
+ *  Muodon ratkaisee se, ONKO OTTELUSSA USEITA JAKSOJA — ei se, montako jaksoa
+ *  on voitettu. Jaksovoittoihin sidottu ehto meni kahdesti väärin:
+ *
+ *  - `periodsWon` laskee päättyneessä ottelussa mukaan myös viimeisen jakson
+ *    (`packages/core/src/state.ts:54`), joten päättynyt yhden jakson
+ *    leiriottelu olisi sanonut "HP 1 – 0 Ysit jaksoissa · 1. jakso 5–3" —
+ *    isoin luku ruudulla olisi ollut 1–0, ja juuri leirimuoto on se ainoa
+ *    formaatti, joka on oikeasti ajettu livenä.
+ *  - Tasan mennyt jakso ei tuota voittoa kummallekaan, joten 1. jakson 5–5
+ *    jälkeen rivi olisi pudonnut takaisin paljaaksi kahdeksi luvuksi, joka
+ *    näyttää täsmälleen samalta kuin vanha (väärä) summarivi.
+ *
+ *  Yhden jakson ottelussa jakson tilanne ON ottelun tilanne, myös lopussa,
+ *  joten leirimuoto ei tarvitse erikoistapausta. */
+export function scoreValue(match: MatchState): string {
+  const home = match.home ?? "Koti";
+  const away = match.away ?? "Vieras";
+  const current = match.currentPeriod == null ? undefined : match.periodScores[match.currentPeriod];
+
+  // 1. jaksoa pidemmälle edennyt ottelu on jaksopeli. `currentPeriod` on
+  // 0-pohjainen, joten > 0 tarkoittaa että ainakin yksi jakso on takana.
+  const multiPeriod = (match.currentPeriod ?? 0) > 0;
+
+  if (!multiPeriod) {
+    // Yksi jakso: sen tilanne on koko totuus. Ilman jaksodataa summa on tässä
+    // tilanteessa sama asia.
+    const score = current ?? { home: match.totalHome, away: match.totalAway };
+    return `${home} ${score.home} – ${score.away} ${away}`;
+  }
+
+  const won = `${home} ${match.periodsWonHome} – ${match.periodsWonAway} ${away} jaksoissa`;
+  // Päättyneessä ottelussa jaksovoitot OVAT lopputulos: viimeistä jaksoa ei
+  // roikoteta perässä kuin se olisi yhä kesken. `currentPeriod` on tällöinkin
+  // numero (palvelin ei nollaa sitä), joten päättyminen on luettava
+  // `finished`istä eikä jakson puuttumisesta.
+  return match.finished || !current
+    ? won
+    : `${won} · ${periodName(match.currentPeriod)} ${current.home}–${current.away}`;
+}
+
 /** Pistetilanne, jakso ja palot, sisävuoro — kolme tietoa samasta ottelusta.
  *  Yksi merkintä = yksi juoksu; palvelin on jo laskenut nämä, tässä ne vain
  *  asetellaan (CLAUDE.md, `runValueOfSubEvent`). */
@@ -129,11 +178,9 @@ function matchFacts(match: MatchState): Fact[] {
       { label: "Sisävuoro", value: "Ei tietoa", tone: "idle" },
     ];
   }
-  const home = match.home ?? "Koti";
-  const away = match.away ?? "Vieras";
   const palot = match.palot;
   return [
-    { label: "Pisteet", value: `${home} ${match.totalHome} – ${match.totalAway} ${away}`, tone: "idle" },
+    { label: "Pisteet", value: scoreValue(match), tone: "idle" },
     {
       label: "Jakso",
       // Palot kuuluvat vain sisävuorossa olevalle ja nollautuvat joka vuoron

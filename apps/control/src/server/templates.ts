@@ -619,9 +619,18 @@ export function buildBroadcastTexts(
   // voi olla oma kirjaimensa ("SuPo G mustat"), eikä video kuulu sen mukaan.
   // Tämä on `isOwnTeam`in ainoa jäljellä oleva tehtävä — otsikon järjestykseen
   // se ei enää vaikuta (#223), mutta soittolistan valintaan kyllä.
-  const names = [nameAtLevel(pair.home, 0), nameAtLevel(pair.away, 0)];
-  const ownFirst = isOwnTeam(names[1]) && !isOwnTeam(names[0]) ? [names[1], names[0]] : names;
-  const ageGroup = input.ageGroup ?? resolveAgeGroup(...ownFirst, input.seriesName);
+  //
+  // Ehdokkaina ovat operaattorin ohitus JA tulospalvelun raakanimet, tässä
+  // järjestyksessä — ei pelkkä ohitus. Ohituksen tarkoitus on lyhentää nimi
+  // otsikkoon mahtuvaksi ("Pesä Ysit E-tytöt kilpa" → "Pesä Ysit kilpa"), ja
+  // juuri se lyhennys pudottaa ikäluokan kirjaimen. Jos raakanimi katoaisi
+  // ehdokkaista, vastustajan hajakirjain voittaisi ja E-tyttöjen ottelu
+  // päätyisi G-soittolistalle. `seriesName` on viimeinen, koska nimien
+  // kirjaimet voittavat sen aina.
+  const ownIsAway = isOwnTeam(input.away) && !isOwnTeam(input.home);
+  const ownOverride = ownIsAway ? input.awayTeam : input.homeTeam;
+  const rawOwnFirst = ownIsAway ? [input.away, input.home] : [input.home, input.away];
+  const ageGroup = input.ageGroup ?? resolveAgeGroup(ownOverride, ...rawOwnFirst, input.seriesName);
   const playlist = playlistForAgeGroup(ageGroup);
   const matchUrl = matchUrlFor(input.matchId);
   // Sama ottelupari kuin otsikossa (#95): kun operaattori on antanut

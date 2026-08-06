@@ -31,7 +31,11 @@ apps/control/run/
 .incoming/
 pesis-ai-youtube-pack-*.zip
 
-# Playwright UI -testien artefaktit (kuvakaappaukset, raportit)
+# Playwright UI -testien artefaktit (kuvakaappaukset, raportit).
+# Juuritason muodot ovat mukana koska `npx playwright test` repon juuresta
+# kirjoittaa sinne — työhakemistokohtaiset polut eivät riitä (6.8.2026).
+test-results/
+playwright-report/
 apps/control/test-results/
 apps/control/playwright-report/
 apps/control/.playwright-tmp/

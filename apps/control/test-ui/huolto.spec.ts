@@ -230,6 +230,32 @@ test.describe("huoltoarkki", () => {
     await expect(stateWord(page)).toBeVisible();
   });
 
+  /** #226: `.sheet__bar`in padding-lyhenne oli ylä|sivut|ala, ja turva-alue oli
+   *  vahingossa ALA-arvossa. Palkin yläreunaan jäi 12 px, joten iOS:n tilapalkki
+   *  peitti "Sulje"-napin eikä sitä voinut painaa — arkista ei päässyt ulos.
+   *
+   *  Muutos meni alun perin sisään ilman testiä, ja #207 oli täsmälleen samaa
+   *  luokkaa: lovi ei näy missään ennen kuin laitteessa on lovi. Arkki on
+   *  `position: absolute; inset: 0`, joten ruudun pienentäminen ei toista tätä
+   *  — turva-alue on syötettävä `--safe-top`ina, jota CSS lukee `env()`:n
+   *  rinnalla juuri tätä varten. */
+  test("Sulje-nappi ei jää lovon alle", async ({ page, openApp }) => {
+    const SAFE_TOP = 59;
+    await openApp();
+    await page.addStyleTag({ content: `:root { --safe-top: ${SAFE_TOP}px; }` });
+    await openSheet(page);
+
+    const box = await page.getByTestId("sheet-close").boundingBox();
+    expect(box).not.toBeNull();
+    // Napin on alettava turva-alueen ALApuolelta, muuten kosketus osuu iOS:n
+    // omaan tilapalkkiin eikä nappiin.
+    expect(box?.y ?? 0).toBeGreaterThanOrEqual(SAFE_TOP);
+
+    // Ja sen on yhä oikeasti toimittava.
+    await page.getByTestId("sheet-close").click();
+    await expect(page.getByTestId("service-sheet")).toHaveCount(0);
+  });
+
   test("arkki mahtuu puhelimen ruudulle eikä hammasratas ole sormea pienempi", async ({ page, openApp }) => {
     await openApp();
 

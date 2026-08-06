@@ -56,8 +56,13 @@ export function StateCard({ job, live, notify, onCleared }: Props) {
           lähetysparia ei vielä ole, ja ajastetun työn, jolla se on. Ne ovat sama
           hetki operaattorille — ottelu on valittu, lähetys ei ole alkanut —
           eivätkä kaksi korttia (#170). */}
+      {/* `key` sitoo kortin työhön: esikatselu, ohitukset ja luontitila ovat
+          komponentin omaa tilaa, eikä mikään nollaa niitä työn vaihtuessa. Jos
+          työ vaihtuu käymättä välillä tyhjänä (toinen puhelin luo uuden työn),
+          ilman avainta kortti näyttäisi edellisen ottelun tekstit ja veisi sen
+          ohitusnimet uuden ottelun YouTube-otsikkoon. */}
       {job && (job.status === "draft" || job.status === "scheduled") && (
-        <PrepCard job={job} notify={notify} />
+        <PrepCard key={job.id} job={job} notify={notify} />
       )}
 
       {/* Käynnistysvahti tulee valmiustarkistuksen JÄLKEEN: se on lupaus siitä

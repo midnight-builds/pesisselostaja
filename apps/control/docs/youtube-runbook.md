@@ -87,8 +87,15 @@ automaattisesti — PL-tunnistetta ei näytetä eikä kysytä (#176).
 alkamisaika ja thumbnail sellaisina kuin ne YouTubeen syntyvät. Se ei ole
 erillinen hyväksymisvaihe eikä siinä ole rastia — vahvistus on itse
 kaksoisnapautus, koska luonti on peruuttamaton ja ulospäin näkyvä (#171).
-Jos joukkue, vastustaja tai paikka pitää kirjoittaa vakiintuneeseen muotoon,
-se tehdään "Muokkaa otsikkoa" -taitoksessa ennen luontia.
+Jos kotijoukkue, vierasjoukkue tai paikka pitää kirjoittaa vakiintuneeseen
+muotoon, se tehdään "Muokkaa otsikkoa" -taitoksessa ennen luontia — kentät ovat
+**Kotijoukkue**, **Vierasjoukkue** ja **Paikka lyhyesti** (#223). Kentät
+muuttavat vain näytettävää nimeä, eivät järjestystä.
+
+Huomaa: ohitus **ei** poista ikäluokkaa soittolistan päättelystä. Ikäluokka
+luetaan ohituksen lisäksi tulospalvelun raakanimestä, jotta lyhennetty nimi
+("Pesä Ysit E-tytöt kilpa" → "Pesä Ysit kilpa") ei siirrä videota vastustajan
+soittolistalle.
 
 **Syntyvä pari** on aina molemmat lähetykset kerralla:
 
@@ -124,7 +131,7 @@ Kanavan nykyinen toimiva muoto on:
 
 **Kotijoukkue on aina ensin ja vierasjoukkue toisena** (#223) — myös silloin kun
 Pesä Ysit on vieraana. Aiempi sääntö "oma joukkue on aina vasemmalla" on
-poistettu 5.8.2026 operaattorin päätöksellä; ala palauttaa sita.
+poistettu 5.8.2026 operaattorin päätöksellä; **älä palauta sitä.**
 
 Esimerkki (Pesä Ysit vieraana):
 

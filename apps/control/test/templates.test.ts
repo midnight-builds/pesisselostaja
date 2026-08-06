@@ -339,6 +339,42 @@ describe("soittolistan valinta", () => {
     expect(texts.playlistId).toBe(PLAYLISTS_2026.E.id);
   });
 
+  // #223:n uudelleennimeäminen katkaisi tämän kerran: ikäluokan ehdokkaiksi
+  // jäivät pelkät ohitetut nimet, jolloin operaattorin lyhennys pudotti
+  // kirjaimen ja vastustajan hajakirjain voitti. Raakanimen on pysyttävä
+  // ehdokkaana ohituksen RINNALLA, ei sen sijasta.
+  it("operaattorin lyhentämä nimi ei siirrä videota vastustajan soittolistalle", () => {
+    const texts = buildBroadcastTexts(
+      campMatch({
+        home: "Pesä Ysit E-tytöt kilpa",
+        away: "SuPo G mustat",
+        // Lyhennetty mahtuakseen otsikkobudjettiin — ilman "E-tytöt".
+        homeTeam: "Pesä Ysit kilpa",
+      })
+    );
+    expect(texts.ageGroup).toBe("E");
+    expect(texts.playlistId).toBe(PLAYLISTS_2026.E.id);
+  });
+
+  it("ikäluokka löytyy raakanimestä myös kun oma joukkue on vieraana ja nimi ohitettu", () => {
+    const texts = buildBroadcastTexts(
+      campMatch({
+        home: "SuPo G mustat",
+        away: "Pesä Ysit E-tytöt kilpa",
+        // Ohitus ei osu OWN_TEAM_PATTERNiin lainkaan.
+        awayTeam: "P9 kilpa",
+      })
+    );
+    expect(texts.ageGroup).toBe("E");
+  });
+
+  it("ohitus saa yhä ratkaista ikäluokan kun raakanimi ei kerro sitä", () => {
+    const texts = buildBroadcastTexts(
+      campMatch({ home: "Pesä Ysit", away: "Tahko", homeTeam: "Pesä Ysit D-tytöt" })
+    );
+    expect(texts.ageGroup).toBe("D");
+  });
+
   it("ei erehdy tavallisesta sanasta joka alkaa ikäluokan kirjaimella", () => {
     expect(resolveAgeGroup("Kempele Esikko")).toBeNull();
     expect(resolveAgeGroup("Pesä Ysit E-tytöt")).toBe("E");

@@ -90,7 +90,10 @@ test.describe("ottelunaikainen", () => {
     await expect(page.locator(".fact")).toHaveCount(5);
     await expect(glance).toContainText("Selostus");
     await expect(glance).toContainText("Raakalähetys");
-    await expect(glance).toContainText("KUV 5 – 3 LAP");
+    // Jaksovoitot ja käynnissä oleva jakso, ei juoksujen summaa (#229):
+    // fikstuurin summa on 5–3, ja juuri se ei saa näkyä.
+    await expect(glance).toContainText("KUV 1 – 0 LAP jaksoissa · 2. jakso 2–2");
+    await expect(glance).not.toContainText("KUV 5 – 3 LAP");
     await expect(glance).toContainText("2. jakso, 2 paloa");
     // Sisävuoro on oma tietonsa: palot kuuluvat vain lyövälle joukkueelle.
     await expect(page.locator(".fact").nth(4)).toContainText("LAP");
