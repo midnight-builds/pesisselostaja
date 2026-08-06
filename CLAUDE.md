@@ -108,18 +108,27 @@ Kaksi asiaa, jotka ovat menneet väärin nimenomaan tässä:
 
 Älä esitä koettelematonta varmana; kerro kumpaa jokin on.
 
-**Koeteltu** (kahdesti, 31.7. ja 1.8.2026, vanhalla käyttöliittymällä):
-lähetysparin luonti, käsikäynnistys, ajo ja itsesammutus normaalilla
-`ended`-polulla. 1.8. myös raakalähetys sulkeutui itsestään.
+**Koeteltu** (31.7., 1.8. ja 5.8.2026): lähetysparin luonti, ajo ja
+itsesammutus normaalilla `ended`-polulla. 1.8. myös raakalähetys sulkeutui
+itsestään.
+
+**5.8.2026, ottelu 136765 — ensimmäinen ajo uudella käyttöliittymällä**
+(95 min, puhdas). Tässä koeteltiin ensi kertaa:
+
+- **Koko uusi käyttöliittymä**, tilakortti ottelupäivän polulla.
+- **Käynnistysvahdin automaattinen käynnistys.** Vahti käynnisti klo 17.58
+  ottelun alkaessa 18.00; kahdessa aiemmassa ajossa käynnistys oli käsin.
+  Vahdin itsekorjaus (oletus pois → päälle) laukeaa vasta kun työ on
+  `scheduled` — pelkkä ottelun valinta ei arma mitään, vaan valmistelu on
+  vietävä loppuun.
+- Katselmuskorjaukset #199–#209.
 
 **Ei koeteltu kertaakaan:**
 
-- **Koko uusi käyttöliittymä.** Yksikään rivi tilakortista ei ole ollut
-  oikeassa ottelussa.
-- **Käynnistysvahdin automaattinen käynnistys** — molemmat aiemmat ajot
-  käynnistettiin käsin. Uudessa käyttöliittymässä vahti on ainoa
-  käynnistystapa.
-- **Hard stopin siivous** — molemmat lopetukset tulivat normaalina polkuna.
+- **Hard stopin siivous** — kaikki kolme lopetusta tulivat normaalina polkuna.
+- **Työn sidonnan sovittelu ja ristiriitavaroitus** (#118). Ohjaamo ei
+  kirjoittanut 5.8. lokiin riviäkään koko ottelun aikana (ks. #232), joten
+  ajosta ei jäänyt näyttöä suuntaan eikä toiseen.
 
 **Valmiustarkistuksen sidontarivi on viimeinen suoja** ennen kuin selostus
 menee väärään otteluun: se pysäyttää käynnistyksen, jos `.env.relay` osoittaa
