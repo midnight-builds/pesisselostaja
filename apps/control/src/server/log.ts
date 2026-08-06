@@ -52,6 +52,8 @@ export type ControlEventCode =
   | "job.created"
   | "job.status"
   | "job.reconciled"
+  | "job.reopened"
+  | "job.conflict"
   // Relayn kosketuspinnat (relay.ts)
   | "relay.env"
   | "relay.unit"

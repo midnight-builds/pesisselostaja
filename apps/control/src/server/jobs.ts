@@ -8,7 +8,7 @@
 // writeRelayEnv.
 import { randomUUID } from "node:crypto";
 import { createStore } from "./store.js";
-import { logInfo, logWarn } from "./log.js";
+import { logInfo } from "./log.js";
 import { DEFAULT_RTMP_URL } from "../shared/api.js";
 import type { Job, JobCleanup, JobStatus } from "../shared/types.js";
 import type { CreateJobRequest, PatchJobRequest } from "../shared/api.js";
@@ -448,15 +448,6 @@ export async function reconcileOpenJobs(
     });
     return changed ? next : jobs;
   });
-  // Sovittelu on ohjaamon oma teko eikä operaattorin, joten se on varoitus eikä
-  // tapahtuma: se sulkee työn jonka joku jätti auki, ja juuri se sulkeminen
-  // selittää jälkikäteen miksi työ on `cancelled` vaikka lähetys ajettiin (#118).
-  for (const job of closed) {
-    logWarn(
-      "job.reconciled",
-      `Avoin työ suljettiin sovittelussa: ${job.home} – ${job.away} (työ ${job.id}, ottelu ${job.matchId}) → ${job.status}. Relay ajaa: ${runningMatchId ?? "ei mitään"}.`
-    );
-  }
   return closed;
 }
 

@@ -1149,6 +1149,19 @@ a.btn--wide {
   flex: none;
   color: var(--faint);
 }
+/* Kumpi prosessi rivin kirjoitti (#232). Kapea ja himmeä: se on rivin
+   sivutieto, ei sen sisältö — mutta ilman sitä ohjaamon oma rivi hukkuu relayn
+   satoihin riveihin, eikä "ohjaamo ei tehnyt mitään" erotu siitä että relay ei
+   kertonut mitään. Kiinteä leveys pitää viestisarakkeen suorassa. */
+.logtail__unit {
+  flex: none;
+  width: 3.5em;
+  color: var(--faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: 1px;
+}
 .logtail__msg {
   min-width: 0;
   overflow-wrap: anywhere;

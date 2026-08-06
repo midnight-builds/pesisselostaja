@@ -17,6 +17,7 @@ import {
   nudgeDelay,
 } from "./relay.js";
 import { readLog } from "./journal.js";
+import { logError, logInfo, reason } from "./log.js";
 import { mayRepairBinding, runControlPreflight } from "./preflight.js";
 import { watchUrlForVideo } from "./youtubeUrl.js";
 import { hasBroadcastPair } from "../shared/jobState.js";
@@ -791,7 +792,7 @@ async function main(): Promise<void> {
     // request funnels through this try/catch, on top of whatever a handler
     // does itself.
     route(req, res, live).catch((err) => {
-      console.error("[control]", req.method, req.url, err);
+      logError("server.error", `${req.method} ${req.url}: ${reason(err)}`);
       if (!res.headersSent) {
         // YouTube-ketjun virheillä on omat merkityksensä, jotka hukkuisivat
         // geneeriseen 500:aan: puuttuva vahvistus on asiakkaan virhe (400),
@@ -813,7 +814,10 @@ async function main(): Promise<void> {
   });
 
   server.listen(CONFIG.port, CONFIG.host, () => {
-    console.log(`[control] kuuntelee osoitteessa http://${CONFIG.host}:${CONFIG.port}/`);
+    // Käynnistysrivi on lokin ainoa kiintopiste ohjaamon uudelleenkäynnistykselle:
+    // sen perusteella tietää jälkikäteen, mitkä hiljaiset minuutit selittyvät
+    // sillä että prosessi oli juuri lähtenyt uudelleen liikkeelle (#232).
+    logInfo("server.start", `Ohjaamo kuuntelee osoitteessa http://${CONFIG.host}:${CONFIG.port}/`);
   });
 
   const shutdown = () => {
@@ -833,6 +837,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("[control] käynnistys epäonnistui:", err);
+  logError("server.error", `Käynnistys epäonnistui: ${reason(err)}`);
   process.exit(1);
 });
