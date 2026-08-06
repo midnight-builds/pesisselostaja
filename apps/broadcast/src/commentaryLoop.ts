@@ -1038,8 +1038,22 @@ export class CommentaryLoop {
     }
   }
 
+  /** Effective timeout per fetch shape (#156).
+   *
+   *  Only the full fetch is floored at `pollIntervalMs`. That floor used to
+   *  apply to every size, and it silently made the constants something other
+   *  than the effective timeouts: `max(1000, 3000)` would have shipped 3 s. Its
+   *  rationale (#89) conflated cadence with latency — how often we ask says
+   *  nothing about how long an answer may take. It stays for the full fetch,
+   *  where #47's acceptance criterion is real: the control file can raise the
+   *  poll interval past 10 s live, and a timeout under the cadence would abort
+   *  fetches the cadence itself expects to be slow. */
   private apiTimeoutMs(size: FetchSize): number {
-    if (size === "delta") return DELTA_FETCH_TIMEOUT_MS;
+    if (size === "delta") {
+      return this.consecutiveFetchFailures >= FETCH_FAILURE_ALARM_STREAK
+        ? DELTA_FETCH_TIMEOUT_SLOW_MS
+        : DELTA_FETCH_TIMEOUT_MS;
+    }
     if (size === "meta") return META_FETCH_TIMEOUT_MS;
     return Math.max(FULL_FETCH_TIMEOUT_MS, this.pollIntervalMs);
   }
