@@ -96,6 +96,24 @@ const FULL_FETCH_TIMEOUT_MS = 10_000;
  *
  *  NOT floored at `pollIntervalMs` — see apiTimeoutMs(). */
 const DELTA_FETCH_TIMEOUT_MS = 1_000;
+/** The delta timeout after FETCH_FAILURE_ALARM_STREAK consecutive failures —
+ *  i.e. the pre-#156 value, given back exactly when the tight one might be
+ *  wrong.
+ *
+ *  The measurement above says a delta answers in ~80 ms or not at all, but it
+ *  was taken against a HEALTHY API. If that ever stops holding — an API that
+ *  genuinely answers in 1–4 s — a fixed 1 s limit would abort every single
+ *  delta, and the only thing still getting through would be the 60 s resync
+ *  full fetch. Narration would run up to a minute behind while the log filled
+ *  with timeouts that look identical to the stuck connections this retune was
+ *  aimed at. A streak is the one signal that separates the two cases: stuck
+ *  connections came in ones (31/31 retries succeeded first try, #156), so a
+ *  third failure in a row means the assumption itself is off.
+ *
+ *  Deliberately NOT a general backoff: the poll cadence still does not flex in
+ *  a failure streak, and an aborted poll still waits for the next tick rather
+ *  than retrying at once. That is issue #52, and it belongs there. */
+const DELTA_FETCH_TIMEOUT_SLOW_MS = 4_000;
 /** Metadata (roster) fetch timeout: the startup fetch and the in-match roster
  *  refresh (`maybeRefreshRoster`).
  *
