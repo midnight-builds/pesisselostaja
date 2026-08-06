@@ -26,6 +26,10 @@ export interface ControlConfig {
    *  status/log/control files the running relay writes (DESIGN.md). */
   relayRunDir: string;
   relayUnit: string;
+  /** Ohjaamon OMA unit. Luetaan lokinäkymään relayn rinnalla (#232): ohjaamon
+   *  teot ovat ottelupäivän toinen puolisko, ja ilman niitä lokista näkyy
+   *  vain se, mitä systemd sanoo prosessista. */
+  controlUnit: string;
   /** Pinned, detached worktree the relay actually runs from (issue #59) —
    *  never this checkout. See CLAUDE.md "Running". */
   deployDir: string;
@@ -64,6 +68,7 @@ export const CONFIG: ControlConfig = {
   relayEnvPath: process.env.CONTROL_RELAY_ENV ?? join(REPO_ROOT, "apps/broadcast/.env.relay"),
   relayRunDir: process.env.CONTROL_RELAY_RUN_DIR ?? join(REPO_ROOT, "apps/broadcast/run/"),
   relayUnit: process.env.CONTROL_RELAY_UNIT ?? "pesisselostaja-relay.service",
+  controlUnit: process.env.CONTROL_UNIT ?? "pesisselostaja-control.service",
   deployDir: process.env.CONTROL_DEPLOY_DIR ?? join(homedir(), "relay-deploy"),
   stateDir: process.env.CONTROL_STATE_DIR ?? join(CONTROL_ROOT, "run/"),
   clientDist: join(CONTROL_ROOT, "dist/client"),
