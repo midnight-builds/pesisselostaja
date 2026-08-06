@@ -69,37 +69,48 @@ const WELCOME_FILLER_MS = 90 * 1000;
  *  the ceiling proposed in #47 and still well under the failure windows that
  *  decide whether the relay gives up. */
 const FULL_FETCH_TIMEOUT_MS = 10_000;
-/** Timeout for the small responses: the delta poll and the one-off metadata
- *  fetch (issue #81, retuned in #156).
+/** Delta poll timeout — the fetch that runs EVERY poll (issues #81, #156).
  *
- *  #47's "be patient, the body grows" reasoning does not carry over here: a
- *  delta returns only the new events (a 304 not even that), and it is the fetch
- *  that runs EVERY poll — the one that decides how fast a hung API is noticed.
+ *  1 s, retuned from 4 s on the relay's own measurements. #47's "be patient,
+ *  the body grows" reasoning never applied here: a delta returns only the new
+ *  events, a 304 not even that.
  *
- *  STILL 4 s — #156 measured but deliberately did not retune. What that
- *  measurement found, so the next attempt starts from facts:
+ *  What a whole match measured (136745, 1.8.2026, 104 min, `api.poll_window`):
+ *  median 72–83 ms, max typically 90–132 ms — and 67 aborts at exactly 4.0 s,
+ *  i.e. the timeout firing, not the API answering slowly. Nothing lands in
+ *  between. A delta either answers inside ~150 ms or the connection is stuck,
+ *  so this constant is a stuck-connection detector, not a slowness allowance;
+ *  1 s is ~7x the observed max and ~6x the p99 measured under camp-day load
+ *  against four simultaneously live matches (p50 96 ms, p99 169 ms, max 303 ms;
+ *  a cold TCP+TLS+DNS connection was 173 ms).
  *
- *  - The value here is NOT the effective timeout. `apiTimeoutMs()` floors it at
- *    `pollIntervalMs` (3 s by default), so shipped behaviour is
- *    `max(4000, 3000) = 4000` — and lowering this constant to 1 s would have
- *    produced 3 s, not 1 s. Any retune must decide about that floor first.
- *  - The earlier comment here claimed "aborting a delta costs nothing". True of
- *    CORRECTNESS — the retry re-fetches and the 60 s resync backstops it — but
- *    false of LATENCY. run() resumes the cadence from now
- *    (`Math.max(nextPollAt + interval, Date.now())`), so the retry fires
- *    IMMEDIATELY and an abort costs the whole timeout in dead waiting, at the
- *    head of the speech chain (fetch -> state -> TTS -> speak). Match 145918
- *    (31.7.2026) spent 31 x 4 s there, every retry succeeding on the first
- *    attempt — stuck connections, not slow ones, so waiting never helped.
- *  - Response times are nowhere near this: 120 samples against four
- *    simultaneously live matches under camp-day load gave p50 96 ms, p99
- *    169 ms, max 303 ms; a cold TCP+TLS+DNS connection measured 173 ms.
+ *  What this buys, stated honestly: NOT a faster retry. run() sets the next
+ *  poll time before the fetch (see the cadence line in run()), so a 4 s abort
+ *  overran the 3 s cadence and the retry fired immediately, while a 1 s abort
+ *  fits inside the cadence and the retry waits out the remaining ~2 s. The gain
+ *  per stuck poll is therefore ~1 s of latency at the head of the speech chain
+ *  (fetch -> state -> TTS -> speak) — and, more to the point, a poll cadence
+ *  that stops being knocked out of step ~0.6 times a minute. Retrying an
+ *  aborted poll immediately instead of waiting for the cadence is the rest of
+ *  the win, but it needs a backoff for a genuinely dead API first: issue #52.
  *
- *  Not retuned yet because those samples are curl's, and this constant also
- *  governs `fetchMatchMetadata` — including the unguarded startup call whose
- *  timeout can kill a live broadcast (#158). `api.poll_window` now reports the
- *  relay's own per-size spread; retune from that, after #158. */
-const SMALL_FETCH_TIMEOUT_MS = 4_000;
+ *  NOT floored at `pollIntervalMs` — see apiTimeoutMs(). */
+const DELTA_FETCH_TIMEOUT_MS = 1_000;
+/** Metadata (roster) fetch timeout: the startup fetch and the in-match roster
+ *  refresh (`maybeRefreshRoster`).
+ *
+ *  4 s, i.e. the pre-#156 value, DELIBERATELY left alone. It used to share a
+ *  constant with the delta poll, which is why #156's retune had to split them:
+ *  every number in that measurement is a delta's. Metadata is fetched a handful
+ *  of times per match and returns both full rosters, so a delta's spread says
+ *  nothing about its spread — and being wrong here is expensive and silent. A
+ *  refresh that always times out is swallowed by design (`maybeRefreshRoster`
+ *  keeps the names it has), so the relay would speak stale player numbers for
+ *  the whole match with nothing but a warning line to show for it.
+ *
+ *  Retune this from `api.poll_window`'s own `meta` bucket once a match's worth
+ *  of it exists — not from the delta numbers. */
+const META_FETCH_TIMEOUT_MS = 4_000;
 
 /** Käynnistyshakujen uudelleenyritysten odotukset (#158).
  *
@@ -128,6 +139,13 @@ const STARTUP_RETRY_ERROR_AFTER = 3;
  *
  *  Otos on ikkunakohtainen (nollataan joka yhteenvedossa), joten se ei kasva
  *  ottelun mitassa eikä vuoda muistia. */
+/** The three fetch shapes, each with its own timeout and its own duration
+ *  sample. They were two ("small" / "full") until #156: lumping the delta poll
+ *  together with the metadata fetch meant the shared sample was ~99 % deltas —
+ *  3 s cadence against a handful of roster reads — so the metadata fetch was
+ *  invisible in the very number used to justify its timeout. */
+export type FetchSize = "delta" | "meta" | "full";
+
 export function formatFetchDurations(samples: number[]): string {
   if (samples.length === 0) return "ei onnistuneita hakuja";
   const sorted = [...samples].sort((a, b) => a - b);
@@ -381,22 +399,26 @@ export class CommentaryLoop {
      *
      *  Kaksi syytä pitää ne erillään, ja molemmat opittiin kantapään kautta:
      *
-     *  1. Niitä säätelee ERI raja (`FULL_FETCH_TIMEOUT_MS` 10 s vs.
-     *     `SMALL_FETCH_TIMEOUT_MS` 4 s). Yhteen taulukkoon sekoitettuna
-     *     raportoitu maksimi voi olla haku, jota arvioitava raja ei koske —
-     *     ja koko #156 on olemassa siksi, ettei rajaa perusteltaisi väärällä
-     *     joukolla. Sekoitus olisi ollut sama kehäpäätelmä uudessa muodossa.
+     *  1. Niitä säätelee ERI raja (`FULL_FETCH_TIMEOUT_MS` 10 s,
+     *     `META_FETCH_TIMEOUT_MS` 4 s, `DELTA_FETCH_TIMEOUT_MS` 1 s). Yhteen
+     *     taulukkoon sekoitettuna raportoitu maksimi voi olla haku, jota
+     *     arvioitava raja ei koske — ja koko #156 on olemassa siksi, ettei
+     *     rajaa perusteltaisi väärällä joukolla. Sekoitus olisi ollut sama
+     *     kehäpäätelmä uudessa muodossa.
      *  2. Ne ovat oikeasti eri kokoisia: täyshaku palauttaa koko historian
-     *     (mitattu ~32 kt ottelun lopussa), delta vain uudet tapahtumat.
+     *     (mitattu ~32 kt ottelun lopussa), meta molemmat kokoonpanot, delta
+     *     vain uudet tapahtumat.
      *
-     *  "small" kattaa delta-pollin JA molemmat `fetchMatchMetadata`-kutsut,
-     *  koska sama raja säätelee niitä — käynnistyksen haku mukaan lukien, joka
-     *  on juuri se kutsu jonka aikakatkaisu voi tappaa lähetyksen (#158).
+     *  Delta ja meta erotettiin toisistaan vasta #156:n virityksessä. Ne
+     *  jakoivat rajan ja siten myös otoksen, ja koska deltoja tulee 3 s välein
+     *  ja metahakuja kourallinen koko otteluun, yhteinen mediaani oli
+     *  käytännössä pelkkää deltaa — eli metahaun rajaa oltiin perustelemassa
+     *  luvuilla, joissa metahakua ei näkynyt.
      *
      *  Epäonnistuneita EI lasketa: niiden kesto on määritelmällisesti
      *  aikakatkaisu, joten ne vetäisivät jakauman kohti sitä rajaa, jota tällä
      *  on tarkoitus arvioida. Ne näkyvät erikseen `virhe`-lukumääränä. */
-    fetchMs: { small: [] as number[], full: [] as number[] },
+    fetchMs: { delta: [] as number[], meta: [] as number[], full: [] as number[] },
   };
   private lastPollSummaryAtMs = Date.now();
   /** Consecutive failed poll cycles; reset by the first success. Drives the
@@ -538,7 +560,8 @@ export class CommentaryLoop {
       `Pollit ${Math.round(elapsedMs / 1000)} s aikana: ${w.polls} kpl ` +
         `(304 ${w.notModified}, delta ${w.delta}, täyshaku ${w.full}, reset ${w.resets}, virhe ${w.failures}), ` +
         `${w.newEvents} uutta tapahtumaa, ${answered}, historiassa ${this.history.size}, ` +
-        `kestot pieni ${formatFetchDurations(w.fetchMs.small)} / täys ${formatFetchDurations(w.fetchMs.full)}, ` +
+        `kestot delta ${formatFetchDurations(w.fetchMs.delta)} / meta ${formatFetchDurations(w.fetchMs.meta)} / ` +
+        `täys ${formatFetchDurations(w.fetchMs.full)}, ` +
         `kursori ${cursor}.`
     );
     this.lastPollSummaryAtMs = Date.now();
@@ -551,7 +574,7 @@ export class CommentaryLoop {
       failures: 0,
       lastEventCount: null,
       newEvents: 0,
-      fetchMs: { small: [], full: [] },
+      fetchMs: { delta: [], meta: [], full: [] },
     };
   }
 
@@ -560,7 +583,7 @@ export class CommentaryLoop {
    *  Kutsutaan haun ympäriltä eikä `fetchEventsForPoll`in ympäriltä, jotta luku
    *  on API:n vasteaika eikä sisällä paikallista yhdistelyä — juuri sitä lukua
    *  vasten aikakatkaisu asetetaan. */
-  private async timedFetch<T>(size: "small" | "full", fetch: () => Promise<T>): Promise<T> {
+  private async timedFetch<T>(size: FetchSize, fetch: () => Promise<T>): Promise<T> {
     const startedAt = Date.now();
     const result = await fetch();
     // Vasta onnistumisen jälkeen: heitto ohittaa tämän rivin, eikä
@@ -653,11 +676,11 @@ export class CommentaryLoop {
 
     let meta: MatchMetadata;
     try {
-      meta = await this.timedFetch("small", () =>
+      meta = await this.timedFetch("meta", () =>
         fetchMatchMetadata(this.config.matchId, {
           apiBase: this.config.apiBase,
           apiKey: this.config.apiKey,
-          timeoutMs: this.apiTimeoutMs("small"),
+          timeoutMs: this.apiTimeoutMs("meta"),
         })
       );
     } catch (err) {
@@ -776,11 +799,11 @@ export class CommentaryLoop {
     const startupMeta = await this.startupFetch(
       "Ottelutietojen haku",
       () =>
-        this.timedFetch("small", () =>
+        this.timedFetch("meta", () =>
           fetchMatchMetadata(this.config.matchId, {
             apiBase: this.config.apiBase,
             apiKey: this.config.apiKey,
-            timeoutMs: this.apiTimeoutMs("small"),
+            timeoutMs: this.apiTimeoutMs("meta"),
           })
         ),
       signal
@@ -958,14 +981,6 @@ export class CommentaryLoop {
     this.consecutiveFetchFailures = 0;
   }
 
-  /** Effective API fetch timeout for a fetch of the given size: the matching
-   *  base constant, but never shorter than the current poll interval (which the
-   *  control file can raise past either base value live). A timeout below the
-   *  cadence would abort fetches the very cadence expects to be slow — issue
-   *  #47's acceptance criterion, which holds for both sizes.
-   *
-   *  "small" covers the delta poll and the startup metadata fetch; "full" the
-   *  whole-history fetch. Why they differ: SMALL_FETCH_TIMEOUT_MS (#81). */
   /** Runs a startup fetch that must not be allowed to kill the process (#158).
    *
    *  By the time `run()` starts, ffmpeg is already pushing picture to the
@@ -1005,9 +1020,10 @@ export class CommentaryLoop {
     }
   }
 
-  private apiTimeoutMs(size: "small" | "full"): number {
-    const base = size === "full" ? FULL_FETCH_TIMEOUT_MS : SMALL_FETCH_TIMEOUT_MS;
-    return Math.max(base, this.pollIntervalMs);
+  private apiTimeoutMs(size: FetchSize): number {
+    if (size === "delta") return DELTA_FETCH_TIMEOUT_MS;
+    if (size === "meta") return META_FETCH_TIMEOUT_MS;
+    return Math.max(FULL_FETCH_TIMEOUT_MS, this.pollIntervalMs);
   }
 
   /** Full events fetch: replaces the local history and re-bases the delta
@@ -1124,10 +1140,10 @@ export class CommentaryLoop {
     }
     const afterMs = this.deltaCursor?.afterMs ?? this.lastServerDateMs - AFTER_MARGIN_MS;
     const after = this.deltaCursor?.after ?? formatHelsinkiTimestamp(new Date(afterMs));
-    const res = await this.timedFetch("small", () =>
+    const res = await this.timedFetch("delta", () =>
       fetchLiveEvents(this.config.matchId, {
         apiBase: this.config.apiBase,
-        timeoutMs: this.apiTimeoutMs("small"),
+        timeoutMs: this.apiTimeoutMs("delta"),
         skipDelay: true,
         after,
         etag: this.deltaCursor?.after === after ? (this.deltaCursor.etag ?? undefined) : undefined,
