@@ -161,11 +161,9 @@ function matchFacts(match: MatchState): Fact[] {
       { label: "Sisävuoro", value: "Ei tietoa", tone: "idle" },
     ];
   }
-  const home = match.home ?? "Koti";
-  const away = match.away ?? "Vieras";
   const palot = match.palot;
   return [
-    { label: "Pisteet", value: `${home} ${match.totalHome} – ${match.totalAway} ${away}`, tone: "idle" },
+    { label: "Pisteet", value: scoreValue(match), tone: "idle" },
     {
       label: "Jakso",
       // Palot kuuluvat vain sisävuorossa olevalle ja nollautuvat joka vuoron
