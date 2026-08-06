@@ -1012,7 +1012,11 @@ a.btn--wide {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 16px calc(12px + env(safe-area-inset-top));
+  /* Turva-alue kuuluu YLÄreunaan: kolmen arvon lyhenne on ylä|sivut|ala, ja
+     inset-top oli ala-arvossa — palkki jäi loven alle ja "Sulje" oli iOS:n
+     tilapalkin peitossa, eli painettavissa vain paperilla. var() ensin,
+     env() varana (#207): Playwrightin WebKit antaa env():lle nollan. */
+  padding: calc(12px + var(--safe-top, env(safe-area-inset-top))) 16px 12px;
   border-bottom: 1px solid var(--line);
 }
 .sheet__title {
