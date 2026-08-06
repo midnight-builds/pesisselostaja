@@ -67,6 +67,47 @@ describe("scoreValue", () => {
     expect(value).toBe("HP 3 – 4 Ysit");
   });
 
+  // `periodsWon` laskee päättyneessä ottelussa mukaan myös viimeisen jakson,
+  // joten jaksovoittoihin sidottu ehto olisi sanonut "HP 1 – 0 Ysit jaksoissa"
+  // yhden jakson leiriottelun lopussa. Leirimuoto on ainoa formaatti, joka on
+  // oikeasti ajettu livenä — tämän on pysyttävä oikein.
+  it("päättynyt yhden jakson ottelu näyttää juoksut, ei kuviteltua jaksovoittoa", () => {
+    const value = scoreValue(
+      match({
+        periodScores: [{ home: 5, away: 3 }],
+        totalHome: 5,
+        totalAway: 3,
+        periodsWonHome: 1,
+        periodsWonAway: 0,
+        currentPeriod: 0,
+        finished: true,
+        battingTeam: null,
+        palot: null,
+      })
+    );
+    expect(value).toBe("HP 5 – 3 Ysit");
+    expect(value).not.toContain("jaksoissa");
+  });
+
+  // Tasan mennyt jakso ei tuota voittoa kummallekaan. Rivi ei silti saa pudota
+  // paljaaksi kahdeksi luvuksi, joka näyttää samalta kuin 1. jakson tilanne.
+  it("tasan mennyt jakso ei piilota sitä että jakso on pelattu", () => {
+    const value = scoreValue(
+      match({
+        periodScores: [
+          { home: 5, away: 5 },
+          { home: 0, away: 2 },
+        ],
+        totalHome: 5,
+        totalAway: 7,
+        periodsWonHome: 0,
+        periodsWonAway: 0,
+        currentPeriod: 1,
+      })
+    );
+    expect(value).toBe("HP 0 – 0 Ysit jaksoissa · 2. jakso 0–2");
+  });
+
   it("supervuoro nimetään oikein", () => {
     const value = scoreValue(
       match({
@@ -85,18 +126,23 @@ describe("scoreValue", () => {
     expect(value).toBe("HP 1 – 1 Ysit jaksoissa · supervuoro 1–0");
   });
 
-  it("päättyneessä ottelussa jaksovoitot ovat lopputulos, eikä perään tule mitään", () => {
+  // Palvelin EI nollaa `currentPeriod`ia ottelun päättyessä (`matches.ts:278`
+  // palauttaa aina numeron kun tapahtumia on), joten päättyminen on luettava
+  // `finished`istä. Aiempi versio tästä testistä asetti `currentPeriod: null`
+  // ja vartioi siten haaraa, jota tuotannossa ei ajeta koskaan.
+  it("päättyneessä jaksopelissä jaksovoitot ovat lopputulos, eikä perään tule mitään", () => {
     const value = scoreValue(
       match({
         periodsWonHome: 0,
         periodsWonAway: 2,
-        currentPeriod: null,
+        currentPeriod: 1,
         finished: true,
         battingTeam: null,
         palot: null,
       })
     );
     expect(value).toBe("HP 0 – 2 Ysit jaksoissa");
+    expect(value).not.toContain("2. jakso");
   });
 
   it("tuntemattomat joukkueet eivät riko riviä", () => {
