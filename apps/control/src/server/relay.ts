@@ -270,6 +270,14 @@ export async function writeRelayEnv(job: Job): Promise<void> {
 
   // 0600: this file holds a YouTube stream key and the ElevenLabs API key.
   await writeFileAtomic(CONFIG.relayEnvPath, `${lines.join("\n")}\n`, 0o600);
+  // Sidonta lokiin — ilman avaimia. Ottelu ja raakalähetys riittävät
+  // vastaamaan siihen kysymykseen jota jälkikäteen kysytään ("mihin otteluun
+  // ohjaamo oli sidottu kun lähetys alkoi"), ja stream key on salaisuus, jota
+  // ei kirjoiteta lokiin missään muodossa (#176).
+  logInfo(
+    "relay.env",
+    `Sidottiin työhön ${job.id}: ottelu ${job.matchId}, raakalähetys ${job.sourceUrl ?? "puuttuu"}, kohde ${job.targetStreamKey ? "asetettu" : "puuttuu"}.`
+  );
 }
 
 // -------------------------------------------------------------- control file
