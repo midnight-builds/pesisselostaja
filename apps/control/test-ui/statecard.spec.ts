@@ -155,4 +155,27 @@ test.describe("tilakortti", () => {
     );
     await expect(stateWord(page)).toHaveText(jobStateWord("arming").word);
   });
+  /** #220: luonti kestää sekunteja (kaksi YouTube-lähetystä), ja sen ajan
+   *  ruudulla ei liikkunut mikään — rivit vain harmaantuivat. Operaattori luki
+   *  sen kaatumiseksi ottelupäivänä 5.8.2026. */
+  test("luonnin ajan painettu rivi kertoo mitä odotetaan", async ({ page, api, openApp }) => {
+    api.delays.set("POST /api/jobs", 2000);
+    await openApp(fixture.liveState({ job: null, health: "idle", headline: "Ei aktiivista lähetystä" }));
+
+    const rows = page.locator(".mrow");
+    const chosen = rows.first();
+    await chosen.click();
+
+    // Merkki on PAINETUSSA rivissä: leiripäivänä listassa on toistasataa
+    // riviä, eikä "jotain luodaan" kerro kumpaa ottelua odotetaan.
+    await expect(chosen).toHaveClass(/mrow--busy/);
+    await expect(chosen).toHaveAttribute("aria-busy", "true");
+    await expect(chosen.locator(".mrow__meta")).toContainText("Luodaan lähetyksiä");
+    // Muut rivit pysyvät lukossa, kuten ennenkin — tuplaklikin estää kone.
+    await expect(rows.nth(1)).toBeDisabled();
+    await expect(rows.nth(1)).not.toHaveClass(/mrow--busy/);
+
+    // Ja luonnin valmistuttua kortti siirtyy valmisteluun.
+    await expect(stateWord(page)).toHaveText(jobStateWord("draft").word, { timeout: 10_000 });
+  });
 });

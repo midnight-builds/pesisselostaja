@@ -402,6 +402,44 @@ select.field__input {
 .mrow:disabled {
   opacity: 0.5;
 }
+/* Luonnissa oleva rivi (#220). Harmaantuminen yksin luetaan kaatumiseksi, ei
+   työksi: lähetysparin luonti kestää sekunteja, ja niiden ajan MIKÄÄN ei
+   liikkunut ruudulla. Painettu rivi pidetään täydessä kirkkaudessa muiden
+   himmetessä — silloin näkyy myös MIKÄ ottelu on luonnissa, ei vain että jokin
+   on. */
+.mrow--busy:disabled {
+  opacity: 1;
+}
+.mrow--busy .mrow__meta {
+  color: var(--ink);
+}
+/* Sykkivä piste kertoo että työ on yhä kesken. Ainoa liike koko näkymässä,
+   joten se kestää olla hillitty; `prefers-reduced-motion` pysäyttää sen, ja
+   teksti kantaa saman tiedon ilman animaatiota. */
+.mrow__pulse {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  animation: mrow-pulse 1.1s ease-in-out infinite;
+}
+@keyframes mrow-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mrow__pulse {
+    animation: none;
+    opacity: 1;
+  }
+}
 .mrow__time {
   flex: none;
   font-size: 16px;
