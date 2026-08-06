@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ControlKnobs, LiveState, MatchState, RelayTelemetry } from "../../shared/types";
 import { TELEMETRY_STALE_MS } from "../../shared/types";
+import { watchUrlForVideo } from "../../shared/youtubeUrl";
 import { api } from "../api";
 import { periodName, seconds } from "../format";
 import { NarrationList } from "./NarrationList";
@@ -34,6 +35,12 @@ interface Fact {
   label: string;
   value: string;
   tone: Tone;
+  /** Kun rivi koskee lähetystä, joka on olemassa YouTubessa: otsikko on linkki
+   *  siihen (#228). Linkki on nimenomaan OTSIKOSSA eikä omalla rivillään —
+   *  kortti on kertasilmäys (#186), eikä siihen lisätä nappirivejä. Kaksi
+   *  ainoaa riviä joilla tämä on mahdollista ovat myös ne kaksi lähetystä,
+   *  joten pari pysyy symmetrisenä ilman uutta rakennetta. */
+  href?: string | null;
 }
 
 /** Kuuluuko selostus juuri nyt.
@@ -308,9 +315,14 @@ export function MatchGlance({ live, notify }: Props) {
 
   const telemetry = freshTelemetry(live);
   const alerts = alertsFor(live);
+  // Osoitteet TYÖSTÄ eikä telemetriasta: telemetria katoaa vanhentuessaan, ja
+  // linkin katoaminen kesken ottelun olisi juuri se hetki, jolloin sitä
+  // tarvitaan. Selostettu lähetys on työn kohde, raakalähetys sen lähde.
+  const narratedUrl = live.job?.targetVideoId ? watchUrlForVideo(live.job.targetVideoId) : null;
+  const rawUrl = live.job?.sourceUrl ?? null;
   const facts = [
-    narrationFact(telemetry, live.relay.active),
-    sourceFact(telemetry, live.relay.active),
+    { ...narrationFact(telemetry, live.relay.active), href: narratedUrl },
+    { ...sourceFact(telemetry, live.relay.active), href: rawUrl },
     ...matchFacts(live.match),
   ];
 
@@ -325,7 +337,18 @@ export function MatchGlance({ live, notify }: Props) {
       <dl className="facts">
         {facts.map((fact) => (
           <div key={fact.label} className={`fact fact--${fact.tone}`}>
-            <dt className="fact__label">{fact.label}</dt>
+            <dt className="fact__label">
+              {/* Uusi välilehti: ohjaamo on puhelimen kotinäytöllä PWA:na, eikä
+                  siitä saa navigoida pois kesken ajon. Alleviivaus tulee
+                  luokasta, jotta linkki tunnistuu myös ilman väriä. */}
+              {fact.href ? (
+                <a className="fact__link" href={fact.href} target="_blank" rel="noreferrer">
+                  {fact.label}
+                </a>
+              ) : (
+                fact.label
+              )}
+            </dt>
             <dd className="fact__value">{fact.value}</dd>
           </div>
         ))}

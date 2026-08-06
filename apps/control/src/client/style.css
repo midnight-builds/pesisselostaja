@@ -721,6 +721,18 @@ select.field__input {
   letter-spacing: 0.06em;
   color: var(--faint);
 }
+/* Otsikko linkkinä lähetykseen (#228). Kosketusalue täyttää --tapin
+   pystysuunnassa, vaikka teksti on pientä: sormella osutaan rivin korkeuteen,
+   ei kirjainten korkeuteen. Alleviivaus on tässä toiminnallinen — se on ainoa
+   merkki joka erottaa linkin muista otsikoista myös ilman väriä. */
+.fact__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap);
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .fact__value {
   flex: 1;
   min-width: 0;
@@ -963,6 +975,14 @@ select.field__input {
   font-size: 14px;
   font-weight: 700;
   line-height: 1.35;
+}
+/* Kaksi lähetystä allekkain, ei rinnakkain: 393 px:n ruudulla kaksi
+   puolikasta nappia katkaisisi juuri ne sanat, jotka erottavat lähetykset
+   toisistaan (#228). */
+.ended__links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .ended__why {
   display: flex;

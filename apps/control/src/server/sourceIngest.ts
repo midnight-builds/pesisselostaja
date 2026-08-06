@@ -29,7 +29,7 @@ import {
   type BroadcastSummary,
   type StreamStatus,
 } from "./youtube.js";
-import { parseYouTubeVideoId } from "./youtubeUrl.js";
+import { parseYouTubeVideoId } from "../shared/youtubeUrl.js";
 
 /** Perusväli. Riittävän tiheä, jotta katvekuvapäätös (vaihe 2) tapahtuu
  *  puolessa minuutissa, ja riittävän harva, ettei kiintiö ole uhattuna. */

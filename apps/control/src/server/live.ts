@@ -50,7 +50,7 @@ import { SOURCE_INGEST_STALE_MS } from "./sourceIngest.js";
 import { getSystemState } from "./system.js";
 import { NarrationTimeline, readRelayStatus } from "./telemetry.js";
 import { transitionBroadcast, type TransitionResult } from "./youtube.js";
-import { parseYouTubeVideoId } from "./youtubeUrl.js";
+import { parseYouTubeVideoId } from "../shared/youtubeUrl.js";
 import { CONFIG } from "./config.js";
 
 /** systemd, machine vitals and journald: cheap, local, and the things that go

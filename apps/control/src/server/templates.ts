@@ -15,7 +15,7 @@
  *     mitä ilman omaa `run/share-template.json`ia käytetään. */
 
 import { venueDisplayName, type VenueNameOptions } from "@pesisselostaja/core";
-import { watchUrlForVideo } from "./youtubeUrl.js";
+import { watchUrlForVideo } from "../shared/youtubeUrl.js";
 import type { JobShareMessage } from "../shared/types.js";
 
 /** Kaikki käyttäjän näkemät ajat ovat Suomen paikallisaikaa (runbook
