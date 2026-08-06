@@ -1,18 +1,36 @@
-/** The relay's log, read back out of journald.
+/** Ottelupäivän loki, luettuna journaldista.
  *
  *  The relay logs to stdout via apps/broadcast/src/log.ts, which prefixes every
  *  line with a Finnish local time ("[16.40.44] Sammutetaan…"). systemd captures
  *  that verbatim, so journald gives us both a trustworthy timestamp
  *  (__REALTIME_TIMESTAMP) and a redundant, timezone-ambiguous one inside the
- *  text. We keep the first and strip the second. */
+ *  text. We keep the first and strip the second.
+ *
+ *  **Molemmat unitit, yhtenä virtana (#232).** Ottelupäivä on relayn ja
+ *  ohjaamon vuoropuhelua, ja pelkkä relayn loki kertoo siitä toisen puolen:
+ *  5.8.2026 vahti käynnisti lähetyksen itse, eikä siitä jäänyt ohjaamon
+ *  unittiin riviäkään. journald lomittaa unitit aikajärjestykseen itse, joten
+ *  yksi kutsu riittää — ja kumpi rivin kirjoitti, luetaan tietueesta
+ *  (`_SYSTEMD_USER_UNIT`) eikä koodista, jotta unitin nimeäminen ei muutu
+ *  jäsentimen arvaukseksi. */
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { LogLine } from "../shared/types.js";
+import type { LogLine, LogUnit } from "../shared/types.js";
+import { CONFIG } from "./config.js";
 
 const run = promisify(execFile);
 
-const RELAY_UNIT = "pesisselostaja-relay";
+/** journald palauttaa unitin aina `.service`-päätteineen; CONFIGin arvo voi olla
+ *  kummassa muodossa tahansa, koska journalctl hyväksyy molemmat. */
+function unitBase(unit: string): string {
+  return unit.replace(/\.service$/, "");
+}
+
+function unitOf(record: JournalRecord): LogUnit {
+  const raw = record._SYSTEMD_USER_UNIT ?? record._SYSTEMD_UNIT ?? "";
+  return unitBase(raw) === unitBase(CONFIG.controlUnit) ? "control" : "relay";
+}
 
 /** journald can hand back a lot; the phone renders a scrollback, not an
  *  archive. */
@@ -31,6 +49,10 @@ export interface JournalRecord {
   MESSAGE?: string | number[];
   PRIORITY?: string;
   __REALTIME_TIMESTAMP?: string;
+  /** Kumpi unit rivin kirjoitti. Käyttäjän unitilla journald täyttää
+   *  `_SYSTEMD_USER_UNIT`in; järjestelmäunitilla vain `_SYSTEMD_UNIT`in. */
+  _SYSTEMD_USER_UNIT?: string;
+  _SYSTEMD_UNIT?: string;
 }
 
 /** journald emits MESSAGE as an array of bytes when the line isn't valid UTF-8.
@@ -105,6 +127,7 @@ export function toLogLine(record: JournalRecord): LogLine | null {
     level: inferLevel(msg, Number.isFinite(priorityRaw) ? priorityRaw : null, code),
     code,
     msg,
+    unit: unitOf(record),
   };
 }
 
@@ -126,7 +149,20 @@ export async function readLog(opts: { limit?: number; level?: string } = {}): Pr
   try {
     ({ stdout } = await run(
       "journalctl",
-      ["--user", "-u", RELAY_UNIT, "-o", "json", "-n", String(scan), "--no-pager"],
+      [
+        "--user",
+        "-u",
+        CONFIG.relayUnit,
+        // Toinen `-u` ei rajaa vaan lisää: journald palauttaa molempien unittien
+        // rivit yhtenä aikajärjestyksessä olevana virtana.
+        "-u",
+        CONFIG.controlUnit,
+        "-o",
+        "json",
+        "-n",
+        String(scan),
+        "--no-pager",
+      ],
       // A long window of relay logs comfortably exceeds execFile's 1 MB default,
       // and the failure mode there is a truncated-output error — i.e. no log at
       // all exactly when the log matters most.

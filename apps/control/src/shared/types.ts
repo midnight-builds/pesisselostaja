@@ -187,12 +187,20 @@ export interface ThumbnailOutcomes {
   narrated: ThumbnailOutcome;
 }
 
+/** Kumpi prosessi rivin kirjoitti (#232). Loki on kahden unitin lomitus, ja
+ *  ilman tätä "ohjaamo ei tehnyt mitään" ja "relay ei kertonut mitään" näyttävät
+ *  lokinäkymässä samalta — juuri se ero jota 5.8.2026 jälkikäteen etsittiin. */
+export type LogUnit = "relay" | "control";
+
 export interface LogLine {
   ts: string;
   level: "debug" | "info" | "warn" | "error";
   /** Stable event code once phase B lands; null while parsing journald prose. */
   code: string | null;
   msg: string;
+  /** Valinnainen: vanhempi palvelin ei lähetä tätä, eikä puuttuva kenttä saa
+   *  jättää lokinäkymää tyhjäksi. */
+  unit?: LogUnit;
 }
 
 export interface SystemState {
