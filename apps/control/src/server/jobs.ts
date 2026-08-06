@@ -8,6 +8,7 @@
 // writeRelayEnv.
 import { randomUUID } from "node:crypto";
 import { createStore } from "./store.js";
+import { logInfo, logWarn } from "./log.js";
 import { DEFAULT_RTMP_URL } from "../shared/api.js";
 import type { Job, JobCleanup, JobStatus } from "../shared/types.js";
 import type { CreateJobRequest, PatchJobRequest } from "../shared/api.js";
@@ -120,6 +121,22 @@ function applyPatch(
   return { jobs: nextJobs, job };
 }
 
+/** Yhden työn tilasiirtymä lokiin (#232).
+ *
+ *  Tilasiirtymät ovat ottelupäivän runko: niistä näkee milloin ottelu valittiin,
+ *  milloin lähetyspari syntyi, milloin lähetys todella lähti liikkeelle ja miten
+ *  se päättyi. Kirjataan täällä eikä kutsupaikoissa, koska polkuja on monta
+ *  (operaattorin nappi, ajastin, poller, sovittelu) ja jokainen niistä kulkee
+ *  tämän tiedoston läpi — kutsupaikkakohtainen lokitus jättäisi juuri sen polun
+ *  pimeäksi, jota kukaan ei muistanut. */
+function logTransition(from: JobStatus, to: JobStatus, job: Job, how: string): void {
+  if (from === to) return;
+  logInfo(
+    "job.status",
+    `${job.home} – ${job.away} (työ ${job.id}, ottelu ${job.matchId}): ${from} → ${to} [${how}]`
+  );
+}
+
 /** Runs a status/field change through applyPatch and store.update in one
  *  shot, returning the job as it ended up. `store.update`'s reducer must
  *  return the array to persist — applyPatch's thrown errors (not-found,
@@ -131,11 +148,18 @@ async function updateJob(
   opts: { force?: boolean } = {}
 ): Promise<Job> {
   let job!: Job;
+  let before: JobStatus | null = null;
   await store.update((jobs) => {
+    // Luetaan reducerin sisällä, koska se on ainoa hetki jossa "ennen" ja
+    // "jälkeen" ovat varmasti samasta kirjoituksesta. Lokitus itse tehdään
+    // vasta updaten jälkeen: reducer voidaan ajaa uudelleen, ja kahdesti
+    // kirjattu siirtymä olisi valheellinen jälki.
+    before = jobs.find((j) => j.id === id)?.status ?? null;
     const result = applyPatch(jobs, id, patch, opts);
     job = result.job;
     return result.jobs;
   });
+  if (before !== null) logTransition(before, job.status, job, opts.force ? "patch, force" : "patch");
   return job;
 }
 
@@ -171,6 +195,10 @@ export async function createJob(req: CreateJobRequest): Promise<Job> {
     note: req.note ?? null,
   };
   await store.update((jobs) => [...jobs, job]);
+  logInfo(
+    "job.created",
+    `Ottelu valittu: ${job.home} – ${job.away} (työ ${job.id}, ottelu ${job.matchId}, alkaa ${job.startsAt ?? "?"}).`
+  );
   return job;
 }
 
@@ -186,6 +214,7 @@ export async function patchJob(id: string, patch: PatchJobRequest): Promise<Job>
  *  uudelleen. */
 export async function markJobScheduled(id: string): Promise<Job> {
   let job!: Job;
+  let moved = false;
   await store.update((jobs) => {
     const idx = jobs.findIndex((j) => j.id === id);
     if (idx === -1) throw new Error(`Työtä ${id} ei löytynyt.`);
@@ -194,8 +223,10 @@ export async function markJobScheduled(id: string): Promise<Job> {
     const next = jobs.slice();
     job = { ...job, status: "scheduled" };
     next[idx] = job;
+    moved = true;
     return next;
   });
+  if (moved) logTransition("draft", "scheduled", job, "lähetyspari luotu");
   return job;
 }
 
@@ -227,10 +258,15 @@ export const ARMING_STALE_MS = 60 * 60_000;
  *  rule. */
 export async function markRunStarted(matchId: number): Promise<Job | null> {
   let started: Job | null = null;
+  // Kentässä eikä muuttujassa: TS kaventaa callbackissa asetetun `let`-muuttujan
+  // takaisin `never`iksi, koska sijoitusta ei nähdä ohjausvirrassa. Kentän
+  // ilmoitettu tyyppi säilyy, joten lokitus lukee sen ilman castia.
+  const seen: { from: JobStatus | null; job: Job | null } = { from: null, job: null };
   await store.update((jobs) => {
     const idx = jobs.findIndex((j) => j.matchId === matchId && isBlocking(j.status));
     if (idx === -1) return jobs;
     const current = jobs[idx];
+    seen.from = current.status;
     // Idempotent: the scheduler stamps the job it just started, and the poller
     // stamps whatever the relay turns out to be running. Both paths run for a
     // scheduler start, and the second one must not write.
@@ -247,8 +283,10 @@ export async function markRunStarted(matchId: number): Promise<Job | null> {
       startedAt: current.startedAt ?? new Date().toISOString(),
     };
     started = next[idx];
+    seen.job = started;
     return next;
   });
+  if (seen.job && seen.from) logTransition(seen.from, seen.job.status, seen.job, "relay ajaa tätä ottelua");
   return started;
 }
 
@@ -286,6 +324,7 @@ export async function reopenRunningJob(matchId: number): Promise<Job | null> {
     reopened = next[idx];
     return next;
   });
+  if (reopened) logTransition("finished", "live", reopened, "relay palasi samaan otteluun");
   return reopened;
 }
 
@@ -303,14 +342,19 @@ export async function reopenRunningJob(matchId: number): Promise<Job | null> {
  *  are freeing the slot, not ending a particular run. */
 export async function closeRunningJob(jobId: string | null = null): Promise<Job | null> {
   let closed: Job | null = null;
+  // Ks. markRunStarted: kentässä, jotta ilmoitettu tyyppi säilyy callbackin yli.
+  const seen: { from: JobStatus | null; job: Job | null } = { from: null, job: null };
   await store.update((jobs) => {
     const idx = jobs.findIndex((j) => isBlocking(j.status) && (jobId === null || j.id === jobId));
     if (idx === -1) return jobs;
+    seen.from = jobs[idx].status;
     const next = jobs.slice();
     next[idx] = closeJob(jobs[idx], new Date().toISOString());
     closed = next[idx];
+    seen.job = closed;
     return next;
   });
+  if (seen.job && seen.from) logTransition(seen.from, seen.job.status, seen.job, "ajo päättyi");
   return closed;
 }
 
@@ -404,6 +448,15 @@ export async function reconcileOpenJobs(
     });
     return changed ? next : jobs;
   });
+  // Sovittelu on ohjaamon oma teko eikä operaattorin, joten se on varoitus eikä
+  // tapahtuma: se sulkee työn jonka joku jätti auki, ja juuri se sulkeminen
+  // selittää jälkikäteen miksi työ on `cancelled` vaikka lähetys ajettiin (#118).
+  for (const job of closed) {
+    logWarn(
+      "job.reconciled",
+      `Avoin työ suljettiin sovittelussa: ${job.home} – ${job.away} (työ ${job.id}, ottelu ${job.matchId}) → ${job.status}. Relay ajaa: ${runningMatchId ?? "ei mitään"}.`
+    );
+  }
   return closed;
 }
 
