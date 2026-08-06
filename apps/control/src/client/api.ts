@@ -127,14 +127,16 @@ export interface CreatedBroadcastPair extends BroadcastPair {
   thumbnails?: ThumbnailOutcomes;
 }
 
-/** Otsikon ja thumbnailin tiedot joita pesistulokset-API ei tunne: oman
- *  joukkueen esitysnimi, vastustajan lyhenne ja lyhyt paikkamuoto. Ilman näitä
- *  otsikoksi tulee tulospalvelun raakamuoto
- *  ("Pesä Ysit, Lappeenranta - Espoon Pesis, 29.7.2026 04 - Liperin
- *  kirkonkylän kenttä 4| LEIRITUOTANTO") vakiintuneen muodon sijaan (#95). */
+/** Otsikon ja thumbnailin tiedot joita pesistulokset-API ei tunne: joukkueiden
+ *  esitysnimet ja lyhyt paikkamuoto. Ilman näitä otsikoksi tulee tulospalvelun
+ *  raakamuoto ("Pesä Ysit, Lappeenranta - Espoon Pesis, 29.7.2026 04 - Liperin
+ *  kirkonkylän kenttä 4| LEIRITUOTANTO") vakiintuneen muodon sijaan (#95).
+ *
+ *  Kentät nimeävät **paikan otsikossa**, eivät omistajuutta: otsikossa on aina
+ *  koti ensin ja vieras toisena riippumatta siitä kumpi on oma joukkue (#223). */
 export interface TitleOverrides {
-  teamLabel?: string;
-  opponent?: string;
+  homeTeam?: string;
+  awayTeam?: string;
   shortVenue?: string;
 }
 

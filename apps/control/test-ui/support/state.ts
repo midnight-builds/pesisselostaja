@@ -420,11 +420,11 @@ export function preflightWithBlockers(): PreflightResult {
 
 /** Tekstipaketti jonka esikatselureitti palauttaa. `matchup` heijastaa
  *  otsikko-ohitukset, jotta selaintesti näkee menivätkö ne palvelimelle. */
-export function broadcastTexts(p: { teamLabel?: string; opponent?: string; shortVenue?: string } = {}) {
-  const own = p.teamLabel ?? "Kuvitteellisen Kylän Veikot";
-  const opponent = p.opponent ?? "Lapinlahden Peikot";
+export function broadcastTexts(p: { homeTeam?: string; awayTeam?: string; shortVenue?: string } = {}) {
+  const home = p.homeTeam ?? "Kuvitteellisen Kylän Veikot";
+  const away = p.awayTeam ?? "Lapinlahden Peikot";
   const place = p.shortVenue ?? "Testikenttä 1";
-  const matchup = `${own} - ${opponent}`;
+  const matchup = `${home} - ${away}`;
   return {
     title: `${matchup}, 29.7.2026 ${place}`,
     narratedTitle: `Selostettu ${matchup}, 29.7.2026 ${place}`,
@@ -443,8 +443,8 @@ export function broadcastTexts(p: { teamLabel?: string; opponent?: string; short
     scheduledLocal: "29.7.2026 klo 8:30",
     matchUrl: "https://www.pesistulokset.fi/ottelut/999001",
     matchup,
-    ownTeam: own,
-    opponentTeam: opponent,
+    homeTeam: home,
+    awayTeam: away,
     venue: place,
     thumbnailHeadline: matchup,
     thumbnailDatetime: "29.7.2026 klo 8:30",

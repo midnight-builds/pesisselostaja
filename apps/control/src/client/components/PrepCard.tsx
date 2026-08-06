@@ -215,8 +215,8 @@ export function PrepCard({ job, notify }: Props) {
  *  Kentät ovat tyhjiä siihen asti että operaattori kirjoittaa niihin, ja
  *  puhelimen ruudulla harmaa esimerkkiteksti lukeutuu kentän arvoksi: kun se
  *  oli kovakoodattu toisen ottelun joukkueiksi, vaikutelma oli että ohjaamo on
- *  sitonut työn väärään otteluun. Palvelin kertoo esikatselussa kumpi joukkue
- *  on oma ja kumpi vastustaja (`teamPair`), joten päättelyä ei tehdä täällä.
+ *  sitonut työn väärään otteluun. Palvelin kertoo esikatselussa parin puolikkaat
+ *  valmiiksi (`teamPair`: koti ensin, vieras toisena), joten päättelyä ei tehdä täällä.
  *  Tuntematon arvo jätetään tyhjäksi — väärä placeholder on pahempi kuin ei
  *  placeholderia. */
 function TitleFields({
@@ -237,21 +237,21 @@ function TitleFields({
     <details className="prep__edit">
       <summary>Muokkaa otsikkoa</summary>
       <label className="field">
-        <span className="field__label">Oma joukkue</span>
+        <span className="field__label">Kotijoukkue</span>
         <input
           className="field__input"
-          value={draft.teamLabel ?? ""}
-          placeholder={texts.ownTeam}
-          onChange={(e) => setDraft({ ...draft, teamLabel: trimmed(e.target.value) })}
+          value={draft.homeTeam ?? ""}
+          placeholder={texts.homeTeam}
+          onChange={(e) => setDraft({ ...draft, homeTeam: trimmed(e.target.value) })}
         />
       </label>
       <label className="field">
-        <span className="field__label">Vastustaja</span>
+        <span className="field__label">Vierasjoukkue</span>
         <input
           className="field__input"
-          value={draft.opponent ?? ""}
-          placeholder={texts.opponentTeam}
-          onChange={(e) => setDraft({ ...draft, opponent: trimmed(e.target.value) })}
+          value={draft.awayTeam ?? ""}
+          placeholder={texts.awayTeam}
+          onChange={(e) => setDraft({ ...draft, awayTeam: trimmed(e.target.value) })}
         />
       </label>
       <label className="field">

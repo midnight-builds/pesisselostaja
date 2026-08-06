@@ -33,8 +33,10 @@ export const PLAYLISTS_2026: Record<AgeGroup, { id: string; name: string }> = {
 
 export type AgeGroup = "G" | "E" | "F" | "D";
 
-/** Otsikon vasen puoli on aina *oma* joukkue, vastustaja oikealla, riippumatta
- *  siitä kumpi on koti- ja kumpi vierasjoukkue tulospalvelussa. */
+/** Tunnistaa oman seuran joukkueen. **Ei vaikuta otsikon järjestykseen** —
+ *  siinä koti on aina ensin (#223). Käytetään enää siihen, että ikäluokka (ja
+ *  sitä kautta soittolista) luetaan ensisijaisesti omasta joukkueesta:
+ *  vastustajan nimessä voi olla oma kirjaimensa ("SuPo G mustat"). */
 export const OWN_TEAM_PATTERN = /pes[äa]\s*ysit/i;
 
 export const NARRATED_PREFIX = "Selostettu ";
@@ -275,11 +277,12 @@ export interface MatchTemplateInput {
   awayShort?: string | null;
   homeCode?: string | null;
   awayCode?: string | null;
-  /** Otsikon vasen puoli, esim. "Pesä Ysit E-tytöt kilpa". Oletuksena se
-   *  joukkueista joka tunnistuu omaksi, muuten kotijoukkue. */
-  teamLabel?: string | null;
-  /** Otsikon oikea puoli. Oletuksena toinen joukkue. */
-  opponent?: string | null;
+  /** Otsikon ensimmäinen paikka = kotijoukkueen esitysnimi, esim.
+   *  "Pesä Ysit E-tytöt kilpa". Oletuksena tulospalvelun kotijoukkue. */
+  homeTeam?: string | null;
+  /** Otsikon toinen paikka = vierasjoukkueen esitysnimi. Oletuksena
+   *  tulospalvelun vierasjoukkue. */
+  awayTeam?: string | null;
   /** Suomen paikallisaika. Annetaan joko nämä tai `startsAt`. */
   localDate?: string | null;
   localTime?: string | null;
@@ -315,13 +318,13 @@ export interface BroadcastTexts {
   /** Ottelupari otsikon nimillä ("Pesä Ysit F-pojat - IPV"), jaettavaa viestiä
    *  varten — sama pari jonka otsikkokin saa. */
   matchup: string;
-  /** Ottelupari erikseen, samalla päättelyllä kuin `matchup` (`teamPair`).
-   *  Käyttöliittymän "Muokkaa otsikkoa" -kenttien placeholderit tarvitsevat
-   *  nimenomaan sen kumpi joukkue on oma ja kumpi vastustaja — pariviivan
+  /** Ottelupari erikseen, samalla päättelyllä kuin `matchup` (`teamPair`):
+   *  koti ensin, vieras toisena. Käyttöliittymän "Muokkaa otsikkoa" -kentät
+   *  tarvitsevat puolikkaat erikseen placeholdereiksi — pariviivan
    *  irrottaminen `matchup`ista clientissä olisi sama päättely toiseen kertaan
    *  ja rikkoutuisi heti kun joukkueen nimessä on väliviiva (#221). */
-  ownTeam: string;
-  opponentTeam: string;
+  homeTeam: string;
+  awayTeam: string;
   /** videos.recordingDetails.locationDescription -kenttään. */
   venue: string;
   /** Valmiit syötteet renderThumbnail({ headline, datetime, venue, narrated }):lle. */
@@ -411,26 +414,26 @@ export function templateInputFromMatch(
 
 // --- Kaavat -----------------------------------------------------------------
 
-/** Kumpi joukkue on "meidän" ja kumpi vastustaja. Otsikossa oma joukkue on
- *  aina vasemmalla riippumatta koti/vieras-asetelmasta (runbookin esimerkit). */
-function teamPair(input: MatchTemplateInput): { own: TeamNames; opponent: TeamNames } {
+/** Otsikon ottelupari: **kotijoukkue ensin, vierasjoukkue toisena** — aina
+ *  (#223). Aiempi sääntö "oma joukkue on aina vasemmalla" on poistettu:
+ *  operaattori luki vieraana pelaavan oman joukkueen ensimmäisenä paikkana
+ *  viaksi. Kutsujan antamat `homeTeam`/`awayTeam` ovat esitysnimen ohituksia
+ *  samoihin paikkoihin, eivät järjestyksen ohituksia. */
+function teamPair(input: MatchTemplateInput): { home: TeamNames; away: TeamNames } {
   const home: TeamNames = { full: input.home, short: input.homeShort, code: input.homeCode };
   const away: TeamNames = { full: input.away, short: input.awayShort, code: input.awayCode };
-  const ownIsAway = isOwnTeam(input.away) && !isOwnTeam(input.home);
-  const own = ownIsAway ? away : home;
-  const opponent = ownIsAway ? home : away;
   return {
-    // Kutsujan antama teamLabel/opponent ohittaa päättelyn, mutta säilyttää
-    // silti lyhennysmuodot kun ne osuvat samaan joukkueeseen.
-    own: input.teamLabel ? { full: input.teamLabel, short: own.short, code: own.code } : own,
-    opponent: input.opponent ? { full: input.opponent, short: opponent.short, code: opponent.code } : opponent,
+    // Ohitus vaihtaa vain täyden nimen; lyhennysmuodot säilyvät, jotta pitkä
+    // otsikko lyhenee edelleen oikein.
+    home: input.homeTeam ? { ...home, full: input.homeTeam } : home,
+    away: input.awayTeam ? { ...away, full: input.awayTeam } : away,
   };
 }
 
-/** Ottelupari annetulla lyhennystasolla, esim. "Pesä Ysit E-tytöt kilpa - Tahko". */
+/** Ottelupari annetulla lyhennystasolla, esim. "Hyvinkään Tahko - Pesä Ysit E-tytöt kilpa". */
 export function buildMatchupLabel(input: MatchTemplateInput, level: ShorteningLevel): string {
-  const { own, opponent } = teamPair(input);
-  return `${nameAtLevel(own, level)} - ${nameAtLevel(opponent, level)}`;
+  const { home, away } = teamPair(input);
+  return `${nameAtLevel(home, level)} - ${nameAtLevel(away, level)}`;
 }
 
 /** `<joukkue/sarja> - <vastustaja>, <pvm> <lyhyt paikka>` (runbook
@@ -611,19 +614,21 @@ export function buildBroadcastTexts(
 ): BroadcastTexts {
   const { date, time } = localPartsOf(input);
   const title = buildTitle(input);
+  const pair = teamPair(input);
   // Ikäluokka luetaan ensisijaisesti OMASTA joukkueesta: vastustajan nimessä
   // voi olla oma kirjaimensa ("SuPo G mustat"), eikä video kuulu sen mukaan.
-  const ownFirst = isOwnTeam(input.away) && !isOwnTeam(input.home) ? [input.away, input.home] : [input.home, input.away];
-  const ageGroup =
-    input.ageGroup ?? resolveAgeGroup(input.teamLabel, ...ownFirst, input.seriesName);
+  // Tämä on `isOwnTeam`in ainoa jäljellä oleva tehtävä — otsikon järjestykseen
+  // se ei enää vaikuta (#223), mutta soittolistan valintaan kyllä.
+  const names = [nameAtLevel(pair.home, 0), nameAtLevel(pair.away, 0)];
+  const ownFirst = isOwnTeam(names[1]) && !isOwnTeam(names[0]) ? [names[1], names[0]] : names;
+  const ageGroup = input.ageGroup ?? resolveAgeGroup(...ownFirst, input.seriesName);
   const playlist = playlistForAgeGroup(ageGroup);
   const matchUrl = matchUrlFor(input.matchId);
   // Sama ottelupari kuin otsikossa (#95): kun operaattori on antanut
-  // teamLabel/opponent-arvot ("Pesä Ysit F-pojat - IPV"), viestin pitää käyttää
+  // homeTeam/awayTeam-arvot ("IPV - Pesä Ysit F-pojat"), viestin pitää käyttää
   // niitä eikä tulospalvelun raakoja nimiä — viesti ja otsikko puhuvat samasta
   // pelistä samoilla nimillä. Lyhennystaso 0: viestissä ei ole pituusrajaa.
   const matchup = buildMatchupLabel(input, 0);
-  const pair = teamPair(input);
   const venue = [input.venue, input.city].filter((v): v is string => Boolean(v)).join(", ");
 
   return {
@@ -639,8 +644,8 @@ export function buildBroadcastTexts(
     scheduledLocal: formatScheduledLocal(date, time),
     matchUrl,
     matchup,
-    ownTeam: nameAtLevel(pair.own, 0),
-    opponentTeam: nameAtLevel(pair.opponent, 0),
+    homeTeam: nameAtLevel(pair.home, 0),
+    awayTeam: nameAtLevel(pair.away, 0),
     venue: venue || (input.shortVenue ?? ""),
     thumbnailHeadline: buildThumbnailHeadline(input),
     thumbnailDatetime: formatScheduledLocal(date, time),

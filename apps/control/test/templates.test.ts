@@ -23,8 +23,11 @@ import {
   type MatchTemplateInput,
 } from "../src/server/templates.js";
 
-/** Runbookin oma esimerkkiottelu: oma joukkue on vieraana, jotta otsikon
- *  "oma joukkue ensin" -sääntö tulee samalla testatuksi. */
+/** Runbookin oma esimerkkiottelu. Oma joukkue on tässä **vieraana**, mikä on
+ *  koko tiedoston tärkein yksityiskohta: se on se asetelma jossa vanha "oma
+ *  joukkue ensin" -sääntö ja uusi "koti ensin" -sääntö (#223) eroavat. Älä
+ *  vaihda omaa joukkuetta kotipuolelle — silloin nämä testit menisivät läpi
+ *  myös vanhalla säännöllä. */
 function campMatch(overrides: Partial<MatchTemplateInput> = {}): MatchTemplateInput {
   return {
     matchId: 146210,
@@ -42,10 +45,24 @@ function campMatch(overrides: Partial<MatchTemplateInput> = {}): MatchTemplateIn
 }
 
 describe("otsikko", () => {
-  it("noudattaa runbookin kaavaa <joukkue> - <vastustaja>, <pvm> <lyhyt paikka>", () => {
+  it("noudattaa runbookin kaavaa <koti> - <vieras>, <pvm> <lyhyt paikka>", () => {
     expect(buildTitle(campMatch())).toBe(
-      "Pesä Ysit E-tytöt kilpa - Hyvinkään Tahko, 15.7.2026 Tenavaleiri Kempele"
+      "Hyvinkään Tahko - Pesä Ysit E-tytöt kilpa, 15.7.2026 Tenavaleiri Kempele"
     );
+  });
+
+  // #223: aiemmin oma joukkue nostettiin aina ensimmäiseksi. Operaattori luki
+  // sen viaksi kesken ottelupäivän — valmistelussa luki Pesä Ysit ensin vaikka
+  // se oli vieraana. Tämä testi kaatuu vanhalla säännöllä.
+  it("kotijoukkue on ensin myös silloin kun oma joukkue on vieraana", () => {
+    const texts = buildBroadcastTexts(campMatch());
+    expect(texts.title.startsWith("Hyvinkään Tahko - Pesä Ysit E-tytöt kilpa")).toBe(true);
+    expect(texts.matchup).toBe("Hyvinkään Tahko - Pesä Ysit E-tytöt kilpa");
+    expect(texts.shareMessage).toContain("Hyvinkään Tahko - Pesä Ysit E-tytöt kilpa");
+    // Ohituskentät nimeävät paikan, eivät omistajuutta: kotipaikan ohitus
+    // osuu kotijoukkueeseen vaikka se olisi vastustaja.
+    const edited = buildBroadcastTexts(campMatch({ homeTeam: "Tahko", awayTeam: "Pesä Ysit E kilpa" }));
+    expect(edited.matchup).toBe("Tahko - Pesä Ysit E kilpa");
   });
 
   it("ei koskaan sisällä lopputulosta — spoileri on käyttäjän nimenomainen kielto", () => {
@@ -84,24 +101,24 @@ describe("otsikko", () => {
   // -merkkijonona. "Muokkaa otsikkoa" -kentät näyttivät kovakoodattua
   // esimerkkiä toisesta ottelusta, ja korjaus on että placeholder tulee tästä
   // ottelusta — samalla päättelyllä jolla otsikkokin syntyy.
-  it("kertoo oman joukkueen ja vastustajan erikseen, otsikon päättelyllä", () => {
-    // Oma joukkue vieraana: pari ei saa mennä koti/vieras-järjestykseen.
+  it("kertoo koti- ja vierasjoukkueen erikseen, otsikon päättelyllä", () => {
+    // Oma joukkue vieraana: pari menee koti/vieras-järjestykseen (#223).
     const away = buildBroadcastTexts(campMatch());
-    expect(away.ownTeam).toBe("Pesä Ysit E-tytöt kilpa");
-    expect(away.opponentTeam).toBe("Hyvinkään Tahko");
+    expect(away.homeTeam).toBe("Hyvinkään Tahko");
+    expect(away.awayTeam).toBe("Pesä Ysit E-tytöt kilpa");
 
-    // ...eikä kotijoukkueenakaan.
+    // ...ja kotijoukkueenakin.
     const home = buildBroadcastTexts(campMatch({ home: "Pesä Ysit F-pojat", away: "IPV" }));
-    expect(home.ownTeam).toBe("Pesä Ysit F-pojat");
-    expect(home.opponentTeam).toBe("IPV");
+    expect(home.homeTeam).toBe("Pesä Ysit F-pojat");
+    expect(home.awayTeam).toBe("IPV");
 
-    // Operaattorin oma muokkaus voittaa päättelyn, kuten otsikossakin.
-    const edited = buildBroadcastTexts(campMatch({ teamLabel: "Pesä Ysit E kilpa", opponent: "Tahko" }));
-    expect(edited.ownTeam).toBe("Pesä Ysit E kilpa");
-    expect(edited.opponentTeam).toBe("Tahko");
+    // Operaattorin oma muokkaus voittaa esitysnimen, ei järjestystä.
+    const edited = buildBroadcastTexts(campMatch({ homeTeam: "Tahko", awayTeam: "Pesä Ysit E kilpa" }));
+    expect(edited.homeTeam).toBe("Tahko");
+    expect(edited.awayTeam).toBe("Pesä Ysit E kilpa");
 
     // Ja pari on sama kuin otsikossa — kaksi lähdettä eriytyisi ennen pitkää.
-    expect(`${away.ownTeam} - ${away.opponentTeam}`).toBe(away.matchup);
+    expect(`${away.homeTeam} - ${away.awayTeam}`).toBe(away.matchup);
   });
 });
 
@@ -126,14 +143,14 @@ describe("thumbnailin otsikkorivi", () => {
   });
 
   it("jättää mahtuvan ottelupparin rauhaan", () => {
-    expect(buildThumbnailHeadline(campMatch({ home: "Tahko" }))).toBe("Pesä Ysit E-tytöt kilpa - Tahko");
+    expect(buildThumbnailHeadline(campMatch({ home: "Tahko" }))).toBe("Tahko - Pesä Ysit E-tytöt kilpa");
   });
 
   it("käyttää runbookin tunnettua lyhennystä kun täysi seuranimi ei mahdu", () => {
-    // "Pesä Ysit E-tytöt kilpa - Hyvinkään Tahko" on 41 merkkiä eli yli
+    // "Hyvinkään Tahko - Pesä Ysit E-tytöt kilpa" on 41 merkkiä eli yli
     // thumbnailin budjetin; runbookin oma esimerkki lyhentää juuri tämän
     // seuran muotoon "Tahko".
-    expect(buildThumbnailHeadline(campMatch())).toBe("Pesä Ysit E-tytöt kilpa - Tahko");
+    expect(buildThumbnailHeadline(campMatch())).toBe("Tahko - Pesä Ysit E-tytöt kilpa");
   });
 
   it("kuvauksessa säilyvät täydet nimet vaikka otsikko lyhennettäisiin", () => {
@@ -179,9 +196,9 @@ describe("jaettava viesti", () => {
   // otsikossa luki jo vakiintunut muoto.
   it("käyttää otsikon joukkuenimiä, ei tulospalvelun raakoja nimiä", () => {
     const texts = buildBroadcastTexts(
-      campMatch({ teamLabel: "Pesä Ysit F-pojat", opponent: "IPV" })
+      campMatch({ homeTeam: "IPV", awayTeam: "Pesä Ysit F-pojat" })
     );
-    expect(texts.shareMessage).toContain("Pesä Ysit F-pojat - IPV");
+    expect(texts.shareMessage).toContain("IPV - Pesä Ysit F-pojat");
     expect(texts.shareMessage).not.toContain("Hyvinkään Tahko");
   });
 
@@ -196,8 +213,8 @@ describe("jaettava viesti", () => {
       lines: ["Katso: {watchUrl}", "Tulokset: {matchUrl}"],
     });
     expect(texts.shareMessage.split("\n")).toEqual([
-      // Oma joukkue ensin, kuten otsikossa — sama pari molemmissa (#95).
-      "Tänään klo 13:30 pelataan Pesä Ysit E-tytöt kilpa - Hyvinkään Tahko!",
+      // Koti ensin, kuten otsikossa — sama pari molemmissa (#95, #223).
+      "Tänään klo 13:30 pelataan Hyvinkään Tahko - Pesä Ysit E-tytöt kilpa!",
       "Katso: <youtube-linkki>",
       "Tulokset: https://www.pesistulokset.fi/ottelut/146210",
     ]);
