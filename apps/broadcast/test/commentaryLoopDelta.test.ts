@@ -602,11 +602,16 @@ describe("API fetch timeout", () => {
     expect(timeoutOf(0)).toBe(10_000);
   });
 
-  it("is a shorter 4 s for the delta poll — the two are not the same value", async () => {
+  it("is a much shorter 1 s for the delta poll — the two are not the same value", async () => {
+    // Retuned 4 s -> 1 s in #156 on a whole match's worth of the relay's own
+    // measurements: median 72-83 ms, max 90-132 ms, and 67 aborts at exactly
+    // 4.0 s with nothing in between. A delta either answers inside ~150 ms or
+    // the connection is stuck, so this limit detects stuck connections; it is
+    // not an allowance for slowness.
     const loop = await seeded();
     fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])], { serverDateMs: T0 + 3000 }));
     await loop.fetchEventsForPoll();
-    expect(timeoutOf(1)).toBe(4_000);
+    expect(timeoutOf(1)).toBe(1_000);
     expect(timeoutOf(1)).not.toBe(timeoutOf(0));
   });
 
@@ -615,20 +620,27 @@ describe("API fetch timeout", () => {
     expect(timeoutOf(0)).toBe(15000);
   });
 
-  it("lifts the delta timeout with the cadence when the control file raises it live", async () => {
+  it("does NOT lift the delta timeout when the control file raises the cadence live", async () => {
+    // The inverse of what this test asserted before #156. The poll-interval
+    // floor applied to every size, which meant the constants were not the
+    // effective timeouts: lowering the delta base to 1 s would have shipped
+    // max(1000, 3000) = 3 s, and nothing would have said so. Cadence is not
+    // latency — how often we ask says nothing about how long an answer may
+    // take. The floor survives only where #47's criterion is real: the full
+    // fetch, whose response grows all match.
     const controlFile = "/tmp/pesis-test-control-timeout.json";
     try {
       const loop = await seeded({ controlFile });
-      writeFileSync(controlFile, JSON.stringify({ pollIntervalMs: 6000 }));
+      writeFileSync(controlFile, JSON.stringify({ pollIntervalMs: 12000 }));
       await loop.refreshRuntimeControls();
 
       fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])], { serverDateMs: T0 + 3000 }));
       await loop.fetchEventsForPoll();
-      expect(timeoutOf(1)).toBe(6000); // floor wins over the 4 s base…
+      expect(timeoutOf(1)).toBe(1_000); // unchanged by the cadence…
 
       fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
       await loop.fetchFullEvents();
-      expect(timeoutOf(2)).toBe(10_000); // …but the full fetch is still longer
+      expect(timeoutOf(2)).toBe(12_000); // …while the full fetch still follows it
     } finally {
       rmSync(controlFile, { force: true });
     }
@@ -642,7 +654,7 @@ describe("API fetch timeout", () => {
       fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
       await loop.fetchEventsForPoll();
 
-      expect(timeoutOf(1)).toBe(4_000); // the delta that got the reset
+      expect(timeoutOf(1)).toBe(1_000); // the delta that got the reset
       expect(timeoutOf(2)).toBe(10_000); // the full refetch it forced
     } finally {
       logSpy.mockRestore();

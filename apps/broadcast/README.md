@@ -211,38 +211,49 @@ one line per poll with the cursor and the response size. It is off by default fo
 the reason above — the cost is paid in the control app's status row, not in log
 space.
 
-Fetches are aborted on **two different timeouts**, neither ever shorter than the
-current poll interval:
+Fetches are aborted on **three different timeouts**, one per fetch shape:
 
-| Fetch | Timeout | Why |
-|---|---|---|
-| Full history (startup, 60 s resync, delta fallbacks) | **10 s** | The response holds the whole match history and keeps growing, so the earlier 4 s cut healthy requests short late in a match — one broadcast logged 12 aborts in two minutes, all at exactly 4.0 s. |
-| Delta poll + startup metadata | **4 s** | Small responses (a 304 smaller still), and the delta runs *every* poll, so it is what decides how fast a hung API is noticed. Giving it the full fetch's patience would only delay detection and recovery by ~6 s per poll. |
+| Fetch | Timeout | Floored at the poll interval? | Why |
+|---|---|---|---|
+| Full history (startup, 60 s resync, delta fallbacks) | **10 s** | yes | The response holds the whole match history and keeps growing, so the earlier 4 s cut healthy requests short late in a match — one broadcast logged 12 aborts in two minutes, all at exactly 4.0 s (#47). |
+| Metadata / roster (startup + in-match refresh) | **4 s** | no | Fetched a handful of times per match, returns both rosters. Deliberately left at the pre-#156 value: a too-tight limit here fails **silently** — `maybeRefreshRoster` keeps the names it has, so the relay would speak stale player numbers all match. |
+| Delta poll | **1 s** | no | Runs *every* poll and returns only the new events (a 304 not even that), so it is what decides how fast a hung connection is noticed. |
 
-**"An aborted delta loses nothing" is only half true, and the half that is false
-cost us a wrong conclusion (#156).** Nothing is lost in terms of *correctness* —
-the next poll retries and the 60 s resync closes any gap. But `run()` resumes the
-cadence from *now*, so the retry fires immediately and the abort costs the whole
-timeout in dead waiting, at the head of the speech chain. Match 145918
-(31.7.2026) spent 31 x 4 s there, every retry succeeding first try.
+**The delta timeout was retuned 4 s → 1 s in #156, on the relay's own numbers.**
+A whole match (136745, 1.8.2026, 104 min) measured a median of 72–83 ms and a max
+of 90–132 ms — and 67 aborts at exactly 4.0 s. There is nothing in between: a
+delta either answers inside ~150 ms or the connection is stuck. The timeout is a
+stuck-connection detector, not an allowance for slowness.
 
-Two things to know before retuning either value:
+What the retune actually buys, stated plainly, because the issue first claimed
+more: **not a faster retry.** `run()` sets the next poll time *before* the fetch,
+so a 4 s abort overran the 3 s cadence and the retry fired immediately, whereas a
+1 s abort fits inside the cadence and the retry waits out the remaining ~2 s. The
+gain is ~1 s of latency per stuck poll at the head of the speech chain, and a poll
+cadence that stops being knocked out of step ~0.6 times a minute. Retrying an
+aborted poll immediately instead of waiting for the cadence is the rest of the
+win — but it needs a backoff for a genuinely dead API first (#52).
 
-- **The constants are not the effective timeouts.** `apiTimeoutMs()` floors both
-  at `pollIntervalMs`, so at the default 3 s cadence the delta timeout is
-  `max(4000, 3000)`. Lowering the constant alone can be a no-op.
+Two things to know before retuning any of them:
+
+- **The poll-interval floor now applies to the full fetch only.** It used to
+  apply to every size, which made the constants *not* the effective timeouts:
+  lowering the delta constant to 1 s would have produced `max(1000, 3000)` = 3 s
+  and nothing would have said so. The rationale (#89) conflated cadence with
+  latency — how often we ask says nothing about how long an answer may take. It
+  survives for the full fetch because there #47's acceptance criterion is real:
+  an operator can raise `pollIntervalMs` past 10 s live.
 - **Measure with the relay's own numbers.** `api.poll_window` reports the median
-  and max per fetch size (#156). Response times measured externally were p50
-  96 ms / max 303 ms under camp-day load, but that is curl's connection
-  behaviour, not the relay's.
+  and max per fetch size — now three separate buckets, because the delta and the
+  metadata fetch used to share one and the delta's 3 s cadence drowned out the
+  handful of metadata reads. Externally measured times (p50 96 ms / max 303 ms
+  under camp-day load) are curl's connection behaviour, not the relay's.
 
-Also note the startup metadata fetch shares the "small" timeout and is
-**unguarded** — a timeout there exits the process while ffmpeg is already
-pushing to a live target (#158). Fix that before shortening this.
+The startup metadata fetch is no longer unguarded: it retries instead of exiting
+the process while ffmpeg is already pushing to a live target (#158).
 
-Polls are sequential, so neither timeout can stack requests; a hung fetch only
-postpones the next poll. A control file that raises `pollIntervalMs` above a base
-value raises that timeout with it.
+Polls are sequential, so no timeout can stack requests; a hung fetch only
+postpones the next poll.
 
 ### Starting before the source goes live
 
