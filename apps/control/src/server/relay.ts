@@ -20,6 +20,7 @@ import { promisify } from "node:util";
 import { DEFAULT_NARRATION_DELAY_MS } from "../../../broadcast/src/config.js";
 import type { ControlKnobs, Job, RelayProcess, SourceIngest } from "../shared/types.js";
 import { CONFIG } from "./config.js";
+import { logInfo } from "./log.js";
 
 // execFile, never exec: every argument below is fixed, but matchIds and paths
 // flow in from HTTP requests and a shell would turn one bad string into command
@@ -189,6 +190,9 @@ export async function readRunningStatus(nowMs: number = Date.now()): Promise<Run
 
 async function systemctlVerb(verb: "start" | "stop" | "restart"): Promise<RelayProcess> {
   await run("systemctl", ["--user", verb, CONFIG.relayUnit]);
+  // Kuka unittia liikutti, näkyy vain jos liikuttaja kertoo sen: systemdin oma
+  // rivi kertoo että unit käynnistyi, ei sitä että ohjaamo käynnisti sen (#232).
+  logInfo("relay.unit", `systemctl ${verb} ${CONFIG.relayUnit}`);
   return getRelayProcess();
 }
 
@@ -266,6 +270,14 @@ export async function writeRelayEnv(job: Job): Promise<void> {
 
   // 0600: this file holds a YouTube stream key and the ElevenLabs API key.
   await writeFileAtomic(CONFIG.relayEnvPath, `${lines.join("\n")}\n`, 0o600);
+  // Sidonta lokiin — ilman avaimia. Ottelu ja raakalähetys riittävät
+  // vastaamaan siihen kysymykseen jota jälkikäteen kysytään ("mihin otteluun
+  // ohjaamo oli sidottu kun lähetys alkoi"), ja stream key on salaisuus, jota
+  // ei kirjoiteta lokiin missään muodossa (#176).
+  logInfo(
+    "relay.env",
+    `Sidottiin työhön ${job.id}: ottelu ${job.matchId}, raakalähetys ${job.sourceUrl ?? "puuttuu"}, kohde ${job.targetStreamKey ? "asetettu" : "puuttuu"}.`
+  );
 }
 
 // -------------------------------------------------------------- control file

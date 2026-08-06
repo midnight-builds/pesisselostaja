@@ -37,6 +37,7 @@ import type {
 } from "../shared/types.js";
 import { blockedPushTitle, isSelectableStart } from "../shared/jobState.js";
 import { activateJob, listJobs, markRunStarted, setJobStatus } from "./jobs.js";
+import { logError, logInfo, logWarn, reason as reasonOf } from "./log.js";
 import { notifySchedulerAction } from "./notifications.js";
 import { runControlPreflight } from "./preflight.js";
 import { startRelay, writeRelayEnv } from "./relay.js";
@@ -290,6 +291,12 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
    *  itsestään korjautuva, toinen ei. */
   let startFailures = 0;
   let failingJobId: string | null = null;
+  /** Viimeksi lokiin kirjoitettu päätösrivi (#232). Ajastin tikittää 30 s välein
+   *  koko iltapäivän, ja sama "raakalähetys ei ole vielä livenä" sata kertaa
+   *  peräkkäin hukuttaisi sen yhden rivin, jonka takia lokia luetaan. Siksi
+   *  kirjoitetaan vasta kun päätös TAI sen perustelu muuttuu — mikä on
+   *  täsmälleen se hetki, jolloin jotain tapahtui. */
+  let loggedDecision: string | null = null;
   /** Käynnistysikkuna: `.env.relay` on kirjoitettu tälle työlle, mutta relay ei
    *  ole vielä käynnissä. Ikkuna kestää valmiustarkistuksen ajan (~10 s), ja
    *  sen sisällä tiedosto oli suojaamaton (#209): `POST /api/preflight` korjaa
@@ -420,6 +427,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
     if (p.decision === "blocked-disk") {
       // Este-pushit ovat käskymuodossa ja kertovat mitä operaattorin on tehtävä
       // (#174) — `p.reason` on ajastimen omaa kirjanpitoa ja jää lokiin.
+      logWarn("scheduler.blocked", p.reason);
       await deps.notify(
         "disk",
         blockedPushTitle("levytila"),
@@ -428,6 +436,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
       return { at, decision: p.decision, jobId, reason: p.reason, applied: false };
     }
     if (p.decision === "blocked-busy") {
+      logWarn("scheduler.blocked", p.reason);
       await deps.notify(
         `busy:${jobId ?? "-"}`,
         blockedPushTitle("toinen lähetys on ajossa"),
@@ -445,6 +454,11 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
     // on käynnistetty (tai yritys on kaatunut): siinä välissä `.env.relay`
     // kuuluu tälle työlle eikä sitä saa korjata kukaan muu.
     starting = true;
+    // Käynnistysikkunan avautuminen omalle rivilleen: se on ainoa hetki jossa
+    // `.env.relay` on kirjoitettu mutta relay ei vielä aja, ja #209 osoitti että
+    // juuri siinä ikkunassa sidonnan voi ylikirjoittaa muualta. Jos niin käy
+    // uudelleen, tämä rivi kertoo milloin ikkuna oli auki ja mille työlle.
+    logInfo("scheduler.start", `Käynnistysikkuna auki: ${label(job)} (työ ${job.id}, ottelu ${job.matchId}).`);
     try {
       // Preflight checks what systemd would actually run, which means it reads
       // `.env.relay` — so the file has to point at THIS job before the gate can
@@ -459,6 +473,16 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
         // tiedon, ettei käynnistetty — minkä ensimmäinen jo sanoo.
         retryAfter = deps.now() + RETRY_AFTER_BLOCK_MS;
         const reason = `${label(job)}: preflightissa ${preflight.blockers} estettä — EI käynnistetty.`;
+        // Esteet mukaan riveittäin: pelkkä lukumäärä kertoo että ei
+        // käynnistetty, ei sitä miksi — ja tämä on se rivi jota jälkikäteen
+        // luetaan kun vahti ei käynnistänyt mitään.
+        logWarn(
+          "scheduler.blocked",
+          `${reason} ${preflight.checks
+            .filter((c) => c.status === "fail")
+            .map((c) => c.technical ?? c.detail)
+            .join("; ")}`
+        );
         return { at, decision: "blocked-preflight", jobId, reason, applied: false };
       }
 
@@ -467,6 +491,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
       // that landed between plan() and here.
       await deps.activateJob(job.id);
       await deps.startRelay();
+      logInfo("scheduler.start", `Relay käynnistetty: ${label(job)} (ottelu ${job.matchId}).`);
       // markRunStarted, ei setJobStatus: pelkkä tilan kääntäminen jätti
       // `startedAt`in tyhjäksi, jolloin pollerin oma sidonta ei enää löytänyt
       // armattua työtä eikä työ saanut aloitushetkeä lainkaan — ja ajon
@@ -477,8 +502,9 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
       if (!started) {
         // Ei kaadeta ajoa tähän: relay on jo käynnissä, ja pollerin sidonta
         // yrittää uudelleen relayn oman status-tiedoston perusteella.
-        console.warn(
-          `[scheduler] työtä ${job.id} (ottelu ${job.matchId}) ei saatu leimattua käyntiin — poller yrittää uudelleen`
+        logWarn(
+          "scheduler.start",
+          `Työtä ${job.id} (ottelu ${job.matchId}) ei saatu leimattua käyntiin — poller yrittää uudelleen.`
         );
       }
       // Käynnistyksen push tulee työn tilasiirtymästä (`live`) yhdestä
@@ -500,6 +526,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
         // error behind a second one.
       }
       const reason = `${label(job)}: käynnistys kaatui — ${detail}`;
+      logError("scheduler.start_failed", reason);
       // Kolmen luokan sääntö (#174): ensimmäinen kaatuminen on itsestään
       // korjautuva, koska uusi yritys ajetaan viiden minuutin päästä — se ei
       // ansaitse pushia. Toinen peräkkäinen samalle työlle ei enää korjaannu
@@ -567,6 +594,17 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
     lastCheckAt = new Date(deps.now()).toISOString();
     nextJob = describeJob(p);
 
+    // Päätös lokiin ENNEN sen toteuttamista, myös silloin kun vahti on pois
+    // päältä: "vahti ei käynnistänyt" on ottelupäivän jälkeen yhtä tärkeä
+    // havainto kuin "vahti käynnisti", eikä kumpaakaan voinut 5.8. todeta
+    // (#232). Kytkimen tila on rivillä mukana, koska sama päätös tarkoittaa
+    // eri asiaa sen molemmin puolin.
+    const decisionLine = `${p.decision}${enabled ? "" : " (vahti pois päältä)"}: ${p.reason}`;
+    if (decisionLine !== loggedDecision) {
+      loggedDecision = decisionLine;
+      logInfo("scheduler.decision", decisionLine);
+    }
+
     if (enabled) {
       lastAction = await execute(p);
     } else {
@@ -616,6 +654,12 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
       // (#208): ilman tätä merkintää käynnistysvahti kytkisi sen takaisin
       // päälle seuraavalla pollilla, eikä käsiajoa voisi suojata lainkaan.
       await store.update(() => ({ enabled, disabledByOperator: !enabled }));
+      logInfo(
+        "scheduler.enabled",
+        enabled
+          ? "Käynnistysvahti kytkettiin PÄÄLLE (operaattori)."
+          : "Käynnistysvahti kytkettiin POIS (operaattorin päätös — ohjaamo ei kytke sitä takaisin itse)."
+      );
       if (!enabled) {
         // Turning it off never stops anything that is already running (uptime
         // first) — it only stops the scheduler from acting again. Clearing the
@@ -641,7 +685,7 @@ export function createScheduler(overrides: Partial<SchedulerDeps> = {}) {
         try {
           await tick();
         } catch (err) {
-          console.error("[control] ajastin kaatui:", err);
+          logError("scheduler.crashed", `Ajastimen kierros kaatui: ${reasonOf(err)}`);
         }
         if (stopped) return;
         timer = setTimeout(() => void loop(), nextCheckInMs);

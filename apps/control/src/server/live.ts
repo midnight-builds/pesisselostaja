@@ -43,6 +43,7 @@ import {
   reopenRunningJob,
 } from "./jobs.js";
 import { readLog } from "./journal.js";
+import { logError, logInfo, logWarn } from "./log.js";
 import { getMatchState } from "./matches.js";
 import { getRelayProcess, readKnobs, readRunningStatus, type RunningStatus } from "./relay.js";
 import { SOURCE_INGEST_STALE_MS } from "./sourceIngest.js";
@@ -932,8 +933,9 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       // oma aloitushetki vähintään työn aloitushetkestä.
       const staleReason = hardStopSnapshotStaleReason(snapshot, current, now);
       if (staleReason) {
-        console.warn(
-          `[control] hard stop -siivous ohitettu: status-tiedoston syy ei kuulu tähän ajoon (${staleReason})`
+        logWarn(
+          "cleanup.skipped",
+          `Hard stopin siivous ohitettu: status-tiedoston syy ei kuulu tähän ajoon (${staleReason}).`
         );
         // Vanhentunut näyttö = ei siivousta JA ei myöskään sen lopetussyytä:
         // indikaattorit luetaan silloin ilman snapshotia, jottei kortti väitä
@@ -952,7 +954,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       ];
       for (const target of targets) {
         if (!target.videoId) {
-          console.warn(`[control] hard stop -siivous: ${target.label} — video id ei tiedossa, ohitetaan`);
+          logWarn("cleanup.skipped", `Hard stopin siivous: ${target.label} — video id ei tiedossa, ohitetaan.`);
           // Ohitus näkyy kortissa käskynä: lähetys on tuolloin auki eikä
           // kukaan sulje sitä, ja hiljainen ohitus on juuri se vika, jonka
           // takia lähetys jäi ottelussa 145900 työntämään roskaa (#121).
@@ -964,8 +966,9 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
           continue;
         }
         if (!target.allowed) {
-          console.warn(
-            `[control] hard stop -siivous: ${target.label} ${target.videoId} EI kosketa — ${target.why}`
+          logWarn(
+            "cleanup.skipped",
+            `Hard stopin siivous: ${target.label} ${target.videoId} EI kosketa — ${target.why}.`
           );
           actions.push({
             what: `${capitalize(target.label)} jätettiin koskematta.`,
@@ -976,8 +979,9 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
         }
         try {
           const result = await transitionBroadcastFn(target.videoId);
-          console.log(
-            `[control] hard stop -siivous: ${target.label} ${target.videoId} (${result.lifeCycleStatus ?? "?"}) — ${result.reason}`
+          logInfo(
+            "cleanup.action",
+            `Hard stopin siivous: ${target.label} ${target.videoId} (${result.lifeCycleStatus ?? "?"}) — ${result.reason}`
           );
           // Tulos LUETAAN (#201). `transitionBroadcast` ei heitä silloin kun se
           // ei voinut sulkea lähetystä — se palauttaa `{ ok: false, skipped:
@@ -988,7 +992,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
           actions.push(cleanupAction(target.label, result));
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          console.error(`[control] hard stop -siivous: ${target.label} ${target.videoId} epäonnistui: ${msg}`);
+          logError("cleanup.failed", `Hard stopin siivous: ${target.label} ${target.videoId} epäonnistui: ${msg}`);
           errors.set("target", `hard stop -siivous (${target.label}) epäonnistui: ${msg}`);
           // YouTuben oma virheteksti jää lokiin (#176): kortissa on teko ja
           // käsky, koska sellaisenaan se sanoisi "403 forbidden" kentällä
@@ -1120,8 +1124,9 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     ) {
       const reopened = await reopenRunningJobFn(runningMatchId);
       if (reopened) {
-        console.warn(
-          `[control] työ ${reopened.id} (ottelu ${reopened.matchId}) palautettiin ajoon — relay ajaa sitä yhä`
+        logWarn(
+          "job.reopened",
+          `Työ ${reopened.id} (ottelu ${reopened.matchId}) palautettiin ajoon — relay ajaa sitä yhä.`
         );
         job = reopened;
       }
@@ -1134,8 +1139,13 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       // Relay-rivillä, ja operaattori näkee mitä relay oikeasti ajaa.
       if (conflictLoggedFor !== runningMatchId) {
         conflictLoggedFor = runningMatchId;
-        console.warn(
-          `[control] työtä ei sidota: relay ajaa ottelua ${runningMatchId}, avoin työ on ottelusta ${current.matchId}`
+        // Ristiriitavaroitus (#118). Tätä riviä on odotettu ensimmäisestä
+        // oikeasta lähetyksestä asti — ks. #232: 5.8.2026 ohjaamo ei
+        // kirjoittanut lokiin mitään, joten siitä ettei rivi näkynyt ei voinut
+        // päätellä ristiriidan puuttumista.
+        logWarn(
+          "job.conflict",
+          `Työtä ei sidota: relay ajaa ottelua ${runningMatchId}, avoin työ on ottelusta ${current.matchId}.`
         );
       }
       return;
@@ -1162,8 +1172,9 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       closed = await reconcileOpenJobsFn(null, now);
     }
     for (const c of closed) {
-      console.warn(
-        `[control] sovittelu sulki avoimen työn ${c.id} (ottelu ${c.matchId}) tilaan ${c.status}`
+      logWarn(
+        "job.reconciled",
+        `Sovittelu sulki avoimen työn ${c.id} (ottelu ${c.matchId}) tilaan ${c.status}. Relay ajaa: ${runningMatchId ?? "ei mitään"}.`
       );
       // Sama siivous kuin laskevalla reunalla: ohjaamon uudelleenkäynnistys ei
       // saa olla se ero, jäävätkö lähetykset päälle. Ajetaan sulkemisen

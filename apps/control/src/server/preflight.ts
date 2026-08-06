@@ -17,6 +17,7 @@ import { readFile } from "node:fs/promises";
 import { parseEnvFile, runPreflight, summarize, type Check } from "../../../broadcast/src/preflight.js";
 import type { Job, PreflightCheck, PreflightResult } from "../shared/types.js";
 import { CONFIG } from "./config.js";
+import { logError, logInfo, logWarn, reason } from "./log.js";
 import { notifyPreflightBlockers } from "./notifications.js";
 
 /** Preflightin oma sanasto → operaattorin kieli (#176).
@@ -277,6 +278,10 @@ export async function runControlPreflight(job?: Job | null, repair?: PreflightRe
     // jälkeen ajettuina ne kertovat sen todellisuuden, jossa lähetys alkaisi.
     // Toisin päin rivit kuvaisivat tilaa, jota ei enää ole.
     if (binding.status === "fail" && repair) {
+      // Talteen ENNEN korjausta: `binding` osoittaa hetken päästä korjattuun
+      // tilaan, ja juuri korjausta edeltävä rivi on se, joka kertoo mihin
+      // ohjaamo oli sidottu ja siten mikä lähetys oli vaarassa (#232).
+      const before = binding.detail;
       try {
         await repair.bindJob(job);
         const after = await readEnvText();
@@ -284,11 +289,22 @@ export async function runControlPreflight(job?: Job | null, repair?: PreflightRe
         if (recheck.status === "ok") {
           binding = recheck;
           repairedDetail = `Korjattiin: ohjaamo osoitti toiseen otteluun, nyt valittuun (${job.home} – ${job.away}).`;
+          // #118:n sovittelu jättää tästä jälkeen. Ilman tätä riviä koko
+          // ominaisuuden koettelu jäi 5.8. auki: näyttöä ei ollut siitä että se
+          // laukesi, eikä siitä että se ei laukea (#232).
+          logWarn(
+            "preflight.repaired",
+            `Työn sidonta korjattiin työhön ${job.id} (ottelu ${job.matchId}, ${job.home} – ${job.away}). Ennen korjausta: ${before}`
+          );
         } else {
           // Korjaus ei purrut (esim. sama avain kahdesti tiedostossa): jäljelle
           // jää este, ja rivi kertoo sen jälkimmäisen totuuden — ei sitä mitä
           // yritettiin.
           binding = recheck;
+          logError(
+            "preflight.repair_failed",
+            `Työn sidonnan korjaus ei purrut työlle ${job.id} (ottelu ${job.matchId}): ${recheck.detail}`
+          );
         }
       } catch (err) {
         binding = {
@@ -296,6 +312,10 @@ export async function runControlPreflight(job?: Job | null, repair?: PreflightRe
           status: "fail",
           detail: `${binding.detail} Automaattinen korjaus epäonnistui: ${err instanceof Error ? err.message : String(err)}`,
         };
+        logError(
+          "preflight.repair_failed",
+          `Työn sidonnan korjaus kaatui työlle ${job.id} (ottelu ${job.matchId}): ${reason(err)}`
+        );
       }
     }
   }
@@ -319,6 +339,22 @@ export async function runControlPreflight(job?: Job | null, repair?: PreflightRe
     warnings: checks.filter((c) => c.status === "warn").length,
     summary: summaryLine(checks),
   };
+  // Tulos lokiin joka ajolta (#232): valmiustarkistus on käynnistyksen portti,
+  // ja ottelupäivän kulkua ei voi rekonstruoida jos portin päätöstä ei ole
+  // kirjattu mihinkään. Rivejä syntyy muutama per ottelupäivä — tarkistus ajetaan
+  // kortin avautuessa ja käynnistysyrityksellä, ei silmukassa.
+  const scope = job ? ` (työ ${job.id}, ottelu ${job.matchId})` : "";
+  if (result.blockers > 0) {
+    logWarn(
+      "preflight.blocked",
+      `${result.summary}${scope} — ${checks
+        .filter((c) => c.status === "fail")
+        .map((c) => `${c.name}: ${c.detail}`)
+        .join("; ")}`
+    );
+  } else {
+    logInfo("preflight.ok", `${result.summary}${scope}`);
+  }
   // The push lives here rather than in the route so that EVERY preflight run
   // is covered — including phase B's automatic arming, where a blocker is
   // found with nobody looking at the screen. Fire-and-forget: a push service

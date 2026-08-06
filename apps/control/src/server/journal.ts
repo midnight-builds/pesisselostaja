@@ -1,18 +1,57 @@
-/** The relay's log, read back out of journald.
+/** Ottelupäivän loki, luettuna journaldista.
  *
  *  The relay logs to stdout via apps/broadcast/src/log.ts, which prefixes every
  *  line with a Finnish local time ("[16.40.44] Sammutetaan…"). systemd captures
  *  that verbatim, so journald gives us both a trustworthy timestamp
  *  (__REALTIME_TIMESTAMP) and a redundant, timezone-ambiguous one inside the
- *  text. We keep the first and strip the second. */
+ *  text. We keep the first and strip the second.
+ *
+ *  **Molemmat unitit, yhtenä virtana (#232).** Ottelupäivä on relayn ja
+ *  ohjaamon vuoropuhelua, ja pelkkä relayn loki kertoo siitä toisen puolen:
+ *  5.8.2026 vahti käynnisti lähetyksen itse, eikä siitä jäänyt ohjaamon
+ *  unittiin riviäkään. journald lomittaa unitit aikajärjestykseen itse, joten
+ *  yksi kutsu riittää — ja kumpi rivin kirjoitti, luetaan tietueesta
+ *  (`_SYSTEMD_USER_UNIT`) eikä koodista, jotta unitin nimeäminen ei muutu
+ *  jäsentimen arvaukseksi. */
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { LogLine } from "../shared/types.js";
+import type { LogLine, LogUnit } from "../shared/types.js";
+import { CONFIG } from "./config.js";
 
 const run = promisify(execFile);
 
-const RELAY_UNIT = "pesisselostaja-relay";
+/** journald palauttaa unitin aina `.service`-päätteineen; CONFIGin arvo voi olla
+ *  kummassa muodossa tahansa, koska journalctl hyväksyy molemmat. */
+function unitBase(unit: string): string {
+  return unit.replace(/\.service$/, "");
+}
+
+/** Kumman unitin rivi tämä on.
+ *
+ *  Kaksi eri kirjoittajaa, kaksi eri kenttää:
+ *
+ *  - **Prosessin oma rivi** kantaa `_SYSTEMD_USER_UNIT`in — sen unitin, jonka
+ *    stdout rivin tuotti. Tämä on ohjaamon ja relayn omat rivit.
+ *  - **systemdin oma rivi unitista** ("Started …", "Consumed … CPU time") tulee
+ *    managerilta, jolloin `_SYSTEMD_USER_UNIT` on `init.scope` ja unit, JOSTA
+ *    rivi kertoo, on `USER_UNIT`issa. Ilman tätä jälkimmäistä ohjaamon omat
+ *    käynnistys- ja pysäytysrivit merkittäisiin relayn riveiksi — eli
+ *    lokinäkymä valehtelisi juuri siitä, kumpi prosessi teki mitä.
+ *
+ *  Tuntematon → "relay": näkymä on ollut relayn loki koko olemassaolonsa ajan,
+ *  ja väärä "ohjaamo"-merkintä väittäisi ohjaamon tehneen jotain (#232). */
+function unitOf(record: JournalRecord): LogUnit {
+  const control = unitBase(CONFIG.controlUnit);
+  const relay = unitBase(CONFIG.relayUnit);
+  for (const raw of [record._SYSTEMD_USER_UNIT, record.USER_UNIT, record._SYSTEMD_UNIT, record.UNIT]) {
+    if (!raw) continue;
+    const name = unitBase(raw);
+    if (name === control) return "control";
+    if (name === relay) return "relay";
+  }
+  return "relay";
+}
 
 /** journald can hand back a lot; the phone renders a scrollback, not an
  *  archive. */
@@ -31,6 +70,14 @@ export interface JournalRecord {
   MESSAGE?: string | number[];
   PRIORITY?: string;
   __REALTIME_TIMESTAMP?: string;
+  /** Rivin KIRJOITTANUT unit. Käyttäjän unitilla journald täyttää
+   *  `_SYSTEMD_USER_UNIT`in; järjestelmäunitilla vain `_SYSTEMD_UNIT`in. */
+  _SYSTEMD_USER_UNIT?: string;
+  _SYSTEMD_UNIT?: string;
+  /** Unit, JOSTA rivi kertoo. systemd itse asettaa nämä omiin viesteihinsä
+   *  ("Started …"), joiden kirjoittaja on manager eikä unit. */
+  USER_UNIT?: string;
+  UNIT?: string;
 }
 
 /** journald emits MESSAGE as an array of bytes when the line isn't valid UTF-8.
@@ -105,6 +152,7 @@ export function toLogLine(record: JournalRecord): LogLine | null {
     level: inferLevel(msg, Number.isFinite(priorityRaw) ? priorityRaw : null, code),
     code,
     msg,
+    unit: unitOf(record),
   };
 }
 
@@ -126,7 +174,20 @@ export async function readLog(opts: { limit?: number; level?: string } = {}): Pr
   try {
     ({ stdout } = await run(
       "journalctl",
-      ["--user", "-u", RELAY_UNIT, "-o", "json", "-n", String(scan), "--no-pager"],
+      [
+        "--user",
+        "-u",
+        CONFIG.relayUnit,
+        // Toinen `-u` ei rajaa vaan lisää: journald palauttaa molempien unittien
+        // rivit yhtenä aikajärjestyksessä olevana virtana.
+        "-u",
+        CONFIG.controlUnit,
+        "-o",
+        "json",
+        "-n",
+        String(scan),
+        "--no-pager",
+      ],
       // A long window of relay logs comfortably exceeds execFile's 1 MB default,
       // and the failure mode there is a truncated-output error — i.e. no log at
       // all exactly when the log matters most.
