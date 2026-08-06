@@ -127,7 +127,7 @@ test.describe("päättynyt", () => {
     const narrated = page.getByRole("link", { name: "Avaa selostettu lähetys" });
     await expect(narrated).toHaveAttribute("href", "https://www.youtube.com/watch?v=SELOSTETTU");
     const raw = page.getByRole("link", { name: "Avaa raakalähetys" });
-    await expect(raw).toHaveAttribute("href", "https://www.youtube.com/watch?v=NORMAALI");
+    await expect(raw).toHaveAttribute("href", "https://www.youtube.com/watch?v=TESTSOURCE1");
     for (const link of [narrated, raw]) {
       await expect(link).toHaveAttribute("target", "_blank");
     }

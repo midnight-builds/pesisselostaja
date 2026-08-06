@@ -116,6 +116,59 @@ test.describe("ottelunaikainen", () => {
     expect((toggle?.y ?? 0) + (toggle?.height ?? 0)).toBeLessThanOrEqual(853);
   });
 
+  /** #228: ajossa olevasta kortista ei päässyt kumpaankaan lähetykseen, joten
+   *  operaattori joutui etsimään omat lähetyksensä YouTubesta kesken ajon.
+   *  Linkit ovat tilasanoissa, koska kortti on kertasilmäys (#186) — uusia
+   *  nappirivejä siihen ei lisätä. */
+  test("kortista pääsee molempiin lähetyksiin", async ({ page, api, openApp }) => {
+    const withPair = fixture.job({
+      id: "job-ottelu",
+      status: "live",
+      startedAt: "2026-07-29T04:48:00.000Z",
+      targetVideoId: "SELOSTETTU11",
+      sourceUrl: "https://www.youtube.com/watch?v=TESTSOURCE1",
+    });
+    api.jobs = [withPair];
+    await openApp(fixture.liveState({ job: withPair }));
+
+    const narrated = page.getByRole("link", { name: "Selostus" });
+    await expect(narrated).toHaveAttribute("href", "https://www.youtube.com/watch?v=SELOSTETTU11");
+    const raw = page.getByRole("link", { name: "Raakalähetys" });
+    await expect(raw).toHaveAttribute("href", "https://www.youtube.com/watch?v=TESTSOURCE1");
+
+    for (const link of [narrated, raw]) {
+      // PWA on kotinäytöllä: ohjaamosta ei saa navigoida pois kesken ajon.
+      await expect(link).toHaveAttribute("target", "_blank");
+      await expect(link).toHaveAttribute("rel", "noreferrer");
+      // Kosketusalue täyttää --tapin, vaikka teksti on pientä.
+      const box = await link.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+
+    // Kortti pysyy kertasilmäyksenä: viisi tietoa, ei uutta riviä.
+    await expect(page.locator(".fact")).toHaveCount(5);
+    expect(await pageScrolls(page)).toBe(false);
+  });
+
+  /** Ilman työn kenttiä linkkiä ei ole — eikä siihen keksitä osoitetta.
+   *  Rikkinäinen linkki YouTubeen on pahempi kuin puuttuva: se näyttää
+   *  toimivalta juuri sinä hetkenä, jona lähetystä ollaan tarkistamassa. */
+  test("ilman osoitetta tilasana ei ole linkki", async ({ page, api, openApp }) => {
+    const bare = fixture.job({
+      id: "job-ottelu",
+      status: "live",
+      startedAt: "2026-07-29T04:48:00.000Z",
+      targetVideoId: null,
+      sourceUrl: null,
+    });
+    api.jobs = [bare];
+    await openApp(fixture.liveState({ job: bare }));
+
+    await expect(page.getByTestId("match-glance")).toContainText("Selostus");
+    await expect(page.getByRole("link", { name: "Selostus" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Raakalähetys" })).toHaveCount(0);
+  });
+
   /** #207: 393 px:n lupaus mitattiin ilman turva-alueita ja ilman
    *  hälytysrivejä — eli siinä tilassa, jossa budjetti on väljimmillään.
    *  Ruutua oikeasti katsotaan siinä toisessa tilassa: kaksi yhtaikaista
