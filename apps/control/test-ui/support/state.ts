@@ -443,6 +443,8 @@ export function broadcastTexts(p: { teamLabel?: string; opponent?: string; short
     scheduledLocal: "29.7.2026 klo 8:30",
     matchUrl: "https://www.pesistulokset.fi/ottelut/999001",
     matchup,
+    ownTeam: own,
+    opponentTeam: opponent,
     venue: place,
     thumbnailHeadline: matchup,
     thumbnailDatetime: "29.7.2026 klo 8:30",

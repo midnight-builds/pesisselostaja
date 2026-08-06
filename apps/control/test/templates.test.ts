@@ -79,6 +79,30 @@ describe("otsikko", () => {
     expect(tight).toBe("Kiri Juniorit Rautiainen - Joma Punainen, 15.7.2026 Joensuu");
     expect(tight).not.toContain("…");
   });
+
+  // #221: käyttöliittymä tarvitsee parin ERIKSEEN, ei pelkkänä "A - B"
+  // -merkkijonona. "Muokkaa otsikkoa" -kentät näyttivät kovakoodattua
+  // esimerkkiä toisesta ottelusta, ja korjaus on että placeholder tulee tästä
+  // ottelusta — samalla päättelyllä jolla otsikkokin syntyy.
+  it("kertoo oman joukkueen ja vastustajan erikseen, otsikon päättelyllä", () => {
+    // Oma joukkue vieraana: pari ei saa mennä koti/vieras-järjestykseen.
+    const away = buildBroadcastTexts(campMatch());
+    expect(away.ownTeam).toBe("Pesä Ysit E-tytöt kilpa");
+    expect(away.opponentTeam).toBe("Hyvinkään Tahko");
+
+    // ...eikä kotijoukkueenakaan.
+    const home = buildBroadcastTexts(campMatch({ home: "Pesä Ysit F-pojat", away: "IPV" }));
+    expect(home.ownTeam).toBe("Pesä Ysit F-pojat");
+    expect(home.opponentTeam).toBe("IPV");
+
+    // Operaattorin oma muokkaus voittaa päättelyn, kuten otsikossakin.
+    const edited = buildBroadcastTexts(campMatch({ teamLabel: "Pesä Ysit E kilpa", opponent: "Tahko" }));
+    expect(edited.ownTeam).toBe("Pesä Ysit E kilpa");
+    expect(edited.opponentTeam).toBe("Tahko");
+
+    // Ja pari on sama kuin otsikossa — kaksi lähdettä eriytyisi ennen pitkää.
+    expect(`${away.ownTeam} - ${away.opponentTeam}`).toBe(away.matchup);
+  });
 });
 
 describe("thumbnailin otsikkorivi", () => {
