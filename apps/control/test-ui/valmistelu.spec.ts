@@ -74,8 +74,11 @@ test.describe("valmistelu", () => {
     await expect(stateWord(page)).toHaveText(jobStateWord("scheduled").word);
     await expect(page.getByRole("button", { name: CREATE })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Avaa selostettu lähetys" })).toBeVisible();
-    // Esikatselua ei myöskään haeta: se koskee luontia, jota ei enää ole.
-    expect(api.called("POST", "/api/youtube/templates/preview")).toBe(false);
+    // Esikatselu haetaan nyt myös tässä tilassa (#225): otsikon vaihtaminen
+    // luonnin jälkeen tarvitsee saman palvelimen muodostaman tekstin, jonka
+    // luontikin sai. Se ei luo YouTubeen mitään — luontia se ei silti tarjoa,
+    // mikä on tämän testin varsinainen väite.
+    await expect(page.getByRole("button", { name: /Luo lähetyspari/ })).toHaveCount(0);
   });
 
   // #203: pari ilman stream keytä ei ole pari. `hasPair` laskettiin pelkästä
@@ -160,6 +163,67 @@ test.describe("valmistelu", () => {
     for (const stranger of ["Pesä Ysit F-pojat", "IPV", "Naperoleiri Liperi"]) {
       expect(await page.locator(`css=input[placeholder="${stranger}"]`).count()).toBe(0);
     }
+  });
+
+  /** #225: otsikkoa ei saanut vaihdetuksi luonnin jälkeen, vaikka palvelimen
+   *  reitti ja clientin `patchVideo` olivat olemassa — yksikään komponentti ei
+   *  kutsunut niitä. Operaattorin ainoat keinot olivat YouTube Studio ja käsin
+   *  kirjoitettu HTTP-kutsu. */
+  test("otsikon voi vaihtaa luonnin jälkeen ja se kirjoitetaan molempiin lähetyksiin", async ({
+    page,
+    api,
+    openApp,
+  }) => {
+    api.authHealth = fixture.authHealthConnected();
+    // YouTuben videoId on aina 11 merkkiä; raakalähetyksen id luetaan sen
+    // osoitteesta, joten fikstuurin on oltava oikean mittainen.
+    const job = fixture.job({
+      id: "job-valmistelu",
+      status: "scheduled",
+      targetVideoId: "SELOSTETTU1",
+      sourceUrl: "https://www.youtube.com/watch?v=RAAKALHETY1",
+      startedAt: null,
+    });
+    api.jobs = [job];
+    await openApp(fixture.liveState({ job, health: "idle", headline: "Ei aktiivista lähetystä" }));
+
+    await page.getByTestId("retitle").getByText("Muokkaa otsikkoa").click();
+    await page.getByLabel("Kotijoukkue").fill("Pesä Ysit F-tytöt");
+
+    // Kirjoitus on lukossa niin kauan kuin kentissä on soveltamatonta tekstiä:
+    // muuten YouTubeen menisi se otsikko, jonka palvelin muodosti EDELLISISTÄ
+    // arvoista — eli lomake näyttäisi muuttavan jotain mitä se ei muuta.
+    const write = page.getByRole("button", { name: "Kirjoita otsikot YouTubeen" });
+    await expect(write).toBeDisabled();
+    await page.getByRole("button", { name: "Päivitä esikatselu" }).click();
+    await expect(page.getByTestId("retitle-narrated")).toContainText("Pesä Ysit F-tytöt");
+
+    await expect(write).toBeEnabled();
+    await write.click();
+
+    // Molemmat lähetykset, kummallekin oma otsikkonsa.
+    // Odotetaan molempia: kirjoitukset menevät peräkkäin, ja pelkkä
+    // ensimmäisen odottaminen lukisi toisen "puuttuvana" ennen kuin se on ehtinyt.
+    await expect
+      .poll(() => api.calledWith("PATCH", "/api/youtube/videos/RAAKALHETY1").length)
+      .toBe(1);
+    expect(api.calledWith("PATCH", "/api/youtube/videos/SELOSTETTU1")).toHaveLength(1);
+    const narrated = api.calledWith("PATCH", "/api/youtube/videos/SELOSTETTU1")[0].body as { title: string };
+    expect(narrated.title).toContain("Selostettu Pesä Ysit F-tytöt");
+    const raw = api.calledWith("PATCH", "/api/youtube/videos/RAAKALHETY1")[0].body as { title: string };
+    expect(raw.title).toContain("Pesä Ysit F-tytöt");
+    expect(raw.title.startsWith("Selostettu")).toBe(false);
+
+    // Kansikuvassa lukee sama ottelupari kuin otsikossa, joten sekin uusitaan —
+    // muuten lähetys kertoisi kahta eri tarinaa.
+    await expect
+      .poll(() => api.called("POST", "/api/youtube/videos/SELOSTETTU1/thumbnail"))
+      .toBe(true);
+    await expect
+      .poll(() => api.called("POST", "/api/youtube/videos/RAAKALHETY1/thumbnail"))
+      .toBe(true);
+
+    await expect(page.getByTestId("retitle-written")).toContainText("Pesä Ysit F-tytöt");
   });
 
   test("valmistelu mahtuu puhelimen leveyteen ilman vaakavieritystä", async ({ page, api, openApp }) => {

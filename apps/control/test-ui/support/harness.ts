@@ -369,6 +369,21 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
         const payload = (body ?? {}) as { overrides?: Record<string, string> };
         return void (await send(fixture.createdPair(fixture.broadcastTexts(payload.overrides ?? {}))));
       }
+      // Metatietojen muokkaus (#225) ja kansikuvan uudelleenlataus. Vastaus on
+      // se mitä palvelin palauttaa: id ja kirjoitettu otsikko.
+      const videoPatch = /^\/api\/youtube\/videos\/([^/]+)$/.exec(path);
+      if (videoPatch && method === "PATCH") {
+        const payload = (body ?? {}) as { title?: string };
+        return void (await send({
+          videoId: videoPatch[1],
+          title: payload.title ?? "",
+          privacyStatus: "unlisted",
+        }));
+      }
+      const thumb = /^\/api\/youtube\/videos\/([^/]+)\/thumbnail$/.exec(path);
+      if (thumb && method === "POST") {
+        return void (await send({ videoId: thumb[1] }));
+      }
       // Thumbnailin esikatselu palauttaa kuvatavuja, ei JSONia.
       if (path === "/api/thumbnail/preview" && method === "POST") {
         return void (await route.fulfill({ status: 200, contentType: "image/png", body: PNG_1PX }));
