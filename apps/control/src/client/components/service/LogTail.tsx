@@ -82,6 +82,12 @@ export function LogTail({ live }: Props) {
           {lines.map((line, index) => (
             <li key={`${line.ts}-${index}`} className={`logtail__row logtail__row--${line.level}`}>
               <span className="logtail__time num">{fiTimeSec(line.ts)}</span>
+              {/* Lähde näkyviin, koska loki on nyt kahden unitin lomitus (#232):
+                  relayn rivit kertovat mitä lähetykselle tapahtui, ohjaamon
+                  rivit mitä ohjaamo päätti. Vanha palvelin ei lähetä kenttää,
+                  ja silloin rivi näytetään ilman merkintää — arvaus "relay"
+                  olisi juuri se valhe, jota tässä ollaan poistamassa. */}
+              <span className="logtail__unit">{line.unit === "control" ? "ohjaamo" : line.unit === "relay" ? "relay" : ""}</span>
               <span className="logtail__msg">{line.msg}</span>
             </li>
           ))}
