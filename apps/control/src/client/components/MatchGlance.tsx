@@ -118,6 +118,38 @@ function freshTelemetry(live: LiveState): RelayTelemetry | null {
   return now - at > TELEMETRY_STALE_MS ? null : live.telemetry;
 }
 
+/** Ottelun tilanne pesäpallona, ei juoksujen summana (#229).
+ *
+ *  `totalHome`/`totalAway` ovat koko ottelun juoksusummat, ja ne ovat oikea
+ *  luku vain silloin kun jaksoja on yksi — juuri sellaisia olivat kaikki
+ *  koeajot ennen 5.8.2026, joten vika ei voinut näkyä aiemmin. Jaksopelissä
+ *  summa ei ole ottelun tilanne missään vaiheessa: ratkaisevat jaksovoitot, ja
+ *  käynnissä olevalla jaksolla on oma lukunsa. Kortti sanoi 6–12 samalla kun
+ *  selostus sanoi oikein "toinen jakso, tilanne 0–2".
+ *
+ *  Kun yhtään jaksoa ei ole vielä ratkennut, jaksovoitot eivät kerro mitään
+ *  (0–0) ja rivi on pelkkä käynnissä olevan jakson tilanne. Se on samalla
+ *  yhden jakson otteluiden koko totuus, joten leirimuoto ei tarvitse
+ *  erikoistapausta. */
+export function scoreValue(match: MatchState): string {
+  const home = match.home ?? "Koti";
+  const away = match.away ?? "Vieras";
+  const current = match.currentPeriod == null ? undefined : match.periodScores[match.currentPeriod];
+  const decided = match.periodsWonHome + match.periodsWonAway;
+
+  if (decided === 0) {
+    // Ei vielä ratkenneita jaksoja: näytetään käynnissä oleva jakso, ja jos
+    // sitäkään ei ole, summa on tässä tilanteessa sama asia.
+    const score = current ?? { home: match.totalHome, away: match.totalAway };
+    return `${home} ${score.home} – ${score.away} ${away}`;
+  }
+
+  const won = `${home} ${match.periodsWonHome} – ${match.periodsWonAway} ${away} jaksoissa`;
+  // Ottelun päätyttyä käynnissä olevaa jaksoa ei ole; silloin jaksovoitot ovat
+  // lopputulos eikä perään kuulu mitään.
+  return current ? `${won} · ${periodName(match.currentPeriod)} ${current.home}–${current.away}` : won;
+}
+
 /** Pistetilanne, jakso ja palot, sisävuoro — kolme tietoa samasta ottelusta.
  *  Yksi merkintä = yksi juoksu; palvelin on jo laskenut nämä, tässä ne vain
  *  asetellaan (CLAUDE.md, `runValueOfSubEvent`). */
