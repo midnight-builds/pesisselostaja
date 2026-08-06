@@ -214,3 +214,34 @@ describe("apiTimeoutMs (#156:n viritys)", () => {
     expect(makeLoop({ pollInterval: 15000 }).apiTimeoutMs("full")).toBe(15000);
   });
 });
+
+describe("delta-aikakatkaisun höllennys hakuvirhesarjassa (#156)", () => {
+  it("antaa deltalle takaisin väljemmän rajan kolmannen peräkkäisen virheen jälkeen", () => {
+    // 1 s riittää KUNNOSSA olevaa APIa vasten (mediaani ~80 ms). Jos API
+    // joskus vastaa aidosti 1–4 s:ssä, kiinteä 1 s katkaisisi joka ikisen
+    // deltan ja läpi menisi enää 60 s välein tehtävä täyshaku — selostus
+    // laahaisi minuutin perässä. Sarja erottaa nämä kaksi tapausta:
+    // jumittuneet yhteydet tulivat yksittäin (31/31 uusintaa onnistui
+    // ensiyrittämällä), joten kolmas peräkkäinen virhe tarkoittaa että
+    // oletus itsessään on väärä.
+    const loop = makeLoop() as LoopInternals & { consecutiveFetchFailures: number };
+    expect(loop.apiTimeoutMs("delta")).toBe(1000);
+
+    loop.consecutiveFetchFailures = 2;
+    expect(loop.apiTimeoutMs("delta")).toBe(1000);
+
+    loop.consecutiveFetchFailures = 3;
+    expect(loop.apiTimeoutMs("delta")).toBe(4000);
+  });
+
+  it("palaa tiukkaan rajaan kun haku onnistuu jälleen", () => {
+    const loop = makeLoop() as LoopInternals & {
+      consecutiveFetchFailures: number;
+      recordPollSuccess(): void;
+    };
+    loop.consecutiveFetchFailures = 5;
+    expect(loop.apiTimeoutMs("delta")).toBe(4000);
+    loop.recordPollSuccess();
+    expect(loop.apiTimeoutMs("delta")).toBe(1000);
+  });
+});
