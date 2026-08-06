@@ -42,6 +42,7 @@ export type ControlEventCode =
   | "scheduler.blocked"
   | "scheduler.start_failed"
   | "scheduler.enabled"
+  | "scheduler.crashed"
   // Valmiustarkistus (preflight.ts)
   | "preflight.ok"
   | "preflight.blocked"
