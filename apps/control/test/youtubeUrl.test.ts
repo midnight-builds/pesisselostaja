@@ -3,7 +3,7 @@
 // ohjaamossa siltä kuin lähetystä ei olisi olemassa, joten hylkäystapaukset
 // ovat tässä yhtä tärkeitä kuin osumat.
 import { describe, expect, it } from "vitest";
-import { parseYouTubeVideoId } from "../src/server/youtubeUrl.js";
+import { parseYouTubeVideoId } from "../src/shared/youtubeUrl.js";
 
 const ID = "dQw4w9WgXcQ";
 

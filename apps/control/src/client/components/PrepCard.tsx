@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Job, PreflightResult } from "../../shared/types";
 import { hasBroadcastPair } from "../../shared/jobState";
+import { watchUrlForVideo } from "../../shared/youtubeUrl";
 import type { BroadcastTexts } from "../../server/templates";
 import type { CreatedBroadcastPair, TemplatePreview, TitleOverrides } from "../api";
 import { api, isAuthMissing } from "../api";
@@ -55,7 +56,9 @@ export function PrepCard({ job, notify }: Props) {
   // Sääntö on jaettu palvelimen tuplaparin eston kanssa (#204): kaksi eri
   // rajaa tuottaisi tilan, jossa kortti tarjoaa luontia jonka palvelin torjuu.
   const hasPair = hasBroadcastPair({ targetVideoId: videoId, targetStreamKey: streamKey });
-  const narratedUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : null;
+  // Osoite apurista eikä käsin: sama muoto on jo neljässä paikassa, ja käsin
+  // kirjoitettuna ne eroaisivat toisistaan hiljaa (#228).
+  const narratedUrl = videoId ? watchUrlForVideo(videoId) : null;
   const rawUrl = job.sourceUrl ?? created?.normal.watchUrl ?? null;
 
   const fail = useCallback(

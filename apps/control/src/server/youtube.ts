@@ -28,7 +28,7 @@
  *  vahvistuksen; ilman sitä ne heittävät ConfirmationRequiredErrorin, jonka
  *  HTTP-kerros kääntää 400:ksi. */
 import { readFile } from "node:fs/promises";
-import { watchUrlForVideo } from "./youtubeUrl.js";
+import { watchUrlForVideo } from "../shared/youtubeUrl.js";
 import { extname } from "node:path";
 import { appendNdjson } from "./store.js";
 import { getAccessToken, recordQuota, type QuotaOp } from "./googleAuth.js";

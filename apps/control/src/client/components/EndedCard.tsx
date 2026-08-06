@@ -1,4 +1,5 @@
 import type { Job, LiveState } from "../../shared/types";
+import { watchUrlForVideo } from "../../shared/youtubeUrl";
 import { duration, fiTime } from "../format";
 
 /** Päättynyt-tila: siivous näkyviin (#187).
@@ -27,9 +28,10 @@ interface Props {
 }
 
 /** Tallenteen osoite. Sama video kuin lähetys: YouTube tarjoilee päättyneen
- *  lähetyksen samalla watch-linkillä, joten uutta tietoa ei tarvita. */
+ *  lähetyksen samalla watch-linkillä, joten uutta tietoa ei tarvita.
+ *  Muoto tulee jaetusta apurista, ei käsin kirjoitettuna (#228). */
 function recordingUrl(job: Job): string | null {
-  return job.targetVideoId ? `https://www.youtube.com/watch?v=${job.targetVideoId}` : null;
+  return job.targetVideoId ? watchUrlForVideo(job.targetVideoId) : null;
 }
 
 /** Kuinka kauan selostus oli ajossa. Molemmat päät työstä, ei kellosta: puhelin
@@ -126,13 +128,26 @@ export function EndedCard({ job, live }: Props) {
         </div>
       </dl>
 
-      {url ? (
-        <a className="btn btn--ghost btn--wide" href={url} target="_blank" rel="noreferrer">
-          Avaa tallenne
-        </a>
-      ) : (
-        <p className="muted">Tallenteen osoitetta ei ole tiedossa.</p>
-      )}
+      {/* Molemmat lähetykset, ei vain selostettu (#228). Päättyneenkin ajon
+          jälkeen kysymys on sama kuin ajon aikana: "jäikö raakalähetys
+          päälle?" — ja siihen ei voinut vastata ilman että lähetyksensä joutui
+          etsimään YouTubesta käsin. Termit ovat CONTEXT.md:n pari, ei paljas
+          "lähde-URL". Uusi välilehti, koska ohjaamo on puhelimen kotinäytöllä
+          PWA:na eikä siitä saa navigoida pois. */}
+      <div className="ended__links">
+        {url ? (
+          <a className="btn btn--ghost btn--wide" href={url} target="_blank" rel="noreferrer">
+            Avaa selostettu lähetys
+          </a>
+        ) : (
+          <p className="muted">Selostetun lähetyksen osoitetta ei ole tiedossa.</p>
+        )}
+        {job.sourceUrl && (
+          <a className="btn btn--ghost btn--wide" href={job.sourceUrl} target="_blank" rel="noreferrer">
+            Avaa raakalähetys
+          </a>
+        )}
+      </div>
     </div>
   );
 }

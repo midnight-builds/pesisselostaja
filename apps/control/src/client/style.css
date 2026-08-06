@@ -964,6 +964,14 @@ select.field__input {
   font-weight: 700;
   line-height: 1.35;
 }
+/* Kaksi lähetystä allekkain, ei rinnakkain: 393 px:n ruudulla kaksi
+   puolikasta nappia katkaisisi juuri ne sanat, jotka erottavat lähetykset
+   toisistaan (#228). */
+.ended__links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .ended__why {
   display: flex;
   flex-direction: column;

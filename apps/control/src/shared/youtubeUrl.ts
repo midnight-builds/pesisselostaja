@@ -1,6 +1,13 @@
-/** YouTube-URLin jäsennys. Puhdas ja riippuvuudeton tarkoituksella: tämä
- *  ajetaan jokaisella lähteen tilan pollauskierroksella, eikä sillä ole mitään
- *  tekemistä verkon tai levyn kanssa. */
+/** YouTube-URLin jäsennys ja muodostus. Puhdas ja riippuvuudeton
+ *  tarkoituksella: tämä ajetaan jokaisella lähteen tilan pollauskierroksella,
+ *  eikä sillä ole mitään tekemistä verkon tai levyn kanssa.
+ *
+ *  `shared/`issa eikä `server/`issä, koska katseluosoitetta tarvitsee myös
+ *  käyttöliittymä: kortit linkittävät molempiin lähetyksiin (#228), ja osoite
+ *  oli ehditty kirjoittaa käsin kolmeen paikkaan. Neljäs kopio olisi ollut se
+ *  hiljainen ero, jota `parseYouTubeVideoId` ei huomaisi. Riippumattomuus on
+ *  ehto tälle paikalle: mitään node-rajapintaa ei saa lisätä tänne, tai
+ *  selainniteeseen vuotaisi palvelinkoodia.
 
 /** Isännät joista videoId ylipäätään voi tulla. `www.`-etuliite riisutaan
  *  ennen vertailua, joten myös `m.`- ja `music.`-muodot on lueteltava. */

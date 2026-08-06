@@ -19,7 +19,7 @@ import {
 import { readLog } from "./journal.js";
 import { logError, logInfo, reason } from "./log.js";
 import { mayRepairBinding, runControlPreflight } from "./preflight.js";
-import { watchUrlForVideo } from "./youtubeUrl.js";
+import { watchUrlForVideo } from "../shared/youtubeUrl.js";
 import { hasBroadcastPair } from "../shared/jobState.js";
 import { startLiveAggregator } from "./live.js";
 import { createSourceIngestPoller } from "./sourceIngest.js";
