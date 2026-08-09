@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 
 /** Leipoo buildiin tiedon siitä mistä se on peräisin (issue #71).
  *
@@ -49,11 +49,33 @@ function buildInfo(): Plugin {
   };
 }
 
-export default defineConfig({
+/** Lisää GoatCounter-merkin `index.html`:ään kun `PUBLIC_GOATCOUNTER_URL` on
+ *  asetettu. Ilman muuttujaa buildiin ei tule riviäkään — kehitysajo ja
+ *  paikallinen :3000 eivät siis kirjaa käyntejä analytiikkaan.
+ *
+ *  Käyntien laskuri on evästeetön eikä tunnista käyttäjää, joten selain saa
+ *  ladata skriptin `async`-tilassa: sen puuttuminen ei riko mitään. */
+function goatcounter(url: string | undefined): Plugin {
+  return {
+    name: "pesisselostaja-goatcounter",
+    transformIndexHtml() {
+      if (!url) return [];
+      return [
+        {
+          tag: "script",
+          attrs: { async: true, "data-goatcounter": url, src: `${url}.js` },
+          injectTo: "head",
+        },
+      ];
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => ({
   base: "./",
-  plugins: [buildInfo()],
+  plugins: [buildInfo(), goatcounter(loadEnv(mode, process.cwd(), "PUBLIC_").PUBLIC_GOATCOUNTER_URL)],
   build: {
     outDir: "dist",
     target: "es2022",
   },
-});
+}));
