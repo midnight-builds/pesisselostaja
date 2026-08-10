@@ -51,11 +51,13 @@ interface LoopInternals {
   lastServerDateMs: number | null;
   lastFullFetchAt: number;
   history: { size: number };
-  pollWindow: { fetchMs: { small: number[]; full: number[] }; failures: number };
+  pollWindow: { fetchMs: { delta: number[]; meta: number[]; full: number[] }; failures: number };
+  apiTimeoutMs(size: "delta" | "meta" | "full"): number;
+  pollIntervalMs: number;
 }
 
-function makeLoop(): LoopInternals {
-  return new CommentaryLoop(makeConfig(), async () => {}) as unknown as LoopInternals;
+function makeLoop(overrides: Partial<RelayConfig> = {}): LoopInternals {
+  return new CommentaryLoop(makeConfig(overrides), async () => {}) as unknown as LoopInternals;
 }
 
 // Fictional data only (public repo).
@@ -111,8 +113,9 @@ describe("pollWindow.fetchMs (#156)", () => {
     await loop.fetchFullEvents();
     expect(loop.pollWindow.fetchMs.full).toHaveLength(1);
     expect(loop.pollWindow.fetchMs.full[0]).toBeGreaterThanOrEqual(0);
-    // Täyshaku EI saa päätyä pieneen otokseen: sitä säätelee eri raja.
-    expect(loop.pollWindow.fetchMs.small).toEqual([]);
+    // Täyshaku EI saa päätyä delta- eikä meta-otokseen: eri raja kummallakin.
+    expect(loop.pollWindow.fetchMs.delta).toEqual([]);
+    expect(loop.pollWindow.fetchMs.meta).toEqual([]);
   });
 
   it("EI kirjaa epäonnistunutta hakua otokseen", async () => {
@@ -124,7 +127,7 @@ describe("pollWindow.fetchMs (#156)", () => {
     fetchMock.mockRejectedValueOnce(new Error("This operation was aborted"));
     await expect(loop.fetchFullEvents()).rejects.toThrow("aborted");
     expect(loop.pollWindow.fetchMs.full).toEqual([]);
-    expect(loop.pollWindow.fetchMs.small).toEqual([]);
+    expect(loop.pollWindow.fetchMs.delta).toEqual([]);
   });
 
   it("kerää useamman haun samaan ikkunaan", async () => {
@@ -136,7 +139,7 @@ describe("pollWindow.fetchMs (#156)", () => {
     expect(loop.pollWindow.fetchMs.full).toHaveLength(3);
   });
 
-  it("mittaa DELTA-haun ja kirjaa sen pieneen otokseen", async () => {
+  it("mittaa DELTA-haun ja kirjaa sen delta-otokseen", async () => {
     // Adversariaalinen katselmus 31.7.2026 huomautti, että alkuperäiset testit
     // ajoivat vain fetchFullEventsia: timedFetchin olisi voinut poistaa
     // delta-kutsusta ja sarja olisi pysynyt vihreänä — vaikka lähes kaikki
@@ -155,8 +158,9 @@ describe("pollWindow.fetchMs (#156)", () => {
     fetchMock.mockResolvedValueOnce({ ...result(), notModified: true });
     await loop.fetchEventsForPoll();
 
-    expect(loop.pollWindow.fetchMs.small).toHaveLength(1);
+    expect(loop.pollWindow.fetchMs.delta).toHaveLength(1);
     expect(loop.pollWindow.fetchMs.full).toHaveLength(fullBefore);
+    expect(loop.pollWindow.fetchMs.meta).toEqual([]);
   });
 
   it("nollaa otoksen kun ikkuna raportoidaan, jottei se kasva ottelun mitassa", async () => {
@@ -167,13 +171,77 @@ describe("pollWindow.fetchMs (#156)", () => {
     fetchMock.mockResolvedValue(result([ev(1)]));
     await loop.fetchEventsForPoll();
     await loop.fetchEventsForPoll();
-    expect(loop.pollWindow.fetchMs.full.length + loop.pollWindow.fetchMs.small.length).toBeGreaterThan(0);
+    expect(loop.pollWindow.fetchMs.full.length + loop.pollWindow.fetchMs.delta.length).toBeGreaterThan(0);
 
     // Pakota yhteenveto erääntymään.
     loop.lastPollSummaryAtMs = Date.now() - 60_000;
     loop.maybeLogPollWindow();
 
     expect(loop.pollWindow.fetchMs.full).toEqual([]);
-    expect(loop.pollWindow.fetchMs.small).toEqual([]);
+    expect(loop.pollWindow.fetchMs.delta).toEqual([]);
+    expect(loop.pollWindow.fetchMs.meta).toEqual([]);
+  });
+});
+
+describe("apiTimeoutMs (#156:n viritys)", () => {
+  it("delta-haku EI ole sidottu pollausväliin", () => {
+    // Tämä on se rivi, joka olisi nollannut koko virityksen hiljaa. Ennen
+    // #156:tta efektiivinen raja oli `max(base, pollIntervalMs)`, joten
+    // vakion laskeminen 4000 → 1000 olisi tuottanut 3000 ms eikä 1000 ms —
+    // eikä mikään lokissa olisi kertonut sitä. Perustelu (#89) sekoitti
+    // kadenssin vasteaikaan: pollausväli kertoo kuinka usein kysytään, ei
+    // kuinka kauan vastaus saa kestää.
+    expect(makeLoop().apiTimeoutMs("delta")).toBe(1000);
+    expect(makeLoop({ pollInterval: 8000 }).apiTimeoutMs("delta")).toBe(1000);
+  });
+
+  it("kokoonpanohaku pitää oman, väljemmän rajansa deltan virityksestä huolimatta", () => {
+    // Delta ja meta jakoivat rajan #156:een asti. Mitattu jakauma (mediaani
+    // 72–83 ms) on käytännössä pelkkiä deltoja, joten sillä ei saa virittää
+    // metahakua: se palauttaa molemmat kokoonpanot, sitä haetaan kourallinen
+    // kertoja otteluun, ja liian tiukka raja epäonnistuu HILJAA —
+    // `maybeRefreshRoster` nielaisee virheen ja pitää vanhat nimet, jolloin
+    // relay puhuu väärillä pelinumeroilla koko ottelun.
+    expect(makeLoop().apiTimeoutMs("meta")).toBe(4000);
+    expect(makeLoop({ pollInterval: 8000 }).apiTimeoutMs("meta")).toBe(4000);
+  });
+
+  it("täyshaku pitää pollausvälilattian, koska sen vastaus kasvaa ottelun mitassa", () => {
+    // #47:n hyväksymiskriteeri, joka pätee yhä juuri täyshaulle: operaattori
+    // voi nostaa pollausvälin ohjaustiedostosta yli 10 s:n, eikä raja saa
+    // silloin katkaista hakua jonka hitautta itse kadenssi odottaa.
+    expect(makeLoop().apiTimeoutMs("full")).toBe(10000);
+    expect(makeLoop({ pollInterval: 15000 }).apiTimeoutMs("full")).toBe(15000);
+  });
+});
+
+describe("delta-aikakatkaisun höllennys hakuvirhesarjassa (#156)", () => {
+  it("antaa deltalle takaisin väljemmän rajan kolmannen peräkkäisen virheen jälkeen", () => {
+    // 1 s riittää KUNNOSSA olevaa APIa vasten (mediaani ~80 ms). Jos API
+    // joskus vastaa aidosti 1–4 s:ssä, kiinteä 1 s katkaisisi joka ikisen
+    // deltan ja läpi menisi enää 60 s välein tehtävä täyshaku — selostus
+    // laahaisi minuutin perässä. Sarja erottaa nämä kaksi tapausta:
+    // jumittuneet yhteydet tulivat yksittäin (31/31 uusintaa onnistui
+    // ensiyrittämällä), joten kolmas peräkkäinen virhe tarkoittaa että
+    // oletus itsessään on väärä.
+    const loop = makeLoop() as LoopInternals & { consecutiveFetchFailures: number };
+    expect(loop.apiTimeoutMs("delta")).toBe(1000);
+
+    loop.consecutiveFetchFailures = 2;
+    expect(loop.apiTimeoutMs("delta")).toBe(1000);
+
+    loop.consecutiveFetchFailures = 3;
+    expect(loop.apiTimeoutMs("delta")).toBe(4000);
+  });
+
+  it("palaa tiukkaan rajaan kun haku onnistuu jälleen", () => {
+    const loop = makeLoop() as LoopInternals & {
+      consecutiveFetchFailures: number;
+      recordPollSuccess(): void;
+    };
+    loop.consecutiveFetchFailures = 5;
+    expect(loop.apiTimeoutMs("delta")).toBe(4000);
+    loop.recordPollSuccess();
+    expect(loop.apiTimeoutMs("delta")).toBe(1000);
   });
 });

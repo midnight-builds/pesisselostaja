@@ -276,6 +276,13 @@ body {
   overflow-wrap: anywhere;
 }
 
+.set-privacy {
+  margin-top: 8px;
+  font-size: calc(11px * var(--ts));
+  line-height: 1.45;
+  color: var(--faint, var(--muted));
+}
+
 /* ════════════════════════════════════════════════════════════
    LIVE MATCH SCREEN
    ════════════════════════════════════════════════════════════ */
