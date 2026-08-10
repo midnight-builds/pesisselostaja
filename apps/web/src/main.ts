@@ -885,6 +885,9 @@ function settingsSheet(): string {
              kerran palvelu jäi pyörittämään haaralta siirrettyä buildia eikä
              sitä voinut todeta käyttöliittymästä lainkaan. -->
         <div class="set-build">${esc(formatBuildInfo())}</div>
+        <!-- Käyntilaskuri on evästeetön eikä tunnista käyttäjää; teksti kertoo
+             sen siellä missä se on luettavissa myös kentällä puhelimella. -->
+        <div class="set-privacy">Keräämme omalla analytiikallamme anonyymejä käyttötilastoja palvelun kehittämiseksi. Emme käytä seurantaan evästeitä, tunnista yksittäisiä käyttäjiä tai myy analytiikkatietoja.</div>
       </div>
     </div>
   </div>`;
