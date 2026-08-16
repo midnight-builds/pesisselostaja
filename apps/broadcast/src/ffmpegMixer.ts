@@ -78,6 +78,10 @@ export interface FfmpegMixerOptions {
   /** Force a respawn on this cadence even if ffmpeg looks healthy, so a
    *  rotated source URL gets picked up (default 15 min). */
   urlRefreshMs?: number;
+  /** yt-dlp:n `--extractor-args` (RELAY_YTDLP_EXTRACTOR_ARGS), eli minä
+   *  YouTuben player-clientinä lähde haetaan. Absent = ytdlpSource.ts:n oletus
+   *  (android, #249:n bottitarkistuksen kiertotie). */
+  ytdlpExtractorArgs?: string;
   /** Give up and stop retrying after this many milliseconds of unbroken
    *  unproductive attempts — a start-up failure, or a session that died in
    *  under minProductiveRunMs — which protects against retrying forever once
@@ -991,9 +995,19 @@ export class FfmpegMixer {
     // around it.
     this.sourceStateValue = "resolving";
     try {
-      if (this.opts.resolveTestSource) return await this.opts.resolveTestSource();
+      if (this.opts.resolveTestSource) {
+        const testUrl = await this.opts.resolveTestSource();
+        this.throttled = false;
+        return testUrl;
+      }
       logInfo("source.resolving", "Haetaan lähdeosoite yt-dlp:llä…");
-      return (await resolveSourceUrl(this.opts.youtubeUrl)).url;
+      const resolved = await resolveSourceUrl(this.opts.youtubeUrl, {
+        extractorArgs: this.opts.ytdlpExtractorArgs,
+      });
+      // YouTube answered us — whatever the block was, it is over, and the next
+      // failure deserves the ordinary fast backoff again.
+      this.throttled = false;
+      return resolved.url;
     } finally {
       this.probingSource = false;
       this.refreshSlateText();
