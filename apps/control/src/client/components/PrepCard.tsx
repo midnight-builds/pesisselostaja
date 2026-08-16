@@ -3,7 +3,7 @@ import type { Job, PreflightResult } from "../../shared/types";
 import { hasBroadcastPair } from "../../shared/jobState";
 import { parseYouTubeVideoId, watchUrlForVideo } from "../../shared/youtubeUrl";
 import type { BroadcastTexts } from "../../server/templates";
-import type { CreatedBroadcastPair, TemplatePreview, TitleOverrides } from "../api";
+import type { CreatedBroadcastPair, PlaylistSummary, TemplatePreview, TitleOverrides } from "../api";
 import { api, isAuthMissing } from "../api";
 import { ConfirmButton } from "./ConfirmButton";
 import { CopyButton } from "./CopyButton";
@@ -60,6 +60,14 @@ export function PrepCard({ job, notify }: Props) {
     /** Menikö kansikuva perille molempiin. */
     thumbnails: boolean;
   } | null>(null);
+  /** Operaattorin käsin valitsema soittolista, tai null = ohjaamon oma
+   *  päättely ikäluokasta. Valinta elää vain tässä kortissa: se lähetetään
+   *  luonnin mukana, eikä työhön jää soittolistakenttää jota myöhempi avaus
+   *  näyttäisi väärin (sama linja kuin otsikon ohituksilla, #231). */
+  const [playlistChoice, setPlaylistChoice] = useState<PlaylistSummary | null>(null);
+  /** Kanavan soittolistat, haettuna vasta kun valitsin avataan. */
+  const [playlists, setPlaylists] = useState<PlaylistSummary[] | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   // Työ on totuus siitä onko pari olemassa; juuri luotu pari on mukana siksi,
   // että palvelimen seuraava kehys on sekunteja päässä eikä luonti saa näyttää
@@ -79,6 +87,15 @@ export function PrepCard({ job, notify }: Props) {
   // kirjoitettuna ne eroaisivat toisistaan hiljaa (#228).
   const narratedUrl = videoId ? watchUrlForVideo(videoId) : null;
   const rawUrl = job.sourceUrl ?? created?.normal.watchUrl ?? null;
+
+  // Soittolista, jonka ohjaamo päättelee ottelun ikäluokasta — tai null, kun
+  // joukkueiden nimissä ei ole ikäluokan kirjainta (#239). Palvelin on
+  // laskenut nimen kaiken aikaa; ennen tätä sitä ei luettu missään, joten
+  // päättelyn epäonnistuminen näkyi vasta ottelupäivän jälkeen tyhjänä
+  // soittolistana.
+  const derivedPlaylist = preview?.texts.playlistName ?? null;
+  /** Mihin listaan lähetykset ovat menossa: operaattorin valinta voittaa. */
+  const playlistLabel = playlistChoice?.title ?? derivedPlaylist;
 
   const same = (a: TitleOverrides, b: TitleOverrides) =>
     a.homeTeam === b.homeTeam && a.awayTeam === b.awayTeam && a.shortVenue === b.shortVenue;
@@ -114,6 +131,30 @@ export function PrepCard({ job, notify }: Props) {
       cancelled = true;
     };
   }, [job.id, overrides, hasPair, fail]);
+
+  // Kun ikäluokka ei ratkennut, valitsin on auki valmiiksi (#239): rivi joka
+  // vain kertoo puutteesta jättäisi korjauksen yhden lisänapautuksen taakse
+  // juuri siinä hetkessä, jossa lähetykset ollaan luomassa. Operaattori saa
+  // silti sulkea sen — efekti ei aja uudelleen samoilla arvoilla.
+  useEffect(() => {
+    if (hasPair || !preview || playlistChoice) return;
+    if (preview.texts.playlistName === null) setPickerOpen(true);
+  }, [hasPair, preview, playlistChoice]);
+
+  // Soittolistat haetaan vasta kun valitsin avataan: kanavan listojen haku on
+  // YouTube-kutsu, eikä sitä ole syytä tehdä joka kerta kun ikäluokka ratkesi
+  // itsestään.
+  useEffect(() => {
+    if (!pickerOpen || playlists) return;
+    let cancelled = false;
+    api.youtubePlaylists().then(
+      (rows) => !cancelled && setPlaylists(rows),
+      (err: unknown) => !cancelled && fail(err),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [pickerOpen, playlists, fail]);
 
   // Jakoviesti muodostetaan aina uudelleen työn linkeistä (#131): luontivastaus
   // näkyy vain kerran, ja viesti jaetaan useaan ryhmään eri aikoina.
@@ -152,7 +193,14 @@ export function PrepCard({ job, notify }: Props) {
     if (busy || hasPair) return;
     setBusy(true);
     try {
-      const pair = await api.createBroadcasts({ jobId: job.id, overrides });
+      // Soittolista lähetetään vain kun operaattori on valinnut sen itse:
+      // ilman kenttää palvelin käyttää ikäluokasta päättelemäänsä listaa, ja
+      // tyhjä arvo tarkoittaisi "ei mihinkään listaan" (#239).
+      const pair = await api.createBroadcasts({
+        jobId: job.id,
+        overrides,
+        ...(playlistChoice ? { playlistId: playlistChoice.id } : {}),
+      });
       setCreated(pair);
       notify("ok", "Lähetyspari luotu");
     } catch (err) {
@@ -242,7 +290,29 @@ export function PrepCard({ job, notify }: Props) {
               <dd>{preview.texts.title}</dd>
               <dt>Alkaa</dt>
               <dd>{preview.texts.scheduledLocal}</dd>
+              <dt>Soittolista</dt>
+              <dd data-testid="prep-playlist">{playlistLabel ?? "Ei tunnistettu"}</dd>
             </dl>
+            {playlistLabel === null && (
+              <p className="prep__note is-fail" data-testid="prep-playlist-missing">
+                Soittolistaa ei tunnistettu — lähetykset eivät päätyisi mihinkään soittolistaan. Valitse
+                lista alta, tai luo pari ilman listaa ja lisää lähetykset myöhemmin itse.
+              </p>
+            )}
+            <details
+              className="prep__edit"
+              data-testid="playlist-picker"
+              open={pickerOpen}
+              onToggle={(e) => setPickerOpen(e.currentTarget.open)}
+            >
+              <summary>Valitse soittolista</summary>
+              <PlaylistField
+                playlists={playlists}
+                value={playlistChoice}
+                derived={derivedPlaylist}
+                onChange={setPlaylistChoice}
+              />
+            </details>
             <details className="prep__edit">
               <summary>Muokkaa otsikkoa</summary>
               <TitleFields value={draft} texts={preview.texts} onChange={setDraft} />
@@ -299,6 +369,23 @@ export function PrepCard({ job, notify }: Props) {
       {created?.thumbnails && (!created.thumbnails.normal.ok || !created.thumbnails.narrated.ok) && (
         <p className="prep__note is-fail">
           Kansikuva jäi asettamatta. Lähetykset on silti luotu — älä luo niitä uudelleen.
+        </p>
+      )}
+      {/* Mihin listaan lähetykset menivät, luonnin omasta vastauksesta (#239).
+          Ilman tätä riviä listaan lisäys onnistui ja epäonnistui täsmälleen
+          samannäköisesti, ja tyhjä soittolista huomattiin vasta ottelupäivän
+          jälkeen. Rivi näkyy vain siinä istunnossa jossa pari luotiin: työhön
+          ei jää soittolistakenttää, eikä kortti saa arvata sellaista. */}
+      {created && (
+        <p
+          className={`prep__note${created.narrated.playlistId ? "" : " is-fail"}`}
+          data-testid="prep-playlist-result"
+        >
+          {created.narrated.playlistId
+            ? playlistLabel
+              ? `Lähetykset lisättiin soittolistaan ${playlistLabel}.`
+              : "Lähetykset lisättiin soittolistaan."
+            : "Lähetykset eivät ole missään soittolistassa — lisää ne itse YouTubessa."}
         </p>
       )}
 
@@ -366,6 +453,57 @@ export function PrepCard({ job, notify }: Props) {
 
       <Readiness result={checks} checking={checking} onRecheck={() => void runChecks()} />
     </div>
+  );
+}
+
+/** Soittolistan käsivalinta (#239).
+ *
+ *  Ohjaamo päättelee listan ottelun ikäluokasta, ja useimmiten se osuu. Kun
+ *  joukkueiden nimissä ei ole ikäluokan kirjainta, päättely ei osu mihinkään —
+ *  ja ennen tätä valitsinta ainoa keino oli lisätä lähetykset listaan käsin
+ *  YouTubessa, ottelupäivän jälkeen, jos joku sattui huomaamaan.
+ *
+ *  Tyhjä valinta on tarkoituksella se mitä ohjaamo tekisi muutenkin: päätelty
+ *  lista, tai ei mitään listaa jos päättely ei osunut. Sen mitä tyhjä valinta
+ *  tarkoittaa lukee kentän alla, koska se on tässä eri asia eri otteluissa. */
+function PlaylistField({
+  playlists,
+  value,
+  derived,
+  onChange,
+}: {
+  playlists: PlaylistSummary[] | null;
+  value: PlaylistSummary | null;
+  derived: string | null;
+  onChange: (next: PlaylistSummary | null) => void;
+}) {
+  const loading = playlists === null;
+
+  return (
+    <label className="field">
+      <span className="field__label">Soittolista</span>
+      <select
+        className="field__input"
+        data-testid="playlist-select"
+        value={value?.id ?? ""}
+        disabled={loading}
+        onChange={(e) => onChange(playlists?.find((p) => p.id === e.target.value) ?? null)}
+      >
+        <option value="">{derived ?? "Ei soittolistaa"}</option>
+        {(playlists ?? []).map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.title}
+          </option>
+        ))}
+      </select>
+      <p className="field__hint">
+        {loading
+          ? "Haetaan kanavan soittolistoja…"
+          : derived
+            ? `Ilman valintaa lähetykset menevät listaan ${derived}.`
+            : "Ilman valintaa lähetykset eivät mene mihinkään soittolistaan."}
+      </p>
+    </label>
   );
 }
 

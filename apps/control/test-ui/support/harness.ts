@@ -78,7 +78,11 @@ export class ApiMock {
     intervalSec: 5,
   };
   broadcasts: unknown[] = [];
-  playlists: unknown[] = [];
+  playlists: unknown[] = fixture.playlists();
+  /** Soittolista jonka ohjaamo päättelee ottelun ikäluokasta, tai `null` kun
+   *  päättely ei osu (#239) — se tila jossa videot jäivät ennen hiljaa
+   *  kaikkien listojen ulkopuolelle. */
+  playlist: { id: string; name: string } | null = { id: "PLtesti", name: "Pesä Ysit F 2026" };
   /** Routes to answer with an error, e.g. { "POST /api/relay/start": "..." }.
    *  A bare string is a 500; give `{ status, error }` when the status itself
    *  is part of what's under test (404 for an unknown match id). */
@@ -362,12 +366,16 @@ async function installApiMock(page: Page, api: ApiMock): Promise<void> {
         return void (await send({
           matchId: 999001,
           jobId: payload.jobId ?? null,
-          texts: fixture.broadcastTexts(payload.overrides ?? {}),
+          texts: fixture.broadcastTexts({ ...(payload.overrides ?? {}), playlist: api.playlist }),
         }));
       }
       if (path === "/api/youtube/broadcasts" && method === "POST") {
-        const payload = (body ?? {}) as { overrides?: Record<string, string> };
-        return void (await send(fixture.createdPair(fixture.broadcastTexts(payload.overrides ?? {}))));
+        const payload = (body ?? {}) as { overrides?: Record<string, string>; playlistId?: string | null };
+        const texts = fixture.broadcastTexts({ ...(payload.overrides ?? {}), playlist: api.playlist });
+        // Sama sääntö kuin palvelimella (youtube.ts): annettu soittolista
+        // voittaa päätellyn, ja kentän puuttuminen tarkoittaa päättelyn tulosta.
+        const playlistId = payload.playlistId === undefined ? texts.playlistId : payload.playlistId;
+        return void (await send(fixture.createdPair(texts, playlistId)));
       }
       // Metatietojen muokkaus (#225) ja kansikuvan uudelleenlataus. Vastaus on
       // se mitä palvelin palauttaa: id ja kirjoitettu otsikko.

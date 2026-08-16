@@ -420,10 +420,20 @@ export function preflightWithBlockers(): PreflightResult {
 
 /** Tekstipaketti jonka esikatselureitti palauttaa. `matchup` heijastaa
  *  otsikko-ohitukset, jotta selaintesti näkee menivätkö ne palvelimelle. */
-export function broadcastTexts(p: { homeTeam?: string; awayTeam?: string; shortVenue?: string } = {}) {
+export function broadcastTexts(
+  p: {
+    homeTeam?: string;
+    awayTeam?: string;
+    shortVenue?: string;
+    /** Ohjaamon ikäluokasta päättelemä soittolista, tai `null` kun päättely ei
+     *  osunut mihinkään (#239) — palvelin palauttaa juuri tämän muodon. */
+    playlist?: { id: string; name: string } | null;
+  } = {}
+) {
   const home = p.homeTeam ?? "Kuvitteellisen Kylän Veikot";
   const away = p.awayTeam ?? "Lapinlahden Peikot";
   const place = p.shortVenue ?? "Testikenttä 1";
+  const playlist = p.playlist === undefined ? { id: "PLtesti", name: "Pesä Ysit F 2026" } : p.playlist;
   const matchup = `${home} - ${away}`;
   return {
     title: `${matchup}, 29.7.2026 ${place}`,
@@ -435,9 +445,9 @@ export function broadcastTexts(p: { homeTeam?: string; awayTeam?: string; shortV
       "YouTube selostettu: <selostettu-youtube-linkki>",
       "Tulospalvelu: https://www.pesistulokset.fi/ottelut/999001",
     ].join("\n"),
-    playlistId: "PLtesti",
-    playlistName: "Pesä Ysit F 2026",
-    ageGroup: "F" as const,
+    playlistId: playlist?.id ?? null,
+    playlistName: playlist?.name ?? null,
+    ageGroup: playlist ? ("F" as const) : null,
     localDate: "29.7.2026",
     localTime: "8:30",
     scheduledLocal: "29.7.2026 klo 8:30",
@@ -454,16 +464,20 @@ export function broadcastTexts(p: { homeTeam?: string; awayTeam?: string; shortV
 
 /** Luotu lähetyspari — jaettavassa viestissä oikeat linkit paikkamerkkien
  *  tilalla, aivan kuten oikealla palvelimella. */
-export function createdPair(texts = broadcastTexts()) {
+export function createdPair(texts = broadcastTexts(), playlistId: string | null = texts.playlistId) {
   const shareMessage = texts.shareMessage
     .replace("<youtube-linkki>", "https://www.youtube.com/watch?v=NORMAALI")
     .replace("<selostettu-youtube-linkki>", "https://www.youtube.com/watch?v=SELOSTETTU");
   return {
-    normal: { watchUrl: "https://www.youtube.com/watch?v=NORMAALI", videoId: "NORMAALI", title: texts.title, rtmpUrl: null, backupUrl: null, streamKey: null },
+    // `playlistId` on se lista johon lähetys oikeasti lisättiin — palvelin
+    // palauttaa sen luontivastauksessa, ja se on ainoa todiste siitä menikö
+    // lisäys perille (#239). Molemmat lähetykset menevät samaan listaan.
+    normal: { watchUrl: "https://www.youtube.com/watch?v=NORMAALI", videoId: "NORMAALI", title: texts.title, playlistId, rtmpUrl: null, backupUrl: null, streamKey: null },
     narrated: {
       watchUrl: "https://www.youtube.com/watch?v=SELOSTETTU",
       videoId: "SELOSTETTU",
       title: texts.narratedTitle,
+      playlistId,
       rtmpUrl: "rtmp://a.rtmp.youtube.com/live2",
       backupUrl: "rtmp://b.rtmp.youtube.com/live2?backup=1",
       streamKey: "cccc-dddd-eeee-ffff",
@@ -476,6 +490,16 @@ export function createdPair(texts = broadcastTexts()) {
     // muuten onnistumisrivi jää kokonaan kattamatta.
     thumbnails: { normal: { ok: true }, narrated: { ok: true } },
   };
+}
+
+/** Kanavan soittolistat sellaisina kuin `GET /api/youtube/playlists` ne antaa
+ *  (#239) — käsivalinnan vaihtoehdot silloin kun ikäluokka ei ratkea. */
+export function playlists() {
+  return [
+    { id: "PLtesti", title: "Pesä Ysit F 2026", itemCount: 12 },
+    { id: "PLdee", title: "Pesä Ysit D 2026", itemCount: 4 },
+    { id: "PLgee", title: "Pesä Ysit G 2026", itemCount: 7 },
+  ];
 }
 
 /** Valmiustarkistus sellaisena kuin ohjaamo sen näyttää valmistelussa (#184):
