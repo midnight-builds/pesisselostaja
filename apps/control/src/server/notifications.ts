@@ -114,11 +114,14 @@ interface Memory {
    *  käynnistyssääntö kuin yllä: eilen päättyneen ottelun siivousmerkintä ei
    *  ole tänään uutinen. */
   endedKey: string | null | undefined;
-  /** Sen työn id, jonka kohteen kuolemasta on jo ilmoitettu (#250). EI
+  /** `<jobId>:<videoId>` sille kohteelle, jonka kuolemasta on jo ilmoitettu
+   *  (#250), `null` kun sellaista ei ole. Avaimessa on videoId eikä pelkkä
+   *  työ, koska toipumispolku luo SAMALLE työlle uuden kohteen — ja sen
+   *  uuden kohteen kuolema on uusi uutinen, ei saman episodin toistoa. EI
    *  `undefined`-alkuarvoa tarkoituksella: kuollut kohde kesken ottelun on
    *  ajankohtainen ja toimintaa vaativa myös silloin, kun ohjaamo käynnistyi
    *  uudelleen kesken episodin — hiljaisuus olisi tässä se vika. */
-  targetDeadJobId: string | null;
+  targetDeadKey: string | null;
 }
 
 const memory: Memory = {
@@ -127,7 +130,7 @@ const memory: Memory = {
   failNotified: false,
   jobKey: undefined,
   endedKey: undefined,
-  targetDeadJobId: null,
+  targetDeadKey: null,
 };
 
 /** Test seam: the module keeps process-lifetime state, so a test that drives
@@ -138,7 +141,7 @@ export function resetNotificationState(): void {
   memory.failNotified = false;
   memory.jobKey = undefined;
   memory.endedKey = undefined;
-  memory.targetDeadJobId = null;
+  memory.targetDeadKey = null;
   lastSentAt.clear();
   lastFailedAt.clear();
 }
@@ -275,17 +278,25 @@ async function observe(state: LiveState): Promise<void> {
     ingest: state.targetIngest,
     nowMs: now,
   });
-  if (prefs.broken && targetDead && state.job && memory.targetDeadJobId !== state.job.id) {
+  const targetKey = state.job?.targetVideoId ? `${state.job.id}:${state.job.targetVideoId}` : null;
+  if (prefs.broken && targetDead && targetKey !== null && memory.targetDeadKey !== targetKey) {
     announcedTargetDead = await notify(
-      `target-dead:${state.job.id}`,
+      `target-dead:${targetKey}`,
       "Selostettu lähetys kuoli",
       `${matchLabel(state)} — YouTube on päättänyt selostetun lähetyksen, mutta ottelu on kesken. Jaettu linkki ei enää näytä lähetystä.`
     );
     // Leima vasta onnistuneesta toimituksesta (sama sääntö kuin notify()n
     // vaimennuksessa, #205): hukkunut push yritetään uudelleen seuraavilla
     // tikeillä, ja toistoa rajoittavat notify()n omat suojat.
-    if (announcedTargetDead) memory.targetDeadJobId = state.job.id;
+    if (announcedTargetDead) memory.targetDeadKey = targetKey;
   }
+  // Kuolleen kohteen episodi on auki niin kauan kuin työn kohde on yhä se,
+  // jonka kuolemasta ilmoitettiin. Kuolema on lopullinen (päättynyttä
+  // lähetystä ei voi palauttaa liveksi), joten mikään health-heilahdus —
+  // ottelun päättyminen, transientti API-virhe havainnon tilalla, portin
+  // hetkellinen sulkeutuminen — ei ole toipumista ennen kuin työlle on
+  // oikeasti luotu uusi kohde (videoId vaihtuu) tai työ vaihtuu.
+  const deadEpisodeOpen = targetKey !== null && memory.targetDeadKey === targetKey;
 
   // --- Selostettu lähetys päättyi: päivän kolmas ja viimeinen push (#174).
   //
@@ -312,7 +323,7 @@ async function observe(state: LiveState): Promise<void> {
     // Sama sääntö kohteen kuolemalle (#250): deriveHealth kääntää saman
     // havainnon failiksi samalla tikillä, ja toinen piippaus minuutin päästä
     // ei kertoisi mitään uutta.
-    if (announcedMidMatchStop || announcedTargetDead) memory.failNotified = true;
+    if (announcedMidMatchStop || announcedTargetDead || deadEpisodeOpen) memory.failNotified = true;
 
     if (prefs.broken && !memory.failNotified && now - memory.failSince >= FAIL_CONFIRM_MS) {
       memory.failNotified = true;
@@ -322,7 +333,15 @@ async function observe(state: LiveState): Promise<void> {
     // Recovery is only ever reported for a failure we actually reported. Left
     // out, an operator who got "Lähetys rikki" would have no way to learn from
     // the phone that it healed — and would drive back to the field for nothing.
-    if (memory.failNotified && prefs.broken) {
+    // Avoimen kohde-episodin aikana health voi käydä ok:ssa vain väärästä
+    // syystä: ottelu päättyi (mitään ei korjaantunut — loppuottelu meni jo
+    // katsojilta ohi) tai varma complete-havainto korvautui hetkeksi
+    // virheellä/portin sulkeutumisella (tiedon menetys ei ole toipumista).
+    // "Lähetys taas kunnossa" olisi silloin valhe — ja pahimmillaan se
+    // saapuisi juuri kun operaattori on lähdössä pystyttämään uutta
+    // lähetystä. Aito toipuminen kulkee uuden kohteen kautta, jolloin
+    // episodi ei enää ole auki.
+    if (memory.failNotified && prefs.broken && !deadEpisodeOpen) {
       await notify("health-recovered", "Lähetys taas kunnossa", state.headline);
     }
     memory.failSince = null;

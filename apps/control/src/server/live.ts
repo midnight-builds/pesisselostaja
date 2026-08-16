@@ -583,8 +583,20 @@ function applyTargetIngest(
       // nosta terveyttä, vain vahvistaa mitä rivi jo sanoo.
       notes.push("YouTube: työntö menee perille");
     } else if (ingest.streamStatus !== null) {
-      notes.push(`YouTube: työntö ei mene perille (${ingest.streamStatus})`);
-      doubt();
+      // Epäilyä vain kun relay itse kertoo työntävänsä. Ennen ensimmäistäkään
+      // työntöä (yt-dlp ratkoo osoitetta, relay odottaa lähdettä) kohteen
+      // striimi ei VOI olla active, ja keltainen "ei mene perille" jokaisen
+      // lähetyksen alussa opettaisi lukemaan rivin keltaisen normaaliksi
+      // käynnistyskohinaksi. `no_signal` lasketaan työnnöksi: katvekuva
+      // työntyy, joten silloin inactive on aito epäilys.
+      const telemetry = freshTelemetry(snap);
+      const pushing =
+        telemetry !== null &&
+        (telemetry.source.state === "live" || telemetry.source.state === "no_signal");
+      if (pushing) {
+        notes.push(`YouTube: työntö ei mene perille (${ingest.streamStatus})`);
+        doubt();
+      }
     }
   }
 
