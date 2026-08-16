@@ -844,6 +844,7 @@ function applyVoiceEngine(): void {
   watcher?.setVoiceEngine(settings.voiceEngine);
   watcher?.setVolumeBoost(settings.volumeBoost);
   watcher?.setElevenLabsApiKey(settings.elevenLabsApiKey);
+  watcher?.setElevenLabsVoice(settings.elevenLabsVoiceId);
   if (settings.voiceEngine === "piper") {
     watcher?.setPiperVoice(settings.piperVoiceId);
   } else {
