@@ -187,6 +187,7 @@ async function main(): Promise<void> {
       streamKey: config.streamKey,
       narrationGain: config.narrationGain,
       urlRefreshMs: config.urlRefreshMs,
+      ytdlpExtractorArgs: config.ytdlpExtractorArgs,
       maxFailureWindowMs: config.maxFailureWindowMs,
       finishedFailureWindowMs: config.finishedFailureWindowMs,
       // The loop owns the finished state; the supervisor uses it to give up
