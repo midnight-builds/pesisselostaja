@@ -563,4 +563,61 @@ describe("kohteen kuolema kesken ottelun (#250)", () => {
     );
     expect(titles()).toEqual(["Selostettu lähetys kuoli", "Selostettu lähetys kuoli"]);
   });
+
+  it("ottelun päättyminen episodin aikana EI ole 'Lähetys taas kunnossa'", async () => {
+    // Kohteen kuolema on lopullinen: kun ottelu sitten päättyy ja health
+    // palaa ok:ksi (rule 8), mikään ei korjaantunut — loppuottelu meni jo
+    // katsojilta ohi. Toipumispush juuri kun operaattori on lähdössä
+    // pystyttämään uutta lähetystä olisi pahin mahdollinen viesti.
+    await notifications.observeLiveState(
+      state({ at: at(0), health: "fail", job: liveJobWithTarget(), targetIngest: deadTarget(at(0)) })
+    );
+    await notifications.observeLiveState(
+      state({
+        at: at(10),
+        health: "ok",
+        matchFinished: true,
+        job: liveJobWithTarget(),
+        targetIngest: deadTarget(at(10)),
+      })
+    );
+    expect(titles()).toEqual(["Selostettu lähetys kuoli"]);
+  });
+
+  it("transientti API-häiriö episodin aikana ei tuota kunnossa/rikki-ping-pongia", async () => {
+    // Virhehavainto korvaa varman complete-havainnon → isTargetDeadMidMatch
+    // false → health käy ok:ssa. Tiedon menetys ei ole toipumista, eikä
+    // completen paluu ole uusi vika.
+    const errorObservation: LiveState["targetIngest"] = {
+      ...deadTarget(at(30))!,
+      lifeCycleStatus: null,
+      error: "selostetun lähetyksen tilaa ei saatu: fetch failed",
+    };
+    await notifications.observeLiveState(
+      state({ at: at(0), health: "fail", job: liveJobWithTarget(), targetIngest: deadTarget(at(0)) })
+    );
+    await notifications.observeLiveState(
+      state({ at: at(30), health: "ok", job: liveJobWithTarget(), targetIngest: errorObservation })
+    );
+    for (const sec of [35, 61, 130]) {
+      await notifications.observeLiveState(
+        state({ at: at(sec), health: "fail", job: liveJobWithTarget(), targetIngest: deadTarget(at(sec)) })
+      );
+    }
+    expect(titles()).toEqual(["Selostettu lähetys kuoli"]);
+  });
+
+  it("saman työn UUDEN kohteen kuolema on uusi uutinen — kuittaus on kohdekohtainen", async () => {
+    // Toipumispolku (#250 kohta 2) luo samalle työlle uuden lähetyksen. Jos
+    // kuittaus olisi työkohtainen, uuden kohteen kuolema jäisi hiljaiseksi.
+    await notifications.observeLiveState(
+      state({ at: at(0), health: "fail", job: liveJobWithTarget(), targetIngest: deadTarget(at(0)) })
+    );
+    const secondTarget = { ...liveJobWithTarget(), targetVideoId: "UUSIKOHDE01" };
+    const secondDead = { ...deadTarget(at(5))!, videoId: "UUSIKOHDE01" };
+    await notifications.observeLiveState(
+      state({ at: at(5), health: "fail", job: secondTarget, targetIngest: secondDead })
+    );
+    expect(titles()).toEqual(["Selostettu lähetys kuoli", "Selostettu lähetys kuoli"]);
+  });
 });

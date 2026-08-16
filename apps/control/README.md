@@ -350,7 +350,11 @@ Ottelun päätyttyä sama `complete` on normaali lopputila eikä hälytä.
 
 Portit ovat samat kuin lähteen pollauksessa (työ `arming`/`live`, relay ajossa
 juuri tätä ottelua, token, kiintiövaraus) — molemmat pollerit väistävät
-itsenäisesti lähetysten luonnin kiintiötarpeen.
+itsenäisesti lähetysten luonnin kiintiötarpeen. Huomaa että kahden pollerin
+yhteiskulutus on ~4 yksikköä / 30 s eli ~480/h: `sourceIngest.ts`:n
+mitoituskommentin "yön yli ~3840" on nyt yhteissummana ~7680, joten pitkänä
+leiripäivänä kiintiövaraus voi sulkea molemmat havainnot samaan aikaan —
+silloin syy näkyy Lähde- ja Kohde-rivien notena, ei vikana.
 
 Toipumispolku (uuden selostetun lähetyksen luonti kesken ottelun ja relayn
 sidonta siihen) on issuen #250 kohta 2 eikä sisälly tähän: valvonta kertoo

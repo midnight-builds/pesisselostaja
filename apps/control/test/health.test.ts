@@ -623,12 +623,33 @@ describe("kohde kuoli kesken ottelun (#250)", () => {
     expect(row.detail).toMatch(/selostettu lähetys on päättynyt/);
   });
 
-  it("työntö joka ei mene perille pudottaa kohde-rivin ok → warn", () => {
+  it("työntö joka ei mene perille pudottaa kohde-rivin ok → warn — kun relay työntää", () => {
     const row = targetRow({
+      telemetry: baseTelemetry(),
       targetIngest: deadTarget({ lifeCycleStatus: "live", streamStatus: "inactive" }),
     });
     expect(row.health).toBe("warn");
     expect(row.detail).toMatch(/työntö ei mene perille \(inactive\)/);
+  });
+
+  it("ennen ensimmäistä työntöä inactive-striimi ei varoita — se ei voi olla muuta", () => {
+    // yt-dlp ratkoo vielä osoitetta: kohteen striimi on väistämättä ready/
+    // inactive, ja keltainen joka lähetyksen alussa opettaisi ohittamaan sen.
+    const row = targetRow({
+      telemetry: baseTelemetry({ source: { state: "resolving", detail: null } }),
+      targetIngest: deadTarget({ lifeCycleStatus: "ready", streamStatus: "ready" }),
+    });
+    expect(row.health).toBe("ok");
+    expect(row.detail).not.toMatch(/ei mene perille/);
+  });
+
+  it("katvekuvan aikana työntö kulkee, joten inactive on aito epäilys", () => {
+    const row = targetRow({
+      telemetry: baseTelemetry({ source: { state: "no_signal", detail: null } }),
+      targetIngest: deadTarget({ lifeCycleStatus: "live", streamStatus: "inactive" }),
+    });
+    expect(row.health).toBe("warn");
+    expect(row.detail).toMatch(/työntö ei mene perille/);
   });
 
   it("perille menevä työntö vahvistaa vihreän rivin", () => {
