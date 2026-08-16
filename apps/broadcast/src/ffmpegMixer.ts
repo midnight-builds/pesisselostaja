@@ -445,6 +445,37 @@ export function scheduledRecheckDelayMs(startsInMs: number | null, imminentForMs
   return Math.min(Math.max(startsInMs - 20_000, SCHEDULED_RECHECK_MIN_MS), SCHEDULED_RECHECK_MAX_MS);
 }
 
+/** Ordinary respawn backoff: doubles from 1 s and stops here. Right for a
+ *  blip, a rotated URL or a dropped RTMP push — retrying soon is free. */
+export const BACKOFF_MAX_MS = 30_000;
+/** …and wrong for HTTP 429 / YouTube's bot check, which is not an outage but
+ *  YouTube telling us to stop asking: at the ordinary cap the relay knocks
+ *  twice a minute for as long as the block lasts, i.e. exactly when backing
+ *  off is the only thing that helps (#249, 16.8.2026). A throttled answer
+ *  therefore jumps straight to a minute instead of creeping up from 1 s. */
+export const THROTTLED_BACKOFF_MIN_MS = 60_000;
+export const THROTTLED_BACKOFF_MAX_MS = 5 * 60_000;
+
+/** Next respawn delay. Pure so the policy can be read (and tested) without
+ *  running the supervisor loop.
+ *
+ *  The throttled backoff is never allowed past half the give-up window: the
+ *  window decides when the relay stops trying, and a backoff that outslept it
+ *  would hand that decision to the sleep instead — a finished match's 2 min
+ *  cleanup window must not turn into a 5 min nap. */
+export function nextBackoffMs(
+  currentMs: number,
+  opts: { throttled: boolean; giveUpWindowMs: number }
+): number {
+  const doubled = currentMs * 2;
+  if (!opts.throttled) return Math.min(doubled, BACKOFF_MAX_MS);
+  const cap = Math.min(
+    THROTTLED_BACKOFF_MAX_MS,
+    Math.max(BACKOFF_MAX_MS, Math.floor(opts.giveUpWindowMs / 2))
+  );
+  return Math.min(Math.max(doubled, Math.min(THROTTLED_BACKOFF_MIN_MS, cap)), cap);
+}
+
 function formatEta(ms: number): string {
   const mins = Math.round(ms / 60000);
   if (mins >= 60) return `${Math.floor(mins / 60)} h ${mins % 60} min`;

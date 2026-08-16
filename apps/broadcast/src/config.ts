@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { DEFAULT_RETENTION_DAYS, DEFAULT_TTS_CACHE_MAX_MB } from "./runRetention.js";
+import { DEFAULT_YTDLP_EXTRACTOR_ARGS } from "./ytdlpSource.js";
 
 export interface RelayConfig {
   matchId: number;
@@ -23,6 +24,12 @@ export interface RelayConfig {
    *  respawns after the first attach add no new delay. */
   firstSpeechDelayMs: number;
   urlRefreshMs: number;
+  /** yt-dlp:n `--extractor-args` (RELAY_YTDLP_EXTRACTOR_ARGS), eli minä
+   *  YouTuben player-clientinä lähde haetaan. Oletus
+   *  DEFAULT_YTDLP_EXTRACTOR_ARGS = `youtube:player_client=android`, joka on
+   *  16.8.2026 bottitarkistuksen kiertotie (#249) — ei makuasia. Tyhjä arvo =
+   *  ei extractor-argumentteja lainkaan, eli yt-dlp:n oma oletus. */
+  ytdlpExtractorArgs: string;
   maxFailureWindowMs: number;
   /** Shorter give-up window used instead of maxFailureWindowMs once the match
    *  has finished — retrying a dead source for 12 min after "Ottelu päättyi"
@@ -171,6 +178,11 @@ export function parseRelayConfig(): RelayConfig {
   const firstSpeechDelayRaw = parseInt(process.env.RELAY_FIRST_SPEECH_DELAY_MS ?? "20000", 10);
   const firstSpeechDelayMs = Number.isNaN(firstSpeechDelayRaw) ? 20000 : Math.max(0, firstSpeechDelayRaw);
   const urlRefreshMs = parseInt(values["url-refresh-ms"] ?? process.env.RELAY_URL_REFRESH_MS ?? String(15 * 60 * 1000), 10);
+  // Extractor-argumentit KOODISSA, ei palvelimen ~/.config/yt-dlp/configissa:
+  // sieltä ne eivät kulje deployn mukana eikä kukaan tiedä relayn käytöksen
+  // riippuvan niistä (#249). Tyhjä (asetettu, mutta "") = ei argumentteja;
+  // asettamaton = DEFAULT_YTDLP_EXTRACTOR_ARGS.
+  const ytdlpExtractorArgs = process.env.RELAY_YTDLP_EXTRACTOR_ARGS ?? DEFAULT_YTDLP_EXTRACTOR_ARGS;
   // How long resolveSourceUrl/ffmpeg-start may fail continuously before the
   // relay gives up and shuts down (see SourceExhaustedError). Kept generous
   // by default so a relay started a few minutes ahead of the phone's
@@ -260,6 +272,7 @@ export function parseRelayConfig(): RelayConfig {
     narrationDelayMs,
     firstSpeechDelayMs,
     urlRefreshMs,
+    ytdlpExtractorArgs,
     maxFailureWindowMs,
     finishedFailureWindowMs,
     hardStopQuietMs,

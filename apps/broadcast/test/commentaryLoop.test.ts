@@ -30,6 +30,7 @@ function makeConfig(overrides: Partial<RelayConfig> = {}): RelayConfig {
     narrationDelayMs: 0,
     firstSpeechDelayMs: 0, // most tests exercise gating/latching without the start-up grace
     urlRefreshMs: 900000,
+    ytdlpExtractorArgs: "",
     noSignalSlate: false,
     noSignalSlateAfterMs: 8000,
     noSignalSlateWidth: 1920,
