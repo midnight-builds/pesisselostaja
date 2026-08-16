@@ -200,6 +200,30 @@ test.describe("ottelunaikainen", () => {
     expect(await horizontalOverflow(page)).toEqual([]);
   });
 
+  // #250: YouTube päätti selostetun lähetyksen kesken ottelun (16.8.2026).
+  // Relayn kirjanpito näyttää tervettä ajoa — työntö kuolleeseen kohteeseen
+  // onnistuu — joten ilman tätä riviä kortti olisi vihreä samalla kun
+  // katsojien linkki osoittaa päättyneeseen videoon.
+  test("kuollut kohde kesken ottelun nostaa hälytysrivin", async ({ page, api, openApp }) => {
+    const job = { ...liveJob(), targetVideoId: "TESTTARGET1" };
+    api.jobs = [job];
+    await openApp(
+      fixture.liveState({
+        job,
+        targetIngest: {
+          observedAt: fixture.NOW,
+          videoId: "TESTTARGET1",
+          lifeCycleStatus: "complete",
+          streamStatus: null,
+          healthStatus: null,
+          error: null,
+        },
+      }),
+    );
+
+    await expect(page.getByTestId("glance-alert")).toHaveText(/Selostettu lähetys on päättynyt/);
+  });
+
   test("viiveen nudge menee control-tiedoston reittiä ja uusi arvo näkyy heti", async ({
     page,
     api,

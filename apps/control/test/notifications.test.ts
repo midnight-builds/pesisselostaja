@@ -112,6 +112,7 @@ function state(overrides: {
   relayActive?: boolean;
   matchFinished?: boolean;
   job?: Job | null;
+  targetIngest?: LiveState["targetIngest"];
 }): LiveState {
   return {
     now: overrides.at,
@@ -130,6 +131,7 @@ function state(overrides: {
       cpuCount: 4,
     },
     knobs: null,
+    targetIngest: overrides.targetIngest ?? null,
     job: overrides.job === undefined ? baseJob() : overrides.job,
     telemetry: null,
     narration: [],
@@ -465,5 +467,100 @@ describe("auto-fix interface", () => {
     await notifications.notifyAutoFix("Relay käynnistettiin uudelleen", "prosessi oli kuollut");
     await notifications.notifyAutoFix("Delta-haku pois päältä", "tapahtumia katosi");
     expect(titles()).toEqual(["Automaattinen korjaus", "Automaattinen korjaus"]);
+  });
+});
+
+/** #250: YouTube päätti selostetun lähetyksen kesken ottelun (16.8.2026,
+ *  ottelu 136771) eikä mikään piipannut. Tämä liipaisin on poikkeus
+ *  FAIL_CONFIRM_MS-säännöstä: "complete" on YouTuben lopullinen tila joka ei
+ *  voi lepattaa, ja jokainen odotettu minuutti on pois loppuottelun
+ *  pelastamisesta. Hiljaisuus pinnataan yhtä tiukasti kuin hälytys. */
+describe("kohteen kuolema kesken ottelun (#250)", () => {
+  const TARGET_VID = "TARGETVID99";
+
+  function liveJobWithTarget(): Job {
+    return { ...baseJob(), targetVideoId: TARGET_VID };
+  }
+
+  function deadTarget(atIso: string): LiveState["targetIngest"] {
+    return {
+      observedAt: atIso,
+      videoId: TARGET_VID,
+      lifeCycleStatus: "complete",
+      streamStatus: null,
+      healthStatus: null,
+      error: null,
+    };
+  }
+
+  it("piippaa heti ensimmäisestä varmasta havainnosta — ei 60 s varmistusta", async () => {
+    await notifications.observeLiveState(
+      state({ at: at(0), health: "fail", job: liveJobWithTarget(), targetIngest: deadTarget(at(0)) })
+    );
+    expect(titles()).toEqual(["Selostettu lähetys kuoli"]);
+  });
+
+  it("piippaa yhdestä episodista täsmälleen kerran", async () => {
+    for (const sec of [0, 5, 10, 15]) {
+      await notifications.observeLiveState(
+        state({ at: at(sec), health: "fail", job: liveJobWithTarget(), targetIngest: deadTarget(at(sec)) })
+      );
+    }
+    expect(titles()).toEqual(["Selostettu lähetys kuoli"]);
+  });
+
+  it("sama episodi ei tuota myöhemmin toista 'Lähetys rikki' -pushia", async () => {
+    // deriveHealth kääntää saman havainnon failiksi samalla tikillä; ilman
+    // failNotified-leimaa puhelin piippaisi samasta viasta uudelleen minuutin
+    // päästä.
+    for (const sec of [0, 30, 61, 90, 120]) {
+      await notifications.observeLiveState(
+        state({ at: at(sec), health: "fail", job: liveJobWithTarget(), targetIngest: deadTarget(at(sec)) })
+      );
+    }
+    expect(titles()).toEqual(["Selostettu lähetys kuoli"]);
+  });
+
+  it("vaikenee kun ottelu on ohi — complete on silloin normaali lopputila", async () => {
+    await notifications.observeLiveState(
+      state({
+        at: at(0),
+        matchFinished: true,
+        job: liveJobWithTarget(),
+        targetIngest: deadTarget(at(0)),
+      })
+    );
+    expect(titles()).toEqual([]);
+  });
+
+  it("vaikenee ilman havaintoa, vaikka health olisi fail", async () => {
+    await notifications.observeLiveState(state({ at: at(0), health: "fail", job: liveJobWithTarget() }));
+    expect(titles()).toEqual([]);
+  });
+
+  it("vaikenee kun havainto koskee toista videota", async () => {
+    const other = { ...deadTarget(at(0))!, videoId: "JOKUMUU1234" };
+    await notifications.observeLiveState(
+      state({ at: at(0), health: "fail", job: liveJobWithTarget(), targetIngest: other })
+    );
+    expect(titles()).toEqual([]);
+  });
+
+  it("hukkunut push yritetään uudelleen eikä episodia leimata ilmoitetuksi", async () => {
+    // notify() lukee toisto- ja uusintasuojiinsa oikeaa kelloa (Date.now()),
+    // joten kellon on kuljettava tilan aikaleimojen mukana.
+    vi.useFakeTimers();
+    vi.setSystemTime(ORIGIN);
+    sendPush.mockResolvedValueOnce({ sent: 0, failed: 1, removed: 0 });
+    await notifications.observeLiveState(
+      state({ at: at(0), health: "fail", job: liveJobWithTarget(), targetIngest: deadTarget(at(0)) })
+    );
+    // Ensimmäinen yritys meni hukkaan (0 tilausta otti vastaan). Uusi yritys
+    // vasta RETRY_AFTER_FAIL_MS:n jälkeen — ja se saa mennä perille.
+    vi.setSystemTime(ORIGIN + 61_000);
+    await notifications.observeLiveState(
+      state({ at: at(61), health: "fail", job: liveJobWithTarget(), targetIngest: deadTarget(at(61)) })
+    );
+    expect(titles()).toEqual(["Selostettu lähetys kuoli", "Selostettu lähetys kuoli"]);
   });
 });

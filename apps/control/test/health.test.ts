@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { buildChain, deriveHealth, type Snapshot } from "../src/server/live.js";
 import { SOURCE_INGEST_STALE_MS } from "../src/server/sourceIngest.js";
+import { TARGET_INGEST_STALE_MS } from "../src/shared/targetHealth.js";
 import type {
   Job,
   LogLine,
@@ -535,5 +536,106 @@ describe("työ ja ajossa oleva ottelu ovat eri", () => {
       null
     );
     expect(sameMatch.find((r) => r.key === "source")?.detail).toContain("ffmpeg käynnissä");
+  });
+});
+
+/** #250: YouTuben autostop päätti selostetun lähetyksen kesken ottelun
+ *  16.8.2026 (ottelu 136771). Relayn kirjanpito näytti tervettä ajoa — RTMP-
+ *  työntö kuolleeseen lähetykseen onnistuu — joten kuolema näkyy vain ohjaamon
+ *  omassa YouTube-havainnossa. Nämä testit pinnaavat sekä hälytyksen että sen
+ *  rajauksen: ottelun jälkeen sama "complete" on normaali, terve lopputila. */
+describe("kohde kuoli kesken ottelun (#250)", () => {
+  const TARGET_VID = "TARGETVID99";
+
+  function deadTarget(overrides: Partial<SourceIngest> = {}): SourceIngest {
+    return {
+      observedAt: new Date().toISOString(),
+      videoId: TARGET_VID,
+      lifeCycleStatus: "complete",
+      streamStatus: null,
+      healthStatus: null,
+      error: null,
+      ...overrides,
+    };
+  }
+
+  function deadSnap(overrides: Partial<Snapshot> = {}): Snapshot {
+    return snapshot({
+      job: baseJob({ status: "live", targetVideoId: TARGET_VID }),
+      targetIngest: deadTarget(),
+      ...overrides,
+    });
+  }
+
+  function targetRow(overrides: Partial<Snapshot> = {}) {
+    const row = buildChain(deadSnap(overrides), null).find((r) => r.key === "target");
+    if (!row) throw new Error("kohde-riviä ei löytynyt");
+    return row;
+  }
+
+  it("deriveHealth: tuore complete-havainto kesken ottelun on FAIL ja otsikko sanoo sen suoraan", () => {
+    const { health, headline } = deriveHealth(deadSnap());
+    expect(health).toBe("fail");
+    expect(headline).toMatch(/Selostettu lähetys on päättynyt/);
+    expect(headline).toMatch(/kesken ottelun/);
+  });
+
+  it("myös revoked on kuollut kohde", () => {
+    const { health } = deriveHealth(deadSnap({ targetIngest: deadTarget({ lifeCycleStatus: "revoked" }) }));
+    expect(health).toBe("fail");
+  });
+
+  it("ottelun päätyttyä complete on normaali lopputila, ei hälytys", () => {
+    const { health } = deriveHealth(deadSnap({ match: baseMatch({ finished: true }) }));
+    expect(health).toBe("ok");
+  });
+
+  it("vanhentunut havainto ei hälytä — tietämättömyys ei ole todiste", () => {
+    const stale = deadTarget({
+      observedAt: new Date(Date.now() - TARGET_INGEST_STALE_MS - 1000).toISOString(),
+    });
+    const { health } = deriveHealth(deadSnap({ targetIngest: stale }));
+    expect(health).toBe("ok");
+  });
+
+  it("toisen videon havainto ei hälytä tämän työn nimissä", () => {
+    const other = deadTarget({ videoId: "JOKUMUU1234" });
+    const { health } = deriveHealth(deadSnap({ targetIngest: other }));
+    expect(health).toBe("ok");
+  });
+
+  it("relayn ollessa alhaalla vika on relay, ei kohde — sääntö 3 voittaa", () => {
+    const { headline } = deriveHealth(
+      deadSnap({ relay: baseRelay({ active: false, activeState: "inactive" }) })
+    );
+    expect(headline).toMatch(/Relay ei ole käynnissä/);
+  });
+
+  it("kohde-rivi on FAIL ja kertoo että työntö menee kuolleeseen kohteeseen", () => {
+    const row = targetRow();
+    expect(row.health).toBe("fail");
+    expect(row.detail).toMatch(/kuolleeseen kohteeseen/);
+  });
+
+  it("ottelun jälkeen kohde-rivi pysyy vihreänä ja mainitsee päättymisen", () => {
+    const row = targetRow({ match: baseMatch({ finished: true }) });
+    expect(row.health).toBe("ok");
+    expect(row.detail).toMatch(/selostettu lähetys on päättynyt/);
+  });
+
+  it("työntö joka ei mene perille pudottaa kohde-rivin ok → warn", () => {
+    const row = targetRow({
+      targetIngest: deadTarget({ lifeCycleStatus: "live", streamStatus: "inactive" }),
+    });
+    expect(row.health).toBe("warn");
+    expect(row.detail).toMatch(/työntö ei mene perille \(inactive\)/);
+  });
+
+  it("perille menevä työntö vahvistaa vihreän rivin", () => {
+    const row = targetRow({
+      targetIngest: deadTarget({ lifeCycleStatus: "live", streamStatus: "active" }),
+    });
+    expect(row.health).toBe("ok");
+    expect(row.detail).toMatch(/työntö menee perille/);
   });
 });
