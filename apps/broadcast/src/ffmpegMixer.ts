@@ -768,6 +768,7 @@ export class FfmpegMixer {
     }
     this.failingSince = null;
     this.backoffMs = 1000; // fresh backoff for when it does go live
+    this.throttled = false; // YouTube answered — about the broadcast, no less
     if (err.startsInMs === null) {
       if (this.imminentSince === null) this.imminentSince = monoNow();
     } else {
