@@ -32,8 +32,14 @@ export const DEFAULT_YTDLP_EXTRACTOR_ARGS = "youtube:player_client=android";
 
 /** Turns the configured extractor-args string into argv. Whitespace separates
  *  several specs (`;` and `,` are part of yt-dlp's own syntax and must survive
- *  untouched); an empty value means "no extractor args at all", which is the
- *  only way to get yt-dlp's plain default back. */
+ *  untouched).
+ *
+ *  An empty value means the RELAY passes no extractor args — NOT that yt-dlp
+ *  runs with its own defaults. yt-dlp reads its config files (`~/.config/yt-dlp/
+ *  config`) before the command line, and this host still carries the original
+ *  16.8.2026 workaround line there. A value set here wins over the host's for
+ *  the same extractor key; an empty one leaves the host's in force. Getting
+ *  back to a bare yt-dlp means editing that file too. */
 export function ytdlpExtractorArgs(
   raw: string | undefined = process.env.RELAY_YTDLP_EXTRACTOR_ARGS
 ): string[] {

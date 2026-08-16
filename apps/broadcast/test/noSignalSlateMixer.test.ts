@@ -15,7 +15,7 @@ import {
   type SourceIngestObservation,
 } from "../src/ffmpegMixer.js";
 import { NoSignalSlate, type SlateLayout } from "../src/noSignalSlate.js";
-import { SourceEndedError } from "../src/ytdlpSource.js";
+import { SourceEndedError, SourceThrottledError } from "../src/ytdlpSource.js";
 
 const LAYOUT: SlateLayout = {
   width: 1920,
@@ -245,6 +245,41 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
     expect(spawns.some(isSlateSpawn)).toBe(true);
     expect(mixer.sourceState).toBe("ended");
     expect(logged()).toContain("Katvekuva pois: lähde on päättynyt hallitusti");
+  }, 25000);
+
+  /** Issue #249. 16.8.2026 katsojat olivat katvekuvassa ~4 min, eli relay istui
+   *  TÄSSÄ silmukassa koko eston ajan — juuri siellä missä se koputti YouTubea
+   *  30 s välein. Perääntyminen, joka on vain pääloopissa, ei siis auta
+   *  siinä tilanteessa jota varten se tehtiin. */
+  it("backs off in the SLATE prober too when YouTube throttles the resolve (#249)", async () => {
+    const spawns: string[][] = [];
+    const mixer = harness({
+      slate: await preparedSlate(),
+      slateAfterMs: 0,
+      // Antelias ikkuna: tässä mitataan perääntymistä, ei luovutusta.
+      maxFailureWindowMs: 10 * 60 * 1000,
+      resolveTestSource: () => {
+        throw new SourceThrottledError(
+          "ERROR: Sign in to confirm you’re not a bot. HTTP Error 429: Too Many Requests"
+        );
+      },
+      spawns,
+    });
+
+    // "seuraava yritys" on nimenomaan KATVEsilmukan rivi — pääloopin oma
+    // perääntymisrivi ei sisällä sitä, joten tämä ei voi mennä läpi pääloopin
+    // ansiosta.
+    const outcome = await runUntil(mixer, () => logged().includes("seuraava yritys"), 8000);
+    expect(outcome).toBe("condition");
+    expect(spawns.some(isSlateSpawn)).toBe(true); // katve oli päällä, kuten 16.8.
+
+    // Seuraava yritys on minuuttien päässä, ei 30 s katossa. Luku luetaan
+    // lokista, koska se on sama luku jonka operaattori näkee.
+    const seconds = Number(/seuraava yritys (\d+) s kuluttua/.exec(logged())?.[1]);
+    expect(seconds).toBeGreaterThanOrEqual(60);
+    // …ja rivi sanoo kumpi pää on vialla.
+    expect(logged()).toMatch(/Raakalähetys voi silti olla kunnossa/);
+    expect(mixer.sourceDetail ?? "").toMatch(/YouTube torjuu haun/);
   }, 25000);
 
   /** Kaksi ffmpegiä samaan RTMP-avaimeen katkaisee lähetyksen YouTuben päässä.
