@@ -48,6 +48,10 @@ export type EventCode =
   | "source.resolving"
   | "source.not_live"
   | "source.progressive_fallback"
+  // YouTube torjui haun (bottitarkistus / HTTP 429) — relay perääntyy (#249).
+  // Oma koodinsa, koska tämä EI ole lähteen vika: raakalähetys voi työntää
+  // moitteettomasti samaan aikaan.
+  | "source.throttled"
   // ffmpeg supervisor
   | "ffmpeg.starting"
   | "ffmpeg.exit"

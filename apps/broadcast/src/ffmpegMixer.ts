@@ -1414,19 +1414,35 @@ export class FfmpegMixer {
             waitMs = this.noteScheduledAnswer(err);
             continue;
           }
-          this.scheduledSince = null;
-          this.imminentSince = null;
-          this.sourceStateValue = "failed";
-          this.sourceDetailValue = err instanceof Error ? err.message : String(err);
+          this.noteResolveFailure(err);
           logError(
             "ffmpeg.start_failed",
             `Lähde ei vastannut katvetilassa: ${err instanceof Error ? err.message : err}`
           );
           // Tässä luovutusikkuna umpeutuu, jos on umpeutuakseen — heitetty
           // SourceExhaustedError kulkee finallyn kautta ulos ja lopettaa
-          // sekä katveen että koko relayn.
+          // sekä katveen että koko relayn. Perääntyminen EI muuta tätä
+          // laskentaa millään tavalla: katve pitää lähetystä hengissä.
           this.noteUnproductiveAttempt((mins) => `Lähde ei ole vastannut ${mins} minuuttiin`);
-          waitMs = Math.min(Math.max(waitMs * 2, 1000), 30000);
+          // Sama perääntymissääntö kuin pääloopissa (#249). Juuri TÄSSÄ
+          // silmukassa relay istui 16.8.2026 koko eston ajan ja koputti
+          // YouTubea 30 s välein; katvekuva ei tee koettimesta vaarattomampaa.
+          // Lattia 1000 ms säilyy: koetin ei saa muuttua tiukaksi silmukaksi
+          // jos initialWaitMs oli pieni.
+          waitMs = Math.max(
+            nextBackoffMs(waitMs, {
+              throttled: this.throttled,
+              giveUpWindowMs: this.giveUpWindowMs(),
+            }),
+            1000
+          );
+          if (this.throttled) {
+            logWarn(
+              "source.throttled",
+              `YouTube torjuu lähdehaun (bottitarkistus/429) — perääntymistahti, seuraava yritys ` +
+                `${Math.round(waitMs / 1000)} s kuluttua. Raakalähetys voi silti olla kunnossa.`
+            );
+          }
         }
       }
     } finally {
