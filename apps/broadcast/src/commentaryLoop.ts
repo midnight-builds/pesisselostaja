@@ -18,6 +18,7 @@ import {
   formatIdleSummary,
   formatMatchEnd,
   formatWelcomeFiller,
+  decideFiller,
   periodName,
   type PlayerLookup,
   type SpeechContext,
@@ -1409,37 +1410,48 @@ export class CommentaryLoop {
    *  Quiet game: a "tilanne on edelleen…" filler once nothing has been said
    *  for IDLE_FILLER_MS. */
   private async maybeAnnounceSummary(meta: MatchMetadata): Promise<void> {
-    // After the closing announcement the narration goes fully silent — no
-    // recaps, fillers, or batter calls — until a post-end score change wakes
-    // it (see processEventsLive). The relay/ffmpeg keep running regardless.
-    if (this.state.finished) return;
     const now = Date.now();
-    // Pre-game there is no situation to recap; keep the wait warm instead.
-    if (!this.matchStarted) {
-      if (now - this.lastSpeechAt < WELCOME_FILLER_MS) return;
-      // Only synthesize the welcome filler when it will actually be heard in
-      // real time (ffmpeg attached, queue empty). Otherwise skip this round —
-      // the ~90s cadence assumes real-time playback, and queuing fillers
-      // before ffmpeg attaches makes them all burst on connect.
-      if (!this.narrationReadyForFiller()) return;
+    // The timing decision itself lives in core (decideFiller, issue #62) —
+    // it used to be duplicated here and in apps/web. Thresholds are passed in
+    // because they differ on purpose between the two apps; the side effects
+    // below (readiness gate, bookkeeping) stay here because they don't.
+    const decision = decideFiller(
+      {
+        // After the closing announcement the narration goes fully silent — no
+        // recaps, fillers, or batter calls — until a post-end score change
+        // wakes it (see processEventsLive). The relay/ffmpeg keep running.
+        finished: this.state.finished,
+        matchStarted: this.matchStarted,
+        now,
+        lastSpeechAt: this.lastSpeechAt,
+        announcementCount: this.state.announcementCount,
+        lastSummaryCount: this.lastSummaryCount,
+      },
+      {
+        welcomeFillerMs: WELCOME_FILLER_MS,
+        idleFillerMs: IDLE_FILLER_MS,
+        summaryEveryN: SUMMARY_EVERY_N,
+      },
+    );
+    if (decision === null) return;
+    // Only synthesize a filler when it will actually be heard in real time
+    // (ffmpeg attached, queue empty). Otherwise skip this round — the ~90s
+    // cadence assumes real-time playback, and queuing fillers before ffmpeg
+    // attaches makes them all burst on connect. In-game the skip happens
+    // WITHOUT advancing the bookkeeping below, so the first ready poll speaks
+    // a fresh recap instead of queueing stale "tilanne on edelleen…" clips
+    // through a long ffmpeg outage. Event narration is unaffected.
+    if (!this.narrationReadyForFiller()) return;
+    if (decision === "welcome") {
       this.speak(formatWelcomeFiller(meta), false);
       return;
     }
-    if (this.state.announcementCount === 0) return;
-    const countDue = this.state.announcementCount - this.lastSummaryCount >= SUMMARY_EVERY_N;
-    const idleDue = now - this.lastSpeechAt > IDLE_FILLER_MS;
-    if (!countDue && !idleDue) return;
-    // Same readiness gate as the pre-game branch: an in-game recap/idle filler
-    // is worthless unless it is heard in real time. Skip WITHOUT advancing the
-    // bookkeeping below, so the first ready poll speaks a fresh one instead of
-    // queueing stale "tilanne on edelleen…" clips every ~2 min through a long
-    // ffmpeg outage. Event narration is unaffected.
-    if (!this.narrationReadyForFiller()) return;
     this.lastSummaryCount = this.state.announcementCount;
     this.state.lastSummaryTime = now;
     this.lastSpeechAt = now;
     const ctx = this.buildContext();
-    const summary = countDue ? formatSituationSummary(meta, ctx) : formatIdleSummary(meta, ctx);
+    const summary =
+      decision === "recap" ? formatSituationSummary(meta, ctx) : formatIdleSummary(meta, ctx);
     this.speak(summary, false);
   }
 
