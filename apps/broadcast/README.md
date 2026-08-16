@@ -303,8 +303,17 @@ to be:
 
 ```
 RELAY_YTDLP_EXTRACTOR_ARGS=youtube:player_client=android   # default
-RELAY_YTDLP_EXTRACTOR_ARGS=                                # empty = no extractor args at all
+RELAY_YTDLP_EXTRACTOR_ARGS=                                # relay passes none — see the caveat below
 ```
+
+**Empty does not mean "yt-dlp's own default" on this host.** yt-dlp reads its
+config files before the command line, and `~/.config/yt-dlp/config` on the relay
+host still carries the original 16.8.2026 workaround line
+(`--extractor-args youtube:player_client=android`). A value set here overrides
+the host's for the same extractor key, but an empty one leaves the host's line
+in force. Getting back to a bare yt-dlp therefore takes **two** edits: this key
+*and* that file. That file is server state, not repo state — it is not deployed,
+not versioned, and nothing but this paragraph records that it exists.
 
 The android default is not a preference. On **16.8.2026, mid-match**, a relay
 restart forced a re-resolve and YouTube answered the web client with `HTTP 429`
@@ -327,12 +336,24 @@ A throttled answer is classified separately from every other resolve failure
   cap; a 429 jumps straight to **60 s** and doubles to **5 min**, because
   knocking twice a minute is what keeps the block alive. It never sleeps past
   half the applicable give-up window, so the window — not the sleep — still
-  decides when the relay gives up.
-- **The status line says which end is in trouble.** `source.state` stays
-  `failed`, but the detail reads *"YouTube torjuu haun (bottitarkistus/429) —
-  raakalähetyksen omasta tilasta ei tietoa"*. In the 16.8. incident the operator
-  was shown a plain source failure while the camera phone was pushing perfectly,
-  which points at the one end of the chain nobody can reach mid-match.
+  decides when the relay gives up. **This applies in the slate prober too**
+  (`runSlateSession`), which is where the relay actually sat during the 16.8.
+  incident: the viewers' four minutes of slate were four minutes of that loop
+  knocking on YouTube every 30 s.
+- **The log and telemetry say which end is in trouble.** `source.state` stays
+  `failed` — the control app mirrors that union by hand, so it gains no new
+  value — but the detail reads *"YouTube torjuu haun (bottitarkistus/429) —
+  raakalähetyksen omasta tilasta ei tietoa"*, and a `source.throttled` warning
+  line goes into the journal and the timeline.
+
+  **What the operator sees today is narrower than that**, and it is worth being
+  precise about it: the wording reaches the **preflight row** in the ohjaamo
+  (translated to "YouTube ei suostu antamaan kuvaa relaylle (bottitarkistus) —
+  raakalähetys voi silti olla kunnossa") and the **log/telemetry**. The live
+  match card still renders `source.state` alone, i.e. "Kuvaa ei saada", because
+  it deliberately does not surface the relay's `source.detail`
+  (`apps/control/src/client/components/MatchGlance.tsx`). Carrying it into that
+  card is its own piece of work, not part of this one.
 
 **Consequence for operators: restarting the relay mid-match is not a
 "couple of seconds" operation.** Every restart re-resolves the source through

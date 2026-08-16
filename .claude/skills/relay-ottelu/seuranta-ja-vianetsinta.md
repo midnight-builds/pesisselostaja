@@ -103,15 +103,24 @@ Se tapahtuu näissä tilanteissa (`ffmpegMixer.ts`, `config.ts`):
   vastaus eikä arvausta kannata tehdä lokin perusteella.
 - **yt-dlp ei palauta URLia / 403** → alkuperäinen lähetys päättyi, on
   yksityinen, tai YouTube rate-limitoi; tarkista `yt-dlp --version` ja päivitä.
-- **`YouTube torjuu haun (bottitarkistus/429)`** (tilarivin selite, #249) →
+- **`source.throttled: YouTube torjuu lähdehaun (bottitarkistus/429)`** (#249) →
   YouTube kieltäytyy vastaamasta **meille**; raakalähetys voi olla täysin
   kunnossa, joten **älä soita kuvaajalle** tämän perusteella. Relay perääntyy jo
-  itse (60 s → 5 min) ja tarttuu lähteeseen kun esto hellittää. **Restart ei
-  auta** — se vain pakottaa uuden haun. Jos esto ei hellitä, vaihda player-
-  client `.env.relay`:ssä: `RELAY_YTDLP_EXTRACTOR_ARGS=youtube:player_client=web`
-  (oletus `android`, joka oli 16.8.2026 se joka meni läpi). Muutos vaatii
-  relayn uudelleenkäynnistyksen — ja `npm run relay:deploy`in, jos muutat koodin
-  oletusta eikä `.env.relay`:tä.
+  itse (60 s → 5 min, myös katvetilassa) ja tarttuu lähteeseen kun esto
+  hellittää. **Restart ei auta** — se vain pakottaa uuden haun. Jos esto ei
+  hellitä, vaihda player-client `.env.relay`:ssä:
+  `RELAY_YTDLP_EXTRACTOR_ARGS=youtube:player_client=web` (oletus `android`, joka
+  oli 16.8.2026 se joka meni läpi). Muutos vaatii relayn uudelleen-
+  käynnistyksen — ja `npm run relay:deploy`in, jos muutat koodin oletusta eikä
+  `.env.relay`:tä. Huomaa että **tyhjä arvo ei palauta yt-dlp:n omaa oletusta**:
+  palvelimen `~/.config/yt-dlp/config` sisältää yhä saman android-rivin, ja se
+  jää voimaan (se tiedosto on palvelimen tilaa, ei repon).
+
+  **Missä tämä näkyy:** lokissa ja telemetriassa, sekä ohjaamon
+  valmiustarkistuksen Lähde-rivillä. Ottelupäivän tilakortti näyttää tästä
+  huolimatta vain `Kuvaa ei saada` — se ei näytä relayn `source.detail`ia
+  lainkaan. Eli jos kortti sanoo "kuvaa ei saada" eikä kuvaaja raportoi mitään
+  vikaa, **katso loki** ennen kuin päättelet kumpi pää on rikki.
 - **Ei selostusta mutta ffmpeg terve** → tarkista `RELAY_NARRATION_GAIN` ≠ 0 ja
   että `commentaryLoop` näkee uusia tapahtumia (vertaa pääsovelluksen lokiin).
   Huomaa myös ensipuheen armonaika `RELAY_FIRST_SPEECH_DELAY_MS`: ennen sen
