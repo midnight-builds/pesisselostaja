@@ -491,6 +491,11 @@ export class FfmpegMixer {
   private child: ChildProcess | null = null;
   private stopped = false;
   private backoffMs = 1000;
+  /** True when the LAST resolve failed because YouTube throttled/bot-checked
+   *  us rather than because the source was unreachable. Decides only the
+   *  backoff (see nextBackoffMs) — the give-up accounting is unchanged, since
+   *  a source we cannot reach is a source we cannot broadcast either way. */
+  private throttled = false;
   private refreshTimer: NodeJS.Timeout | null = null;
   /** When the current unbroken run of *unproductive* attempts began, or null
    *  if the source has since produced a real run. Used to give up after
