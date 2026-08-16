@@ -161,7 +161,20 @@ export async function checkSource(youtubeUrl: string): Promise<Check> {
       const eta = scheduled.startsInMs === null ? "" : ` (~${Math.round(scheduled.startsInMs / 60000)} min)`;
       return { name: "Lähde", status: "ok", detail: `ei vielä livenä, ajastettu alkavaksi${eta} — relay odottaa` };
     }
-    return { name: "Lähde", status: "fail", detail: stderr.trim().split("\n").at(-1) ?? String(err) };
+    const lastLine = stderr.trim().split("\n").at(-1) ?? String(err);
+    // Says which END is in trouble. "Lähde ei vastaa" sends the operator after
+    // the phone in the field; the truth here is that YouTube declined to answer
+    // the relay, and the raakalähetys itself may be perfectly fine (#249).
+    if (parseSourceThrottled(stderr)) {
+      return {
+        name: "Lähde",
+        status: "fail",
+        detail:
+          "YouTube torjuu haun (bottitarkistus / 429) — raakalähetyksen omasta tilasta " +
+          `ei tietoa. Kokeile toista player_clientiä RELAY_YTDLP_EXTRACTOR_ARGS:lla. ${lastLine}`,
+      };
+    }
+    return { name: "Lähde", status: "fail", detail: lastLine };
   }
 }
 
