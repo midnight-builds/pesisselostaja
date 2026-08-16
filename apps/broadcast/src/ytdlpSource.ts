@@ -230,7 +230,10 @@ export function parseResolveOutput(stdout: string): { url: string | null; liveSt
   return { url, liveStatus };
 }
 
-export function resolveSourceUrl(youtubeUrl: string): Promise<ResolvedSource> {
+export function resolveSourceUrl(
+  youtubeUrl: string,
+  opts: { extractorArgs?: string } = {}
+): Promise<ResolvedSource> {
   return new Promise((resolve, reject) => {
     execFile(
       "yt-dlp",
@@ -240,10 +243,7 @@ export function resolveSourceUrl(youtubeUrl: string): Promise<ResolvedSource> {
         // cost another extraction and could answer about a different instant.
         "--print",
         "%(live_status)s",
-        "-f",
-        "best[protocol^=m3u8]/best",
-        "--no-playlist",
-        ...JS_RUNTIME_ARGS,
+        ...ytdlpSourceArgs(opts.extractorArgs),
         youtubeUrl,
       ],
       { maxBuffer: 4 * 1024 * 1024 },
