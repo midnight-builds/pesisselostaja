@@ -869,6 +869,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
     // ja ilmainen, eikä aggregaattorin tikkien tarvitse tietää pollerin omasta
     // 30 s rytmistä.
     const source = opts.getSourceIngest?.() ?? { ingest: null, reason: null };
+    const target = opts.getTargetIngest?.() ?? { ingest: null, reason: null };
     const snap: Snapshot = {
       now: Date.now(),
       job,
@@ -880,6 +881,8 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       errors,
       sourceIngest: source.ingest,
       sourceIngestReason: source.reason,
+      targetIngest: target.ingest,
+      targetIngestReason: target.reason,
       runningMatchId,
     };
     const { health, headline } = deriveHealth(snap);
