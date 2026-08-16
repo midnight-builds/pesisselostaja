@@ -32,6 +32,7 @@ import type {
   RelayTelemetry,
   SourceIngest,
   SystemState,
+  TargetIngest,
 } from "../shared/types.js";
 import { TELEMETRY_STALE_MS } from "../shared/types.js";
 import {
@@ -47,6 +48,7 @@ import { logError, logInfo, logWarn } from "./log.js";
 import { getMatchState } from "./matches.js";
 import { getRelayProcess, readKnobs, readRunningStatus, type RunningStatus } from "./relay.js";
 import { SOURCE_INGEST_STALE_MS } from "./sourceIngest.js";
+import { isTargetDeadMidMatch, TARGET_INGEST_STALE_MS } from "../shared/targetHealth.js";
 import { getSystemState } from "./system.js";
 import { NarrationTimeline, readRelayStatus } from "./telemetry.js";
 import { transitionBroadcast, type TransitionResult } from "./youtube.js";
@@ -133,6 +135,10 @@ export interface LiveAggregatorOptions {
    *  polleri pollaa omalla 30 s välillään kiintiön takia, ja tämä vain kysyy
    *  sen viimeisimmän tuloksen jokaisella tikillä. */
   getSourceIngest?: () => { ingest: SourceIngest | null; reason: string | null };
+  /** Kohteen eli selostetun lähetyksen tilan polleri (targetIngest.ts, #250).
+   *  Sama omistussuhde kuin lähteen pollerilla: polleri pollaa omalla 30 s
+   *  välillään kiintiön takia, aggregaattori vain kysyy viimeisimmän tuloksen. */
+  getTargetIngest?: () => { ingest: TargetIngest | null; reason: string | null };
   /** Hard stopin siivous (#123): lähetyksen lopetus YouTubessa. Injektoitava,
    *  jotta testi ajaa laskevan reunan koskematta YouTube-API:in. */
   transitionBroadcast?: (videoId: string) => Promise<TransitionResult>;
@@ -261,6 +267,13 @@ export interface Snapshot {
   sourceIngest?: SourceIngest | null;
   /** Pollerin syy sille ettei havaintoa juuri nyt ole. */
   sourceIngestReason?: string | null;
+  /** Ohjaamon YouTube-havainto kohteesta eli selostetusta lähetyksestä (#250).
+   *  Sama valinnaisuussääntö kuin sourceIngestillä: puuttuva ja null ovat
+   *  "ei havaintoa", ja hälytys tehdään vain tuoreesta, virheettömästä
+   *  havainnosta (isTargetDeadMidMatch). */
+  targetIngest?: TargetIngest | null;
+  /** Pollerin syy sille ettei kohdehavaintoa juuri nyt ole. */
+  targetIngestReason?: string | null;
   /** Ottelu jota relay oikeasti ajaa, relayn oman status-tiedoston mukaan.
    *  null = ei näyttöä (relay alhaalla, tai juuri käynnistynyt eikä ole vielä
    *  ehtinyt kirjoittaa). Erottelu on olennainen: "ei tiedetä" ei ole sama asia
@@ -274,6 +287,19 @@ function matchIdConflict(snap: Snapshot): { job: number; running: number } | nul
   const running = snap.runningMatchId ?? null;
   if (!snap.job || running === null) return null;
   return running === snap.job.matchId ? null : { job: snap.job.matchId, running };
+}
+
+/** Snapshot-muotoinen kääre jaetulle kohteen kuolemantarkistukselle (#250).
+ *  Itse sääntö on `shared/targetHealth.ts`:ssä, koska selain ajaa saman
+ *  päätöksen tilakortin hälytysriville. */
+function targetDeadMidMatch(snap: Snapshot): boolean {
+  return isTargetDeadMidMatch({
+    job: snap.job,
+    relayActive: snap.relay.active,
+    matchFinished: snap.match.finished,
+    ingest: snap.targetIngest,
+    nowMs: snap.now,
+  });
 }
 
 function minutes(sec: number | null): string {
@@ -347,6 +373,19 @@ export function deriveHealth(snap: Snapshot): { health: Health; headline: string
     return {
       health: "fail",
       headline: `Relay ajaa ottelua ${conflict.running}, ohjaamon työ on ottelusta ${conflict.job} — säätimet eivät mene perille`,
+    };
+  }
+
+  // 3c. Selostettu lähetys on päättynyt YouTubessa kesken ottelun (#250).
+  //     Relayn oma kirjanpito näyttää tässä tilanteessa täyttä tervettä ajoa —
+  //     RTMP-työntö kuolleeseen lähetykseen onnistuu — joten tämä selviää vain
+  //     YouTubelta kysymällä. 16.8.2026 (ottelu 136771) loppuottelu meni ilman
+  //     katsojia, koska mikään ei kertonut tästä; jaettu linkki osoitti
+  //     päättyneeseen videoon.
+  if (targetDeadMidMatch(snap)) {
+    return {
+      health: "fail",
+      headline: "Selostettu lähetys on päättynyt YouTubessa kesken ottelun — katsojat eivät näe lähetystä",
     };
   }
 
@@ -495,6 +534,64 @@ function applySourceIngest(
     // polleri nollaa havainnon). Se on tiedetty vika eikä tietämättömyys,
     // joten se saa pudottaa rivin ok → warn.
     if (ingest !== null) doubt();
+  }
+
+  return {
+    health,
+    detail: notes.length > 0 ? [row.detail, ...notes].join(" · ") : row.detail,
+  };
+}
+
+/** Kohde-rivin sääntö YouTube-havainnolle (#250). Sama periaate kuin
+ *  applySourceIngestissä — havainto voi vain lisätä epäilystä, ei tuottaa
+ *  vihreää — mutta yhdellä poikkeuksella: kesken ottelun kuollut kohde on
+ *  fail, ei warn, ja sen päättää buildChainin oma haara ennen tätä funktiota.
+ *  Tänne pääsevät vain lievemmät havainnot: työntö ei mene perille, havainto
+ *  puuttuu, tai lähetys on päättynyt ottelun jo loputtua (normaali tila). */
+function applyTargetIngest(
+  row: { health: Health; detail: string },
+  snap: Snapshot,
+  now: number
+): { health: Health; detail: string } {
+  const ingest = snap.targetIngest ?? null;
+  const notes: string[] = [];
+  let health = row.health;
+  const doubt = (): void => {
+    if (health === "ok") health = "warn";
+  };
+
+  const ageMs = ingest ? now - Date.parse(ingest.observedAt) : NaN;
+  const fresh =
+    ingest !== null &&
+    ingest.error === null &&
+    Number.isFinite(ageMs) &&
+    ageMs >= 0 &&
+    ageMs <= TARGET_INGEST_STALE_MS;
+
+  if (!fresh) {
+    if (ingest !== null) {
+      notes.push(ingest.error ? "YouTube: havaintoa ei saatu" : "YouTube: havainto vanhentunut");
+    }
+  } else if (ingest) {
+    if (ingest.lifeCycleStatus === "complete" || ingest.lifeCycleStatus === "revoked") {
+      // Kesken ottelun tämä on jo fail-haara buildChainissa; tänne pääsee vain
+      // kun ottelu on ohi tai relay sammunut — silloin päättynyt kohde on
+      // normaali lopputila eikä laske terveyttä.
+      notes.push("YouTube: selostettu lähetys on päättynyt");
+    } else if (ingest.streamStatus === "active") {
+      // Ainoa arvo joka tarkoittaa että YouTube ottaa työntömme vastaan. Ei
+      // nosta terveyttä, vain vahvistaa mitä rivi jo sanoo.
+      notes.push("YouTube: työntö menee perille");
+    } else if (ingest.streamStatus !== null) {
+      notes.push(`YouTube: työntö ei mene perille (${ingest.streamStatus})`);
+      doubt();
+    }
+  }
+
+  // Pollerin syy näytetään aina kun se on asetettu — sama perustelu kuin
+  // lähteen rivillä. Ilman työtä rivi sanoo asian jo itse.
+  if (snap.job && snap.targetIngestReason) {
+    notes.push(`YouTube: ${snap.targetIngestReason}`);
   }
 
   return {
@@ -683,10 +780,18 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
     rows.push(chainRow("target", "Kohde", "idle", "ei aktiivista työtä"));
   } else if (!job.targetStreamKey) {
     rows.push(chainRow("target", "Kohde", "fail", "stream key puuttuu — ei mihin pushata"));
+  } else if (targetDeadMidMatch(snap)) {
+    // #250: YouTube on päättänyt selostetun lähetyksen vaikka ottelu on kesken
+    // ja relay työntää yhä. Tähän ei ole log-fallbackia, koska työntö onnistuu
+    // — kohteen kuolema ei näy relayn päässä mitenkään.
+    rows.push(
+      chainRow("target", "Kohde", "fail", "YouTube: selostettu lähetys on päättynyt kesken ottelun — työntö menee kuolleeseen kohteeseen")
+    );
   } else if (targetBlamed && isRecent(targetBlamed, now)) {
     rows.push(chainRow("target", "Kohde", "fail", "ffmpeg syytti kohdetta — tarkista stream key"));
   } else if (relay.active) {
-    rows.push(chainRow("target", "Kohde", "ok", `push ${job.targetRtmpUrl}`));
+    const target = applyTargetIngest({ health: "ok", detail: `push ${job.targetRtmpUrl}` }, snap, now);
+    rows.push(chainRow("target", "Kohde", target.health, target.detail));
   } else {
     rows.push(chainRow("target", "Kohde", "idle", "ei pushia"));
   }
