@@ -944,7 +944,7 @@ export class BrowserWatcher {
   private async _speakElevenLabs(text: string, token: number): Promise<void> {
     const startedAt = Date.now();
     debugLog("speak-elevenlabs-start", { text, chars: text.length });
-    const blob = await elevenLabsSynthesize(text, this._elevenLabsApiKey);
+    const blob = await elevenLabsSynthesize(text, this._elevenLabsApiKey, this._elevenLabsVoiceId);
     if (this._muted || token !== this._drainToken) return; // cancelled during synth
     await this._playBlob(blob);
     debugLog("speak-elevenlabs-end", { text, ms: Date.now() - startedAt });
