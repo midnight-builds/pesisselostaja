@@ -309,7 +309,10 @@ async function observe(state: LiveState): Promise<void> {
     // A mid-match stop we just announced IS this failure. Marking the episode
     // as announced keeps the phone from buzzing twice about one event a minute
     // apart — the second buzz would carry no information the first didn't.
-    if (announcedMidMatchStop) memory.failNotified = true;
+    // Sama sääntö kohteen kuolemalle (#250): deriveHealth kääntää saman
+    // havainnon failiksi samalla tikillä, ja toinen piippaus minuutin päästä
+    // ei kertoisi mitään uutta.
+    if (announcedMidMatchStop || announcedTargetDead) memory.failNotified = true;
 
     if (prefs.broken && !memory.failNotified && now - memory.failSince >= FAIL_CONFIRM_MS) {
       memory.failNotified = true;
