@@ -733,9 +733,16 @@ export class FfmpegMixer {
         this.noteUnproductiveAttempt((mins) => `Lähde ei ole vastannut ${mins} minuuttiin`);
       }
       if (this.stopped) break;
-      logInfo("ffmpeg.respawn", `Uudelleenyritys ${this.backoffMs}ms kuluttua…`);
+      logInfo(
+        "ffmpeg.respawn",
+        `Uudelleenyritys ${this.backoffMs}ms kuluttua…` +
+          (this.throttled ? " (YouTube torjui haun — perääntymistahti)" : "")
+      );
       preResolved = await this.waitBeforeNextAttempt(this.backoffMs);
-      this.backoffMs = Math.min(this.backoffMs * 2, 30000);
+      this.backoffMs = nextBackoffMs(this.backoffMs, {
+        throttled: this.throttled,
+        giveUpWindowMs: this.giveUpWindowMs(),
+      });
     }
   }
 
@@ -921,15 +928,21 @@ export class FfmpegMixer {
    *  SourceExhaustedError, which the caller turns into a relay shutdown) once
    *  the unbroken run of such attempts outlasts the give-up window. A finished
    *  match's source won't come back, so it uses the much shorter window. */
+  /** The give-up window in force right now. Read both by the accounting below
+   *  and by the throttled backoff, which must never sleep past it. */
+  private giveUpWindowMs(): number {
+    return (this.opts.isMatchFinished?.() ?? false)
+      ? (this.opts.finishedFailureWindowMs ?? 2 * 60 * 1000)
+      : this.maxFailureWindowMs;
+  }
+
   private noteUnproductiveAttempt(
     describe: (windowMins: number) => string,
     opts: { window?: number; reason?: SourceEndReason } = {}
   ): void {
     if (this.failingSince === null) this.failingSince = monoNow();
     const finished = this.opts.isMatchFinished?.() ?? false;
-    const defaultWindow = finished
-      ? (this.opts.finishedFailureWindowMs ?? 2 * 60 * 1000)
-      : this.maxFailureWindowMs;
+    const defaultWindow = this.giveUpWindowMs();
     // A caller with stronger evidence may shorten the window, never lengthen
     // it: the shortest applicable window wins, so a finished match still ends
     // promptly and a mid-match tail does not get MORE patience than a plain
