@@ -114,6 +114,37 @@ const DELTA_FETCH_TIMEOUT_MS = 1_000;
  *  a failure streak, and an aborted poll still waits for the next tick rather
  *  than retrying at once. That is issue #52, and it belongs there. */
 const DELTA_FETCH_TIMEOUT_SLOW_MS = 4_000;
+/** How many SUCCESSFUL polls the loosened delta timeout stays in force after a
+ *  failure streak opened it — the valve's hysteresis.
+ *
+ *  Without it the valve does nothing it promises. `recordPollSuccess()` clears
+ *  the failure streak, so a valve keyed on the streak alone would shut on the
+ *  very first poll it helped: against an API that genuinely answers in 1–4 s
+ *  the cycle would be 3 aborts at 1 s → one poll at 4 s → success → streak
+ *  cleared → back to 1 s → abort. Three deltas out of every four dropped,
+ *  fresh data every ~12 s instead of 3 s, and the log full of "HUOM,
+ *  hakuvirhesarja" lines that the ohjaamo puts in front of the operator.
+ *
+ *  10 is chosen from both directions, and deliberately from the small end:
+ *  - Long enough to be a state, not a blip. At the 3 s default cadence it is
+ *    ~30 s of uninterrupted healthy polling before the tight limit comes back,
+ *    while the noise it must ignore is a SINGLE stuck connection (~0.6 per
+ *    minute, i.e. one per ~100 polls, 31/31 retries succeeding first try —
+ *    #156). Ten clean polls in a row cannot be produced by that noise.
+ *  - Short enough to cost almost nothing when the valve opened by accident.
+ *    The only price of the loose limit is that a stuck connection is again
+ *    waited out for 4 s instead of 1 s, and at that failure rate ten polls
+ *    span at most one such connection: ~3 s of extra latency, once, before
+ *    the tight limit is back. A much larger N would quietly re-ship the
+ *    pre-#156 behaviour for the rest of the match.
+ *
+ *  Honest residual: a genuinely slow API makes this settle into ~10 good polls
+ *  followed by 3 aborts (23 % dropped, against 75 % with no dwell at all), not
+ *  a permanently open valve. Closing that gap needs the valve to key on the
+ *  MEASURED duration of successful deltas rather than on failures; that is a
+ *  bigger change and there is still no match's worth of data showing an API
+ *  that behaves this way. */
+const DELTA_SLOW_DWELL_POLLS = 10;
 /** Metadata (roster) fetch timeout: the startup fetch and the in-match roster
  *  refresh (`maybeRefreshRoster`).
  *
