@@ -12,6 +12,7 @@ import {
 import { fetchTodayMatches } from "@pesisselostaja/core";
 import { formatBuildInfo } from "./buildInfo.js";
 import { PIPER_VOICES, piperStored, piperDownload } from "./piper.js";
+import { ELEVENLABS_DEFAULT_VOICE_ID } from "./elevenlabs.js";
 import { debugLog } from "./debuglog.js";
 import type { LiveMatchSummary } from "@pesisselostaja/core";
 
@@ -765,6 +766,13 @@ function voiceEngineHtml(): string {
         placeholder="sk_…" value="${esc(settings.elevenLabsApiKey)}" />
       <div class="b" style="margin-top:6px">Avain tallentuu vain tähän selaimeen. Synteesi kuluttaa
         ElevenLabs-krediittejäsi; virhetilanteessa palataan selaimen ääneen.</div>
+    </div>
+    <div class="adv-field" style="border-top:1px solid var(--line)">
+      <div class="a">ElevenLabs-ääni (Voice ID)</div>
+      <input id="elevenlabs-voice" type="text" spellcheck="false" autocomplete="off"
+        placeholder="${esc(ELEVENLABS_DEFAULT_VOICE_ID)} (oletus)" value="${esc(settings.elevenLabsVoiceId)}" />
+      <div class="b" style="margin-top:6px">Voice ID löytyy ElevenLabsin äänikirjastosta.
+        Tyhjänä käytetään oletusääntä.</div>
     </div>`;
   }
   const opts = PIPER_VOICES.map((v) =>
