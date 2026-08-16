@@ -715,6 +715,13 @@ export class FfmpegMixer {
         }
         this.noteResolveFailure(err);
         logError("ffmpeg.start_failed", `ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
+        if (this.throttled) {
+          logWarn(
+            "source.throttled",
+            "YouTube torjuu lähdehaun (bottitarkistus/429) — perääntymistahti. " +
+              "Raakalähetys voi silti olla kunnossa; restart ei auta."
+          );
+        }
         // Käynnistysvirhe katkaisee code=0-parikuvion: "kaksi peräkkäistä
         // lähes samanmittaista sessiota" ei saa muodostua sessioista joiden
         // välissä lähde ei auennut lainkaan (#123, adversaarilöydös).
