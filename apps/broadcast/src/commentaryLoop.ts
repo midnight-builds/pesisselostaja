@@ -1019,6 +1019,12 @@ export class CommentaryLoop {
     this.pollStats.fetchFailures++;
     this.pollWindow.failures++;
     const streak = ++this.consecutiveFetchFailures;
+    // Arm (and re-arm, for as long as the streak lasts) the loosened delta
+    // timeout. Arming here rather than reading the streak in apiTimeoutMs() is
+    // what makes the valve outlive the streak: recordPollSuccess() clears the
+    // streak, but the dwell counter it decrements takes DELTA_SLOW_DWELL_POLLS
+    // successes to run out.
+    if (streak >= FETCH_FAILURE_ALARM_STREAK) this.slowDeltaDwellPolls = DELTA_SLOW_DWELL_POLLS;
     const seconds = ((Date.now() - cycleStartedAt) / 1000).toFixed(1);
     const label = streak >= FETCH_FAILURE_ALARM_STREAK ? "HUOM, hakuvirhesarja" : "Hakuvirhe";
     logWarn("api.fetch_failed", `${label} (kesto ${seconds} s, ${streak}. peräkkäinen): ${err instanceof Error ? err.message : err}`);
