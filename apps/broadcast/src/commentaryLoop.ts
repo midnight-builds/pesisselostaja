@@ -1038,6 +1038,10 @@ export class CommentaryLoop {
       logInfo("api.fetch_recovered", `Haku onnistui jälleen — ${this.consecutiveFetchFailures} peräkkäistä hakuvirhettä takana.`);
     }
     this.consecutiveFetchFailures = 0;
+    // One success is not evidence that the tight limit fits again — it may be
+    // the loose limit that let this very poll through. Hence a countdown, not
+    // a clear.
+    if (this.slowDeltaDwellPolls > 0) this.slowDeltaDwellPolls--;
   }
 
   /** Runs a startup fetch that must not be allowed to kill the process (#158).
