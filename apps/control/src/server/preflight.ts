@@ -85,6 +85,11 @@ const ENV_WORD: Record<string, string> = {
   RELAY_YOUTUBE_URL: "raakalähetys",
   RELAY_STREAM_KEY: "selostetun lähetyksen kohde",
   RELAY_RTMP_URL: "kohteen osoite",
+  // #249: relayn oma rivi neuvoo kokeilemaan toista player_clientiä tällä
+  // avaimella. Ilman omaa sanaa yleiskorvaus teki siitä lauseen "Kokeile
+  // toista player_clientiä ohjaamon sidonta:lla" — eli ohjeen, joka osoittaa
+  // väärään asetukseen. Ei ohjaamon sidontaa, vaan relayn hakutapa.
+  RELAY_YTDLP_EXTRACTOR_ARGS: "relayn hakutavan asetus",
 };
 
 export function redactEnvKeys(detail: string): string {
