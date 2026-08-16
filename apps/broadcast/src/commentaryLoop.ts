@@ -474,6 +474,10 @@ export class CommentaryLoop {
    *  alarm threshold (FETCH_FAILURE_ALARM_STREAK) and the streak position on
    *  the failure log line. */
   private consecutiveFetchFailures = 0;
+  /** Successful polls still owed to the loosened delta timeout (hysteresis, see
+   *  DELTA_SLOW_DWELL_POLLS). Armed when a failure streak reaches the alarm
+   *  threshold, decremented by each success — NOT cleared by the first one. */
+  private slowDeltaDwellPolls = 0;
   /** Consecutive reset answers of any kind; cleared by any delta that actually
    *  merges or 304s. Only drives the log (one line per streak, not per poll —
    *  the match-start streak is ~60 polls long at the default cadence). */
