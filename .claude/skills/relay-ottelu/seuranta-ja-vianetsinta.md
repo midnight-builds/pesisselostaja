@@ -103,6 +103,15 @@ Se tapahtuu näissä tilanteissa (`ffmpegMixer.ts`, `config.ts`):
   vastaus eikä arvausta kannata tehdä lokin perusteella.
 - **yt-dlp ei palauta URLia / 403** → alkuperäinen lähetys päättyi, on
   yksityinen, tai YouTube rate-limitoi; tarkista `yt-dlp --version` ja päivitä.
+- **`YouTube torjuu haun (bottitarkistus/429)`** (tilarivin selite, #249) →
+  YouTube kieltäytyy vastaamasta **meille**; raakalähetys voi olla täysin
+  kunnossa, joten **älä soita kuvaajalle** tämän perusteella. Relay perääntyy jo
+  itse (60 s → 5 min) ja tarttuu lähteeseen kun esto hellittää. **Restart ei
+  auta** — se vain pakottaa uuden haun. Jos esto ei hellitä, vaihda player-
+  client `.env.relay`:ssä: `RELAY_YTDLP_EXTRACTOR_ARGS=youtube:player_client=web`
+  (oletus `android`, joka oli 16.8.2026 se joka meni läpi). Muutos vaatii
+  relayn uudelleenkäynnistyksen — ja `npm run relay:deploy`in, jos muutat koodin
+  oletusta eikä `.env.relay`:tä.
 - **Ei selostusta mutta ffmpeg terve** → tarkista `RELAY_NARRATION_GAIN` ≠ 0 ja
   että `commentaryLoop` näkee uusia tapahtumia (vertaa pääsovelluksen lokiin).
   Huomaa myös ensipuheen armonaika `RELAY_FIRST_SPEECH_DELAY_MS`: ennen sen

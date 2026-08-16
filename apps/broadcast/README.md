@@ -291,6 +291,57 @@ was about to go live. In match 145889 on 29.7. the countdown vanished at 08:28
 and ffmpeg attached only at 08:33, so the match start, IPV's first palo and both
 first-period runs were narrated into a FIFO nobody was reading.
 
+### How the source is resolved — and what YouTube may answer instead (#249)
+
+Both the relay and `preflight` resolve the source with the **same** yt-dlp
+flags (`ytdlpSourceArgs` in `src/ytdlpSource.ts`) — format pick, JS runtime and
+extractor args. They used to be two copies, i.e. preflight could bless a source
+the relay would then fetch differently.
+
+The extractor args say **which YouTube player client** the extraction pretends
+to be:
+
+```
+RELAY_YTDLP_EXTRACTOR_ARGS=youtube:player_client=android   # default
+RELAY_YTDLP_EXTRACTOR_ARGS=                                # empty = no extractor args at all
+```
+
+The android default is not a preference. On **16.8.2026, mid-match**, a relay
+restart forced a re-resolve and YouTube answered the web client with `HTTP 429`
++ `Sign in to confirm you're not a bot`; viewers saw the slate for ~4 minutes,
+and the android client went straight through from the same IP. The workaround
+first lived in the host's `~/.config/yt-dlp/config` — a file that is in neither
+the repo nor the deploy, so nothing said the relay depended on it. It is now in
+the relay's own argv. **If the picture quality or format list ever changes for
+no visible reason, this line is the first suspect**, and another client can be
+tried by editing `.env.relay` alone (several specs: separate them with spaces).
+
+A throttled answer is classified separately from every other resolve failure
+(`SourceThrottledError`), because it says nothing about the broadcast:
+
+- **It is never read as "the source ended."** The ordering in
+  `classifyResolveFailure` is scheduled → throttled → ended, so a bot check that
+  happens to also mention formats can never shut down a relay whose match is
+  still being played.
+- **The retry cadence backs off.** An ordinary outage doubles from 1 s to a 30 s
+  cap; a 429 jumps straight to **60 s** and doubles to **5 min**, because
+  knocking twice a minute is what keeps the block alive. It never sleeps past
+  half the applicable give-up window, so the window — not the sleep — still
+  decides when the relay gives up.
+- **The status line says which end is in trouble.** `source.state` stays
+  `failed`, but the detail reads *"YouTube torjuu haun (bottitarkistus/429) —
+  raakalähetyksen omasta tilasta ei tietoa"*. In the 16.8. incident the operator
+  was shown a plain source failure while the camera phone was pushing perfectly,
+  which points at the one end of the chain nobody can reach mid-match.
+
+**Consequence for operators: restarting the relay mid-match is not a
+"couple of seconds" operation.** Every restart re-resolves the source through
+yt-dlp, and that resolve can be blocked by something entirely outside this
+repo. The resolved URL is deliberately *not* cached to disk across restarts —
+`live_status` on a fresh resolve is the relay's only "the broadcast ended"
+signal (issue #103), and a stored URL would bypass it and republish a finished
+match's DVR tail.
+
 ### Telemetry: status + timeline
 
 Every run writes two machine-readable files into `run/`, for the control app
@@ -579,6 +630,14 @@ calibrates against, not something to try to eliminate.
 - **yt-dlp returns no URL / 403** — the original broadcast may have ended, be
   private, or YouTube may be rate-limiting; `yt-dlp --version` should also be
   reasonably current (update it if extraction starts failing repo-wide).
+- **`YouTube torjuu haun (bottitarkistus/429)` in the status detail** — YouTube
+  is refusing to answer *us*; the raakalähetys itself may be perfectly fine, so
+  do **not** start chasing the camera phone. The relay is already backing off
+  (60 s → 5 min) and will pick the source up on its own once the block lifts.
+  If it doesn't, try another player client in `.env.relay`
+  (`RELAY_YTDLP_EXTRACTOR_ARGS=youtube:player_client=web`, or `ios`) — see
+  "How the source is resolved" above. Restarting the relay does not help and
+  costs another resolve.
 - **`HUOM: yt-dlp ei palauttanut HLS-manifestia`** — the picture is going out
   at whatever the progressive fallback offers (typically 360p) instead of the
   full-quality HLS rendition. Since the 2026.07 releases yt-dlp needs a
