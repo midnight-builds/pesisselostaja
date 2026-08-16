@@ -14,6 +14,51 @@ import { logWarn } from "./log.js";
  *  systemd. */
 const JS_RUNTIME_ARGS = ["--js-runtimes", `node:${process.execPath}`];
 
+/** yt-dlp extractor arguments, i.e. which YouTube player client the extraction
+ *  pretends to be.
+ *
+ *  `youtube:player_client=android` is not a preference, it is the workaround
+ *  that got a live broadcast back on 16.8.2026 (issue #249): a mid-match relay
+ *  restart forced a re-resolve, YouTube answered the web client with HTTP 429 +
+ *  "Sign in to confirm you're not a bot", and viewers saw the slate for ~4 min.
+ *  The android client went through from the same IP.
+ *
+ *  It lives here, in version control, rather than in the host's
+ *  `~/.config/yt-dlp/config` where it was first added — a file that is neither
+ *  in the repo nor in the deploy, so nothing said the relay's behaviour
+ *  depended on it. If the android client ever starts misbehaving (a changed
+ *  format list is the symptom to expect), this is the first suspect. */
+export const DEFAULT_YTDLP_EXTRACTOR_ARGS = "youtube:player_client=android";
+
+/** Turns the configured extractor-args string into argv. Whitespace separates
+ *  several specs (`;` and `,` are part of yt-dlp's own syntax and must survive
+ *  untouched); an empty value means "no extractor args at all", which is the
+ *  only way to get yt-dlp's plain default back. */
+export function ytdlpExtractorArgs(
+  raw: string | undefined = process.env.RELAY_YTDLP_EXTRACTOR_ARGS
+): string[] {
+  const value = (raw ?? DEFAULT_YTDLP_EXTRACTOR_ARGS).trim();
+  if (!value) return [];
+  return value.split(/\s+/).flatMap((spec) => ["--extractor-args", spec]);
+}
+
+/** The flags that decide WHAT yt-dlp extracts and HOW it talks to YouTube —
+ *  shared verbatim by the relay's resolve and by preflight's source check.
+ *
+ *  One constant on purpose: the two argument lists were copies, so preflight
+ *  could report a healthy source while the relay's own resolve used different
+ *  flags (or vice versa). A preflight that does not ask the same question it
+ *  is trusted to answer is worse than no preflight. */
+export function ytdlpSourceArgs(extractorArgs?: string): string[] {
+  return [
+    "-f",
+    "best[protocol^=m3u8]/best",
+    "--no-playlist",
+    ...JS_RUNTIME_ARGS,
+    ...ytdlpExtractorArgs(extractorArgs),
+  ];
+}
+
 /** An HLS pick resolves to a manifest host; a progressive fallback resolves to
  *  `…/videoplayback?…&itag=18`. Used only to warn — a 360p push still beats no
  *  push at all, so this never fails the resolve (uptime first). */
