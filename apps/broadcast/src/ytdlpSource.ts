@@ -230,6 +230,25 @@ export function parseResolveOutput(stdout: string): { url: string | null; liveSt
   return { url, liveStatus };
 }
 
+/** Turns a failed yt-dlp run into the error the relay acts on, or null when
+ *  the stderr says nothing recognisable and the raw failure should stand.
+ *
+ *  Pure and exported because the ORDER is the whole content of this function,
+ *  and the order is a policy about broadcasts rather than about strings:
+ *   1. "starts later" — waiting beats every other reading (a scheduled
+ *      broadcast is healthy, and giving up on one cost us a live start once).
+ *   2. "YouTube refused us" — says nothing about the broadcast, so it must not
+ *      be read as its end.
+ *   3. "the broadcast is over" — only once nothing above claimed the answer. */
+export function classifyResolveFailure(stderr: string): Error | null {
+  const lastLine = stderr.trim().split("\n").at(-1) ?? "";
+  const scheduled = parseScheduledStart(stderr);
+  if (scheduled) return new SourceNotLiveYetError(lastLine, scheduled.startsInMs);
+  if (parseSourceThrottled(stderr)) return new SourceThrottledError(lastLine);
+  if (parseSourceEnded(stderr)) return new SourceEndedError(lastLine);
+  return null;
+}
+
 export function resolveSourceUrl(
   youtubeUrl: string,
   opts: { extractorArgs?: string } = {}
