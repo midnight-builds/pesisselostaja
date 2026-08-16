@@ -998,6 +998,14 @@ function bindSettings(): void {
     toast(settings.elevenLabsApiKey ? "Avain tallennettu" : "Avain poistettu");
   };
 
+  const elVoiceInput = root.querySelector<HTMLInputElement>("#elevenlabs-voice");
+  if (elVoiceInput) elVoiceInput.onchange = () => {
+    settings.elevenLabsVoiceId = elVoiceInput.value.trim();
+    saveSettings();
+    watcher?.setElevenLabsVoice(settings.elevenLabsVoiceId);
+    toast(settings.elevenLabsVoiceId ? "Ääni tallennettu" : "Käytetään oletusääntä");
+  };
+
   const boostToggle = root.querySelector<HTMLElement>('[data-toggle="volumeBoost"]');
   if (boostToggle) boostToggle.onclick = () => {
     settings.volumeBoost = !settings.volumeBoost;
