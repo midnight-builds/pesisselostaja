@@ -843,6 +843,7 @@ async function main(): Promise<void> {
     // riippumaton, eikä kesken oleva YouTube-kutsu saa pitää prosessia
     // pystyssä sammutuksen jälkeen.
     sourceIngest.stop();
+    targetIngest.stop();
     authWatch();
     live.stop();
     server.close(() => process.exit(0));
