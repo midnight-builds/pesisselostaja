@@ -97,6 +97,37 @@ export class SourceEndedError extends Error {
   }
 }
 
+/** YouTube refused to answer *us*, and said nothing about the broadcast: HTTP
+ *  429, or the bot check that fronts it. The distinction matters twice.
+ *
+ *  For the relay: this is not an ordinary outage, so the ordinary backoff (a
+ *  retry every 30 s at the cap) is exactly wrong — hammering is what keeps the
+ *  block alive. See nextBackoffMs in ffmpegMixer.
+ *
+ *  For the operator: `source.state: failed` under this cause means "the relay
+ *  cannot reach the raakalähetys", NOT "the raakalähetys is broken". On
+ *  16.8.2026 the ohjaamo said the latter while the phone was pushing perfectly,
+ *  which points the operator at the one end of the chain nobody can reach
+ *  mid-match (issue #249). */
+export class SourceThrottledError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SourceThrottledError";
+  }
+}
+
+/** yt-dlp's wording when YouTube throttles or bot-checks the request itself.
+ *  Both observed on 16.8.2026; the 429 arrived with the bot-check text. */
+const THROTTLED_PATTERNS = [
+  /Sign in to confirm you'?re not a bot/i,
+  /HTTP Error 429/i,
+  /\b429\b.*Too Many Requests|Too Many Requests.*\b429\b/i,
+] as const;
+
+export function parseSourceThrottled(stderr: string): boolean {
+  return THROTTLED_PATTERNS.some((pattern) => pattern.test(stderr));
+}
+
 /** yt-dlp's wording when the live is over and it cannot even list formats.
  *
  *  Secondary evidence only: `live_status` below is the real answer and comes
