@@ -441,6 +441,77 @@ export function formatWelcomeFiller(meta: MatchMetadata): string {
   ]);
 }
 
+/** Mikä täyte on vuorossa, jos mikään:
+ *  - `"welcome"` → {@link formatWelcomeFiller}, ennen ottelun alkua
+ *  - `"recap"`   → {@link formatSituationSummary}, kun puheita on kertynyt
+ *  - `"idle"`    → {@link formatIdleSummary}, kun on ollut liian hiljaista
+ *  - `null`      → ei mitään juuri nyt */
+export type FillerDecision = "welcome" | "recap" | "idle" | null;
+
+/** Tilannekuva päätöstä varten. Pelkkiä lukuja ja lippuja — ei soittimia,
+ *  ei syötettä, ei mykistystä. */
+export interface FillerTimingState {
+  /** Loppuselostus on annettu → selostus vaikenee kokonaan. */
+  finished: boolean;
+  /** Ottelu on käynnistynyt (ensimmäinen tapahtuma nähty). */
+  matchStarted: boolean;
+  /** Nykyhetki (ms). Annetaan argumenttina, jotta funktio pysyy puhtaana. */
+  now: number;
+  /** Milloin viimeksi puhuttiin (ms). */
+  lastSpeechAt: number;
+  /** Kuinka monta varsinaista selostusta on annettu. */
+  announcementCount: number;
+  /** `announcementCount` viimeisimmän tilannekatsauksen hetkellä. */
+  lastSummaryCount: number;
+}
+
+/** Kynnykset annetaan argumentteina, koska ne EROAVAT sovelluksittain
+ *  tarkoituksella: web käyttää 2 min hiljaisuusrajaa, broadcast 90 s (putken
+ *  oma viive päälle laskettuna 2 min tuntui jo siltä kuin selostus olisi
+ *  kuollut). Kumpi on oikein, on operaattorin päätös — älä yhtenäistä näitä
+ *  tässä. */
+export interface FillerThresholds {
+  /** Ennen ottelua: tervetulotäytteen tahti (ms). */
+  welcomeFillerMs: number;
+  /** Ottelun aikana: hiljaisuuden raja, jonka jälkeen täyte (ms). */
+  idleFillerMs: number;
+  /** Joka n:s selostus laukaisee täyden tilannekatsauksen. */
+  summaryEveryN: number;
+}
+
+/**
+ * Hiljaisuustäytön ja tilannekatsauksen **ajastuspäätös** — sama sekä webissä
+ * että lähetysputkessa (issue #62). Aiemmin tämä oli kahtena kopiona, ja
+ * jatkomuutokset piti muistaa tehdä kahdesti.
+ *
+ * Funktio on puhdas: se vain kertoo *mikä* täyte olisi vuorossa. Kaikki
+ * sivuvaikutukset — kirjanpidon päivitys, syötteeseen kirjoitus, mykistys ja
+ * broadcastin `narrationReadyForFiller()`-portti — jäävät kutsupaikoille,
+ * koska ne eroavat sovellusten välillä.
+ */
+export function decideFiller(
+  state: FillerTimingState,
+  thresholds: FillerThresholds,
+): FillerDecision {
+  // Loppuselostuksen jälkeen selostus vaikenee täysin: ei katsauksia eikä
+  // täytteitä, ennen kuin ottelun jälkeinen pistemuutos herättää sen.
+  if (state.finished) return null;
+  // Ennen ottelua ei ole tilannetta katsattavaksi; pidetään odotus lämpimänä.
+  if (!state.matchStarted) {
+    return state.now - state.lastSpeechAt < thresholds.welcomeFillerMs
+      ? null
+      : "welcome";
+  }
+  if (state.announcementCount === 0) return null;
+  const countDue =
+    state.announcementCount - state.lastSummaryCount >= thresholds.summaryEveryN;
+  const idleDue = state.now - state.lastSpeechAt > thresholds.idleFillerMs;
+  // Katsaus voittaa täytteen, kun molemmat erääntyvät samalla kierroksella.
+  if (countDue) return "recap";
+  if (idleDue) return "idle";
+  return null;
+}
+
 export function subEventToSpeech(
   event: LiveEvent,
   sub: SubEvent,
