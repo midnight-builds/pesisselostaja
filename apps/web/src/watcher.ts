@@ -21,6 +21,7 @@ import {
   formatSituationSummary,
   formatIdleSummary,
   formatWelcomeFiller,
+  decideFiller,
   periodName,
   type SpeechContext,
 } from "@pesisselostaja/core";
@@ -743,32 +744,45 @@ export class BrowserWatcher {
    *  a "tilanne on edelleen…" filler once nothing has been said for
    *  IDLE_FILLER_MS. */
   private maybeAnnounceSummary(state: WatcherState, meta: MatchMetadata): void {
-    // After the closing announcement the narration goes fully silent — no
-    // recaps or fillers — until a post-end score change wakes it
-    // (see processEventsLive).
-    if (state.finished) return;
     const now = Date.now();
-    // Pre-game there is no situation to recap; keep the wait warm instead.
-    if (!this._matchStarted) {
-      if (now - this._lastSpeechAt < WELCOME_FILLER_MS) return;
+    // The timing decision itself lives in core (decideFiller, issue #62) — it
+    // used to be duplicated here and in apps/broadcast. Thresholds are passed
+    // in because they differ on purpose between the two apps; the side effects
+    // below (feed, mute) stay here because they don't.
+    const decision = decideFiller(
+      {
+        // After the closing announcement the narration goes fully silent — no
+        // recaps or fillers — until a post-end score change wakes it
+        // (see processEventsLive).
+        finished: state.finished,
+        matchStarted: this._matchStarted,
+        now,
+        lastSpeechAt: this._lastSpeechAt,
+        announcementCount: state.announcementCount,
+        lastSummaryCount: this._lastSummaryCount,
+      },
+      {
+        welcomeFillerMs: WELCOME_FILLER_MS,
+        idleFillerMs: IDLE_FILLER_MS,
+        summaryEveryN: SUMMARY_EVERY_N,
+      },
+    );
+    if (decision === null) return;
+    if (decision === "welcome") {
       this._lastSpeechAt = now;
       const welcome = formatWelcomeFiller(meta);
       this.emitFeed("info", welcome);
       if (!this._muted) this.speakRaw(welcome);
       return;
     }
-    if (state.announcementCount === 0) return;
-    const countDue =
-      state.announcementCount - this._lastSummaryCount >= SUMMARY_EVERY_N;
-    const idleDue = now - this._lastSpeechAt > IDLE_FILLER_MS;
-    if (!countDue && !idleDue) return;
     this._lastSummaryCount = state.announcementCount;
     state.lastSummaryTime = now;
     this._lastSpeechAt = now;
     const ctx = this.buildContext(state);
-    const summary = countDue
-      ? formatSituationSummary(meta, ctx)
-      : formatIdleSummary(meta, ctx);
+    const summary =
+      decision === "recap"
+        ? formatSituationSummary(meta, ctx)
+        : formatIdleSummary(meta, ctx);
     this.emitFeed("summary", summary);
     if (!this._muted) this.speakRaw(summary);
   }
