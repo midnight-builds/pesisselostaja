@@ -138,13 +138,20 @@ async function checkMatch(matchId: number, apiKey?: string, apiBase?: string): P
 /** Resolves the source the same way the relay will, and classifies the three
  *  outcomes that actually matter before a broadcast: live and full quality,
  *  live but degraded, or scheduled for later. */
-export async function checkSource(youtubeUrl: string): Promise<Check> {
+export async function checkSource(
+  youtubeUrl: string,
+  /** Test seam: runs yt-dlp with the given argv. Exists so a test can assert
+   *  WHICH flags preflight passes without a network call — the drift this
+   *  guards against (preflight resolving differently than the relay) is
+   *  invisible to every other kind of test, and is what issue #249 was. */
+  opts: { runYtdlp?: (args: string[]) => Promise<{ stdout: string }> } = {}
+): Promise<Check> {
+  const runYtdlp =
+    opts.runYtdlp ?? ((args: string[]) => run("yt-dlp", args, { maxBuffer: 4 * 1024 * 1024 }));
   try {
     // Exactly the relay's own flags (ytdlpSourceArgs) — a preflight that asks a
     // different question than the relay will ask is worth nothing.
-    const { stdout } = await run("yt-dlp", ["-g", ...ytdlpSourceArgs(), youtubeUrl], {
-      maxBuffer: 4 * 1024 * 1024,
-    });
+    const { stdout } = await runYtdlp(["-g", ...ytdlpSourceArgs(), youtubeUrl]);
     const url = stdout.trim().split("\n")[0];
     if (!url) return { name: "Lähde", status: "fail", detail: "yt-dlp ei palauttanut URLia" };
     return isHlsManifestUrl(url)
