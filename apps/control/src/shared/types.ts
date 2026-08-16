@@ -273,6 +273,11 @@ export interface LiveState {
    *  olemassa olevaan sopimukseen, eivätkä testien fixtuurit (test-ui/support/
    *  state.ts) saa rikkoutua siitä että ohjaamo alkoi julkaista sen. */
   sourceIngest?: SourceIngest | null;
+  /** Ohjaamon viimeisin YouTube-havainto kohteesta eli selostetusta
+   *  lähetyksestä (#250), tai null kun sitä ei juuri nyt pollata. Valinnainen
+   *  samasta syystä kuin `sourceIngest`: kenttä lisättiin olemassa olevaan
+   *  sopimukseen. */
+  targetIngest?: TargetIngest | null;
   job: Job | null;
   /** Ohjaamon työ ja ajossa oleva relay ovat eri otteluista (#118), tai null
    *  kun ristiriitaa ei ole.
