@@ -86,7 +86,7 @@ export class PiperTts {
     const dir = await mkdtemp(join(tmpdir(), "pesis-relay-tts-"));
     const wavPath = join(dir, "out.wav");
     try {
-      await execFileP(this.opts.piperBin, ["--model", modelPath, "--output_file", wavPath], text);
+      await execFileP(this.opts.piperBin, piperArgs(modelPath, wavPath, this.opts.rng), text);
       const pcm = await execFileP("ffmpeg", ["-y", "-i", wavPath, "-ar", "48000", "-ac", "2", "-f", "s16le", "pipe:1"]);
       return pcm;
     } catch (err) {
