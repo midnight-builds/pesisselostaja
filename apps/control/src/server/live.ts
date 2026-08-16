@@ -909,6 +909,7 @@ export function startLiveAggregator(opts: LiveAggregatorOptions = {}): LiveAggre
       system,
       knobs,
       sourceIngest: source.ingest,
+      targetIngest: target.ingest,
       job,
       conflict,
       telemetry: conflicted ? null : telemetry,
