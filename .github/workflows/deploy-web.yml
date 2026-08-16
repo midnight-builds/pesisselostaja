@@ -33,6 +33,8 @@ jobs:
 
       - name: Build
         run: npm run build -w @pesisselostaja/web
+        env:
+          PUBLIC_GOATCOUNTER_URL: https://analytics.talonpoika.dev/count
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
