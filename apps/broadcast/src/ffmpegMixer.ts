@@ -713,22 +713,7 @@ export class FfmpegMixer {
           preResolved = await this.waitBeforeNextAttempt(waitMs);
           continue;
         }
-        this.scheduledSince = null;
-        this.imminentSince = null;
-        this.sourceStateValue = "failed";
-        // YouTube declined to answer US. The state stays "failed" (the ohjaamo
-        // mirrors that union by hand and must not learn a new value here), but
-        // the detail says which end of the chain is in trouble: on 16.8.2026
-        // the operator was shown "raakalähetys ongelma" while the phone was
-        // pushing perfectly (#249).
-        this.throttled = err instanceof SourceThrottledError;
-        this.sourceDetailValue = this.throttled
-          ? `YouTube torjuu haun (bottitarkistus/429) — raakalähetyksen omasta tilasta ei tietoa: ${
-              (err as Error).message
-            }`
-          : err instanceof Error
-            ? err.message
-            : String(err);
+        this.noteResolveFailure(err);
         logError("ffmpeg.start_failed", `ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
         // Käynnistysvirhe katkaisee code=0-parikuvion: "kaksi peräkkäistä
         // lähes samanmittaista sessiota" ei saa muodostua sessioista joiden
@@ -933,6 +918,37 @@ export class FfmpegMixer {
    *  SourceExhaustedError, which the caller turns into a relay shutdown) once
    *  the unbroken run of such attempts outlasts the give-up window. A finished
    *  match's source won't come back, so it uses the much shorter window. */
+  /** Bookkeeping for a resolve that failed for a reason other than "not yet"
+   *  or "over": state, wording and the throttled flag the backoff reads.
+   *
+   *  Shared by the main respawn loop and the slate prober ON PURPOSE. They had
+   *  drifted before (#104: the slate loop swallowed SourceEndedError), and the
+   *  slate loop is where the relay sits during exactly the outage this handles
+   *  — on 16.8.2026 the ~4 minutes of slate WERE the bot check (#249). A branch
+   *  that only the main loop takes is a branch that misses the incident.
+   *
+   *  Deliberately does NOT touch noteUnproductiveAttempt: the give-up verdict
+   *  is unchanged by why we cannot reach the source, and the slate loop keeps a
+   *  broadcast alive. */
+  private noteResolveFailure(err: unknown): void {
+    this.scheduledSince = null;
+    this.imminentSince = null;
+    this.sourceStateValue = "failed";
+    // YouTube declined to answer US. The state stays "failed" (the ohjaamo
+    // mirrors that union by hand and must not learn a new value here), but the
+    // detail says which end of the chain is in trouble: on 16.8.2026 the
+    // operator was told the raakalähetys was broken while the phone was
+    // pushing perfectly.
+    this.throttled = err instanceof SourceThrottledError;
+    this.sourceDetailValue = this.throttled
+      ? `YouTube torjuu haun (bottitarkistus/429) — raakalähetyksen omasta tilasta ei tietoa: ${
+          (err as Error).message
+        }`
+      : err instanceof Error
+        ? err.message
+        : String(err);
+  }
+
   /** The give-up window in force right now. Read both by the accounting below
    *  and by the throttled backoff, which must never sleep past it. */
   private giveUpWindowMs(): number {
