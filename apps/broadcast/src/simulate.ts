@@ -17,6 +17,7 @@ import { loadState, addRun, getPeriodScore, periodsWon, periodsPlayed, type Watc
 import { loadPronunciations, applyPronunciations, preventOrdinalReading } from "./nodePronunciation.js";
 import { PiperTts } from "./piperTts.js";
 import { buildMixFilterComplex } from "./ffmpegMixer.js";
+import { ytdlpExtractorArgs } from "./ytdlpSource.js";
 import { log } from "./log.js";
 
 // Same .env.relay systemd's EnvironmentFile gives the live service, so an
@@ -70,8 +71,14 @@ async function downloadVod(youtubeUrl: string, outPath: string): Promise<void> {
     return;
   }
   log("Ladataan VOD yt-dlp:llä…");
+  // Extractor-argumentit jaetaan relayn kanssa (#249): bottitarkistus osuu
+  // samaan IP:hen riippumatta siitä kumpi kysyy. Muuta EI jaeta — tämä lataa
+  // päättyneen VODin tiedostoksi, kun taas ytdlpSourceArgs pyytää elävän
+  // lähetyksen m3u8-manifestia. Sama argumenttilista olisi tässä väärä vastaus,
+  // ei yhtenäisyyttä.
   await runInherit("yt-dlp", [
     "--no-playlist",
+    ...ytdlpExtractorArgs(),
     "-f", "bv*+ba/best",
     "--merge-output-format", "mp4",
     "-o", outPath,
