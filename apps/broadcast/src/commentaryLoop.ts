@@ -1095,9 +1095,13 @@ export class CommentaryLoop {
    *  fetches the cadence itself expects to be slow. */
   private apiTimeoutMs(size: FetchSize): number {
     if (size === "delta") {
-      return this.consecutiveFetchFailures >= FETCH_FAILURE_ALARM_STREAK
-        ? DELTA_FETCH_TIMEOUT_SLOW_MS
-        : DELTA_FETCH_TIMEOUT_MS;
+      // Open on the streak, held open by the dwell counter (see
+      // DELTA_SLOW_DWELL_POLLS): the streak itself is gone the moment a poll
+      // succeeds, so keying only on it would give the loose limit to one poll
+      // in four instead of to the state that needs it.
+      const loosened =
+        this.consecutiveFetchFailures >= FETCH_FAILURE_ALARM_STREAK || this.slowDeltaDwellPolls > 0;
+      return loosened ? DELTA_FETCH_TIMEOUT_SLOW_MS : DELTA_FETCH_TIMEOUT_MS;
     }
     if (size === "meta") return META_FETCH_TIMEOUT_MS;
     return Math.max(FULL_FETCH_TIMEOUT_MS, this.pollIntervalMs);
