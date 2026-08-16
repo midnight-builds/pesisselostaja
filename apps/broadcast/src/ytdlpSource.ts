@@ -119,7 +119,10 @@ export class SourceThrottledError extends Error {
 /** yt-dlp's wording when YouTube throttles or bot-checks the request itself.
  *  Both observed on 16.8.2026; the 429 arrived with the bot-check text. */
 const THROTTLED_PATTERNS = [
-  /Sign in to confirm you'?re not a bot/i,
+  // `you.{0,4}re` on purpose: yt-dlp quotes YouTube's own wording, which uses a
+  // typographic apostrophe ("you’re") — matching only the ASCII one would have
+  // missed the exact line this whole change exists for.
+  /Sign in to confirm you.{0,4}re not a bot/i,
   /HTTP Error 429/i,
   /\b429\b.*Too Many Requests|Too Many Requests.*\b429\b/i,
 ] as const;
