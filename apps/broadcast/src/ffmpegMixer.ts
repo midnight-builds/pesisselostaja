@@ -2,7 +2,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { SourceEndReason } from "@pesisselostaja/core";
 import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import { NarrationFifo } from "./narrationFifo.js";
-import { resolveSourceUrl, SourceEndedError, SourceNotLiveYetError } from "./ytdlpSource.js";
+import {
+  resolveSourceUrl,
+  SourceEndedError,
+  SourceNotLiveYetError,
+  SourceThrottledError,
+} from "./ytdlpSource.js";
 import type { NoSignalSlate, SlateLayout, SlateTextStyle } from "./noSignalSlate.js";
 import {
   classifyFfmpegFailure,
@@ -707,7 +712,19 @@ export class FfmpegMixer {
         this.scheduledSince = null;
         this.imminentSince = null;
         this.sourceStateValue = "failed";
-        this.sourceDetailValue = err instanceof Error ? err.message : String(err);
+        // YouTube declined to answer US. The state stays "failed" (the ohjaamo
+        // mirrors that union by hand and must not learn a new value here), but
+        // the detail says which end of the chain is in trouble: on 16.8.2026
+        // the operator was shown "raakalähetys ongelma" while the phone was
+        // pushing perfectly (#249).
+        this.throttled = err instanceof SourceThrottledError;
+        this.sourceDetailValue = this.throttled
+          ? `YouTube torjuu haun (bottitarkistus/429) — raakalähetyksen omasta tilasta ei tietoa: ${
+              (err as Error).message
+            }`
+          : err instanceof Error
+            ? err.message
+            : String(err);
         logError("ffmpeg.start_failed", `ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
         // Käynnistysvirhe katkaisee code=0-parikuvion: "kaksi peräkkäistä
         // lähes samanmittaista sessiota" ei saa muodostua sessioista joiden
