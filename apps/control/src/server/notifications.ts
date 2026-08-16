@@ -19,6 +19,7 @@
 
 import type { LiveState, NotificationPrefs, PreflightResult } from "../shared/types.js";
 import { blockedPushTitle, jobArrivalPush, jobEndedPush } from "../shared/jobState.js";
+import { isTargetDeadMidMatch } from "../shared/targetHealth.js";
 import { sendPushDetailed } from "./push.js";
 import { createStore } from "./store.js";
 
@@ -113,6 +114,11 @@ interface Memory {
    *  käynnistyssääntö kuin yllä: eilen päättyneen ottelun siivousmerkintä ei
    *  ole tänään uutinen. */
   endedKey: string | null | undefined;
+  /** Sen työn id, jonka kohteen kuolemasta on jo ilmoitettu (#250). EI
+   *  `undefined`-alkuarvoa tarkoituksella: kuollut kohde kesken ottelun on
+   *  ajankohtainen ja toimintaa vaativa myös silloin, kun ohjaamo käynnistyi
+   *  uudelleen kesken episodin — hiljaisuus olisi tässä se vika. */
+  targetDeadJobId: string | null;
 }
 
 const memory: Memory = {
@@ -121,6 +127,7 @@ const memory: Memory = {
   failNotified: false,
   jobKey: undefined,
   endedKey: undefined,
+  targetDeadJobId: null,
 };
 
 /** Test seam: the module keeps process-lifetime state, so a test that drives
@@ -131,6 +138,7 @@ export function resetNotificationState(): void {
   memory.failNotified = false;
   memory.jobKey = undefined;
   memory.endedKey = undefined;
+  memory.targetDeadJobId = null;
   lastSentAt.clear();
   lastFailedAt.clear();
 }
@@ -249,6 +257,34 @@ async function observe(state: LiveState): Promise<void> {
       "Lähetys katkesi",
       `${matchLabel(state)} — selostus ei ole enää ajossa, mutta ottelu on kesken.`
     );
+  }
+
+  // --- Selostettu lähetys kuoli YouTubessa kesken ottelun (#250).
+  //
+  // Ei FAIL_CONFIRM_MS-odotusta: vahvistusaika on lepatusta vastaan, ja
+  // YouTuben "complete" on lopullinen tila joka ei voi lepattaa — päättynyttä
+  // lähetystä ei voi palauttaa liveksi. Jokainen odotettu minuutti on pois
+  // siitä ajasta, jona loppuottelulle ehtii vielä pystyttää uuden lähetyksen.
+  // 16.8.2026 (ottelu 136771) tämä selvisi käsin tarkistamalla, ja
+  // loppuottelu meni katsojilta ohi.
+  let announcedTargetDead = false;
+  const targetDead = isTargetDeadMidMatch({
+    job: state.job,
+    relayActive: state.relay.active,
+    matchFinished: state.match.finished,
+    ingest: state.targetIngest,
+    nowMs: now,
+  });
+  if (prefs.broken && targetDead && state.job && memory.targetDeadJobId !== state.job.id) {
+    announcedTargetDead = await notify(
+      `target-dead:${state.job.id}`,
+      "Selostettu lähetys kuoli",
+      `${matchLabel(state)} — YouTube on päättänyt selostetun lähetyksen, mutta ottelu on kesken. Jaettu linkki ei enää näytä lähetystä.`
+    );
+    // Leima vasta onnistuneesta toimituksesta (sama sääntö kuin notify()n
+    // vaimennuksessa, #205): hukkunut push yritetään uudelleen seuraavilla
+    // tikeillä, ja toistoa rajoittavat notify()n omat suojat.
+    if (announcedTargetDead) memory.targetDeadJobId = state.job.id;
   }
 
   // --- Selostettu lähetys päättyi: päivän kolmas ja viimeinen push (#174).
