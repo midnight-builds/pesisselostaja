@@ -140,11 +140,11 @@ async function checkMatch(matchId: number, apiKey?: string, apiBase?: string): P
  *  live but degraded, or scheduled for later. */
 export async function checkSource(youtubeUrl: string): Promise<Check> {
   try {
-    const { stdout } = await run(
-      "yt-dlp",
-      ["-g", "-f", "best[protocol^=m3u8]/best", "--no-playlist", "--js-runtimes", `node:${process.execPath}`, youtubeUrl],
-      { maxBuffer: 4 * 1024 * 1024 }
-    );
+    // Exactly the relay's own flags (ytdlpSourceArgs) — a preflight that asks a
+    // different question than the relay will ask is worth nothing.
+    const { stdout } = await run("yt-dlp", ["-g", ...ytdlpSourceArgs(), youtubeUrl], {
+      maxBuffer: 4 * 1024 * 1024,
+    });
     const url = stdout.trim().split("\n")[0];
     if (!url) return { name: "Lähde", status: "fail", detail: "yt-dlp ei palauttanut URLia" };
     return isHlsManifestUrl(url)
