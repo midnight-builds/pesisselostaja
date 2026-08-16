@@ -268,31 +268,7 @@ export function resolveSourceUrl(
       { maxBuffer: 4 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) {
-          const text = String(stderr ?? "");
-          const lastLine = text.trim().split("\n").at(-1) ?? "";
-          const scheduled = parseScheduledStart(text);
-          if (scheduled) {
-            reject(new SourceNotLiveYetError(lastLine, scheduled.startsInMs));
-            return;
-          }
-          // Checked BEFORE "ended": a throttled answer is YouTube declining to
-          // talk to us, so it carries no information about the broadcast at
-          // all. Should a bot-check response ever also carry one of the ended
-          // wordings, treating it as "ended" would shut down a relay whose
-          // match is still being played — while treating a genuinely finished
-          // broadcast as throttled only costs a few extra resolves, after
-          // which live_status answers post_live and #103's guard holds.
-          if (parseSourceThrottled(text)) {
-            reject(new SourceThrottledError(lastLine));
-            return;
-          }
-          // Checked after "not live yet": a scheduled broadcast can also
-          // mention formats, and waiting must win over finishing.
-          if (parseSourceEnded(text)) {
-            reject(new SourceEndedError(lastLine));
-            return;
-          }
-          reject(err);
+          reject(classifyResolveFailure(String(stderr ?? "")) ?? err);
           return;
         }
         const { url, liveStatus } = parseResolveOutput(stdout);
