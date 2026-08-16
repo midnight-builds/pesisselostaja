@@ -34,6 +34,8 @@ interface Settings {
   voiceEngine: "browser" | "piper" | "elevenlabs";
   piperVoiceId: string;
   elevenLabsApiKey: string;
+  /** Empty = the default voice in elevenlabs.ts (issue #63). */
+  elevenLabsVoiceId: string;
   volumeBoost: boolean;
   keepScreenOn: boolean;
 }
@@ -63,12 +65,13 @@ function loadSettings(): Settings {
         voiceEngine: p.voiceEngine === "piper" || p.voiceEngine === "elevenlabs" ? p.voiceEngine : "browser",
         piperVoiceId: p.piperVoiceId ?? DEFAULT_PIPER_VOICE,
         elevenLabsApiKey: p.elevenLabsApiKey ?? "",
+        elevenLabsVoiceId: p.elevenLabsVoiceId ?? "",
         volumeBoost: p.volumeBoost ?? false,
         keepScreenOn: p.keepScreenOn ?? true,
       };
     }
   } catch { /* ignore */ }
-  return { apiKey: DEFAULT_API_KEY, apiBase: DEFAULT_API_BASE, pollInterval: 6, announceBatterChanges: true, voiceName: "", voiceEngine: "browser", piperVoiceId: DEFAULT_PIPER_VOICE, elevenLabsApiKey: "", volumeBoost: false, keepScreenOn: true };
+  return { apiKey: DEFAULT_API_KEY, apiBase: DEFAULT_API_BASE, pollInterval: 6, announceBatterChanges: true, voiceName: "", voiceEngine: "browser", piperVoiceId: DEFAULT_PIPER_VOICE, elevenLabsApiKey: "", elevenLabsVoiceId: "", volumeBoost: false, keepScreenOn: true };
 }
 
 function saveSettings(): void {
