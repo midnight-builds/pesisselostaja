@@ -137,7 +137,7 @@ describe("selostajan esittely (#247)", () => {
   // vaikka palautekanavan, osa katsojista ei kuule sitä kertaakaan koko
   // ottelun aikana. Sanamuoto on käyttäjän antama.
   it("every variant says the speech is artificial, names the source, apologises and gives the feedback channel", () => {
-    const variants = allVariants(3, () => formatIntroFiller());
+    const variants = allVariants(3, () => formatIntroFiller(false));
     expectEveryVariantCarries(variants, [
       "keinotekoisesti",
       "pesistulokset.fi-palveluun kirjattuja tietoja",
@@ -151,12 +151,53 @@ describe("selostajan esittely (#247)", () => {
   it("keeps the user's own wording as one of the variants, verbatim", () => {
     // Issue #247, Ossi 16.8.2026. Variaatiot saavat vaihtaa sanajärjestystä,
     // mutta alkuperäinen muotoilu ei saa hävitä matkalla.
-    const variants = allVariants(3, () => formatIntroFiller());
+    const variants = allVariants(3, () => formatIntroFiller(false));
     expect(variants).toContain(
       "Minun puheeni on tuotettu keinotekoisesti ja luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja. " +
         "Pahoittelen jos välillä selostuksessani on aukkoja tai asiat tulevat väärään aikaan. " +
         "Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
     );
+  });
+
+  // ------------------------------------------------- ensimmäinen esittely
+  // `pickVariant` on arpa. Variantti, joka alkaa "Muistutan että…", olettaa
+  // että esittely on jo kerran kuultu — arvottuna ensimmäiseksi se olisi koko
+  // lähetyksen ensimmäinen lause, ja selostaja muistuttaisi asiasta jota se ei
+  // ole vielä kertonut. Siksi ensimmäinen esittely arvotaan suppeammasta
+  // joukosta. Varianttia EI poisteta: se on hyvä myöhempään esittelyyn.
+
+  it("ei koskaan aloita ottelua muistutuksella aiemmasta kerrasta", () => {
+    // Koko arvonta-avaruus läpi, ei muutamaa otosta: yksikin osuma
+    // "Muistutan"-varianttiin ensimmäisellä kerralla on vika.
+    const drawn = new Set<string>();
+    const draws = 200;
+    for (let i = 0; i < draws; i++) {
+      Math.random = () => i / draws;
+      drawn.add(formatIntroFiller(true));
+    }
+    Math.random = realRandom;
+    expect(drawn.size).toBeGreaterThan(0);
+    for (const text of drawn) {
+      expect(text, `ensimmäinen esittely ei saa olettaa aiempaa kertaa: ${text}`)
+        .not.toMatch(/^Muistutan/);
+    }
+  });
+
+  it("ensimmäisen esittelyn variantit kertovat silti kaikki samat asiat", () => {
+    const variants = allVariants(2, () => formatIntroFiller(true));
+    expectEveryVariantCarries(variants, [
+      "keinotekoisesti",
+      "pesistulokset.fi-palveluun kirjattuja tietoja",
+      "aukkoja",
+      "väärään aikaan",
+      "Otan mielelläni palautetta vastaan",
+      "verkosta minut löytää nimellä Pesisselostaja",
+    ]);
+  });
+
+  it("pitää muistutusvariantin käytössä myöhemmissä esittelyissä", () => {
+    const variants = allVariants(3, () => formatIntroFiller(false));
+    expect(variants.some((t) => t.startsWith("Muistutan"))).toBe(true);
   });
 });
 

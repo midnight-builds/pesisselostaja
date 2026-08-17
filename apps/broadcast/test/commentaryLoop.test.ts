@@ -300,6 +300,31 @@ describe("CommentaryLoop selostajan esittely (#247)", () => {
     expect(loop.lastIntroPeriod).toBe(0);
   });
 
+  // Kutsupaikan johdotus: `formatIntroFiller(firstOfMatch)` saa oikean lipun
+  // vain kun `lastIntroPeriod` luetaan ENNEN kuittausta. Jos lippu jäisi aina
+  // falseksi, arpa voisi antaa lähetyksen ensimmäiseksi lauseeksi
+  // "Muistutan että…" — muistutus asiasta, jota ei ole vielä kerrottu.
+  it("ottelun ensimmäinen esittely ei viittaa aiempaan kertaan", async () => {
+    const realRandom = Math.random;
+    try {
+      const draws = 20;
+      for (let i = 0; i < draws; i++) {
+        Math.random = () => i / draws;
+        const sink = recordingSink();
+        const { loop } = startedMatch(sink);
+
+        await loop.maybeAnnounceSummary(META);
+        await loop.synthQueue;
+
+        expect(sink.calls).toHaveLength(1);
+        expect(sink.calls[0].text).toMatch(INTRO);
+        expect(sink.calls[0].text).not.toMatch(/^Muistutan/);
+      }
+    } finally {
+      Math.random = realRandom;
+    }
+  });
+
   it("ei esittele itseään ennen ottelun alkua", async () => {
     const sink = recordingSink();
     const { loop } = startedMatch(sink);

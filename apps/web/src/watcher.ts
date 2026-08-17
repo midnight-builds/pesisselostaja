@@ -795,9 +795,12 @@ export class BrowserWatcher {
     }
     // Merkintä vasta puhumisen yhteydessä: lykätty esittely jää velaksi.
     if (decision === "intro") {
+      // `_lastIntroPeriod === null` ⇒ tämä on ottelun ensimmäinen esittely, eikä
+      // sanamuoto saa viitata aiempaan kertaan. Luetaan ENNEN merkintää.
+      const firstOfMatch = this._lastIntroPeriod === null;
       this._lastIntroPeriod = state.currentPeriod;
       this._lastSpeechAt = now;
-      const intro = formatIntroFiller();
+      const intro = formatIntroFiller(firstOfMatch);
       this.emitFeed("info", intro);
       if (!this._muted) this.speakRaw(intro);
       return;

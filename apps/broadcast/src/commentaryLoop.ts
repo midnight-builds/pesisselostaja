@@ -1508,8 +1508,11 @@ export class CommentaryLoop {
     // Merkintä vasta tässä, puhumisen yhteydessä: jos gate yllä ohitti
     // kierroksen, esittely on yhä velkaa eikä sitä saa kuitata annetuksi.
     if (decision === "intro") {
+      // `lastIntroPeriod === null` ⇒ tämä on ottelun ensimmäinen esittely, eikä
+      // sanamuoto saa viitata aiempaan kertaan. Luetaan ENNEN merkintää.
+      const firstOfMatch = this.lastIntroPeriod === null;
       this.lastIntroPeriod = this.state.currentPeriod;
-      this.speak(formatIntroFiller(), false);
+      this.speak(formatIntroFiller(firstOfMatch), false);
       return;
     }
     this.lastSummaryCount = this.state.announcementCount;

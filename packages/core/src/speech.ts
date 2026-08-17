@@ -149,13 +149,33 @@ function vuoropariLabel(inning: number, batTurn: number): string {
  *  nobody noticed. `test/variantParity.test.ts` walks every variant of every
  *  group and fails if one drops a fact its siblings carry. */
 const lastVariantPick = new Map<string, number>();
-function pickVariant(group: string, variants: string[]): string {
+/** `allowed` rajaa arvonnan osajoukkoon ILMAN että ryhmä pilkotaan kahdeksi:
+ *  "älä toista edellistä" -muisti on indeksipohjainen, joten eri mittaiset
+ *  joukot samassa ryhmässä — tai sama joukko kahdessa ryhmässä — antaisivat
+ *  saman tekstin kahdesti peräkkäin. Kutsupaikat vaimentavat peräkkäiset
+ *  identtiset lauseet, joten toisinto ei kuuluisi toistona vaan katoaisi. */
+function pickVariant(
+  group: string,
+  variants: string[],
+  allowed?: (index: number) => boolean,
+): string {
   if (variants.length === 1) return variants[0];
   const prev = lastVariantPick.get(group);
-  let idx = Math.floor(Math.random() * variants.length);
-  if (idx === prev) idx = (idx + 1) % variants.length;
-  lastVariantPick.set(group, idx);
-  return variants[idx];
+  const start = Math.floor(Math.random() * variants.length);
+  let chosen = -1;
+  let fallback = -1; // sallittu mutta sama kuin edellinen: parempi kuin ei mitään
+  for (let step = 0; step < variants.length; step++) {
+    const cand = (start + step) % variants.length;
+    if (allowed && !allowed(cand)) continue;
+    if (fallback < 0) fallback = cand;
+    if (cand !== prev) {
+      chosen = cand;
+      break;
+    }
+  }
+  if (chosen < 0) chosen = fallback >= 0 ? fallback : start;
+  lastVariantPick.set(group, chosen);
+  return variants[chosen];
 }
 
 function ttsClean(text: string): string {
@@ -441,6 +461,32 @@ export function formatWelcomeFiller(meta: MatchMetadata): string {
   ]);
 }
 
+interface IntroVariant {
+  text: string;
+  /** Tosi, jos teksti viittaa aiempaan kertaan ("Muistutan että…"). Sellainen
+   *  variantti EI kelpaa ottelun ensimmäiseksi esittelyksi: `pickVariant` on
+   *  arpa, joten se voisi osua lähetyksen ensimmäiseksi lauseeksi, ja selostaja
+   *  muistuttaisi asiasta jota se ei ole vielä kertonut. */
+  assumesEarlierIntro: boolean;
+}
+
+/** Esittelyn variantit. Kaikki kertovat saman viiden asian — ks.
+ *  {@link formatIntroFiller} ja `test/variantParity.test.ts`. */
+const INTRO_VARIANTS: IntroVariant[] = [
+  {
+    text: "Minun puheeni on tuotettu keinotekoisesti ja luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja. Pahoittelen jos välillä selostuksessani on aukkoja tai asiat tulevat väärään aikaan. Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
+    assumesEarlierIntro: false,
+  },
+  {
+    text: "Muistutan että puheeni on tuotettu keinotekoisesti: luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja. Pahoittelen jos selostuksessani on välillä aukkoja tai asiat tulevat väärään aikaan. Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
+    assumesEarlierIntro: true,
+  },
+  {
+    text: "Luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja, ja puheeni on tuotettu keinotekoisesti. Pahoittelen jos asiat tulevat väärään aikaan tai selostuksessani on välillä aukkoja. Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
+    assumesEarlierIntro: false,
+  },
+];
+
 /**
  * Selostajan esittely: koneellisesti tuotettu puhe, mihin se perustuu ja mistä
  * antaa palautetta. Puhutaan ottelun alussa ja jokaisen jaksonvaihteen jälkeen
@@ -452,13 +498,19 @@ export function formatWelcomeFiller(meta: MatchMetadata): string {
  * kertovat kaikki saman viiden asian: puhe on keinotekoista, lähde on
  * pesistulokset.fi, aukoista ja ajoitusheitoista pahoitellaan, palautetta
  * otetaan vastaan ja verkosta löytyy nimellä Pesisselostaja.
+ *
+ * `firstOfMatch` kertoo, onko tämä ottelun ENSIMMÄINEN esittely. Silloin
+ * arvonta rajataan variantteihin, jotka eivät oleta aiempaa kertaa — muuten
+ * "Muistutan että…" voisi olla koko lähetyksen ensimmäinen lause. Kutsupaikka
+ * tietää tämän `lastIntroPeriod === null` -tilasta. Myöhemmissä esittelyissä
+ * koko joukko on käytettävissä.
  */
-export function formatIntroFiller(): string {
-  return pickVariant("intro", [
-    "Minun puheeni on tuotettu keinotekoisesti ja luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja. Pahoittelen jos välillä selostuksessani on aukkoja tai asiat tulevat väärään aikaan. Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
-    "Muistutan että puheeni on tuotettu keinotekoisesti: luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja. Pahoittelen jos selostuksessani on välillä aukkoja tai asiat tulevat väärään aikaan. Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
-    "Luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja, ja puheeni on tuotettu keinotekoisesti. Pahoittelen jos asiat tulevat väärään aikaan tai selostuksessani on välillä aukkoja. Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
-  ]);
+export function formatIntroFiller(firstOfMatch: boolean): string {
+  return pickVariant(
+    "intro",
+    INTRO_VARIANTS.map((v) => v.text),
+    firstOfMatch ? (i) => !INTRO_VARIANTS[i].assumesEarlierIntro : undefined,
+  );
 }
 
 /** Mikä täyte on vuorossa, jos mikään:
