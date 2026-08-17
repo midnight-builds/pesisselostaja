@@ -296,6 +296,42 @@ describe("havainto", () => {
     expect(h.fetchBroadcast).toHaveBeenCalledTimes(3);
   });
 
+  // LUKKO (#252). Kohteen polleri sai oman not-found-tilansa, ja kohteen
+  // havaintotyyppi lakkasi olemasta tämän tyypin alias. Tämä testi lukitsee
+  // sen, ettei muutos vuotanut tänne: raakalähetyksen tyhjä vastaus on yhä
+  // VIRHE (eli tietämättömyyttä, josta ei hälytetä) eikä auktoritatiivinen
+  // havainto, ja väli nousee yhä kattoon.
+  //
+  // Suunta on tahallinen eikä epäsymmetria ole vahinko: raakalähetys EI ole
+  // ohjaamon kanavalla, joten tyhjä vastaus tarkoittaa tässä "API ei näe tätä"
+  // — yt-dlp näkee saman lähetyksen aivan hyvin. Kohteen tapauksessa ohjaamo
+  // loi lähetyksen itse omalle kanavalleen, joten tyhjä vastaus on todiste.
+  // Jos tämä testi kaatuu, ohjaamo on alkanut pitää tervettä raakalähetystä
+  // kuolleena — se on kalliimpi vika kuin se, joka #252:ssa korjattiin.
+  it("LUKKO: raakalähetyksen tyhjä vastaus pysyy virheenä eikä saa not-found-tilaa", async () => {
+    const h = harness({ fetchBroadcast: vi.fn(async () => null) });
+    await settle();
+    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS);
+
+    // Kaksi peräkkäistä tyhjää: kohteella tämä olisi nyt "confirmed" ilman
+    // virhettä. Lähteellä sen on pysyttävä virheenä.
+    expect(h.fetchBroadcast).toHaveBeenCalledTimes(2);
+    for (const write of h.writes) {
+      expect(write.ingest.error).toMatch(/ei löytynyt/);
+      expect(write.ingest.lifeCycleStatus).toBeNull();
+      // Kohteen kenttää ei saa ilmestyä lähteen havaintoon: se kulkeutuisi
+      // relaylle kirjoitettavaan tiedostoon asti.
+      expect(Object.keys(write.ingest).sort()).toEqual([
+        "error",
+        "healthStatus",
+        "lifeCycleStatus",
+        "observedAt",
+        "streamStatus",
+        "videoId",
+      ]);
+    }
+  });
+
   it("lähetyksen ilmestyminen nollaa 'ei löytynyt' -laskurin", async () => {
     let found = false;
     const fetchBroadcast = vi.fn(async (): Promise<BroadcastSummary | null> =>

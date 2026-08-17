@@ -15,6 +15,7 @@ import type {
   RelayProcess,
   RelayTelemetry,
   SourceIngest,
+  TargetIngest,
   SystemState,
 } from "../src/shared/types.js";
 
@@ -547,13 +548,14 @@ describe("työ ja ajossa oleva ottelu ovat eri", () => {
 describe("kohde kuoli kesken ottelun (#250)", () => {
   const TARGET_VID = "TARGETVID99";
 
-  function deadTarget(overrides: Partial<SourceIngest> = {}): SourceIngest {
+  function deadTarget(overrides: Partial<TargetIngest> = {}): TargetIngest {
     return {
       observedAt: new Date().toISOString(),
       videoId: TARGET_VID,
       lifeCycleStatus: "complete",
       streamStatus: null,
       healthStatus: null,
+      notFound: "no",
       error: null,
       ...overrides,
     };
@@ -658,5 +660,76 @@ describe("kohde kuoli kesken ottelun (#250)", () => {
     });
     expect(row.health).toBe("ok");
     expect(row.detail).toMatch(/työntö menee perille/);
+  });
+
+  // ------------------------------------------------- käsin poistettu (#252)
+  //
+  // Sama lopputulos katsojalle kuin complete — jaettu linkki ei näytä mitään —
+  // mutta ennen #252:ta ohjaamo vaikeni tästä täysin: polleri merkitsi tyhjän
+  // vastauksen virheeksi, ja isTargetDeadMidMatch hylkää virhehavainnot, joten
+  // Kohde-rivi jäi vihreäksi noteella "YouTube: havaintoa ei saatu".
+  describe("selostettu lähetys poistettu käsin (#252)", () => {
+    /** Poistettu lähetys: ei lifeCycleStatusta lainkaan, koska YouTube ei
+     *  palauta lähetyksestä mitään — ainoa tieto on että sitä ei ole. */
+    function missingTarget(overrides: Partial<TargetIngest> = {}): TargetIngest {
+      return deadTarget({ lifeCycleStatus: null, notFound: "confirmed", ...overrides });
+    }
+
+    it("varmistettu not-found kesken ottelun on FAIL", () => {
+      const { health } = deriveHealth(deadSnap({ targetIngest: missingTarget() }));
+      expect(health).toBe("fail");
+    });
+
+    it("otsikko sanoo että lähetystä ei ole — ei että se päättyi", () => {
+      const { headline } = deriveHealth(deadSnap({ targetIngest: missingTarget() }));
+      expect(headline).toMatch(/ei enää ole YouTubessa/);
+      expect(headline).toMatch(/kesken ottelun/);
+      // Poistettu lähetys ei "päättynyt": operaattori etsisi sitä Studiosta.
+      expect(headline).not.toMatch(/on päättynyt/);
+    });
+
+    it("kohde-rivi on FAIL ja kertoo poistosta", () => {
+      const row = targetRow({ targetIngest: missingTarget() });
+      expect(row.health).toBe("fail");
+      expect(row.detail).toMatch(/ei löydy kanavalta/);
+      expect(row.detail).toMatch(/kuolleeseen kohteeseen/);
+    });
+
+    it("VAHVISTAMATON not-found ei hälytä — yksi tyhjä vastaus on armonaikaa", () => {
+      // Juuri luotu lähetys voi puuttua listauksesta hetken, ja väärä hälytys
+      // kesken ottelun on kalliimpi kuin minuutin viive.
+      const { health } = deriveHealth(
+        deadSnap({
+          targetIngest: missingTarget({
+            notFound: "unconfirmed",
+            error: "selostettua lähetystä ei löytynyt kanavalta",
+          }),
+        })
+      );
+      expect(health).toBe("ok");
+    });
+
+    it("ottelun päätyttyä poistettu lähetys ei ole FAIL, mutta ei myöskään vihreä", () => {
+      // Toisin kuin complete, poisto ei ole normaali lopputila — mutta ottelun
+      // jälkeen katsottavaa ei enää ole, joten se on huomautus eikä hälytys.
+      const row = targetRow({
+        match: baseMatch({ finished: true }),
+        targetIngest: missingTarget(),
+      });
+      expect(row.health).toBe("warn");
+      expect(row.detail).toMatch(/ei löydy kanavalta/);
+    });
+
+    it("vanhentunut not-found-havainto ei hälytä", () => {
+      const stale = missingTarget({
+        observedAt: new Date(Date.now() - TARGET_INGEST_STALE_MS - 1000).toISOString(),
+      });
+      expect(deriveHealth(deadSnap({ targetIngest: stale })).health).toBe("ok");
+    });
+
+    it("toisen videon not-found ei hälytä tämän työn nimissä", () => {
+      const other = missingTarget({ videoId: "JOKUMUU1234" });
+      expect(deriveHealth(deadSnap({ targetIngest: other })).health).toBe("ok");
+    });
   });
 });
