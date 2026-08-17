@@ -187,13 +187,27 @@ const ENDED_PATTERNS_AMBIGUOUS = [
 
 /** Any ended wording at all, final or ambiguous. */
 export function parseSourceEnded(stderr: string): boolean {
-  return parseSourceEndedFinal(stderr) || ENDED_PATTERNS_AMBIGUOUS.some((p) => p.test(stderr));
+  return parseSourceEndedFinal(stderr) !== null || ENDED_PATTERNS_AMBIGUOUS.some((p) => p.test(stderr));
 }
 
-/** Only the wordings that state the broadcast is over. These outrank a
- *  throttled answer in classifyResolveFailure. */
-export function parseSourceEndedFinal(stderr: string): boolean {
-  return ENDED_PATTERNS_FINAL.some((pattern) => pattern.test(stderr));
+/** The `ERROR:` line stating the broadcast is over, or null. Returns the LINE
+ *  so the caller can report the sentence that actually decided the verdict —
+ *  the last line of a failed run is often something else entirely (a 429).
+ *
+ *  **Only `ERROR:` lines count**, and that restriction is the point. yt-dlp
+ *  tries several player clients and downgrades a per-client failure to
+ *  `WARNING: … This live event has ended.` before carrying on with the next
+ *  one. Honouring a warning would let one client's answer end a broadcast the
+ *  run itself never concluded had ended — a relay shutting down mid-match,
+ *  telling the operator "ended", on evidence yt-dlp had already decided not to
+ *  act on. A final verdict has to come from yt-dlp's own final verdict. */
+export function parseSourceEndedFinal(stderr: string): string | null {
+  for (const raw of stderr.split("\n")) {
+    const line = raw.trim();
+    if (!/^ERROR\b/i.test(line)) continue;
+    if (ENDED_PATTERNS_FINAL.some((pattern) => pattern.test(line))) return line;
+  }
+  return null;
 }
 
 const UNIT_MS: Record<string, number> = {
