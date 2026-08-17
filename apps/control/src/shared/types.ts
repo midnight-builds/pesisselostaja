@@ -247,13 +247,40 @@ export interface SourceIngest {
   error: string | null;
 }
 
+/** Onko YouTube vastannut tyhjää kysyttäessä selostettua lähetystä (#252).
+ *
+ *  Oma tilansa nimenomaan siksi, ettei se ole `error`: virhe on "emme
+ *  saaneet vastausta", tyhjä lista on vastaus — ja auktoritatiivinen sellainen,
+ *  koska ohjaamo loi lähetyksen omalle kanavalleen ja kysyy sitä sen omalla
+ *  id:llä.
+ *
+ *  - `"no"` — lähetys löytyi kanavalta.
+ *  - `"unconfirmed"` — yksi tyhjä vastaus. Juuri luotu lähetys voi puuttua
+ *    listauksesta hetken (eventual consistency), joten tämä on armonaikaa eikä
+ *    näyttöä; kohdellaan tietämättömyytenä eikä hälytetä.
+ *  - `"confirmed"` — kaksi peräkkäistä tyhjää vastausta. Lähetys on poissa
+ *    (käsin poistettu Studiossa, kanavamoderointi), ja katsojan kannalta
+ *    lopputulos on sama kuin `complete`: jaettu linkki ei näytä mitään. */
+export type TargetNotFound = "no" | "unconfirmed" | "confirmed";
+
 /** Ohjaamon YouTube-API-havainto KOHTEESTA eli selostetusta lähetyksestä
  *  (#250). Sama muoto kuin lähteen havainnolla: observedAt/videoId/tilat/error
  *  tarkoittavat samaa, vain katsottava lähetys on eri. Toisin kuin lähteessä,
  *  YouTube on kohteen tilan AINOA totuudenlähde — relayn RTMP-työntö onnistuu
  *  myös kuolleeseen lähetykseen (16.8.2026, ottelu 136771), joten relayn oma
- *  kirjanpito ei voi kertoa tästä mitään. */
-export type TargetIngest = SourceIngest;
+ *  kirjanpito ei voi kertoa tästä mitään.
+ *
+ *  Oma tyyppinsä eikä enää `SourceIngest`in alias (#252): kohteella on yksi
+ *  kenttä jota lähteellä ei ole. Suunta on tarkoituksella tämä — `TargetIngest`
+ *  levenee, `SourceIngest` ei muutu millään tavalla, jottei kohteen takia
+ *  lisätty tieto voi saada raakalähetyksen riviä hälyttämään väärin. */
+export interface TargetIngest extends SourceIngest {
+  /** Vastasiko YouTube tyhjää, ja onko se jo varmistettu. Ks. `TargetNotFound`.
+   *  Kun tämä on `"confirmed"`, `error` on null ja tila-kentät ovat null: kyse
+   *  ei ole epäonnistuneesta hausta vaan onnistuneesta havainnosta siitä,
+   *  ettei lähetystä ole. */
+  notFound: TargetNotFound;
+}
 
 /** Everything the live view needs, in one payload, pushed over SSE. */
 export interface LiveState {

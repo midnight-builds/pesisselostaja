@@ -19,7 +19,7 @@
 
 import type { LiveState, NotificationPrefs, PreflightResult } from "../shared/types.js";
 import { blockedPushTitle, jobArrivalPush, jobEndedPush } from "../shared/jobState.js";
-import { isTargetDeadMidMatch } from "../shared/targetHealth.js";
+import { targetDeathReason } from "../shared/targetHealth.js";
 import { sendPushDetailed } from "./push.js";
 import { createStore } from "./store.js";
 
@@ -271,19 +271,22 @@ async function observe(state: LiveState): Promise<void> {
   // 16.8.2026 (ottelu 136771) tämä selvisi käsin tarkistamalla, ja
   // loppuottelu meni katsojilta ohi.
   let announcedTargetDead = false;
-  const targetDead = isTargetDeadMidMatch({
+  const targetDeath = targetDeathReason({
     job: state.job,
     relayActive: state.relay.active,
     matchFinished: state.match.finished,
     ingest: state.targetIngest,
     nowMs: now,
   });
+  const targetDead = targetDeath !== null;
   const targetKey = state.job?.targetVideoId ? `${state.job.id}:${state.job.targetVideoId}` : null;
   if (prefs.broken && targetDead && targetKey !== null && memory.targetDeadKey !== targetKey) {
     announcedTargetDead = await notify(
       `target-dead:${targetKey}`,
       "Selostettu lähetys kuoli",
-      `${matchLabel(state)} — YouTube on päättänyt selostetun lähetyksen, mutta ottelu on kesken. Jaettu linkki ei enää näytä lähetystä.`
+      targetDeath === "missing"
+        ? `${matchLabel(state)} — selostettua lähetystä ei enää ole YouTuben kanavalla, mutta ottelu on kesken. Jaettu linkki ei enää näytä lähetystä.`
+        : `${matchLabel(state)} — YouTube on päättänyt selostetun lähetyksen, mutta ottelu on kesken. Jaettu linkki ei enää näytä lähetystä.`
     );
     // Leima vasta onnistuneesta toimituksesta (sama sääntö kuin notify()n
     // vaimennuksessa, #205): hukkunut push yritetään uudelleen seuraavilla

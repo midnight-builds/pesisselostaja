@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ControlKnobs, LiveState, MatchState, RelayTelemetry } from "../../shared/types";
 import { TELEMETRY_STALE_MS } from "../../shared/types";
-import { isTargetDeadMidMatch } from "../../shared/targetHealth";
+import { targetDeathReason } from "../../shared/targetHealth";
 import { watchUrlForVideo } from "../../shared/youtubeUrl";
 import { api } from "../api";
 import { periodName, seconds } from "../format";
@@ -240,16 +240,19 @@ function alertsFor(live: LiveState): string[] {
   // linkki osoittaa päättyneeseen videoon — 16.8.2026 tämä huomattiin vain
   // tarkistamalla YouTube käsin. Sama jaettu sääntö kuin palvelimen otsikolla
   // ja pushilla (shared/targetHealth), jotta kolme pintaa eivät voi erota.
-  if (
-    isTargetDeadMidMatch({
-      job: live.job,
-      relayActive: live.relay.active,
-      matchFinished: live.match.finished,
-      ingest: live.targetIngest,
-      nowMs: Number.isFinite(nowMs) ? nowMs : 0,
-    })
-  ) {
-    out.push("Selostettu lähetys on päättynyt YouTubessa — katsojat eivät näe eivätkä kuule lähetystä.");
+  const targetDeath = targetDeathReason({
+    job: live.job,
+    relayActive: live.relay.active,
+    matchFinished: live.match.finished,
+    ingest: live.targetIngest,
+    nowMs: Number.isFinite(nowMs) ? nowMs : 0,
+  });
+  if (targetDeath !== null) {
+    out.push(
+      targetDeath === "missing"
+        ? "Selostettua lähetystä ei enää ole YouTubessa — katsojat eivät näe eivätkä kuule lähetystä."
+        : "Selostettu lähetys on päättynyt YouTubessa — katsojat eivät näe eivätkä kuule lähetystä."
+    );
   }
   return out;
 }

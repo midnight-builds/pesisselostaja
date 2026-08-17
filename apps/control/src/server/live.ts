@@ -48,7 +48,11 @@ import { logError, logInfo, logWarn } from "./log.js";
 import { getMatchState } from "./matches.js";
 import { getRelayProcess, readKnobs, readRunningStatus, type RunningStatus } from "./relay.js";
 import { SOURCE_INGEST_STALE_MS } from "./sourceIngest.js";
-import { isTargetDeadMidMatch, TARGET_INGEST_STALE_MS } from "../shared/targetHealth.js";
+import {
+  targetDeathReason,
+  TARGET_INGEST_STALE_MS,
+  type TargetDeathReason,
+} from "../shared/targetHealth.js";
 import { getSystemState } from "./system.js";
 import { NarrationTimeline, readRelayStatus } from "./telemetry.js";
 import { transitionBroadcast, type TransitionResult } from "./youtube.js";
@@ -292,8 +296,8 @@ function matchIdConflict(snap: Snapshot): { job: number; running: number } | nul
 /** Snapshot-muotoinen kääre jaetulle kohteen kuolemantarkistukselle (#250).
  *  Itse sääntö on `shared/targetHealth.ts`:ssä, koska selain ajaa saman
  *  päätöksen tilakortin hälytysriville. */
-function targetDeadMidMatch(snap: Snapshot): boolean {
-  return isTargetDeadMidMatch({
+function targetDeadMidMatch(snap: Snapshot): TargetDeathReason | null {
+  return targetDeathReason({
     job: snap.job,
     relayActive: snap.relay.active,
     matchFinished: snap.match.finished,
@@ -376,16 +380,20 @@ export function deriveHealth(snap: Snapshot): { health: Health; headline: string
     };
   }
 
-  // 3c. Selostettu lähetys on päättynyt YouTubessa kesken ottelun (#250).
+  // 3c. Selostettu lähetys on kuollut YouTubessa kesken ottelun (#250, #252).
   //     Relayn oma kirjanpito näyttää tässä tilanteessa täyttä tervettä ajoa —
   //     RTMP-työntö kuolleeseen lähetykseen onnistuu — joten tämä selviää vain
   //     YouTubelta kysymällä. 16.8.2026 (ottelu 136771) loppuottelu meni ilman
   //     katsojia, koska mikään ei kertonut tästä; jaettu linkki osoitti
   //     päättyneeseen videoon.
-  if (targetDeadMidMatch(snap)) {
+  const deathReason = targetDeadMidMatch(snap);
+  if (deathReason !== null) {
     return {
       health: "fail",
-      headline: "Selostettu lähetys on päättynyt YouTubessa kesken ottelun — katsojat eivät näe lähetystä",
+      headline:
+        deathReason === "missing"
+          ? "Selostettua lähetystä ei enää ole YouTubessa kesken ottelun — katsojat eivät näe lähetystä"
+          : "Selostettu lähetys on päättynyt YouTubessa kesken ottelun — katsojat eivät näe lähetystä",
     };
   }
 
@@ -570,10 +578,26 @@ function applyTargetIngest(
 
   if (!fresh) {
     if (ingest !== null) {
-      notes.push(ingest.error ? "YouTube: havaintoa ei saatu" : "YouTube: havainto vanhentunut");
+      // Vahvistamaton tyhjä vastaus (#252) on yhä tietämättömyyttä, mutta se on
+      // eri tietämättömyyttä kuin "kutsu epäonnistui" — ja jos se jää siihen,
+      // se on ainoa vihje ennen varmistusta.
+      notes.push(
+        ingest.notFound === "unconfirmed"
+          ? "YouTube: selostettua lähetystä ei löytynyt kanavalta — varmistetaan"
+          : ingest.error
+            ? "YouTube: havaintoa ei saatu"
+            : "YouTube: havainto vanhentunut"
+      );
     }
   } else if (ingest) {
-    if (ingest.lifeCycleStatus === "complete" || ingest.lifeCycleStatus === "revoked") {
+    if (ingest.notFound === "confirmed") {
+      // Kesken ottelun tämä on jo fail-haara buildChainissa; tänne pääsee vain
+      // kun ottelu on ohi tai relay sammunut. Poistettu lähetys ei silloinkaan
+      // ole normaali lopputila (toisin kuin `complete`), joten se ei saa jäädä
+      // vihreäksi — mutta se ei ole enää hälytys, koska katsottavaa ei ole.
+      notes.push("YouTube: selostettua lähetystä ei löydy kanavalta");
+      doubt();
+    } else if (ingest.lifeCycleStatus === "complete" || ingest.lifeCycleStatus === "revoked") {
       // Kesken ottelun tämä on jo fail-haara buildChainissa; tänne pääsee vain
       // kun ottelu on ohi tai relay sammunut — silloin päättynyt kohde on
       // normaali lopputila eikä laske terveyttä.
@@ -783,6 +807,7 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
   // we configured and what ffmpeg blamed when it died.
   const targetBlamed = lastMatching(snap.log, PHRASE.targetBlamed);
   const targetError = errors.get("target");
+  const targetDeath = targetDeadMidMatch(snap);
   if (targetError) {
     // Hard stopin siivous epäonnistui (#123). Tämä on juuri se tilanne jossa
     // kohde voi jäädä työntämään roskaa, joten se ei saa jäädä pelkkään
@@ -792,12 +817,20 @@ export function buildChain(snap: Snapshot, knobs: ControlKnobs | null): ChainSta
     rows.push(chainRow("target", "Kohde", "idle", "ei aktiivista työtä"));
   } else if (!job.targetStreamKey) {
     rows.push(chainRow("target", "Kohde", "fail", "stream key puuttuu — ei mihin pushata"));
-  } else if (targetDeadMidMatch(snap)) {
-    // #250: YouTube on päättänyt selostetun lähetyksen vaikka ottelu on kesken
-    // ja relay työntää yhä. Tähän ei ole log-fallbackia, koska työntö onnistuu
-    // — kohteen kuolema ei näy relayn päässä mitenkään.
+  } else if (targetDeath !== null) {
+    // #250/#252: selostettu lähetys on kuollut vaikka ottelu on kesken ja relay
+    // työntää yhä. Tähän ei ole log-fallbackia, koska työntö onnistuu — kohteen
+    // kuolema ei näy relayn päässä mitenkään. Syy erotellaan, koska se ohjaa
+    // eri toimeen: päättyneen lähetyksen näkee Studiossa, poistettua ei.
     rows.push(
-      chainRow("target", "Kohde", "fail", "YouTube: selostettu lähetys on päättynyt kesken ottelun — työntö menee kuolleeseen kohteeseen")
+      chainRow(
+        "target",
+        "Kohde",
+        "fail",
+        targetDeath === "missing"
+          ? "YouTube: selostettua lähetystä ei löydy kanavalta — poistettu kesken ottelun, työntö menee kuolleeseen kohteeseen"
+          : "YouTube: selostettu lähetys on päättynyt kesken ottelun — työntö menee kuolleeseen kohteeseen"
+      )
     );
   } else if (targetBlamed && isRecent(targetBlamed, now)) {
     rows.push(chainRow("target", "Kohde", "fail", "ffmpeg syytti kohdetta — tarkista stream key"));
