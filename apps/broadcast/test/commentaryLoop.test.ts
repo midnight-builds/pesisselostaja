@@ -91,7 +91,16 @@ interface LoopInternals {
   maybeAnnounceSummary(meta: MatchMetadata): Promise<void>;
   speak(text: string, countAnnouncement?: boolean, dedupeKey?: string): void;
   synthQueue: Promise<void>;
-  state: { announcementCount: number; finished: boolean };
+  state: {
+    announcementCount: number;
+    finished: boolean;
+    // Hiljaisuusfillerin sisältö luetaan näistä (buildContext) — ks. #60.
+    currentPeriod: number;
+    currentOuts: number;
+    currentBatTeamId: number | null;
+    periodRuns: Record<number, { home: number; away: number }>;
+    lastSummaryTime: number;
+  };
   matchStarted: boolean;
   lastSpeech: string | null;
   lastSpeechAt: number;
@@ -207,6 +216,139 @@ describe("CommentaryLoop in-game filler gating", () => {
     await loop.synthQueue;
     expect(sink.calls).toHaveLength(1);
     expect(loop.lastSpeechAt).toBeGreaterThan(0);
+  });
+});
+
+// ------------------------------------------------------------------- issue #60
+// 90 sekunnin hiljaisuusfilleri ei ollut lauennut kertaakaan kolmessa
+// live-ajossa, eikä yksikään testi koetellut sen rajaa tai sisältöä: yllä
+// olevat gating-testit asettavat lastSpeechAt = 0, jolloin "hiljaisuutta" on
+// aina takana ikuisuus ja itse 90 s ehto jää kokonaan koettelematta. Nämä
+// testit ajavat kellon valeajastimella rajan yli ja lukevat mitä filleri puhuu.
+describe("CommentaryLoop 90 s hiljaisuusfilleri (#60)", () => {
+  const T0 = 1_000_000; // mikä tahansa "nyt": filleri mittaa eroa, ei absoluuttia
+  const IDLE_MS = 90_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  /** Käynnissä oleva, tapahtumaton ottelu: ffmpeg kiinni ja jono tyhjä, joten
+   *  ainoa fillerin ja mikserin välissä oleva portti on kello. Tilanne
+   *  (4–1 kotijoukkueelle, vieras sisävuorossa) on sisältötestiä varten. */
+  function quietGame(sink: SpeechSink) {
+    const { s, port } = mutableStatus(true, 0);
+    const loop = latchedLoop(sink, s, port);
+    loop.matchStarted = true;
+    // > 0 (muuten filleri ei koskaan laukea), mutta alle SUMMARY_EVERY_N:n:
+    // countDue pysyy epätotena, joten laukaisu voi tulla vain idleDue-ehdosta.
+    loop.state.announcementCount = 3;
+    loop.state.currentPeriod = 0;
+    loop.state.currentOuts = 2;
+    loop.state.currentBatTeamId = META.away.id;
+    loop.state.periodRuns[0] = { home: 4, away: 1 };
+    loop.lastSpeechAt = T0; // hiljaisuus alkaa nyt, ei "joskus ennen aikojen alkua"
+    return { loop, s };
+  }
+
+  it("pysyy hiljaa kun hiljaisuutta on kertynyt alle 90 sekuntia", async () => {
+    const sink = recordingSink();
+    const { loop } = quietGame(sink);
+
+    vi.setSystemTime(T0 + 89_000);
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+
+    expect(sink.calls).toHaveLength(0);
+    // Kirjanpito ei kulunut: seuraava kysely näkee saman hiljaisuuden jatkuvan.
+    expect(loop.lastSpeechAt).toBe(T0);
+    expect(loop.state.lastSummaryTime).toBe(0);
+  });
+
+  it("laukeaa vasta kun 90 sekuntia on täyttynyt, ja nollaa kellon itselleen", async () => {
+    const sink = recordingSink();
+    const { loop } = quietGame(sink);
+
+    // Tasan rajalla ei vielä puhuta: ehto on ehdoton > eikä >=.
+    vi.setSystemTime(T0 + IDLE_MS);
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+    expect(sink.calls).toHaveLength(0);
+
+    vi.setSystemTime(T0 + IDLE_MS + 1);
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+    expect(sink.calls).toHaveLength(1);
+
+    // Kello lähtee fillerin hetkestä, joten seuraava filleri on 90 s päässä.
+    expect(loop.lastSpeechAt).toBe(T0 + IDLE_MS + 1);
+    vi.setSystemTime(T0 + IDLE_MS + 1 + IDLE_MS);
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+    expect(sink.calls).toHaveLength(1);
+  });
+
+  it("puhuu hiljaisuusfillerin sisällön: käynnissä olevan jakson tilanne, johtaja ja sisävuoro", async () => {
+    const sink = recordingSink();
+    const { loop } = quietGame(sink);
+
+    vi.setSystemTime(T0 + IDLE_MS + 1);
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+
+    expect(sink.calls).toHaveLength(1);
+    const text = sink.calls[0].text;
+    // formatIdleSummary arpoo sanamuodon (pickVariant), joten testi hyväksyy
+    // varianttijoukon mutta vaatii jokaiselta variantilta saman sisällön.
+    expect(text).toMatch(
+      /^(Tilanne on edelleen|Tilanne edelleen|Ottelu jatkuu|Tulospalvelun mukaan tilanne|Tilasto kertoo)/
+    );
+    expect(text).toContain("4, 1"); // kuluvan jakson lukema, koti ensin
+    expect(text).toContain(META.home.shorthand); // johtava joukkue nimetään
+    expect(text).toContain("reilusti"); // 3 juoksun ero → ei "niukasti"
+    // Sisävuorossa oleva joukkue on se, mitä kuulija hiljaisuuden jälkeen
+    // eniten kaipaa (#100) — se ei saa pudota fillerista pois.
+    expect(text).toContain(`sisävuorossa on ${META.away.shorthand}`);
+    // Hiljaisuusfilleri, ei laskuripohjainen tilannekooste ("Menossa 1. jakso…").
+    expect(text).not.toMatch(/menossa/i);
+    // Filleriä ei lasketa selostukseksi, joten se ei siirrä koosteen laskuria.
+    expect(loop.state.announcementCount).toBe(3);
+  });
+
+  it("ei laukea kun ottelu on jo päättynyt, vaikka hiljaisuutta olisi tunteja", async () => {
+    const sink = recordingSink();
+    const { loop } = quietGame(sink);
+    loop.state.finished = true;
+
+    vi.setSystemTime(T0 + 60 * 60 * 1000);
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+    expect(sink.calls).toHaveLength(0);
+  });
+
+  it("laskee hiljaisuuden viimeisestä puheesta, ei fillerin edellisestä vuorosta", async () => {
+    const sink = recordingSink();
+    const { loop } = quietGame(sink);
+
+    // Tapahtuma 80 s kohdalla: hiljaisuus alkaa alusta siitä hetkestä.
+    vi.setSystemTime(T0 + 80_000);
+    loop.speak("Palo! Toinen palo.");
+    await loop.synthQueue;
+    expect(sink.calls).toHaveLength(1);
+
+    // T0:sta on jo yli 90 s, mutta puheesta vasta 11 s → ei filleriä.
+    vi.setSystemTime(T0 + 91_000);
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+    expect(sink.calls).toHaveLength(1);
+
+    // 90 s tapahtumasta täyteen → filleri.
+    vi.setSystemTime(T0 + 80_000 + IDLE_MS + 1);
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+    expect(sink.calls).toHaveLength(2);
   });
 });
 
