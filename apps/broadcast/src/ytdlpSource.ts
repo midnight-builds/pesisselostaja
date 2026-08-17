@@ -14,6 +14,80 @@ import { logWarn } from "./log.js";
  *  systemd. */
 const JS_RUNTIME_ARGS = ["--js-runtimes", `node:${process.execPath}`];
 
+/** yt-dlp extractor arguments, i.e. which YouTube player client the extraction
+ *  pretends to be.
+ *
+ *  `youtube:player_client=android` is not a preference, it is the workaround
+ *  that got a live broadcast back on 16.8.2026 (issue #249): a mid-match relay
+ *  restart forced a re-resolve, YouTube answered the web client with HTTP 429 +
+ *  "Sign in to confirm you're not a bot", and viewers saw the slate for ~4 min.
+ *  The android client went through from the same IP.
+ *
+ *  It lives here, in version control, rather than in the host's
+ *  `~/.config/yt-dlp/config` where it was first added — a file that is neither
+ *  in the repo nor in the deploy, so nothing said the relay's behaviour
+ *  depended on it. If the android client ever starts misbehaving (a changed
+ *  format list is the symptom to expect), this is the first suspect. */
+export const DEFAULT_YTDLP_EXTRACTOR_ARGS = "youtube:player_client=android";
+
+/** Turns the configured extractor-args string into argv. Whitespace separates
+ *  several specs (`;` and `,` are part of yt-dlp's own syntax and must survive
+ *  untouched).
+ *
+ *  An empty value means the RELAY passes no extractor args — NOT that yt-dlp
+ *  runs with its own defaults. yt-dlp reads its config files (`~/.config/yt-dlp/
+ *  config`) before the command line, and this host still carries the original
+ *  16.8.2026 workaround line there. A value set here wins over the host's for
+ *  the same extractor key; an empty one leaves the host's in force. Getting
+ *  back to a bare yt-dlp means editing that file too. */
+export function ytdlpExtractorArgs(
+  raw: string | undefined = process.env.RELAY_YTDLP_EXTRACTOR_ARGS
+): string[] {
+  const value = (raw ?? DEFAULT_YTDLP_EXTRACTOR_ARGS).trim();
+  if (!value) return [];
+  return value.split(/\s+/).flatMap((spec) => ["--extractor-args", spec]);
+}
+
+/** The flags that decide WHAT yt-dlp extracts and HOW it talks to YouTube —
+ *  shared verbatim by the relay's resolve and by preflight's source check.
+ *
+ *  One constant on purpose: the two argument lists were copies, so preflight
+ *  could report a healthy source while the relay's own resolve used different
+ *  flags (or vice versa). A preflight that does not ask the same question it
+ *  is trusted to answer is worse than no preflight. */
+export function ytdlpSourceArgs(extractorArgs?: string): string[] {
+  return [
+    "-f",
+    "best[protocol^=m3u8]/best",
+    "--no-playlist",
+    ...JS_RUNTIME_ARGS,
+    ...ytdlpExtractorArgs(extractorArgs),
+  ];
+}
+
+/** Argv for downloading a FINISHED broadcast to a file (simulate.ts's offline
+ *  replay). Deliberately NOT ytdlpSourceArgs: that asks for a live m3u8
+ *  manifest, which is the wrong question for a VOD — sharing the whole list
+ *  would be uniformity, not correctness.
+ *
+ *  What IS shared is the extractor args, because YouTube's bot check is about
+ *  the client and the IP, not about what we ask for: the same block that hit
+ *  the relay on 16.8.2026 hits this download too (#249). Lives here rather
+ *  than in simulate.ts so it is reachable from a test — simulate.ts runs
+ *  `main()` on import and cannot be imported at all. */
+export function ytdlpVodArgs(outPath: string): string[] {
+  return [
+    "--no-playlist",
+    ...ytdlpExtractorArgs(),
+    "-f",
+    "bv*+ba/best",
+    "--merge-output-format",
+    "mp4",
+    "-o",
+    outPath,
+  ];
+}
+
 /** An HLS pick resolves to a manifest host; a progressive fallback resolves to
  *  `…/videoplayback?…&itag=18`. Used only to warn — a 360p push still beats no
  *  push at all, so this never fails the resolve (uptime first). */
@@ -52,19 +126,88 @@ export class SourceEndedError extends Error {
   }
 }
 
+/** YouTube refused to answer *us*, and said nothing about the broadcast: HTTP
+ *  429, or the bot check that fronts it. The distinction matters twice.
+ *
+ *  For the relay: this is not an ordinary outage, so the ordinary backoff (a
+ *  retry every 30 s at the cap) is exactly wrong — hammering is what keeps the
+ *  block alive. See nextBackoffMs in ffmpegMixer.
+ *
+ *  For the operator: `source.state: failed` under this cause means "the relay
+ *  cannot reach the raakalähetys", NOT "the raakalähetys is broken". On
+ *  16.8.2026 the ohjaamo said the latter while the phone was pushing perfectly,
+ *  which points the operator at the one end of the chain nobody can reach
+ *  mid-match (issue #249). */
+export class SourceThrottledError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SourceThrottledError";
+  }
+}
+
+/** yt-dlp's wording when YouTube throttles or bot-checks the request itself.
+ *  Both observed on 16.8.2026; the 429 arrived with the bot-check text. */
+const THROTTLED_PATTERNS = [
+  // `you.{0,4}re` on purpose: yt-dlp quotes YouTube's own wording, which uses a
+  // typographic apostrophe ("you’re") — matching only the ASCII one would have
+  // missed the exact line this whole change exists for.
+  /Sign in to confirm you.{0,4}re not a bot/i,
+  /HTTP Error 429/i,
+  /\b429\b.*Too Many Requests|Too Many Requests.*\b429\b/i,
+] as const;
+
+export function parseSourceThrottled(stderr: string): boolean {
+  return THROTTLED_PATTERNS.some((pattern) => pattern.test(stderr));
+}
+
 /** yt-dlp's wording when the live is over and it cannot even list formats.
  *
  *  Secondary evidence only: `live_status` below is the real answer and comes
  *  back on every successful extraction. These strings are what is left for the
- *  case where yt-dlp fails before it can report a status at all. */
-const ENDED_PATTERNS = [
+ *  case where yt-dlp fails before it can report a status at all.
+ *
+ *  Split in two because a stderr can hold BOTH an ended wording and a 429, and
+ *  the two halves want opposite verdicts in that case:
+ *
+ *  - **Final**: YouTube said, in as many words, that this broadcast is over.
+ *    A throttled request cannot invent that sentence, so it outranks the
+ *    throttle. Reading it as "we were merely blocked" would keep the slate
+ *    pushing into a finished broadcast for the whole give-up window — the
+ *    exact #103 outcome the relay is built to avoid.
+ *  - **Ambiguous**: a *symptom* of an extraction that failed, and failing to
+ *    list formats is precisely what a bot check causes. Here the throttle wins,
+ *    because reading a block as "ended" would shut down a relay whose match is
+ *    still being played. */
+const ENDED_PATTERNS_FINAL = [/This live event has ended/i] as const;
+
+const ENDED_PATTERNS_AMBIGUOUS = [
   /Requested format is not available/i,
   /This live stream recording is not available/i,
-  /This live event has ended/i,
 ] as const;
 
+/** Any ended wording at all, final or ambiguous. */
 export function parseSourceEnded(stderr: string): boolean {
-  return ENDED_PATTERNS.some((pattern) => pattern.test(stderr));
+  return parseSourceEndedFinal(stderr) !== null || ENDED_PATTERNS_AMBIGUOUS.some((p) => p.test(stderr));
+}
+
+/** The `ERROR:` line stating the broadcast is over, or null. Returns the LINE
+ *  so the caller can report the sentence that actually decided the verdict —
+ *  the last line of a failed run is often something else entirely (a 429).
+ *
+ *  **Only `ERROR:` lines count**, and that restriction is the point. yt-dlp
+ *  tries several player clients and downgrades a per-client failure to
+ *  `WARNING: … This live event has ended.` before carrying on with the next
+ *  one. Honouring a warning would let one client's answer end a broadcast the
+ *  run itself never concluded had ended — a relay shutting down mid-match,
+ *  telling the operator "ended", on evidence yt-dlp had already decided not to
+ *  act on. A final verdict has to come from yt-dlp's own final verdict. */
+export function parseSourceEndedFinal(stderr: string): string | null {
+  for (const raw of stderr.split("\n")) {
+    const line = raw.trim();
+    if (!/^ERROR\b/i.test(line)) continue;
+    if (ENDED_PATTERNS_FINAL.some((pattern) => pattern.test(line))) return line;
+  }
+  return null;
 }
 
 const UNIT_MS: Record<string, number> = {
@@ -154,7 +297,38 @@ export function parseResolveOutput(stdout: string): { url: string | null; liveSt
   return { url, liveStatus };
 }
 
-export function resolveSourceUrl(youtubeUrl: string): Promise<ResolvedSource> {
+/** Turns a failed yt-dlp run into the error the relay acts on, or null when
+ *  the stderr says nothing recognisable and the raw failure should stand.
+ *
+ *  Pure and exported because the ORDER is the whole content of this function,
+ *  and the order is a policy about broadcasts rather than about strings:
+ *   1. "starts later" — waiting beats every other reading (a scheduled
+ *      broadcast is healthy, and giving up on one cost us a live start once).
+ *   2. "this broadcast has ended", said in those words — final. A 429 in the
+ *      same stderr (yt-dlp prints its retry warnings there too) must not hide
+ *      it: the relay would hold the slate over a finished match for the whole
+ *      give-up window, which is #103 wearing a different hat.
+ *   3. "YouTube refused us" — a block says nothing about the broadcast, so
+ *      every REMAINING ended-ish wording is only a symptom of the failed
+ *      extraction and loses to the throttle.
+ *   4. those remaining ended-ish wordings, once nothing above claimed it. */
+export function classifyResolveFailure(stderr: string): Error | null {
+  const lastLine = stderr.trim().split("\n").at(-1) ?? "";
+  const scheduled = parseScheduledStart(stderr);
+  if (scheduled) return new SourceNotLiveYetError(lastLine, scheduled.startsInMs);
+  // The MATCHED line, not the last one: a run that ended on a 429 would
+  // otherwise be reported to the operator as "ended, reason: HTTP 429".
+  const finalEnded = parseSourceEndedFinal(stderr);
+  if (finalEnded) return new SourceEndedError(finalEnded);
+  if (parseSourceThrottled(stderr)) return new SourceThrottledError(lastLine);
+  if (parseSourceEnded(stderr)) return new SourceEndedError(lastLine);
+  return null;
+}
+
+export function resolveSourceUrl(
+  youtubeUrl: string,
+  opts: { extractorArgs?: string } = {}
+): Promise<ResolvedSource> {
   return new Promise((resolve, reject) => {
     execFile(
       "yt-dlp",
@@ -164,29 +338,13 @@ export function resolveSourceUrl(youtubeUrl: string): Promise<ResolvedSource> {
         // cost another extraction and could answer about a different instant.
         "--print",
         "%(live_status)s",
-        "-f",
-        "best[protocol^=m3u8]/best",
-        "--no-playlist",
-        ...JS_RUNTIME_ARGS,
+        ...ytdlpSourceArgs(opts.extractorArgs),
         youtubeUrl,
       ],
       { maxBuffer: 4 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) {
-          const text = String(stderr ?? "");
-          const lastLine = text.trim().split("\n").at(-1) ?? "";
-          const scheduled = parseScheduledStart(text);
-          if (scheduled) {
-            reject(new SourceNotLiveYetError(lastLine, scheduled.startsInMs));
-            return;
-          }
-          // Checked after "not live yet": a scheduled broadcast can also
-          // mention formats, and waiting must win over finishing.
-          if (parseSourceEnded(text)) {
-            reject(new SourceEndedError(lastLine));
-            return;
-          }
-          reject(err);
+          reject(classifyResolveFailure(String(stderr ?? "")) ?? err);
           return;
         }
         const { url, liveStatus } = parseResolveOutput(stdout);

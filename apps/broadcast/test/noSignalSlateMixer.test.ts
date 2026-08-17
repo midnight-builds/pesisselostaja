@@ -15,7 +15,7 @@ import {
   type SourceIngestObservation,
 } from "../src/ffmpegMixer.js";
 import { NoSignalSlate, type SlateLayout } from "../src/noSignalSlate.js";
-import { SourceEndedError } from "../src/ytdlpSource.js";
+import { SourceEndedError, SourceThrottledError } from "../src/ytdlpSource.js";
 
 const LAYOUT: SlateLayout = {
   width: 1920,
@@ -245,6 +245,97 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
     expect(spawns.some(isSlateSpawn)).toBe(true);
     expect(mixer.sourceState).toBe("ended");
     expect(logged()).toContain("Katvekuva pois: lähde on päättynyt hallitusti");
+  }, 25000);
+
+  /** Issue #249. 16.8.2026 katsojat olivat katvekuvassa ~4 min, eli relay istui
+   *  TÄSSÄ silmukassa koko eston ajan — juuri siellä missä se koputti YouTubea
+   *  30 s välein. Perääntyminen, joka on vain pääloopissa, ei siis auta
+   *  siinä tilanteessa jota varten se tehtiin. */
+  it("backs off in the SLATE prober too when YouTube throttles the resolve (#249)", async () => {
+    const spawns: string[][] = [];
+    const mixer = harness({
+      slate: await preparedSlate(),
+      slateAfterMs: 0,
+      // Antelias ikkuna: tässä mitataan perääntymistä, ei luovutusta.
+      maxFailureWindowMs: 10 * 60 * 1000,
+      resolveTestSource: () => {
+        throw new SourceThrottledError(
+          "ERROR: Sign in to confirm you’re not a bot. HTTP Error 429: Too Many Requests"
+        );
+      },
+      spawns,
+    });
+
+    // "seuraava yritys" on nimenomaan KATVEsilmukan rivi — pääloopin oma
+    // perääntymisrivi ei sisällä sitä, joten tämä ei voi mennä läpi pääloopin
+    // ansiosta.
+    const outcome = await runUntil(mixer, () => logged().includes("seuraava yritys"), 8000);
+    expect(outcome).toBe("condition");
+    expect(spawns.some(isSlateSpawn)).toBe(true); // katve oli päällä, kuten 16.8.
+
+    // Seuraava yritys on minuuttien päässä, ei 30 s katossa. Luku luetaan
+    // lokista, koska se on sama luku jonka operaattori näkee. TÄMÄ on testin
+    // kantava väite: "seuraava yritys N s" syntyy vain katvesilmukassa.
+    const slateLine = logged()
+      .split("\n")
+      .find((l) => /seuraava yritys \d+ s kuluttua/.test(l)) ?? "";
+    const seconds = Number(/seuraava yritys (\d+) s kuluttua/.exec(slateLine)?.[1]);
+    expect(seconds).toBeGreaterThanOrEqual(60);
+    // …ja SE rivi sanoo kumpi pää on vialla. Väite kohdistuu tähän riviin eikä
+    // koko lokiin: sama lause on myös pääloopin varoituksessa, joten koko
+    // lokiin osuva regex menisi läpi ilman katvesilmukan perääntymistä.
+    expect(slateLine).toMatch(/Raakalähetys voi silti olla kunnossa/);
+    expect(mixer.sourceDetail ?? "").toMatch(/YouTube torjuu haun/);
+  }, 25000);
+
+  /** Perääntyminen ei saa tehdä katveesta kuuroa. Uni katkeaa myös silloin kun
+   *  katvetilan ehdot lakkaavat kesken unen (ottelu päättyy): muuten
+   *  väripalkkeja työnnettäisiin päättyneeseen lähetykseen koko unen ajan —
+   *  ennen #249:ää enintään 30 s, sen jälkeen jopa 5 min. */
+  it("wakes from a long backoff sleep the moment the match ends (#249/#104)", async () => {
+    const spawns: string[][] = [];
+    let finished = false;
+    const mixer = harness({
+      slate: await preparedSlate(),
+      slateAfterMs: 0,
+      maxFailureWindowMs: 10 * 60 * 1000,
+      isMatchFinished: () => finished,
+      resolveTestSource: () => {
+        throw new SourceThrottledError("ERROR: HTTP Error 429: Too Many Requests");
+      },
+      spawns,
+    });
+
+    void mixer.start().catch(() => undefined);
+    // Odota että katve on päällä ja pitkä uni (≥60 s) on alkanut.
+    const sleeping = Date.now() + 8000;
+    while (Date.now() < sleeping && !logged().includes("seuraava yritys")) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(logged()).toContain("seuraava yritys");
+    expect(spawns.some(isSlateSpawn)).toBe(true);
+
+    // Ottelu päättyy KESKEN unen. Ilman korjausta silmukka nukkuisi minuutin.
+    //
+    // Väite on TÄSMÄLLINEN lopetussyy, ei pelkkä "Katvekuva pois": sen
+    // alkuliite esiintyy myös rivillä "Katvekuva pois käytöstä tältä ajolta"
+    // (disableSlate) ja stop():n omassa purussa, joten löysempi ehto meni läpi
+    // ilman korjaustakin. Vain tämä rivi voi syntyä siitä, että uni katkesi
+    // ottelun päättymiseen.
+    const END_LINE = "Katvekuva pois: lähde on päättynyt hallitusti";
+    const endedAt = Date.now();
+    finished = true;
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline && !logged().includes(END_LINE)) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const woke = logged().includes(END_LINE); // luettu ENNEN stop():ia
+    const reactionMs = Date.now() - endedAt;
+    mixer.stop();
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(woke).toBe(true);
+    expect(reactionMs).toBeLessThan(4000); // ei 60 s unen loppuun asti
   }, 25000);
 
   /** Kaksi ffmpegiä samaan RTMP-avaimeen katkaisee lähetyksen YouTuben päässä.

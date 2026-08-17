@@ -2,7 +2,12 @@ import { execFile } from "node:child_process";
 import { readFile, statfs } from "node:fs/promises";
 import { promisify } from "node:util";
 import { fetchMatchMetadata, fetchLiveEvents } from "@pesisselostaja/core";
-import { isHlsManifestUrl, parseScheduledStart } from "./ytdlpSource.js";
+import {
+  isHlsManifestUrl,
+  parseScheduledStart,
+  parseSourceThrottled,
+  ytdlpSourceArgs,
+} from "./ytdlpSource.js";
 
 const run = promisify(execFile);
 
@@ -133,13 +138,20 @@ async function checkMatch(matchId: number, apiKey?: string, apiBase?: string): P
 /** Resolves the source the same way the relay will, and classifies the three
  *  outcomes that actually matter before a broadcast: live and full quality,
  *  live but degraded, or scheduled for later. */
-export async function checkSource(youtubeUrl: string): Promise<Check> {
+export async function checkSource(
+  youtubeUrl: string,
+  /** Test seam: runs yt-dlp with the given argv. Exists so a test can assert
+   *  WHICH flags preflight passes without a network call — the drift this
+   *  guards against (preflight resolving differently than the relay) is
+   *  invisible to every other kind of test, and is what issue #249 was. */
+  opts: { runYtdlp?: (args: string[]) => Promise<{ stdout: string }> } = {}
+): Promise<Check> {
+  const runYtdlp =
+    opts.runYtdlp ?? ((args: string[]) => run("yt-dlp", args, { maxBuffer: 4 * 1024 * 1024 }));
   try {
-    const { stdout } = await run(
-      "yt-dlp",
-      ["-g", "-f", "best[protocol^=m3u8]/best", "--no-playlist", "--js-runtimes", `node:${process.execPath}`, youtubeUrl],
-      { maxBuffer: 4 * 1024 * 1024 }
-    );
+    // Exactly the relay's own flags (ytdlpSourceArgs) — a preflight that asks a
+    // different question than the relay will ask is worth nothing.
+    const { stdout } = await runYtdlp(["-g", ...ytdlpSourceArgs(), youtubeUrl]);
     const url = stdout.trim().split("\n")[0];
     if (!url) return { name: "Lähde", status: "fail", detail: "yt-dlp ei palauttanut URLia" };
     return isHlsManifestUrl(url)
@@ -156,7 +168,20 @@ export async function checkSource(youtubeUrl: string): Promise<Check> {
       const eta = scheduled.startsInMs === null ? "" : ` (~${Math.round(scheduled.startsInMs / 60000)} min)`;
       return { name: "Lähde", status: "ok", detail: `ei vielä livenä, ajastettu alkavaksi${eta} — relay odottaa` };
     }
-    return { name: "Lähde", status: "fail", detail: stderr.trim().split("\n").at(-1) ?? String(err) };
+    const lastLine = stderr.trim().split("\n").at(-1) ?? String(err);
+    // Says which END is in trouble. "Lähde ei vastaa" sends the operator after
+    // the phone in the field; the truth here is that YouTube declined to answer
+    // the relay, and the raakalähetys itself may be perfectly fine (#249).
+    if (parseSourceThrottled(stderr)) {
+      return {
+        name: "Lähde",
+        status: "fail",
+        detail:
+          "YouTube torjuu haun (bottitarkistus / 429) — raakalähetyksen omasta tilasta " +
+          `ei tietoa. Kokeile toista player_clientiä RELAY_YTDLP_EXTRACTOR_ARGS:lla. ${lastLine}`,
+      };
+    }
+    return { name: "Lähde", status: "fail", detail: lastLine };
   }
 }
 

@@ -2,7 +2,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { SourceEndReason } from "@pesisselostaja/core";
 import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import { NarrationFifo } from "./narrationFifo.js";
-import { resolveSourceUrl, SourceEndedError, SourceNotLiveYetError } from "./ytdlpSource.js";
+import {
+  resolveSourceUrl,
+  SourceEndedError,
+  SourceNotLiveYetError,
+  SourceThrottledError,
+} from "./ytdlpSource.js";
 import type { NoSignalSlate, SlateLayout, SlateTextStyle } from "./noSignalSlate.js";
 import {
   classifyFfmpegFailure,
@@ -73,6 +78,10 @@ export interface FfmpegMixerOptions {
   /** Force a respawn on this cadence even if ffmpeg looks healthy, so a
    *  rotated source URL gets picked up (default 15 min). */
   urlRefreshMs?: number;
+  /** yt-dlp:n `--extractor-args` (RELAY_YTDLP_EXTRACTOR_ARGS), eli minä
+   *  YouTuben player-clientinä lähde haetaan. Absent = ytdlpSource.ts:n oletus
+   *  (android, #249:n bottitarkistuksen kiertotie). */
+  ytdlpExtractorArgs?: string;
   /** Give up and stop retrying after this many milliseconds of unbroken
    *  unproductive attempts — a start-up failure, or a session that died in
    *  under minProductiveRunMs — which protects against retrying forever once
@@ -445,6 +454,60 @@ export function scheduledRecheckDelayMs(startsInMs: number | null, imminentForMs
   return Math.min(Math.max(startsInMs - 20_000, SCHEDULED_RECHECK_MIN_MS), SCHEDULED_RECHECK_MAX_MS);
 }
 
+/** Ordinary respawn backoff: doubles from 1 s and stops here. Right for a
+ *  blip, a rotated URL or a dropped RTMP push — retrying soon is free. */
+export const BACKOFF_MAX_MS = 30_000;
+/** …and wrong for HTTP 429 / YouTube's bot check, which is not an outage but
+ *  YouTube telling us to stop asking: at the ordinary cap the relay knocks
+ *  twice a minute for as long as the block lasts, i.e. exactly when backing
+ *  off is the only thing that helps (#249, 16.8.2026). A throttled answer
+ *  therefore jumps straight to a minute instead of creeping up from 1 s. */
+export const THROTTLED_BACKOFF_MIN_MS = 60_000;
+export const THROTTLED_BACKOFF_MAX_MS = 5 * 60_000;
+
+/** Next respawn delay. Pure so the policy can be read (and tested) without
+ *  running the supervisor loop.
+ *
+ *  A throttled sleep is capped at **half the give-up window**, without
+ *  exception — including windows shorter than the ordinary 30 s cap, where the
+ *  earlier version quietly let one sleep swallow the entire window. It is a
+ *  real cap, not a preference: the sleep decides when the next attempt
+ *  happens, and the attempt is when the window is actually examined.
+ *
+ *  Note what this does NOT promise: the give-up MOMENT is unchanged. Fewer
+ *  attempts mean the window is checked later, so a throttled outage postpones
+ *  the shutdown — worst case ~721 s → ~991 s on the 12 min window, ~121 s →
+ *  ~151 s on the 2 min one. That is the safer direction (a blocked source can
+ *  come back), but it is a consequence worth saying out loud rather than a
+ *  property that survived. Keep these numbers in step with README.md's
+ *  "How the source is resolved" section; the two have already drifted once. */
+export function nextBackoffMs(
+  currentMs: number,
+  opts: { throttled: boolean; giveUpWindowMs: number }
+): number {
+  const doubled = currentMs * 2;
+  if (!opts.throttled) return Math.min(doubled, BACKOFF_MAX_MS);
+  const cap = Math.min(THROTTLED_BACKOFF_MAX_MS, halfWindowMs(opts.giveUpWindowMs));
+  return Math.min(Math.max(doubled, Math.min(THROTTLED_BACKOFF_MIN_MS, cap)), cap);
+}
+
+function halfWindowMs(giveUpWindowMs: number): number {
+  return Math.max(1, Math.floor(giveUpWindowMs / 2));
+}
+
+/** Applies the same half-window ceiling at the moment of sleeping, because the
+ *  window can SHRINK between computing a backoff and using it: the match ends
+ *  mid-outage and maxFailureWindowMs (12 min) gives way to
+ *  finishedFailureWindowMs (2 min). A 5 min sleep computed under the old
+ *  window would then outlast the new one on its own — measured 300 s to give
+ *  up where an ordinary outage takes 150 s. Recomputing here costs nothing and
+ *  keeps the ceiling honest whichever window is in force when we actually
+ *  sleep. Only throttled sleeps need it; the ordinary 30 s cap is below every
+ *  window the relay ships with. */
+export function clampSleepToWindow(sleepMs: number, giveUpWindowMs: number): number {
+  return Math.min(sleepMs, halfWindowMs(giveUpWindowMs));
+}
+
 function formatEta(ms: number): string {
   const mins = Math.round(ms / 60000);
   if (mins >= 60) return `${Math.floor(mins / 60)} h ${mins % 60} min`;
@@ -460,6 +523,11 @@ export class FfmpegMixer {
   private child: ChildProcess | null = null;
   private stopped = false;
   private backoffMs = 1000;
+  /** True when the LAST resolve failed because YouTube throttled/bot-checked
+   *  us rather than because the source was unreachable. Decides only the
+   *  backoff (see nextBackoffMs) — the give-up accounting is unchanged, since
+   *  a source we cannot reach is a source we cannot broadcast either way. */
+  private throttled = false;
   private refreshTimer: NodeJS.Timeout | null = null;
   /** When the current unbroken run of *unproductive* attempts began, or null
    *  if the source has since produced a real run. Used to give up after
@@ -668,11 +736,15 @@ export class FfmpegMixer {
           preResolved = await this.waitBeforeNextAttempt(waitMs);
           continue;
         }
-        this.scheduledSince = null;
-        this.imminentSince = null;
-        this.sourceStateValue = "failed";
-        this.sourceDetailValue = err instanceof Error ? err.message : String(err);
+        this.noteResolveFailure(err);
         logError("ffmpeg.start_failed", `ffmpeg-käynnistysvirhe: ${err instanceof Error ? err.message : err}`);
+        if (this.throttled) {
+          logWarn(
+            "source.throttled",
+            "YouTube torjuu lähdehaun (bottitarkistus/429) — perääntymistahti. " +
+              "Raakalähetys voi silti olla kunnossa; restart ei auta."
+          );
+        }
         // Käynnistysvirhe katkaisee code=0-parikuvion: "kaksi peräkkäistä
         // lähes samanmittaista sessiota" ei saa muodostua sessioista joiden
         // välissä lähde ei auennut lainkaan (#123, adversaarilöydös).
@@ -680,9 +752,22 @@ export class FfmpegMixer {
         this.noteUnproductiveAttempt((mins) => `Lähde ei ole vastannut ${mins} minuuttiin`);
       }
       if (this.stopped) break;
-      logInfo("ffmpeg.respawn", `Uudelleenyritys ${this.backoffMs}ms kuluttua…`);
-      preResolved = await this.waitBeforeNextAttempt(this.backoffMs);
-      this.backoffMs = Math.min(this.backoffMs * 2, 30000);
+      // Katto lasketaan VASTA tässä: ottelu on voinut päättyä sitten edellisen
+      // laskennan, jolloin luovutusikkuna kutistui eikä vanha uni enää mahdu
+      // sen sisään.
+      const sleepMs = this.throttled
+        ? clampSleepToWindow(this.backoffMs, this.giveUpWindowMs())
+        : this.backoffMs;
+      logInfo(
+        "ffmpeg.respawn",
+        `Uudelleenyritys ${sleepMs}ms kuluttua…` +
+          (this.throttled ? " (YouTube torjui haun — perääntymistahti)" : "")
+      );
+      preResolved = await this.waitBeforeNextAttempt(sleepMs);
+      this.backoffMs = nextBackoffMs(this.backoffMs, {
+        throttled: this.throttled,
+        giveUpWindowMs: this.giveUpWindowMs(),
+      });
     }
   }
 
@@ -704,6 +789,7 @@ export class FfmpegMixer {
     }
     this.failingSince = null;
     this.backoffMs = 1000; // fresh backoff for when it does go live
+    this.throttled = false; // YouTube answered — about the broadcast, no less
     if (err.startsInMs === null) {
       if (this.imminentSince === null) this.imminentSince = monoNow();
     } else {
@@ -868,15 +954,52 @@ export class FfmpegMixer {
    *  SourceExhaustedError, which the caller turns into a relay shutdown) once
    *  the unbroken run of such attempts outlasts the give-up window. A finished
    *  match's source won't come back, so it uses the much shorter window. */
+  /** Bookkeeping for a resolve that failed for a reason other than "not yet"
+   *  or "over": state, wording and the throttled flag the backoff reads.
+   *
+   *  Shared by the main respawn loop and the slate prober ON PURPOSE. They had
+   *  drifted before (#104: the slate loop swallowed SourceEndedError), and the
+   *  slate loop is where the relay sits during exactly the outage this handles
+   *  — on 16.8.2026 the ~4 minutes of slate WERE the bot check (#249). A branch
+   *  that only the main loop takes is a branch that misses the incident.
+   *
+   *  Deliberately does NOT touch noteUnproductiveAttempt: the give-up verdict
+   *  is unchanged by why we cannot reach the source, and the slate loop keeps a
+   *  broadcast alive. */
+  private noteResolveFailure(err: unknown): void {
+    this.scheduledSince = null;
+    this.imminentSince = null;
+    this.sourceStateValue = "failed";
+    // YouTube declined to answer US. The state stays "failed" (the ohjaamo
+    // mirrors that union by hand and must not learn a new value here), but the
+    // detail says which end of the chain is in trouble: on 16.8.2026 the
+    // operator was told the raakalähetys was broken while the phone was
+    // pushing perfectly.
+    this.throttled = err instanceof SourceThrottledError;
+    this.sourceDetailValue = this.throttled
+      ? `YouTube torjuu haun (bottitarkistus/429) — raakalähetyksen omasta tilasta ei tietoa: ${
+          (err as Error).message
+        }`
+      : err instanceof Error
+        ? err.message
+        : String(err);
+  }
+
+  /** The give-up window in force right now. Read both by the accounting below
+   *  and by the throttled backoff, which must never sleep past it. */
+  private giveUpWindowMs(): number {
+    return (this.opts.isMatchFinished?.() ?? false)
+      ? (this.opts.finishedFailureWindowMs ?? 2 * 60 * 1000)
+      : this.maxFailureWindowMs;
+  }
+
   private noteUnproductiveAttempt(
     describe: (windowMins: number) => string,
     opts: { window?: number; reason?: SourceEndReason } = {}
   ): void {
     if (this.failingSince === null) this.failingSince = monoNow();
     const finished = this.opts.isMatchFinished?.() ?? false;
-    const defaultWindow = finished
-      ? (this.opts.finishedFailureWindowMs ?? 2 * 60 * 1000)
-      : this.maxFailureWindowMs;
+    const defaultWindow = this.giveUpWindowMs();
     // A caller with stronger evidence may shorten the window, never lengthen
     // it: the shortest applicable window wins, so a finished match still ends
     // promptly and a mid-match tail does not get MORE patience than a plain
@@ -925,9 +1048,19 @@ export class FfmpegMixer {
     // around it.
     this.sourceStateValue = "resolving";
     try {
-      if (this.opts.resolveTestSource) return await this.opts.resolveTestSource();
+      if (this.opts.resolveTestSource) {
+        const testUrl = await this.opts.resolveTestSource();
+        this.throttled = false;
+        return testUrl;
+      }
       logInfo("source.resolving", "Haetaan lähdeosoite yt-dlp:llä…");
-      return (await resolveSourceUrl(this.opts.youtubeUrl)).url;
+      const resolved = await resolveSourceUrl(this.opts.youtubeUrl, {
+        extractorArgs: this.opts.ytdlpExtractorArgs,
+      });
+      // YouTube answered us — whatever the block was, it is over, and the next
+      // failure deserves the ordinary fast backoff again.
+      this.throttled = false;
+      return resolved.url;
     } finally {
       this.probingSource = false;
       this.refreshSlateText();
@@ -1273,6 +1406,12 @@ export class FfmpegMixer {
     let endReason = "pysäytettiin";
     try {
       while (!this.stopped && childAlive) {
+        // EI clampSleepToWindowia tässä, toisin kuin pääloopissa. Ainoa asia
+        // joka kutistaa luovutusikkunan on isMatchFinished(), ja se sammuttaa
+        // samalla slateStillAllowed():n — jolloin uni katkeaa heti alla olevan
+        // ehtonsa kautta. Katto tässä olisi siis koodia, joka ei voi koskaan
+        // vaikuttaa mihinkään eikä siksi ole testattavissa; katvetilan suoja on
+        // se herääminen, ei toinen kattolaskenta.
         await this.sleepWhileSlateAlive(waitMs, () => childAlive);
         if (this.stopped) break;
         if (!childAlive) {
@@ -1317,19 +1456,35 @@ export class FfmpegMixer {
             waitMs = this.noteScheduledAnswer(err);
             continue;
           }
-          this.scheduledSince = null;
-          this.imminentSince = null;
-          this.sourceStateValue = "failed";
-          this.sourceDetailValue = err instanceof Error ? err.message : String(err);
+          this.noteResolveFailure(err);
           logError(
             "ffmpeg.start_failed",
             `Lähde ei vastannut katvetilassa: ${err instanceof Error ? err.message : err}`
           );
           // Tässä luovutusikkuna umpeutuu, jos on umpeutuakseen — heitetty
           // SourceExhaustedError kulkee finallyn kautta ulos ja lopettaa
-          // sekä katveen että koko relayn.
+          // sekä katveen että koko relayn. Perääntyminen EI muuta tätä
+          // laskentaa millään tavalla: katve pitää lähetystä hengissä.
           this.noteUnproductiveAttempt((mins) => `Lähde ei ole vastannut ${mins} minuuttiin`);
-          waitMs = Math.min(Math.max(waitMs * 2, 1000), 30000);
+          // Sama perääntymissääntö kuin pääloopissa (#249). Juuri TÄSSÄ
+          // silmukassa relay istui 16.8.2026 koko eston ajan ja koputti
+          // YouTubea 30 s välein; katvekuva ei tee koettimesta vaarattomampaa.
+          // Lattia 1000 ms säilyy: koetin ei saa muuttua tiukaksi silmukaksi
+          // jos initialWaitMs oli pieni.
+          waitMs = Math.max(
+            nextBackoffMs(waitMs, {
+              throttled: this.throttled,
+              giveUpWindowMs: this.giveUpWindowMs(),
+            }),
+            1000
+          );
+          if (this.throttled) {
+            logWarn(
+              "source.throttled",
+              `YouTube torjuu lähdehaun (bottitarkistus/429) — perääntymistahti, seuraava yritys ` +
+                `${Math.round(waitMs / 1000)} s kuluttua. Raakalähetys voi silti olla kunnossa.`
+            );
+          }
         }
       }
     } finally {
@@ -1406,7 +1561,13 @@ export class FfmpegMixer {
    *  koetinvälin ennen kuin katkosta huomattaisiin. */
   private async sleepWhileSlateAlive(ms: number, alive: () => boolean): Promise<void> {
     const until = monoNow() + ms;
-    while (!this.stopped && alive() && monoNow() < until) {
+    // …and wakes when the slate's own conditions lapse (match finished, or the
+    // ohjaamo says the broadcast is complete). The caller re-checks
+    // slateStillAllowed() right after this returns, but only after it returns:
+    // without this the colour bars would keep pushing into a finished
+    // broadcast for the whole sleep. That used to be ≤30 s; with the throttled
+    // backoff (#249) a sleep can be 5 min, so the gap became a real one.
+    while (!this.stopped && alive() && this.slateStillAllowed() && monoNow() < until) {
       await delay(Math.min(200, until - monoNow()));
     }
   }

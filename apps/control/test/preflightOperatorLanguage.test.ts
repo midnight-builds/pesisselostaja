@@ -94,6 +94,41 @@ describe("operaattorin kieli", () => {
     expect(wire.detail).toBe("Selostetulla lähetyksellä ei ole kohdetta — luo lähetyspari.");
   });
 
+  /** #249: relayn oma rivi neuvoo kokeilemaan toista player_clientiä
+   *  `RELAY_YTDLP_EXTRACTOR_ARGS`:lla. Yleiskorvaus teki siitä ruudulle
+   *  lauseen "Kokeile toista player_clientiä ohjaamon sidonta:lla" — ohje, joka
+   *  osoittaa väärään asetukseen. Rivi tulee relayn omasta preflightista asti,
+   *  jottei tämä testaa keksittyä tekstiä. */
+  it("ei silvo relayn bottitarkistusriviä ohjaamon sidonnaksi", async () => {
+    const { checkSource } = await import("../../broadcast/src/preflight.js");
+    const raw = await checkSource("https://example.invalid/live", {
+      runYtdlp: async () => {
+        throw Object.assign(new Error("yt-dlp failed"), {
+          stderr: "ERROR: Sign in to confirm you’re not a bot. HTTP Error 429: Too Many Requests",
+        });
+      },
+    });
+
+    const wire = toOperatorCheck(raw);
+
+    expect(wire.detail).not.toContain("RELAY_");
+    expect(wire.detail).not.toContain("ohjaamon sidonta");
+    // Operaattori saa tietää kumpi pää on vialla — ei "lähde ei vastaa", joka
+    // lähettäisi hänet kuvaajan perään kesken ottelun.
+    expect(wire.detail).toMatch(/bottitarkistus/i);
+    expect(wire.detail).toMatch(/raakalähetys voi silti/i);
+    // Raaka rivi säilyy huoltopinnalle.
+    expect(wire.technical).toBe(raw.detail);
+  });
+
+  it("antaa tuntemattomallekin hakutapa-avaimelle oman sanansa", () => {
+    // Viimeinen suoja sille varalta ettei rivillä ole omaa käännöstä.
+    expect(redactEnvKeys("Kokeile toista player_clientiä RELAY_YTDLP_EXTRACTOR_ARGS:lla")).not.toContain(
+      "ohjaamon sidonta"
+    );
+    expect(redactEnvKeys("RELAY_YTDLP_EXTRACTOR_ARGS")).toBe("relayn hakutavan asetus");
+  });
+
   it("ei jätä technicalia riville joka on jo operaattorin kieltä", () => {
     const wire = toOperatorCheck({ name: "ffmpeg", status: "ok", detail: "löytyy polusta" });
     expect(wire.technical).toBeUndefined();
