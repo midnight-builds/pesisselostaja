@@ -148,6 +148,16 @@ lähetys ei ole alkanut — joten ne ovat yksi kortin sisältö (`PrepCard`), ei
   (`toOperatorCheck`, `src/server/preflight.ts`), ja raaka rivi kulkee mukana
   `PreflightCheck.technical`-kentässä huoltoarkkia varten (#188). Env-avainten
   nimiä, tiedostopolkuja tai stream keytä ei näy käyttöliittymässä missään.
+- **Soittolista on näkyvä valinta, ei hiljainen arvaus** (#239). Ohjaamo
+  päättelee listan ottelun ikäluokasta (`resolveAgeGroup` →
+  `playlistForAgeGroup`), ja esikatselu näyttää listan **nimellä**. Kun
+  joukkueiden nimissä ei ole ikäluokan kirjainta, päättely ei osu mihinkään —
+  ja se sanotaan ääneen, koska ennen tätä lähetykset syntyivät normaalisti ja
+  jäivät kaikkien listojen ulkopuolelle huomaamatta. Valitsin (`GET
+  /api/youtube/playlists`) on silloin auki valmiiksi, ja valinta menee luontiin
+  `playlistId`-ohituksena. Luonnin jälkeen kortti kertoo luontivastauksesta
+  mihin listaan lähetykset menivät — tai ettei mihinkään. Kanavan listat
+  haetaan vasta kun valitsin avataan.
 
 ### Ottelun aikana (#186)
 
