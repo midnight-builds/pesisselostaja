@@ -267,13 +267,19 @@ export function parseResolveOutput(stdout: string): { url: string | null; liveSt
  *  and the order is a policy about broadcasts rather than about strings:
  *   1. "starts later" — waiting beats every other reading (a scheduled
  *      broadcast is healthy, and giving up on one cost us a live start once).
- *   2. "YouTube refused us" — says nothing about the broadcast, so it must not
- *      be read as its end.
- *   3. "the broadcast is over" — only once nothing above claimed the answer. */
+ *   2. "this broadcast has ended", said in those words — final. A 429 in the
+ *      same stderr (yt-dlp prints its retry warnings there too) must not hide
+ *      it: the relay would hold the slate over a finished match for the whole
+ *      give-up window, which is #103 wearing a different hat.
+ *   3. "YouTube refused us" — a block says nothing about the broadcast, so
+ *      every REMAINING ended-ish wording is only a symptom of the failed
+ *      extraction and loses to the throttle.
+ *   4. those remaining ended-ish wordings, once nothing above claimed it. */
 export function classifyResolveFailure(stderr: string): Error | null {
   const lastLine = stderr.trim().split("\n").at(-1) ?? "";
   const scheduled = parseScheduledStart(stderr);
   if (scheduled) return new SourceNotLiveYetError(lastLine, scheduled.startsInMs);
+  if (parseSourceEndedFinal(stderr)) return new SourceEndedError(lastLine);
   if (parseSourceThrottled(stderr)) return new SourceThrottledError(lastLine);
   if (parseSourceEnded(stderr)) return new SourceEndedError(lastLine);
   return null;
