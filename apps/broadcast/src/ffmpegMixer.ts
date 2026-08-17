@@ -468,20 +468,25 @@ export const THROTTLED_BACKOFF_MAX_MS = 5 * 60_000;
 /** Next respawn delay. Pure so the policy can be read (and tested) without
  *  running the supervisor loop.
  *
- *  The throttled backoff is never allowed past half the give-up window: the
- *  window decides when the relay stops trying, and a backoff that outslept it
- *  would hand that decision to the sleep instead — a finished match's 2 min
- *  cleanup window must not turn into a 5 min nap. */
+ *  A throttled sleep is capped at **half the give-up window**, without
+ *  exception — including windows shorter than the ordinary 30 s cap, where the
+ *  earlier version quietly let one sleep swallow the entire window. It is a
+ *  real cap, not a preference: the sleep decides when the next attempt
+ *  happens, and the attempt is when the window is actually examined.
+ *
+ *  Note what this does NOT promise: the give-up MOMENT is unchanged. Fewer
+ *  attempts mean the window is checked later, so a throttled outage postpones
+ *  the shutdown (12 min window: ~722 s → ~1017 s). That is the safer
+ *  direction — a blocked source can come back — but it is a consequence worth
+ *  saying out loud rather than a property that survived. */
 export function nextBackoffMs(
   currentMs: number,
   opts: { throttled: boolean; giveUpWindowMs: number }
 ): number {
   const doubled = currentMs * 2;
   if (!opts.throttled) return Math.min(doubled, BACKOFF_MAX_MS);
-  const cap = Math.min(
-    THROTTLED_BACKOFF_MAX_MS,
-    Math.max(BACKOFF_MAX_MS, Math.floor(opts.giveUpWindowMs / 2))
-  );
+  const halfWindow = Math.max(1, Math.floor(opts.giveUpWindowMs / 2));
+  const cap = Math.min(THROTTLED_BACKOFF_MAX_MS, halfWindow);
   return Math.min(Math.max(doubled, Math.min(THROTTLED_BACKOFF_MIN_MS, cap)), cap);
 }
 
