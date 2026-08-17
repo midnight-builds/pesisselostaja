@@ -332,7 +332,10 @@ describe("CommentaryLoop poll statistics + failure streaks", () => {
       expect(logSpy.mock.calls[1][0]).not.toContain("HUOM");
 
       loop.recordPollFailure(new Error("This operation was aborted"), startedAt);
-      expect(logSpy.mock.calls[2][0]).toMatch(/HUOM, hakuvirhesarja \(kesto 8\.\d s, 3\. peräkkäinen\)/);
+      // Kolmannesta virheestä alkaen rivi kertoo myös venytetyn pollausvälin
+      // (#52 kohta 2) — operaattorin ei pidä joutua päättelemään hidastumista
+      // lokirivien väleistä.
+      expect(logSpy.mock.calls[2][0]).toMatch(/HUOM, hakuvirhesarja \(kesto 8\.\d s, 3\. peräkkäinen, pollausväli \d+ ms\)/);
       expect(loop.pollStatsSummary).toContain("hakuvirheitä 3");
     } finally {
       logSpy.mockRestore();
@@ -350,7 +353,9 @@ describe("CommentaryLoop poll statistics + failure streaks", () => {
 
       for (let i = 0; i < 3; i++) loop.recordPollFailure(new Error("x"), startedAt);
       loop.recordPollSuccess();
-      expect(logSpy.mock.calls.at(-1)![0]).toContain("Haku onnistui jälleen — 3 peräkkäistä hakuvirhettä takana.");
+      expect(logSpy.mock.calls.at(-1)![0]).toContain("Haku onnistui jälleen — 3 peräkkäistä hakuvirhettä takana");
+      // Sama rivi kertoo myös, että pollaustahti on taas operaattorin (#52).
+      expect(logSpy.mock.calls.at(-1)![0]).toContain("pollausväli takaisin");
 
       // The streak reset: the next failure counts as the 1st again.
       loop.recordPollFailure(new Error("x"), startedAt);

@@ -85,15 +85,16 @@ const FULL_FETCH_TIMEOUT_MS = 10_000;
  *  against four simultaneously live matches (p50 96 ms, p99 169 ms, max 303 ms;
  *  a cold TCP+TLS+DNS connection was 173 ms).
  *
- *  What this buys, stated honestly: NOT a faster retry. run() sets the next
- *  poll time before the fetch (see the cadence line in run()), so a 4 s abort
- *  overran the 3 s cadence and the retry fired immediately, while a 1 s abort
- *  fits inside the cadence and the retry waits out the remaining ~2 s. The gain
- *  per stuck poll is therefore ~1 s of latency at the head of the speech chain
- *  (fetch -> state -> TTS -> speak) — and, more to the point, a poll cadence
- *  that stops being knocked out of step ~0.6 times a minute. Retrying an
- *  aborted poll immediately instead of waiting for the cadence is the rest of
- *  the win, but it needs a backoff for a genuinely dead API first: issue #52.
+ *  What this buys, stated honestly: NOT a faster retry. run() anchors the next
+ *  poll on the instant this one was DUE (see the cadence line in run()), so a
+ *  4 s abort overran the 3 s cadence and the retry fired immediately, while a
+ *  1 s abort fits inside the cadence and the retry waits out the remaining ~2 s.
+ *  The gain per stuck poll is therefore ~1 s of latency at the head of the
+ *  speech chain (fetch -> state -> TTS -> speak) — and, more to the point, a
+ *  poll cadence that stops being knocked out of step ~0.6 times a minute.
+ *  Retrying an aborted poll immediately instead of waiting for the cadence is
+ *  the rest of the win; it is still not done (issue #52), though the backoff it
+ *  was waiting for now exists (effectivePollIntervalMs).
  *
  *  NOT floored at `pollIntervalMs` — see apiTimeoutMs(). */
 const DELTA_FETCH_TIMEOUT_MS = 1_000;
@@ -111,9 +112,11 @@ const DELTA_FETCH_TIMEOUT_MS = 1_000;
  *  connections came in ones (31/31 retries succeeded first try, #156), so a
  *  third failure in a row means the assumption itself is off.
  *
- *  Deliberately NOT a general backoff: the poll cadence still does not flex in
- *  a failure streak, and an aborted poll still waits for the next tick rather
- *  than retrying at once. That is issue #52, and it belongs there. */
+ *  Still not a general backoff: the poll cadence flexes on the same streak now
+ *  (effectivePollIntervalMs, issue #52 kohta 2), but an aborted poll continues
+ *  to wait for the next tick rather than retrying at once — that half of #52 is
+ *  open. The two valves are keyed on one streak and recover differently on
+ *  purpose; effectivePollIntervalMs() says why. */
 const DELTA_FETCH_TIMEOUT_SLOW_MS = 4_000;
 /** How many SUCCESSFUL polls the loosened delta timeout stays in force after a
  *  failure streak opened it — the valve's hysteresis.
@@ -228,6 +231,34 @@ const RESYNC_EVERY_MS = 60 * 1000;
 /** Floor for the control file's pollIntervalMs — the server response cache is
  *  ~5 s, so polling much faster only burns requests. */
 const MIN_POLL_INTERVAL_MS = 2000;
+/** Ceiling for the failure-streak backoff (issue #52, kohta 2). The backoff
+ *  doubles the operator's cadence for as long as fetches keep failing; this is
+ *  where it stops.
+ *
+ *  A ceiling is not optional here. The failure mode this whole valve must not
+ *  cause is narration LAGGING a live match: the moment the API answers again,
+ *  the events it has been holding are already late, and the backed-off wait is
+ *  added on top of that lateness. So the cap is set from what it costs on
+ *  recovery, not from what it saves on a dead API:
+ *
+ *  - It is the worst-case extra lag of a recovery, once. 15 s is well under a
+ *    quarter of the API's own publish delay (68–123 s measured, see
+ *    AFTER_MARGIN_MS) — i.e. small next to the lateness the broadcast already
+ *    carries by construction, and roughly one event's worth of pesäpallo.
+ *  - It stays comfortably under RESYNC_EVERY_MS (60 s). A cadence that reached
+ *    the resync period would make the delta path pointless: the periodic full
+ *    fetch would be the only thing still bringing events in.
+ *  - It is still a 5x cut in request rate at the 3 s default, which is all the
+ *    backoff was ever asked to do — nobody is hammering an API at 15 s.
+ *
+ *  NOT a floor on top of an operator-chosen slower cadence: see
+ *  effectivePollIntervalMs(), which never polls faster than `pollIntervalMs`. */
+const MAX_POLL_INTERVAL_MS = 15_000;
+/** How many times the backoff may double before MAX_POLL_INTERVAL_MS takes
+ *  over. The ceiling normally binds first (3 s -> 6 -> 12 -> 24, capped at the
+ *  third step), so this exists only to keep the arithmetic finite: an API dead
+ *  for an hour produces a streak in the hundreds, and `2 ** 300` is Infinity. */
+const POLL_BACKOFF_MAX_DOUBLINGS = 4;
 /** Consecutive UNEXPLAINED reset answers that trip the breaker and drop the
  *  run back to plain full fetches. "Unexplained" matters: a reset whose
  *  instant is newer than the `after` we sent explains itself (our baseline
@@ -938,18 +969,21 @@ export class CommentaryLoop {
     this.lastSummaryCount = this.state.announcementCount;
 
     logInfo("api.loop_start", `Selostussilmukka käynnissä… (polli ${this.pollIntervalMs} ms, delta-haku ${this.deltaFetch ? "PÄÄLLÄ" : "POIS"})`);
-    // Fixed poll cadence, independent of how long a cycle's fetch/processing
-    // takes — synthesis no longer blocks this loop (see speak()/synthQueue),
-    // so cycles should normally be fast, but a slow fetch must not add to the
-    // next wait on top of its own delay. If a cycle overruns the interval,
-    // resume the cadence from now instead of firing a burst of catch-up ticks
-    // (no-overlap guard).
-    let nextPollAt = Date.now() + this.pollIntervalMs;
+    // Poll cadence independent of how long a cycle's fetch/processing takes —
+    // synthesis no longer blocks this loop (see speak()/synthQueue), so cycles
+    // should normally be fast, but a slow fetch must not add to the next wait
+    // on top of its own delay. If a cycle overruns the interval, resume the
+    // cadence from now instead of firing a burst of catch-up ticks (no-overlap
+    // guard). The interval itself is the operator's, except while a fetch-
+    // failure streak stretches it — see effectivePollIntervalMs().
+    let nextPollAt = Date.now() + this.effectivePollIntervalMs();
     while (!signal.aborted) {
-      const waitMs = nextPollAt - Date.now();
+      // The instant this poll was DUE — the anchor the next tick is measured
+      // from, so neither a slow fetch nor a roster refresh can add to the wait.
+      const dueAt = nextPollAt;
+      const waitMs = dueAt - Date.now();
       if (waitMs > 0) await this.sleepAbortable(waitMs, signal);
       if (signal.aborted) break;
-      nextPollAt = Math.max(nextPollAt + this.pollIntervalMs, Date.now());
       await this.refreshRuntimeControls();
       // Names before speech: a roster published since the last poll must be in
       // use for THIS poll's events, not the next one's.
@@ -1009,7 +1043,46 @@ export class CommentaryLoop {
       } catch (err) {
         this.recordPollFailure(err, cycleStartedAt);
       }
+      // Scheduled AFTER the cycle, so this poll's OUTCOME governs the very next
+      // wait: a failure streak stretches it here, and the single success that
+      // ends the streak shortens it here — not one poll later, which would hand
+      // a recovering API up to MAX_POLL_INTERVAL_MS of extra lag for free.
+      // Anchored on `dueAt` rather than on now, so the property the tight delta
+      // timeout was tuned against still holds exactly: an abort that overran the
+      // cadence retries at once, one that fits inside it waits out the rest.
+      nextPollAt = Math.max(dueAt + this.effectivePollIntervalMs(), Date.now());
     }
+  }
+
+  /** The wait before the next poll: the operator's cadence, stretched while a
+   *  fetch-failure streak is running (issue #52, kohta 2).
+   *
+   *  Keyed on `consecutiveFetchFailures`, i.e. the same streak that already
+   *  decides the alarming log line and the loosened delta timeout — one streak,
+   *  one meaning. It starts at FETCH_FAILURE_ALARM_STREAK for the reason stated
+   *  there: a lone failure is routine noise (22 isolated blips in 45 min with
+   *  zero events lost), a streak is not.
+   *
+   *  Recovery is deliberately INSTANT — one successful fetch clears the streak
+   *  and the very next wait is the operator's cadence again — and that is the
+   *  opposite of the hysteresis the delta timeout needs (DELTA_SLOW_DWELL_POLLS).
+   *  The asymmetry is intentional, because the two valves fail in opposite
+   *  directions. A delta timeout that snaps back too early ABORTS polls, so it
+   *  must dwell. A cadence that snaps back too early merely costs a few extra
+   *  requests to a working API — while a cadence that snaps back too LATE leaves
+   *  narration trailing a live match, which is the one outcome this loop exists
+   *  to prevent. When in doubt here, poll. */
+  private effectivePollIntervalMs(): number {
+    const base = this.pollIntervalMs;
+    const doublings = Math.min(
+      POLL_BACKOFF_MAX_DOUBLINGS,
+      this.consecutiveFetchFailures - FETCH_FAILURE_ALARM_STREAK + 1
+    );
+    if (doublings <= 0) return base;
+    // Never faster than the operator asked for: `base` is the ceiling's floor,
+    // so a deliberately slow cadence (say 30 s) is not "backed off" to 15.
+    const ceiling = Math.max(base, MAX_POLL_INTERVAL_MS);
+    return Math.min(ceiling, Math.max(MIN_POLL_INTERVAL_MS, base * 2 ** doublings));
   }
 
   /** A lone poll failure is routine noise (8 s client-timeout blips — one
@@ -1028,7 +1101,11 @@ export class CommentaryLoop {
     if (streak >= FETCH_FAILURE_ALARM_STREAK) this.slowDeltaDwellPolls = DELTA_SLOW_DWELL_POLLS;
     const seconds = ((Date.now() - cycleStartedAt) / 1000).toFixed(1);
     const label = streak >= FETCH_FAILURE_ALARM_STREAK ? "HUOM, hakuvirhesarja" : "Hakuvirhe";
-    logWarn("api.fetch_failed", `${label} (kesto ${seconds} s, ${streak}. peräkkäinen): ${err instanceof Error ? err.message : err}`);
+    // The stretched cadence is stated outright: an operator reading the log must
+    // not have to infer from the gaps between lines that the relay slowed down.
+    const slowed = this.effectivePollIntervalMs();
+    const cadence = slowed > this.pollIntervalMs ? `, pollausväli ${slowed} ms` : "";
+    logWarn("api.fetch_failed", `${label} (kesto ${seconds} s, ${streak}. peräkkäinen${cadence}): ${err instanceof Error ? err.message : err}`);
   }
 
   /** Closes an alarming failure streak with an explicit all-clear line, so a
@@ -1036,7 +1113,10 @@ export class CommentaryLoop {
    *  the absence of errors. */
   private recordPollSuccess(): void {
     if (this.consecutiveFetchFailures >= FETCH_FAILURE_ALARM_STREAK) {
-      logInfo("api.fetch_recovered", `Haku onnistui jälleen — ${this.consecutiveFetchFailures} peräkkäistä hakuvirhettä takana.`);
+      logInfo(
+        "api.fetch_recovered",
+        `Haku onnistui jälleen — ${this.consecutiveFetchFailures} peräkkäistä hakuvirhettä takana, pollausväli takaisin ${this.pollIntervalMs} ms.`
+      );
     }
     this.consecutiveFetchFailures = 0;
     // One success is not evidence that the tight limit fits again — it may be

@@ -1,9 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { rmSync, writeFileSync } from "node:fs";
+
+// Only the two network calls are replaced; everything else in core stays real,
+// so the tests that use buildPlayerLookup/format* below are untouched. Needed
+// by the #52 cadence tests at the bottom, which drive the real poll loop.
+vi.mock("@pesisselostaja/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@pesisselostaja/core")>();
+  return { ...actual, fetchMatchMetadata: vi.fn(), fetchLiveEvents: vi.fn() };
+});
+
 import { CommentaryLoop, type NarrationStatus, type SpeechSink } from "../src/commentaryLoop.js";
 import type { RelayConfig } from "../src/config.js";
-import { buildPlayerLookup } from "@pesisselostaja/core";
+import { buildPlayerLookup, fetchLiveEvents, fetchMatchMetadata } from "@pesisselostaja/core";
 import type { LiveEvent, MatchMetadata, PlayerLookup, SubEvent } from "@pesisselostaja/core";
+import { setLogSink } from "../src/log.js";
 
 // Fictional teams only — public repo (see feedback-fixtures-fictional-names).
 const META: MatchMetadata = {
@@ -735,5 +745,169 @@ describe("CommentaryLoop lastEventAt (#119)", () => {
     await inner.synthQueue;
 
     expect(loop.lastEventAt).toBe(first);
+  });
+});
+
+// Issue #52, kohta 2. Ottelussa 146210 hakuvirheryöppy vaati operaattorin
+// väliintulon kesken liven: relay ei hidastanut pollausta itse, vaan jauhoi
+// samaa 3 sekunnin tahtia kaatuvaa API:a vasten kunnes joku kävi kääntämässä
+// välin 6 sekuntiin käsin.
+//
+// Tämän vahdin PAHIN lopputulos ei kuitenkaan ole hidas pollaus vaan se, että
+// tahti EI palaudu: selostus laahaisi ottelusta jäljessä lopun matkaa vaikka
+// API vastaisi taas moitteetta. Siksi painopiste on palautumisessa — yksi
+// onnistunut haku riittää, ja väli on ylhäältä katkaistu myös sarjan aikana.
+describe("CommentaryLoop pollausvälin jousto hakuvirhesarjassa (#52 kohta 2)", () => {
+  const metaMock = vi.mocked(fetchMatchMetadata);
+  const eventsMock = vi.mocked(fetchLiveEvents);
+  const codes: string[] = [];
+  const tempFiles: string[] = [];
+  // Otettu talteen ennen kuin vi.useFakeTimers korvaa globaalin: tällä
+  // päästetään oikea tapahtumasilmukka (ja sen levy-IO) läpi valekellosta
+  // huolimatta.
+  const realSetImmediate = setImmediate;
+
+  interface RunInternals {
+    run(): Promise<void>;
+    stop(): void;
+    consecutiveFetchFailures: number;
+    effectivePollIntervalMs(): number;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    metaMock.mockReset();
+    eventsMock.mockReset();
+    metaMock.mockResolvedValue(META);
+    codes.length = 0;
+    setLogSink((entry) => {
+      if (entry.code) codes.push(entry.code);
+    });
+  });
+
+  afterEach(() => {
+    setLogSink(null);
+    vi.useRealTimers();
+    for (const f of tempFiles.splice(0)) rmSync(f, { force: true });
+  });
+
+  /** Ajaa OIKEAN poll-silmukan valekellolla ja palauttaa peräkkäisten pollien
+   *  välit millisekunteina. `succeeds(n)` kertoo onnistuuko n. polli (n alkaa
+   *  1:stä); käynnistyksen historiahaku onnistuu aina eikä näy väleissä.
+   *
+   *  Kelloa siirretään AINA seuraavaan ajastimeen, ei kiinteällä ikkunalla, ja
+   *  joka siirron välissä päästetään OIKEA tapahtumasilmukka läpi. Kumpikin osa
+   *  on pakollinen, ja molemmat opittiin tätä kirjoittaessa:
+   *
+   *  - `advanceTimersByTime(60_000)` kelasi koko ikkunan kerralla silloin kun
+   *    silmukka oli kesken syklin eikä yhtään ajastinta ollut jonossa. Kello oli
+   *    minuutin edellä ennen kuin ensimmäistäkään pollia ehti tapahtua, ja
+   *    mitatut välit olivat puhdasta roskaa.
+   *  - Sykli odottaa välissä oikeaa levy-IO:ta (tilatiedoston tallennus), jota
+   *    valekellon kelaus ei valmistele: ilman oikeaa `setImmediate`-käyntiä
+   *    silmukka jäi odottamaan IO:ta, kierrosbudjetti paloi tyhjään ja pollien
+   *    määrä vaihteli ajokerroittain. */
+  async function pollGaps(
+    succeeds: (poll: number) => boolean,
+    wantedPolls: number,
+    pollInterval = 3000
+  ): Promise<number[]> {
+    const instants: number[] = [];
+    let call = 0;
+    eventsMock.mockImplementation(async () => {
+      const poll = call++;
+      // Poll 0 = run():n käynnistyshaku, ei osa pollaustahtia.
+      if (poll === 0) return { events: [], team: null, period: null } as never;
+      instants.push(Date.now());
+      if (!succeeds(poll)) throw new Error("API ei vastaa");
+      return { events: [], team: null, period: null } as never;
+    });
+
+    // Omat tiedostopolut per ajo. Jaettu /tmp-polku ei ole makuasia: toinen
+    // testi tässä samassa tiedostossa kirjoittaa control-tiedoston, ja silloin
+    // refreshRuntimeControls ylikirjoittaa juuri sen pollausvälin, jota tässä
+    // mitataan (havaittu: 20 s:n tahti muuttui ajossa 3 s:ksi).
+    const tag = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const stateFile = `/tmp/pesis-52-state-${tag}.json`;
+    tempFiles.push(stateFile);
+
+    const loop = new CommentaryLoop(
+      makeConfig({
+        pollInterval,
+        dryRun: true,
+        stateFile,
+        controlFile: `/tmp/pesis-52-control-${tag}.json`,
+      }),
+      async () => {}
+    ) as unknown as RunInternals;
+    const run = loop.run().catch(() => {});
+    // Kierrosbudjetti on reilu tarkoituksella: yksi polli vaatii useita
+    // kierroksia (ajastin kerrallaan + oikean IO:n läpipäästö), ja liian tiukka
+    // budjetti näkyi juuri niin kuin oikea vika näkyisi — polleja tuli liian
+    // vähän. Siksi alla oleva tarkistus vaatii pyydetyn määrän erikseen.
+    for (let i = 0; i < 500 * wantedPolls + 2000 && instants.length < wantedPolls; i++) {
+      await vi.advanceTimersToNextTimerAsync();
+      await new Promise((resolve) => realSetImmediate(resolve));
+    }
+    loop.stop();
+    await vi.runAllTimersAsync();
+    await run;
+
+    expect(instants.length).toBeGreaterThanOrEqual(wantedPolls);
+    return instants.slice(1).map((t, i) => t - (instants[i] as number));
+  }
+
+  it("venyttää pollausväliä vasta virhesarjassa, ei yksittäisestä virheestä", async () => {
+    const gaps = await pollGaps(() => false, 5);
+
+    // Kaksi ensimmäistä virhettä ovat rutiinikohinaa (FETCH_FAILURE_ALARM_STREAK),
+    // eivätkä saa vaikuttaa tahtiin lainkaan.
+    expect(gaps.slice(0, 2)).toEqual([3000, 3000]);
+    // Kolmannesta peräkkäisestä virheestä alkaen väli tuplaantuu.
+    expect(gaps[2]).toBe(6000);
+    expect(gaps[3]).toBe(12000);
+  });
+
+  it("ei venytä väliä yli katon, jottei selostus jää jälkeen ottelusta", async () => {
+    const gaps = await pollGaps(() => false, 7);
+
+    // MAX_POLL_INTERVAL_MS. Ilman kattoa tuplaantuminen veisi välin minuutteihin
+    // ja API:n palatessa selostus olisi vastaavasti myöhässä.
+    expect(Math.max(...gaps)).toBe(15_000);
+    expect(gaps.at(-1)).toBe(15_000);
+  });
+
+  // TÄMÄ on se testi, jonka takia koko jousto on turvallinen kirjoittaa.
+  it("palauttaa normaalin tahdin YHDESTÄ onnistuneesta hausta", async () => {
+    // Kuusi virhettä peräkkäin vie välin kattoon asti; 7. polli onnistuu.
+    const gaps = await pollGaps((poll) => poll >= 7, 12);
+
+    // Sarjan aikana väli oli venynyt kattoon: 6. ja 7. pollin väli on 15 s.
+    expect(gaps[5]).toBe(15_000);
+    // Ja tässä on koko jutun ydin: 7. polli onnistui, joten SEURAAVA väli on jo
+    // operaattorin tahti — ei vielä yhtä 15 sekunnin odotusta, jonka verran
+    // selostus olisi turhaan myöhässä juuri kun API taas vastaa.
+    expect(gaps[6]).toBe(3000);
+    // …eikä tahti myöskään ryömi takaisin ylös onnistumisten jatkuessa.
+    expect(gaps.slice(6)).toEqual([3000, 3000, 3000, 3000, 3000]);
+    expect(codes).toContain("api.fetch_recovered");
+  });
+
+  it("ei pollaa nopeammin kuin operaattori pyysi, vaikka katto olisi lyhyempi", async () => {
+    // 20 s > MAX_POLL_INTERVAL_MS: katto ei saa "hidastaa" tahtia 15 sekuntiin.
+    const gaps = await pollGaps(() => false, 5, 20_000);
+
+    expect(gaps.length).toBeGreaterThan(2);
+    expect(gaps.every((g) => g === 20_000)).toBe(true);
+  });
+
+  it("ei tuota MIN_POLL_INTERVAL_MS:ää lyhyempää väliä", () => {
+    const loop = new CommentaryLoop(
+      makeConfig({ pollInterval: 500 }),
+      async () => {}
+    ) as unknown as RunInternals;
+
+    loop.consecutiveFetchFailures = 3;
+    expect(loop.effectivePollIntervalMs()).toBeGreaterThanOrEqual(2000);
   });
 });
