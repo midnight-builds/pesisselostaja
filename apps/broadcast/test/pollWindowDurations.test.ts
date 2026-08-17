@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock ONLY the network call, like commentaryLoopDelta.test.ts does.
 vi.mock("@pesisselostaja/core", async (importOriginal) => {
@@ -216,6 +216,22 @@ describe("apiTimeoutMs (#156:n viritys)", () => {
 });
 
 describe("delta-aikakatkaisun höllennys hakuvirhesarjassa (#156)", () => {
+  interface FailureLoop extends LoopInternals {
+    consecutiveFetchFailures: number;
+    recordPollFailure(err: unknown, cycleStartedAt: number): void;
+    recordPollSuccess(): void;
+  }
+
+  /** Silmukka, jonka virhe- ja onnistumiskirjaukset ajetaan oikeiden
+   *  metodien läpi — venttiilin tila on niiden yhteispeliä, ei yhden kentän
+   *  arvo, joten sitä ei saa testata kenttää käsin asettamalla. */
+  function failingLoop(): FailureLoop {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    return makeLoop() as FailureLoop;
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
   it("antaa deltalle takaisin väljemmän rajan kolmannen peräkkäisen virheen jälkeen", () => {
     // 1 s riittää KUNNOSSA olevaa APIa vasten (mediaani ~80 ms). Jos API
     // joskus vastaa aidosti 1–4 s:ssä, kiinteä 1 s katkaisisi joka ikisen
@@ -234,14 +250,57 @@ describe("delta-aikakatkaisun höllennys hakuvirhesarjassa (#156)", () => {
     expect(loop.apiTimeoutMs("delta")).toBe(4000);
   });
 
-  it("palaa tiukkaan rajaan kun haku onnistuu jälleen", () => {
-    const loop = makeLoop() as LoopInternals & {
-      consecutiveFetchFailures: number;
-      recordPollSuccess(): void;
-    };
-    loop.consecutiveFetchFailures = 5;
+  it("palaa tiukkaan rajaan kun API on vastannut riittävän monta pollia putkeen", () => {
+    // Venttiili sulkeutuu — mutta vasta hystereesin (10 onnistunutta pollia)
+    // jälkeen, ei ensimmäisestä onnistumisesta. Ks. seuraava testi siitä miksi.
+    const loop = failingLoop();
+    for (let i = 0; i < 3; i++) loop.recordPollFailure(new Error("This operation was aborted"), Date.now());
     expect(loop.apiTimeoutMs("delta")).toBe(4000);
-    loop.recordPollSuccess();
+
+    for (let i = 0; i < 9; i++) {
+      loop.recordPollSuccess();
+      expect(loop.apiTimeoutMs("delta"), `polli ${i + 1} onnistui, venttiilin pitää olla yhä auki`).toBe(4000);
+    }
+    loop.recordPollSuccess(); // 10.
     expect(loop.apiTimeoutMs("delta")).toBe(1000);
+  });
+
+  it("turvaventtiili pysyy auki eikä nollaudu ensimmäisestä onnistumisesta", () => {
+    // Vika, joka löytyi PR #240:n katselmuksessa. `recordPollSuccess()`
+    // nollasi `consecutiveFetchFailures`in, ja koska väljä raja luettiin
+    // pelkästä laskurista, venttiili sulkeutui juuri sillä pollilla jonka se
+    // päästi läpi. Aidosti 1–4 s:ssä vastaavaa APIa vasten syntyi nelivaiheinen
+    // silmukka: 3 katkaisua 1 s:ssä → 4. polli saa 4 s ja onnistuu → laskuri
+    // nollaantuu → seuraava polli on taas 1 s ja katkeaa. Kolme deltaa neljästä
+    // hylättiin, tuoretta dataa tuli ~12 s välein 3 s sijaan, ja loki täyttyi
+    // "HUOM, hakuvirhesarja" -riveistä, jotka ohjaamo näyttää operaattorille.
+    const loop = failingLoop();
+
+    // Vaihe 1–3: kolme katkaisua tiukalla rajalla.
+    for (let i = 0; i < 3; i++) loop.recordPollFailure(new Error("This operation was aborted"), Date.now());
+    expect(loop.apiTimeoutMs("delta"), "kolmas virhe avaa venttiilin").toBe(4000);
+
+    // Vaihe 4: väljä raja päästää pollin läpi.
+    loop.recordPollSuccess();
+
+    // Tässä silmukka ennen katkesi: raja putosi takaisin 1 s:ään.
+    expect(loop.apiTimeoutMs("delta"), "onnistuminen ei saa sulkea venttiiliä").toBe(4000);
+
+    // Ja sama simuloituna kokonaisena ajona: API vastaa aidosti 2000 ms:ssä,
+    // eli polli onnistuu täsmälleen silloin kun raja on väljä.
+    const loop2 = failingLoop();
+    const API_RESPONSE_MS = 2000;
+    let ok = 0;
+    for (let poll = 0; poll < 40; poll++) {
+      if (loop2.apiTimeoutMs("delta") >= API_RESPONSE_MS) {
+        ok++;
+        loop2.recordPollSuccess();
+      } else {
+        loop2.recordPollFailure(new Error("This operation was aborted"), Date.now());
+      }
+    }
+    // Ilman hystereesiä kuvio on 3 virhettä + 1 onnistuminen = 10/40 (25 %).
+    // Hystereesin kanssa 3 virhettä + 10 onnistumista = 30/40 (75 %).
+    expect(ok, "hystereesin kanssa valtaosa polleista menee läpi").toBeGreaterThan(25);
   });
 });
