@@ -750,12 +750,18 @@ export class FfmpegMixer {
         this.noteUnproductiveAttempt((mins) => `Lähde ei ole vastannut ${mins} minuuttiin`);
       }
       if (this.stopped) break;
+      // Katto lasketaan VASTA tässä: ottelu on voinut päättyä sitten edellisen
+      // laskennan, jolloin luovutusikkuna kutistui eikä vanha uni enää mahdu
+      // sen sisään.
+      const sleepMs = this.throttled
+        ? clampSleepToWindow(this.backoffMs, this.giveUpWindowMs())
+        : this.backoffMs;
       logInfo(
         "ffmpeg.respawn",
-        `Uudelleenyritys ${this.backoffMs}ms kuluttua…` +
+        `Uudelleenyritys ${sleepMs}ms kuluttua…` +
           (this.throttled ? " (YouTube torjui haun — perääntymistahti)" : "")
       );
-      preResolved = await this.waitBeforeNextAttempt(this.backoffMs);
+      preResolved = await this.waitBeforeNextAttempt(sleepMs);
       this.backoffMs = nextBackoffMs(this.backoffMs, {
         throttled: this.throttled,
         giveUpWindowMs: this.giveUpWindowMs(),
