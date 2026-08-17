@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { SourceThrottledError } from "../src/ytdlpSource.js";
 import {
   BACKOFF_MAX_MS,
+  clampSleepToWindow,
   FfmpegMixer,
   nextBackoffMs,
   SourceExhaustedError,
@@ -85,6 +86,17 @@ describe("respawn backoff against YouTube's bot check / 429", () => {
     expect(
       nextBackoffMs(60000, { throttled: true, giveUpWindowMs: FINISHED_WINDOW })
     ).toBeLessThanOrEqual(FINISHED_WINDOW / 2);
+  });
+
+  /** Löydetty tätä korjatessa: katto laskettiin vain arvoa luotaessa, mutta
+   *  ikkuna KUTISTUU kun ottelu päättyy (12 min → 2 min). Vanha 5 min uni
+   *  eläisi uuden ikkunan yli omin voimin — mitattu 300 s luovutukseen siinä
+   *  missä tavallinen katkos vie 150 s. */
+  it("re-applies the ceiling at sleep time, after the window shrinks", () => {
+    const midMatchBackoff = THROTTLED_BACKOFF_MAX_MS; // 5 min, laskettu 12 min ikkunalla
+    expect(clampSleepToWindow(midMatchBackoff, 2 * 60 * 1000)).toBe(60_000);
+    // Ei kasvata mitään: lyhyempi uni menee läpi sellaisenaan.
+    expect(clampSleepToWindow(5_000, 12 * 60 * 1000)).toBe(5_000);
   });
 
   it("caps at half the window for EVERY window, including short ones", () => {

@@ -328,18 +328,41 @@ tried by editing `.env.relay` alone (several specs: separate them with spaces).
 A throttled answer is classified separately from every other resolve failure
 (`SourceThrottledError`), because it says nothing about the broadcast:
 
-- **It is never read as "the source ended."** The ordering in
-  `classifyResolveFailure` is scheduled → throttled → ended, so a bot check that
-  happens to also mention formats can never shut down a relay whose match is
-  still being played.
+- **It is not read as "the source ended" — unless YouTube said so in those
+  words.** `classifyResolveFailure` runs scheduled → *final* ending → throttled
+  → *ambiguous* ending. The split matters both ways, and both ways have a
+  failure mode:
+  - `This live event has ended` is **final**, and outranks a 429 in the same
+    stderr. yt-dlp prints its retry warnings (`HTTP Error 429 … Retrying (1/3)`)
+    on the same stream as the real answer, so a throttle-wins-everything rule
+    would hide a finished match behind a warning line — and hold the slate over
+    it for the whole give-up window, which is issue #103 wearing a different hat.
+  - `Requested format is not available` is **ambiguous**: it is a symptom of an
+    extraction that failed, and failing to list formats is exactly what a bot
+    check causes. There the throttle wins, because reading a block as "ended"
+    would shut down a relay whose match is still being played.
 - **The retry cadence backs off.** An ordinary outage doubles from 1 s to a 30 s
   cap; a 429 jumps straight to **60 s** and doubles to **5 min**, because
-  knocking twice a minute is what keeps the block alive. It never sleeps past
-  half the applicable give-up window, so the window — not the sleep — still
-  decides when the relay gives up. **This applies in the slate prober too**
-  (`runSlateSession`), which is where the relay actually sat during the 16.8.
-  incident: the viewers' four minutes of slate were four minutes of that loop
-  knocking on YouTube every 30 s.
+  knocking twice a minute is what keeps the block alive. A throttled sleep is
+  capped at **half the applicable give-up window**, re-checked at the moment of
+  sleeping — the window shrinks from 12 min to 2 min when the match ends, and a
+  sleep computed under the old window must not outlive the new one.
+
+  **The give-up window is not a deadline, though, and the backoff moves the
+  moment it bites.** The window is measured in time but *examined* only when an
+  attempt happens, so fewer attempts mean a later verdict. Measured against the
+  shipped defaults it costs nothing (12 min window: give-up at 722 s throttled
+  vs 727 s ordinary; 2 min window: 122 s vs 127 s), because the half-window cap
+  keeps at least two attempts inside the window. The general bound is what to
+  rely on: **a throttled outage can postpone the shutdown by at most half the
+  window**, and it can never bring it forward.
+- **This applies in the slate prober too** (`runSlateSession`), which is where
+  the relay actually sat during the 16.8. incident: the viewers' four minutes of
+  slate were four minutes of that loop knocking on YouTube every 30 s. Its sleep
+  also wakes the moment the slate's conditions lapse (match finished, or the
+  ohjaamo says the broadcast is complete) — with sleeps up to 5 min, waiting for
+  the sleep to end would mean colour bars pushing into a finished broadcast for
+  minutes.
 - **The log and telemetry say which end is in trouble.** `source.state` stays
   `failed` — the control app mirrors that union by hand, so it gains no new
   value — but the detail reads *"YouTube torjuu haun (bottitarkistus/429) —

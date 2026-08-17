@@ -108,7 +108,9 @@ Se tapahtuu näissä tilanteissa (`ffmpegMixer.ts`, `config.ts`):
   kunnossa, joten **älä soita kuvaajalle** tämän perusteella. Relay perääntyy jo
   itse (60 s → 5 min, myös katvetilassa) ja tarttuu lähteeseen kun esto
   hellittää. **Restart ei auta** — se vain pakottaa uuden haun. Jos esto ei
-  hellitä, vaihda player-client `.env.relay`:ssä:
+  hellitä, vaihda player-client `.env.relay`:ssä (huomaa: perääntyminen siirtää
+  myös luovutushetkeä, enintään puolella luovutusikkunasta — relay elää siis
+  hieman pidempään kuin tavallisessa katkoksessa, ei lyhyempään):
   `RELAY_YTDLP_EXTRACTOR_ARGS=youtube:player_client=web` (oletus `android`, joka
   oli 16.8.2026 se joka meni läpi). Muutos vaatii relayn uudelleen-
   käynnistyksen — ja `npm run relay:deploy`in, jos muutat koodin oletusta eikä
