@@ -168,6 +168,7 @@ interface PrivateWatcher {
     meta: MatchMetadata,
     lookup: ReturnType<typeof buildPlayerLookup>,
   ): void;
+  maybeAnnounceSummary(state: WatcherState, meta: MatchMetadata): void;
 }
 
 interface Harness {
@@ -177,6 +178,8 @@ interface Harness {
   logs: string[];
   errors: string[];
   process(events: LiveEvent[]): void;
+  /** Yksi pollin täyte-/katsauskierros, kuten `poll` sen ajaa. */
+  fillerTick(): void;
 }
 
 function harness(over: Partial<WatcherConfig> = {}): Harness {
@@ -207,6 +210,8 @@ function harness(over: Partial<WatcherConfig> = {}): Harness {
     errors,
     process: (events) =>
       (watcher as unknown as PrivateWatcher).processEventsLive(events, state, meta, lookup),
+    fillerTick: () =>
+      (watcher as unknown as PrivateWatcher).maybeAnnounceSummary(state, meta),
   };
 }
 
@@ -314,5 +319,55 @@ describe("BrowserWatcher.processEventsLive: syötteen johdotus (#86)", () => {
     await flushSpeech();
 
     expect(feedTexts(h)).toEqual(afterFirstPoll);
+  });
+});
+
+// --------------------------------------------------------------- issue #247
+// Webin AINOA portti esittelyn ja tapahtumapuheen välissä on se, mitä
+// `watcher.ts` antaa `decideFiller`in `speechQueueEmpty`-kenttään. Kentän
+// kovakoodaus `true`ksi ei kaatanut yhtäkään web-testiä ennen näitä: coren
+// testit koettelevat päätöstä annetulla lipulla, eivät sitä että selain
+// oikeasti lukee jononsa tilan. Esittely on parinkymmenen sekunnin
+// puheenvuoro — väärin ajoitettuna se asettuu juoksun ja palon väliin.
+describe("BrowserWatcher: esittely odottaa tyhjää puhejonoa (#247)", () => {
+  const INTRO = /puheeni on tuotettu keinotekoisesti|Luen ääneen pesistulokset\.fi/;
+  const intros = (h: Harness): string[] => feedTexts(h).filter((t) => INTRO.test(t));
+
+  it("ei kiilaa kesken tapahtumapuheen, vaan tulee vasta jonon tyhjennyttyä", async () => {
+    const h = harness();
+
+    // Tapahtumat juuri selostettu: lausuma on äänessä tai jonossa.
+    h.process([liveEvent(1, [runSub]), liveEvent(2, [outSub])]);
+    h.fillerTick();
+    expect(
+      intros(h),
+      "esittely ei saa lähteä kun puhejono on varattu — lukeeko watcher jononsa tilan?",
+    ).toEqual([]);
+
+    // Kaksi kuulutusta ⇒ yksi NARRATION_GAP_MS-tauko välissä.
+    await flushSpeech(900);
+    h.fillerTick();
+    expect(intros(h)).toHaveLength(1);
+    expect(spoken.at(-1)).toMatch(INTRO);
+  });
+
+  it("pysyy velkana koko ryöpyn ajan eikä kulu odottaessaan", async () => {
+    const h = harness();
+
+    h.process([liveEvent(1, [runSub])]);
+    // Monta kierrosta ryöpyn aikana: yksikään ei saa kuluttaa esittelyä.
+    h.fillerTick();
+    h.fillerTick();
+    h.fillerTick();
+    expect(intros(h)).toEqual([]);
+
+    await flushSpeech(900);
+    h.fillerTick();
+    expect(intros(h)).toHaveLength(1);
+
+    // Eikä toistu samassa jaksossa, vaikka kierroksia tulisi lisää.
+    await flushSpeech(900);
+    h.fillerTick();
+    expect(intros(h)).toHaveLength(1);
   });
 });
