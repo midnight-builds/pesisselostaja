@@ -141,15 +141,36 @@ export function parseSourceThrottled(stderr: string): boolean {
  *
  *  Secondary evidence only: `live_status` below is the real answer and comes
  *  back on every successful extraction. These strings are what is left for the
- *  case where yt-dlp fails before it can report a status at all. */
-const ENDED_PATTERNS = [
+ *  case where yt-dlp fails before it can report a status at all.
+ *
+ *  Split in two because a stderr can hold BOTH an ended wording and a 429, and
+ *  the two halves want opposite verdicts in that case:
+ *
+ *  - **Final**: YouTube said, in as many words, that this broadcast is over.
+ *    A throttled request cannot invent that sentence, so it outranks the
+ *    throttle. Reading it as "we were merely blocked" would keep the slate
+ *    pushing into a finished broadcast for the whole give-up window — the
+ *    exact #103 outcome the relay is built to avoid.
+ *  - **Ambiguous**: a *symptom* of an extraction that failed, and failing to
+ *    list formats is precisely what a bot check causes. Here the throttle wins,
+ *    because reading a block as "ended" would shut down a relay whose match is
+ *    still being played. */
+const ENDED_PATTERNS_FINAL = [/This live event has ended/i] as const;
+
+const ENDED_PATTERNS_AMBIGUOUS = [
   /Requested format is not available/i,
   /This live stream recording is not available/i,
-  /This live event has ended/i,
 ] as const;
 
+/** Any ended wording at all, final or ambiguous. */
 export function parseSourceEnded(stderr: string): boolean {
-  return ENDED_PATTERNS.some((pattern) => pattern.test(stderr));
+  return parseSourceEndedFinal(stderr) || ENDED_PATTERNS_AMBIGUOUS.some((p) => p.test(stderr));
+}
+
+/** Only the wordings that state the broadcast is over. These outrank a
+ *  throttled answer in classifyResolveFailure. */
+export function parseSourceEndedFinal(stderr: string): boolean {
+  return ENDED_PATTERNS_FINAL.some((pattern) => pattern.test(stderr));
 }
 
 const UNIT_MS: Record<string, number> = {
