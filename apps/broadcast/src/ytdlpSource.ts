@@ -65,6 +65,29 @@ export function ytdlpSourceArgs(extractorArgs?: string): string[] {
   ];
 }
 
+/** Argv for downloading a FINISHED broadcast to a file (simulate.ts's offline
+ *  replay). Deliberately NOT ytdlpSourceArgs: that asks for a live m3u8
+ *  manifest, which is the wrong question for a VOD — sharing the whole list
+ *  would be uniformity, not correctness.
+ *
+ *  What IS shared is the extractor args, because YouTube's bot check is about
+ *  the client and the IP, not about what we ask for: the same block that hit
+ *  the relay on 16.8.2026 hits this download too (#249). Lives here rather
+ *  than in simulate.ts so it is reachable from a test — simulate.ts runs
+ *  `main()` on import and cannot be imported at all. */
+export function ytdlpVodArgs(outPath: string): string[] {
+  return [
+    "--no-playlist",
+    ...ytdlpExtractorArgs(),
+    "-f",
+    "bv*+ba/best",
+    "--merge-output-format",
+    "mp4",
+    "-o",
+    outPath,
+  ];
+}
+
 /** An HLS pick resolves to a manifest host; a progressive fallback resolves to
  *  `…/videoplayback?…&itag=18`. Used only to warn — a 360p push still beats no
  *  push at all, so this never fails the resolve (uptime first). */
