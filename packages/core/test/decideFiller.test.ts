@@ -175,6 +175,53 @@ describe("decideFiller", () => {
       expect(decideFiller(s, WEB)).toBe("intro");
     });
 
+    // ------------------------------------------------- vain jaksoissa
+    // CLAUDE.md ("Scoring"): period 0 = 1. jakso, 1 = 2. jakso, 2 = supervuoro,
+    // 3 = kotiutuslyöntikilpailu. Issue #247 pyytää esittelyä "ottelun alussa
+    // ja jaksojen välissä" — supervuoro ja kotiutuslyöntikilpailu eivät ole
+    // jaksoja, ja ne ovat ottelun kireimmät kohdat.
+
+    it("ei esittele itseään supervuorossa", () => {
+      // Esittely annettu 2. jaksossa, ottelu jatkuu supervuoroon.
+      const s = state({ currentPeriod: 2, lastIntroPeriod: 1 });
+      expect(decideFiller(s, WEB)).toBeNull();
+      expect(decideFiller(s, BROADCAST)).toBeNull();
+
+      // Ei myöskään silloin kun esittelyä ei ole annettu kertaakaan: kyse ei
+      // ole "jo tehty" -kirjanpidosta vaan siitä ettei supervuoro ole jakso.
+      const never = state({ currentPeriod: 2, lastIntroPeriod: null });
+      expect(decideFiller(never, WEB)).toBeNull();
+    });
+
+    it("ei esittele itseään kotiutuslyöntikilpailussa", () => {
+      const s = state({ currentPeriod: 3, lastIntroPeriod: 2 });
+      expect(decideFiller(s, WEB)).toBeNull();
+      expect(decideFiller(s, BROADCAST)).toBeNull();
+
+      const never = state({ currentPeriod: 3, lastIntroPeriod: null });
+      expect(decideFiller(never, WEB)).toBeNull();
+    });
+
+    it("lykätty esittely ei kanna ratkaisuvaiheisiin", () => {
+      // 2. jakso: esittely olisi vuorossa, mutta tapahtumaryöppy lykkää sen.
+      const deferred = state({
+        currentPeriod: 1,
+        lastIntroPeriod: 0,
+        speechQueueEmpty: false,
+      });
+      expect(decideFiller(deferred, WEB)).toBeNull();
+
+      // Hiljainen hetki tuli vasta supervuorossa. Velka ei siirry sinne.
+      for (const currentPeriod of [2, 3]) {
+        const quiet = state({
+          currentPeriod,
+          lastIntroPeriod: 0,
+          speechQueueEmpty: true,
+        });
+        expect(decideFiller(quiet, WEB), `period ${currentPeriod}`).toBeNull();
+      }
+    });
+
     it("odottaa ottelun alkua: ennen sitä puhutaan tervetulotäytettä", () => {
       const s = freshMatch({ matchStarted: false, lastSpeechAt: 0 });
       expect(decideFiller(s, WEB)).toBe("welcome");

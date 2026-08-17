@@ -27,6 +27,17 @@ export interface SpeechContext {
   currentBatTurn: number;
 }
 
+/** Onko `event.period` **jakso** — eli 1. tai 2. jakso?
+ *
+ *  Repon termistö (CLAUDE.md, "Scoring"): 0 = 1. jakso, 1 = 2. jakso,
+ *  **2 = supervuoro, 3 = kotiutuslyöntikilpailu**. Kaksi jälkimmäistä eivät ole
+ *  jaksoja vaan ratkaisuvaiheita, joten "jaksojen välissä" ei tarkoita niitä.
+ *  Tämä on olemassa siksi, että `currentPeriod`-vertailu näyttää muuten
+ *  harmittomalta lukuvertailulta eikä paljasta mitä lukujen takana on. */
+export function isJakso(period: number): boolean {
+  return period === 0 || period === 1;
+}
+
 export function periodName(period: number): string {
   switch (period) {
     case 0: return "ensimmäinen jakso";
@@ -590,6 +601,13 @@ export function decideFiller(
   // jaksonvaihteen jälkeen — `currentPeriod` on avain, joten leirimuodossa,
   // jossa jaksoja on vain yksi, väliesittelyä ei tule lainkaan.
   //
+  // VAIN JAKSOISSA. `event.period` on repon termistössä (CLAUDE.md, "Scoring")
+  // 0 = 1. jakso, 1 = 2. jakso, 2 = supervuoro, 3 = kotiutuslyöntikilpailu.
+  // Supervuoro ja kotiutuslyöntikilpailu EIVÄT ole jaksoja, ja issue #247
+  // pyytää esittelyä "ottelun alussa ja jaksojen välissä" — ne ovat lisäksi
+  // ottelun kireimmät kohdat, joihin parinkymmenen sekunnin puheenvuoro
+  // osuisi pahiten. Älä "korjaa" tätä takaisin yleiseksi period-vertailuksi.
+  //
   // Ehtona tyhjä puhejono: esittely on parinkymmenen sekunnin puheenvuoro,
   // eikä se saa asettua tapahtumaselostusten väliin. Kun jono ei ole tyhjä,
   // tämä ei "kuluta" esittelyä vaan putoaa läpi tavallisiin täytteisiin, ja
@@ -597,7 +615,11 @@ export function decideFiller(
   //
   // Voittaa katsauksen ja täytteen: esittely on kertaluontoinen ja sidottu
   // juuri tähän kohtaan ottelua, katsaus ja täyte toistuvat joka tapauksessa.
-  if (state.lastIntroPeriod !== state.currentPeriod && state.speechQueueEmpty) {
+  if (
+    isJakso(state.currentPeriod) &&
+    state.lastIntroPeriod !== state.currentPeriod &&
+    state.speechQueueEmpty
+  ) {
     return "intro";
   }
   if (state.announcementCount === 0) return null;
