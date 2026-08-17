@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Job, JobCleanup, LiveState, MatchState, RelayProcess } from "../src/shared/types.js";
+import type { Job, JobCleanup, LiveState, MatchState, RelayProcess, TargetIngest } from "../src/shared/types.js";
 import { jobStateWord } from "../src/shared/jobState.js";
 
 // `sendPushDetailed` kertoo montako tilausta otti ilmoituksen vastaan, ja
@@ -482,7 +482,7 @@ describe("kohteen kuolema kesken ottelun (#250)", () => {
     return { ...baseJob(), targetVideoId: TARGET_VID };
   }
 
-  function deadTarget(atIso: string): LiveState["targetIngest"] {
+  function deadTarget(atIso: string): TargetIngest {
     return {
       observedAt: atIso,
       videoId: TARGET_VID,
@@ -499,6 +499,31 @@ describe("kohteen kuolema kesken ottelun (#250)", () => {
       state({ at: at(0), health: "fail", job: liveJobWithTarget(), targetIngest: deadTarget(at(0)) })
     );
     expect(titles()).toEqual(["Selostettu lähetys kuoli"]);
+  });
+
+  // #252: käsin poistettu lähetys on katsojalle sama asia kuin päättynyt, ja
+  // ennen korjausta se oli ainoa kuolintapa josta puhelin ei piipannut
+  // lainkaan — polleri merkitsi tyhjän vastauksen virheeksi ja virhehavainnot
+  // hylätään.
+  it("piippaa myös käsin poistetusta lähetyksestä", async () => {
+    const missing = { ...deadTarget(at(0)), lifeCycleStatus: null, notFound: "confirmed" as const };
+    await notifications.observeLiveState(
+      state({ at: at(0), health: "fail", job: liveJobWithTarget(), targetIngest: missing })
+    );
+    expect(titles()).toEqual(["Selostettu lähetys kuoli"]);
+  });
+
+  it("vahvistamaton not-found ei piippaa — yksi tyhjä vastaus on armonaikaa", async () => {
+    const unconfirmed = {
+      ...deadTarget(at(0)),
+      lifeCycleStatus: null,
+      notFound: "unconfirmed" as const,
+      error: "selostettua lähetystä ei löytynyt kanavalta",
+    };
+    await notifications.observeLiveState(
+      state({ at: at(0), health: "ok", job: liveJobWithTarget(), targetIngest: unconfirmed })
+    );
+    expect(titles()).not.toContain("Selostettu lähetys kuoli");
   });
 
   it("piippaa yhdestä episodista täsmälleen kerran", async () => {

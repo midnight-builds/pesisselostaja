@@ -225,6 +225,31 @@ test.describe("ottelunaikainen", () => {
     await expect(page.getByTestId("glance-alert")).toHaveText(/Selostettu lähetys on päättynyt/);
   });
 
+  // #252: sama hälytys, eri kuolintapa — lähetys on poistettu käsin, jolloin
+  // YouTube ei palauta siitä mitään. Selain ajaa oman kopionsa jaetusta
+  // säännöstä, joten tämä pinnaa senkin — ja tekstin, joka ei saa väittää
+  // lähetyksen "päättyneen": operaattori etsisi sitä turhaan Studiosta.
+  test("käsin poistettu kohde nostaa hälytysrivin omalla sanamuodollaan", async ({ page, api, openApp }) => {
+    const job = { ...liveJob(), targetVideoId: "TESTTARGET1" };
+    api.jobs = [job];
+    await openApp(
+      fixture.liveState({
+        job,
+        targetIngest: {
+          observedAt: fixture.NOW,
+          videoId: "TESTTARGET1",
+          lifeCycleStatus: null,
+          streamStatus: null,
+          healthStatus: null,
+          notFound: "confirmed",
+          error: null,
+        },
+      }),
+    );
+
+    await expect(page.getByTestId("glance-alert")).toHaveText(/ei enää ole YouTubessa/);
+  });
+
   test("viiveen nudge menee control-tiedoston reittiä ja uusi arvo näkyy heti", async ({
     page,
     api,
