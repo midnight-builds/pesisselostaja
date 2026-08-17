@@ -441,12 +441,33 @@ export function formatWelcomeFiller(meta: MatchMetadata): string {
   ]);
 }
 
+/**
+ * Selostajan esittely: koneellisesti tuotettu puhe, mihin se perustuu ja mistä
+ * antaa palautetta. Puhutaan ottelun alussa ja jokaisen jaksonvaihteen jälkeen
+ * kerran (issue #247).
+ *
+ * **Sanamuoto on käyttäjän antama** (Ossi 16.8.2026, issue #247) — ensimmäinen
+ * variantti on se teksti sanatarkasti. Muut variantit vaihtavat vain
+ * sanajärjestystä, jottei sama virke toistu identtisenä joka jaksotauolla; ne
+ * kertovat kaikki saman viiden asian: puhe on keinotekoista, lähde on
+ * pesistulokset.fi, aukoista ja ajoitusheitoista pahoitellaan, palautetta
+ * otetaan vastaan ja verkosta löytyy nimellä Pesisselostaja.
+ */
+export function formatIntroFiller(): string {
+  return pickVariant("intro", [
+    "Minun puheeni on tuotettu keinotekoisesti ja luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja. Pahoittelen jos välillä selostuksessani on aukkoja tai asiat tulevat väärään aikaan. Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
+    "Muistutan että puheeni on tuotettu keinotekoisesti: luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja. Pahoittelen jos selostuksessani on välillä aukkoja tai asiat tulevat väärään aikaan. Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
+    "Luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja, ja puheeni on tuotettu keinotekoisesti. Pahoittelen jos asiat tulevat väärään aikaan tai selostuksessani on välillä aukkoja. Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
+  ]);
+}
+
 /** Mikä täyte on vuorossa, jos mikään:
  *  - `"welcome"` → {@link formatWelcomeFiller}, ennen ottelun alkua
+ *  - `"intro"`   → {@link formatIntroFiller}, ottelun alussa ja jaksojen välissä
  *  - `"recap"`   → {@link formatSituationSummary}, kun puheita on kertynyt
  *  - `"idle"`    → {@link formatIdleSummary}, kun on ollut liian hiljaista
  *  - `null`      → ei mitään juuri nyt */
-export type FillerDecision = "welcome" | "recap" | "idle" | null;
+export type FillerDecision = "welcome" | "intro" | "recap" | "idle" | null;
 
 /** Tilannekuva päätöstä varten. Pelkkiä lukuja ja lippuja — ei soittimia,
  *  ei syötettä, ei mykistystä. */
