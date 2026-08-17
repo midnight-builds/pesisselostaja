@@ -351,11 +351,16 @@ A throttled answer is classified separately from every other resolve failure
   **The give-up window is not a deadline, though, and the backoff moves the
   moment it bites.** The window is measured in time but *examined* only when an
   attempt happens, so fewer attempts mean a later verdict — never an earlier
-  one. It is not free: measured by driving the real supervisor loop and scanning
-  the worst case over when the block starts, the 12 min window gives up at
-  **991 s instead of 721 s**, and the 2 min window at 151 s instead of 121 s.
-  The bound to rely on is **window + half the window**, since the half-window
-  cap is what keeps one sleep from swallowing more than that. The direction is
+  one. It is not free: measured by driving the real backoff policy and scanning
+  the worst case over when the block starts *and* over the phase of the attempt
+  grid, the 12 min window gives up at **1020 s instead of 721 s**, and the 2 min
+  window at **180 s instead of 121 s**. Phase matters because attempts cost real
+  time (a throttled resolve does yt-dlp's own retries first), so a check can land
+  exactly on the window boundary — where it does *not* give up — and then sleep a
+  full `min(5 min, half window)` before the next one. The bound to rely on is
+  **window + half the window**, since the half-window cap is what keeps one sleep
+  from swallowing more than that; on the 2 min window that bound is reached
+  exactly, and on the 12 min one the absolute 5 min ceiling bites first. The direction is
   the safe one (a blocked source can come back), but a 429 costs real minutes of
   extra uptime, and the relay's own cleanup waits that long too.
 - **This applies in the slate prober too** (`runSlateSession`), which is where
