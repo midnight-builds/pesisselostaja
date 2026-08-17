@@ -274,11 +274,17 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
     expect(spawns.some(isSlateSpawn)).toBe(true); // katve oli päällä, kuten 16.8.
 
     // Seuraava yritys on minuuttien päässä, ei 30 s katossa. Luku luetaan
-    // lokista, koska se on sama luku jonka operaattori näkee.
-    const seconds = Number(/seuraava yritys (\d+) s kuluttua/.exec(logged())?.[1]);
+    // lokista, koska se on sama luku jonka operaattori näkee. TÄMÄ on testin
+    // kantava väite: "seuraava yritys N s" syntyy vain katvesilmukassa.
+    const slateLine = logged()
+      .split("\n")
+      .find((l) => /seuraava yritys \d+ s kuluttua/.test(l)) ?? "";
+    const seconds = Number(/seuraava yritys (\d+) s kuluttua/.exec(slateLine)?.[1]);
     expect(seconds).toBeGreaterThanOrEqual(60);
-    // …ja rivi sanoo kumpi pää on vialla.
-    expect(logged()).toMatch(/Raakalähetys voi silti olla kunnossa/);
+    // …ja SE rivi sanoo kumpi pää on vialla. Väite kohdistuu tähän riviin eikä
+    // koko lokiin: sama lause on myös pääloopin varoituksessa, joten koko
+    // lokiin osuva regex menisi läpi ilman katvesilmukan perääntymistä.
+    expect(slateLine).toMatch(/Raakalähetys voi silti olla kunnossa/);
     expect(mixer.sourceDetail ?? "").toMatch(/YouTube torjuu haun/);
   }, 25000);
 
