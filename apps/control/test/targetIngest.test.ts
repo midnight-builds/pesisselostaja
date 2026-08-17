@@ -211,6 +211,7 @@ describe("havainto", () => {
       lifeCycleStatus: "live",
       streamStatus: "active",
       healthStatus: "good",
+      notFound: "no",
       error: null,
     });
     expect(h.poller.reason()).toBeNull();
@@ -236,22 +237,71 @@ describe("havainto", () => {
     expect(h.poller.current()?.lifeCycleStatus).toBe("live");
   });
 
-  it("lähetystä ei löydy: yksi uusinta perusvälillä, vasta sitten katto", async () => {
+  // #252: tyhjä vastaus ei ole virhe vaan vastaus. Ensimmäinen on armonaikaa
+  // (juuri luotu lähetys voi puuttua listauksesta hetken), toinen on näyttö
+  // siitä että lähetys on poistettu — ja se on merkittävä havainnoksi eikä
+  // virheeksi, koska kuluttajat hylkäävät virhehavainnot tietämättömyytenä.
+  it("lähetystä ei löydy kerran: vahvistamaton, virheenä — armonaikaa", async () => {
     const h = harness({ fetchBroadcast: vi.fn(async () => null) });
     await settle();
 
+    expect(h.poller.current()?.notFound).toBe("unconfirmed");
     expect(h.poller.current()?.error).toMatch(/ei löytynyt/);
     expect(h.poller.current()?.lifeCycleStatus).toBeNull();
+  });
 
-    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS - 1);
-    expect(h.fetchBroadcast).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(h.fetchBroadcast).toHaveBeenCalledTimes(2);
+  it("lähetystä ei löydy kahdesti: varmistettu havainto ilman virhettä", async () => {
+    const h = harness({ fetchBroadcast: vi.fn(async () => null) });
+    await settle();
+    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS);
 
-    await vi.advanceTimersByTimeAsync(MAX_INTERVAL_MS - 1);
     expect(h.fetchBroadcast).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(h.fetchBroadcast).toHaveBeenCalledTimes(3);
+    expect(h.poller.current()?.notFound).toBe("confirmed");
+    // Tämä on koko #252:n ydin: varmistettu poisto EI saa mennä error-kenttään,
+    // koska isTargetDeadMidMatch hylkää virhehavainnot — ja juuri siksi
+    // not-found jäi ennen vihreäksi.
+    expect(h.poller.current()?.error).toBeNull();
+    expect(h.poller.current()?.lifeCycleStatus).toBeNull();
+  });
+
+  it("ei löydy: väli pysyy perusvälissä eikä nouse kattoon", async () => {
+    const h = harness({ fetchBroadcast: vi.fn(async () => null) });
+    await settle();
+
+    for (let round = 2; round <= 4; round += 1) {
+      await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS - 1);
+      expect(h.fetchBroadcast).toHaveBeenCalledTimes(round - 1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(h.fetchBroadcast).toHaveBeenCalledTimes(round);
+    }
+    expect(BASE_INTERVAL_MS).toBeLessThan(MAX_INTERVAL_MS);
+  });
+
+  it("lähetyksen palatessa notFound nollautuu", async () => {
+    let found = false;
+    const h = harness({
+      fetchBroadcast: vi.fn(async () => (found ? broadcast() : null)),
+    });
+    await settle();
+    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS);
+    expect(h.poller.current()?.notFound).toBe("confirmed");
+
+    found = true;
+    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS);
+    expect(h.poller.current()?.notFound).toBe("no");
+    expect(h.poller.current()?.lifeCycleStatus).toBe("live");
+  });
+
+  it("virhehavainto ei väitä lähetystä poissaolevaksi", async () => {
+    const h = harness({
+      fetchBroadcast: vi.fn(async () => {
+        throw new Error("verkko poikki");
+      }),
+    });
+    await settle();
+
+    expect(h.poller.current()?.notFound).toBe("no");
+    expect(h.poller.current()?.error).toMatch(/verkko poikki/);
   });
 });
 

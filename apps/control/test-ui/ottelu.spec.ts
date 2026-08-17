@@ -216,6 +216,7 @@ test.describe("ottelunaikainen", () => {
           lifeCycleStatus: "complete",
           streamStatus: null,
           healthStatus: null,
+          notFound: "no",
           error: null,
         },
       }),

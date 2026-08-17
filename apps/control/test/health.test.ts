@@ -15,6 +15,7 @@ import type {
   RelayProcess,
   RelayTelemetry,
   SourceIngest,
+  TargetIngest,
   SystemState,
 } from "../src/shared/types.js";
 
@@ -547,13 +548,14 @@ describe("työ ja ajossa oleva ottelu ovat eri", () => {
 describe("kohde kuoli kesken ottelun (#250)", () => {
   const TARGET_VID = "TARGETVID99";
 
-  function deadTarget(overrides: Partial<SourceIngest> = {}): SourceIngest {
+  function deadTarget(overrides: Partial<TargetIngest> = {}): TargetIngest {
     return {
       observedAt: new Date().toISOString(),
       videoId: TARGET_VID,
       lifeCycleStatus: "complete",
       streamStatus: null,
       healthStatus: null,
+      notFound: "no",
       error: null,
       ...overrides,
     };

@@ -37,6 +37,12 @@ const MAX_INTERVAL_MS = 300_000;
 /** Eksponentiaalinen backoff transienteille virheille. */
 const BACKOFF_STEPS = [30_000, 60_000, 120_000, MAX_INTERVAL_MS];
 
+/** Montako peräkkäistä tyhjää vastausta tarvitaan ennen kuin lähetys
+ *  julistetaan poissaolevaksi (#252). Yksi ei riitä: juuri luotu lähetys voi
+ *  puuttua listauksesta hetken (eventual consistency), ja väärä hälytys kesken
+ *  ottelun on kallis. Kaksi kierrosta = enintään minuutti armonaikaa. */
+const NOT_FOUND_CONFIRM_STREAK = 2;
+
 /** Ks. sourceIngest.ts: virheteksti ei saa olla koko JSON-virherunko. */
 const MAX_ERROR_LENGTH = 200;
 
@@ -173,17 +179,39 @@ export function createTargetIngestPoller(deps: Partial<TargetIngestPollerDeps> =
     const observedAt = new Date(d.now()).toISOString();
     /** Tila-kentät ovat aina null virhetilanteessa: hälytys tehdään vain
      *  varmasta havainnosta, ei vanhasta tai puuttuvasta. */
-    const blank = { observedAt, videoId, lifeCycleStatus: null, streamStatus: null, healthStatus: null };
+    const blank = {
+      observedAt,
+      videoId,
+      lifeCycleStatus: null,
+      streamStatus: null,
+      healthStatus: null,
+      notFound: "no" as const,
+    };
 
     try {
       const broadcast = await d.fetchBroadcast(videoId);
       if (!broadcast) {
         notFoundStreak += 1;
-        // Ohjaamo loi tämän lähetyksen omalle kanavalleen, joten "ei löydy" on
-        // outo tila (poistettu käsin?) — mutta juuri luotu lähetys voi puuttua
-        // listauksesta hetken, joten yksi uusinta perusvälillä ennen kattoa.
-        publish({ ...blank, error: "selostettua lähetystä ei löytynyt kanavalta" });
-        intervalMs = notFoundStreak >= 2 ? MAX_INTERVAL_MS : BASE_INTERVAL_MS;
+        // Ohjaamo loi tämän lähetyksen omalle kanavalleen ja kysyy sitä sen
+        // omalla id:llä, joten tyhjä vastaus on YouTuben oma vastaus "tätä
+        // lähetystä ei ole" — ei epäonnistunut haku (#252). Ensimmäinen tyhjä
+        // on silti armonaikaa, koska juuri luotu lähetys voi puuttua
+        // listauksesta hetken; kaksi peräkkäistä on näyttö poistosta.
+        const confirmed = notFoundStreak >= NOT_FOUND_CONFIRM_STREAK;
+        publish({
+          ...blank,
+          notFound: confirmed ? "confirmed" : "unconfirmed",
+          // Varmistettu tyhjä EI ole virhe: `error` varataan tietämättömyydelle
+          // ("emme saaneet vastausta"), ja kuluttajat hylkäävät virhehavainnot.
+          // Jos poisto merkittäisiin virheeksi, se jäisi vihreäksi juuri siinä
+          // tilanteessa, jota varten vahti on olemassa.
+          error: confirmed ? null : "selostettua lähetystä ei löytynyt kanavalta",
+        });
+        // Ei taka-askelta: varmistuttuaan tilanne on hälytys, jota operaattori
+        // katsoo ruudulta, ja 5 min väli tarkoittaisi että myös YouTuben
+        // mahdollinen korjaantuminen näkyisi vasta 5 min päästä. Kysely maksaa
+        // saman kuin terve kierros, joten mitään ei säästettäisi.
+        intervalMs = BASE_INTERVAL_MS;
         return;
       }
       notFoundStreak = 0;
@@ -198,6 +226,7 @@ export function createTargetIngestPoller(deps: Partial<TargetIngestPollerDeps> =
         lifeCycleStatus: broadcast.lifeCycleStatus,
         streamStatus: stream?.streamStatus ?? null,
         healthStatus: stream?.healthStatus ?? null,
+        notFound: "no",
         error: null,
       });
       intervalMs = BASE_INTERVAL_MS;

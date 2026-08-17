@@ -489,6 +489,7 @@ describe("kohteen kuolema kesken ottelun (#250)", () => {
       lifeCycleStatus: "complete",
       streamStatus: null,
       healthStatus: null,
+      notFound: "no",
       error: null,
     };
   }
