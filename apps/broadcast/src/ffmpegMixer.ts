@@ -1404,12 +1404,13 @@ export class FfmpegMixer {
     let endReason = "pysäytettiin";
     try {
       while (!this.stopped && childAlive) {
-        // Sama kattolaskenta kuin pääloopissa, samasta syystä: ikkuna on
-        // voinut kutistua sitten waitMs:n laskennan.
-        await this.sleepWhileSlateAlive(
-          this.throttled ? clampSleepToWindow(waitMs, this.giveUpWindowMs()) : waitMs,
-          () => childAlive
-        );
+        // EI clampSleepToWindowia tässä, toisin kuin pääloopissa. Ainoa asia
+        // joka kutistaa luovutusikkunan on isMatchFinished(), ja se sammuttaa
+        // samalla slateStillAllowed():n — jolloin uni katkeaa heti alla olevan
+        // ehtonsa kautta. Katto tässä olisi siis koodia, joka ei voi koskaan
+        // vaikuttaa mihinkään eikä siksi ole testattavissa; katvetilan suoja on
+        // se herääminen, ei toinen kattolaskenta.
+        await this.sleepWhileSlateAlive(waitMs, () => childAlive);
         if (this.stopped) break;
         if (!childAlive) {
           // Katvetilan ffmpeg kuoli itsestään. Kertakytkin pois, jottei tästä

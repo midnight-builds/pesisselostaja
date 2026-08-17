@@ -310,17 +310,26 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
     expect(spawns.some(isSlateSpawn)).toBe(true);
 
     // Ottelu päättyy KESKEN unen. Ilman korjausta silmukka nukkuisi minuutin.
+    //
+    // Väite on TÄSMÄLLINEN lopetussyy, ei pelkkä "Katvekuva pois": sen
+    // alkuliite esiintyy myös rivillä "Katvekuva pois käytöstä tältä ajolta"
+    // (disableSlate) ja stop():n omassa purussa, joten löysempi ehto meni läpi
+    // ilman korjaustakin. Vain tämä rivi voi syntyä siitä, että uni katkesi
+    // ottelun päättymiseen.
+    const END_LINE = "Katvekuva pois: lähde on päättynyt hallitusti";
     const endedAt = Date.now();
     finished = true;
-    const woke = Date.now() + 5000;
-    while (Date.now() < woke && !logged().includes("Katvekuva pois")) {
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline && !logged().includes(END_LINE)) {
       await new Promise((r) => setTimeout(r, 50));
     }
+    const woke = logged().includes(END_LINE); // luettu ENNEN stop():ia
     const reactionMs = Date.now() - endedAt;
     mixer.stop();
+    await new Promise((r) => setTimeout(r, 100));
 
-    expect(logged()).toContain("Katvekuva pois");
-    expect(reactionMs).toBeLessThan(5000); // ei 60 s unen loppuun asti
+    expect(woke).toBe(true);
+    expect(reactionMs).toBeLessThan(4000); // ei 60 s unen loppuun asti
   }, 25000);
 
   /** Kaksi ffmpegiä samaan RTMP-avaimeen katkaisee lähetyksen YouTuben päässä.

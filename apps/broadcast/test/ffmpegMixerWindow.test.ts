@@ -99,6 +99,44 @@ describe("respawn backoff against YouTube's bot check / 429", () => {
     expect(clampSleepToWindow(5_000, 12 * 60 * 1000)).toBe(5_000);
   });
 
+  /** Puhdas funktio ei riitä: sen kutsu on se, mikä voi kadota. Tämä ajaa
+   *  oikeaa valvojasilmukkaa ja lukee unen pituuden siitä rivistä, jonka
+   *  operaattori näkee — ottelu päättyy kesken 60 s unen, jolloin ikkuna
+   *  kutistuu 20 s:iin eikä seuraava uni saa enää olla 60 s. */
+  it("applies the ceiling at the main loop's sleep, not just in the pure function", async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => void lines.push(String(a[0])));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    let finished = false;
+    const mixer = new FfmpegMixer({
+      youtubeUrl: "https://example.invalid/live",
+      rtmpUrl: "", streamKey: "",
+      narrationGain: 1.3,
+      fifoPath: "/tmp/pesis-test-mixer-clamp.pcm",
+      maxFailureWindowMs: 12 * 60 * 1000,
+      // Ottelun päätyttyä ikkuna on 20 s, eli puolet siitä on 10 s.
+      finishedFailureWindowMs: 20_000,
+      isMatchFinished: () => finished,
+      resolveTestSource: () => {
+        throw new SourceThrottledError("ERROR: HTTP Error 429: Too Many Requests");
+      },
+    });
+
+    void mixer.start().catch(() => undefined);
+    const respawns = (): string[] => lines.filter((l) => l.includes("Uudelleenyritys"));
+    const until = Date.now() + 5000;
+    while (Date.now() < until && respawns().length < 1) await new Promise((r) => setTimeout(r, 20));
+    // Ottelu päättyy ENSIMMÄISEN unen aikana; toinen uni lasketaan jo
+    // kutistuneella ikkunalla.
+    finished = true;
+    while (Date.now() < until && respawns().length < 2) await new Promise((r) => setTimeout(r, 20));
+    mixer.stop();
+
+    const second = respawns()[1] ?? "";
+    expect(second).toContain("Uudelleenyritys 10000ms");
+    expect(second).not.toContain("Uudelleenyritys 60000ms");
+  }, 15000);
+
   it("caps at half the window for EVERY window, including short ones", () => {
     // Aiempi versio piti 30 s lattian myös silloin kun ikkuna oli 30 s, eli
     // yksi uni söi koko ikkunan. Katto on katto, ei toive.
