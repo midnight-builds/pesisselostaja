@@ -45,7 +45,7 @@ describe("resolveElevenLabsVoiceId (#63)", () => {
 
 describe("elevenLabsSynthesize käyttää asetettua ääntä (#63)", () => {
   it("kutsuu asetuksen ääni-ID:llä", async () => {
-    const fetchMock = vi.fn(async () => okResponse());
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => okResponse());
     vi.stubGlobal("fetch", fetchMock);
 
     await elevenLabsSynthesize("Juoksu", "sk_test", "oma-aani-id");
@@ -56,7 +56,7 @@ describe("elevenLabsSynthesize käyttää asetettua ääntä (#63)", () => {
   });
 
   it("ilman asetusta kutsuu oletusäänellä", async () => {
-    const fetchMock = vi.fn(async () => okResponse());
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => okResponse());
     vi.stubGlobal("fetch", fetchMock);
 
     await elevenLabsSynthesize("Juoksu", "sk_test", "");
@@ -69,7 +69,7 @@ describe("elevenLabsSynthesize käyttää asetettua ääntä (#63)", () => {
   it("koodaa ID:n URLiin — roskasyöte ei riko polkua", async () => {
     // Käyttäjä liittää kentän itse, joten se voi sisältää mitä tahansa. Ilman
     // koodausta esim. "/" muuttaisi pyynnön osoitetta.
-    const fetchMock = vi.fn(async () => okResponse());
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => okResponse());
     vi.stubGlobal("fetch", fetchMock);
 
     await elevenLabsSynthesize("Juoksu", "sk_test", "a/b?c");
