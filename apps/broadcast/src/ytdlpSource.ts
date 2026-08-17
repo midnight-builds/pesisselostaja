@@ -316,7 +316,10 @@ export function classifyResolveFailure(stderr: string): Error | null {
   const lastLine = stderr.trim().split("\n").at(-1) ?? "";
   const scheduled = parseScheduledStart(stderr);
   if (scheduled) return new SourceNotLiveYetError(lastLine, scheduled.startsInMs);
-  if (parseSourceEndedFinal(stderr)) return new SourceEndedError(lastLine);
+  // The MATCHED line, not the last one: a run that ended on a 429 would
+  // otherwise be reported to the operator as "ended, reason: HTTP 429".
+  const finalEnded = parseSourceEndedFinal(stderr);
+  if (finalEnded) return new SourceEndedError(finalEnded);
   if (parseSourceThrottled(stderr)) return new SourceThrottledError(lastLine);
   if (parseSourceEnded(stderr)) return new SourceEndedError(lastLine);
   return null;
