@@ -121,8 +121,16 @@ raakalähetystä ja käynnistää relayn heti kun kuvaaja aloittaa lähetyksen.
 **Lopetus**:
 Se, miten lähetysketju päättyy. Oletus on yksi ketju: kuvaaja sulkee
 StreamLabsin → raakalähetys päättyy → relay havaitsee sen ja sammuu itse →
-YouTube sulkee selostetun lähetyksen omalla AutoStopillaan. Ohjaamo ei lopeta
-mitään; se siivoaa vasta jälkikäteen.
+ohjaamo sulkee selostetun lähetyksen **hallitusti** (#153). Raakalähetykseen
+ohjaamo ei tässä koske: se päättyi jo itse, ja juuri siitä relay tiesi sammua.
+
+**Hallittu lopetus** on nimenomaan tämä: ohjaamo transitoi selostetun
+lähetyksen `complete`ksi laskevalla reunalla, kun relayn telemetria kertoo sekä
+`endReason === "ended"` että `match.finished`. Ehto vaatii molemmat, koska
+kesken ottelun kuollut raakalähetys antaa myös `ended`in — ja liian aikainen
+`complete` katkaisisi elävän lähetyksen katsojilta. Kun ehto ei täyty, kohteen
+sulkee YouTuben oma AutoStop kuten ennenkin; se on peräytymistie, ei oletus,
+koska katsojalle AutoStopin lopetus ei erotu katkosta.
 
 **Tämä on oletus, ei ainoa tapa, eikä ketju pääty aina kokonaisena.**
 Raakalähetys, relayn ajo, selostettu lähetys ja työ päättyvät kukin erikseen ja

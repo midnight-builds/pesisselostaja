@@ -43,11 +43,21 @@ ohitettavissa (`CONTROL_PORT`, `CONTROL_HOST`, `CONTROL_RELAY_ENV`,
 
 **Hard stopin siivous** laukeaa vain kun relay sammutti itsensä takarajan takia
 (telemetrian `endReason === "hard_stop"`, ks. issue #123): ottelu oli päättynyt
-tulospalvelun mukaan ja lähde oireili. Normaalissa lopetuksessa ohjaamo ei
-transitoi mitään — kohteen sulkee YouTuben `enableAutoStop`, eikä lähteeseen
-kosketa. Siivous lokittaa mitkä lähetykset olivat live ja mitä tehtiin tai
-jätettiin tekemättä ja miksi; sen epäonnistuminen ei koskaan estä työn
-sulkemista.
+tulospalvelun mukaan ja raakalähetys oireili. Se on ainoa tilanne, jossa
+ohjaamo koskee **raakalähetykseen**.
+
+**Hallittu lopetus** (issue #153) sulkee **selostetun lähetyksen** myös
+normaalissa lopetuksessa: ehtona on että relayn telemetria kertoo sekä
+`endReason === "ended"` että `match.finished`. Molemmat vaaditaan — pelkkä
+`ended` tulee myös kesken ottelun kuolleesta raakalähetyksestä (akku, verkko),
+ja `complete` silloin katkaisisi elävän lähetyksen katsojilta. Raakalähetykseen
+ei tässä kosketa lainkaan, ei myöskään `CONTROL_HARD_STOP_SOURCE` päällä.
+
+Kun kumpikaan ehto ei täyty (luovutus, vanha deploy joka ei kerro syytä,
+vanhentunut status-tiedosto), ohjaamo ei transitoi mitään ja kohteen sulkee
+YouTuben `enableAutoStop`. Siivous lokittaa mitkä lähetykset olivat live ja mitä
+tehtiin tai jätettiin tekemättä ja miksi; sen epäonnistuminen ei koskaan estä
+työn sulkemista.
 
 ## Testit
 
@@ -196,10 +206,12 @@ jälkikäteen — teko jota ei näytetä on teko jota ei voi tarkistaa.
   (`indicators`) ja *mitä tehtiin* (`actions`). Työ suljetaan sillä sekunnilla
   kun relay sammuu, ja lähetykset ovat silloin vielä auki — siksi ehto on tämä
   kenttä eikä `status === "finished"`.
-- **Tyhjä tekolista ei ole puuttuva siivous** vaan tavallisin lopputulos:
-  normaalissa lopetuksessa selostetun lähetyksen sulkee YouTuben
-  `enableAutoStop`, eikä raakalähetykseen kosketa. Kortti sanoo sen ääneen,
-  koska "ei rivejä" näyttäisi unohdukselta.
+- **Tyhjä tekolista ei ole puuttuva siivous** vaan täysin normaali lopputulos:
+  luovutuksessa, vanhalla deployllä ja kesken ottelun kuolleen raakalähetyksen
+  jälkeen ohjaamo ei transitoi mitään, ja kohteen sulkee YouTuben
+  `enableAutoStop`. Kortti sanoo sen ääneen, koska "ei rivejä" näyttäisi
+  unohdukselta. Hallitussa lopetuksessa (#153) rivejä on tasan yksi:
+  *"Selostettu lähetys suljettiin."*
 - **Useampi riippumaton päättymisindikaattori** (#171): relayn oma lopetussyy,
   relayn havainto raakalähetyksestä ja tulospalvelun kirjaus ovat eri lähteitä,
   ja kortti luettelee ne erikseen. Vanhentuneesta status-tiedostosta ei väitetä

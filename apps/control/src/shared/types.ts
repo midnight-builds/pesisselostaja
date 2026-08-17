@@ -136,9 +136,17 @@ export interface RelayTelemetry {
    *  (#103) ja `no_signal`ille (#104), ks. #117.
    *
    *  `undefined`/puuttuva = relay ei kertonut (vanha deploy, tai ajossa yhä).
-   *  `"hard_stop"` on ainoa arvo, joka oikeuttaa hard stopin siivouksen
-   *  (#123) — normaalissa lopetuksessa YouTuben `enableAutoStop` hoitaa
-   *  kohteen, eikä lähteeseen kosketa. */
+   *
+   *  Kaksi arvoa oikeuttaa lähetykseen koskemisen, eri laajuudella:
+   *  - `"hard_stop"` on ainoa arvo, joka oikeuttaa hard stopin siivouksen
+   *    (#123) — ja siis ainoa, jolla RAAKALÄHETYKSEEN saa koskea (lipun
+   *    `CONTROL_HARD_STOP_SOURCE` takana).
+   *  - `"ended"` YHDESSÄ `match.finished`in kanssa oikeuttaa hallitun
+   *    lopetuksen (#153): SELOSTETTU lähetys transitoidaan `complete`ksi.
+   *    Pelkkä `"ended"` ei riitä — se tulee myös kesken ottelun kuolleesta
+   *    raakalähetyksestä, ja lopetus silloin katkaisisi elävän lähetyksen.
+   *
+   *  Muissa tapauksissa kohteen sulkee YouTuben `enableAutoStop`. */
   endReason?: SourceEndReason | null;
 }
 
