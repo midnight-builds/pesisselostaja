@@ -1505,6 +1505,13 @@ export class CommentaryLoop {
       this.speak(formatWelcomeFiller(meta), false);
       return;
     }
+    // Merkintä vasta tässä, puhumisen yhteydessä: jos gate yllä ohitti
+    // kierroksen, esittely on yhä velkaa eikä sitä saa kuitata annetuksi.
+    if (decision === "intro") {
+      this.lastIntroPeriod = this.state.currentPeriod;
+      this.speak(formatIntroFiller(), false);
+      return;
+    }
     this.lastSummaryCount = this.state.announcementCount;
     this.state.lastSummaryTime = now;
     this.lastSpeechAt = now;
