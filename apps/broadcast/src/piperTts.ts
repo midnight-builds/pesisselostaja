@@ -14,6 +14,37 @@ export interface PiperTtsOptions {
   piperBin: string;
   voice: string;
   voicesDir: string;
+  /** Randomness source for the per-line noise_w jitter; injectable so tests are
+   *  deterministic. Must return a value in [0, 1). Defaults to Math.random. */
+  rng?: () => number;
+}
+
+/** Approved per-line `noise_w` jitter range (issue #69).
+ *
+ *  Piper's own default is 0.8. Varying it slightly line by line keeps
+ *  consecutive same-shaped announcements ("Palo! …", "Vuorossa …") from being
+ *  acoustically identical over a 90-minute match. The 0.75 / 0.95 / 0.85 values
+ *  of segment 6 in `experiments/voice-tuning-demo.ts` were listened to on
+ *  fi_FI-harri-medium on 9.7.2026 and accepted (see voice-tuning-demo.md,
+ *  "Palaute"); this is that range, applied continuously.
+ *
+ *  Do NOT widen the range and do NOT add `--length_scale` here: the 1.15
+ *  slowdown from the same listening session was explicitly REJECTED — it sounds
+ *  bad on this voice. Widening `noise_w` (e.g. towards 1.3) is an open question
+ *  that needs a human listening test, not a code change. */
+export const NOISE_W_MIN = 0.75;
+export const NOISE_W_MAX = 0.95;
+
+/** The exact argv the relay runs `piper` with — a pure function so the
+ *  inference parameters are testable without spawning the binary. */
+export function piperArgs(modelPath: string, outputPath: string, rng: () => number = Math.random): string[] {
+  const r = Math.min(Math.max(rng(), 0), 1);
+  const noiseW = NOISE_W_MIN + r * (NOISE_W_MAX - NOISE_W_MIN);
+  return [
+    "--model", modelPath,
+    "--output_file", outputPath,
+    "--noise_w", noiseW.toFixed(3),
+  ];
 }
 
 function execFileP(cmd: string, args: string[], input?: string): Promise<Buffer> {
@@ -55,7 +86,7 @@ export class PiperTts {
     const dir = await mkdtemp(join(tmpdir(), "pesis-relay-tts-"));
     const wavPath = join(dir, "out.wav");
     try {
-      await execFileP(this.opts.piperBin, ["--model", modelPath, "--output_file", wavPath], text);
+      await execFileP(this.opts.piperBin, piperArgs(modelPath, wavPath, this.opts.rng), text);
       const pcm = await execFileP("ffmpeg", ["-y", "-i", wavPath, "-ar", "48000", "-ac", "2", "-f", "s16le", "pipe:1"]);
       return pcm;
     } catch (err) {
