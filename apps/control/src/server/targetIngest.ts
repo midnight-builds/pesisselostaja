@@ -40,7 +40,14 @@ const BACKOFF_STEPS = [30_000, 60_000, 120_000, MAX_INTERVAL_MS];
 /** Montako peräkkäistä tyhjää vastausta tarvitaan ennen kuin lähetys
  *  julistetaan poissaolevaksi (#252). Yksi ei riitä: juuri luotu lähetys voi
  *  puuttua listauksesta hetken (eventual consistency), ja väärä hälytys kesken
- *  ottelun on kallis. Kaksi kierrosta = enintään minuutti armonaikaa. */
+ *  ottelun on kallis.
+ *
+ *  Kaksi kierrosta = yksi uusinta perusvälillä eli 30 s armonaikaa. Ei enempää,
+ *  koska #250 jättää tästä hälytyksestä FAIL_CONFIRM_MS:n pois tarkoituksella:
+ *  jokainen odotettu minuutti on pois siitä ajasta, jona loppuottelulle ehtii
+ *  vielä pystyttää uuden lähetyksen. Kohteen lähetys on myös luotu tunteja
+ *  aiemmin (ajastushetkellä), joten juuri luodun lähetyksen näkyvyysviive ei
+ *  ole tässä se realistinen riski vaan yksittäinen listauksen häiriö. */
 const NOT_FOUND_CONFIRM_STREAK = 2;
 
 /** Ks. sourceIngest.ts: virheteksti ei saa olla koko JSON-virherunko. */
@@ -232,6 +239,13 @@ export function createTargetIngestPoller(deps: Partial<TargetIngestPollerDeps> =
       intervalMs = BASE_INTERVAL_MS;
       return;
     } catch (err) {
+      // Virhe katkaisee sarjan (#252). "Kaksi PERÄKKÄISTÄ tyhjää vastausta" on
+      // hälytyksen koko näyttö, ja verkkovirhe ei ole tyhjä vastaus — ilman
+      // tätä nollausta sekvenssi tyhjä → verkkovirhe → tyhjä varmistaisi
+      // poiston, vaikka YouTube ehti sanoa "ei löydy" vain kerran. Suunta on
+      // tahallisesti varovainen: väärä hälytys kesken ottelun maksaa enemmän
+      // kuin yhden kierroksen viive.
+      notFoundStreak = 0;
       if (err instanceof GoogleAuthError && err.needsReauth) {
         reauthLockedAt = d.now();
         reauthLockFingerprint = fingerprint;

@@ -250,6 +250,53 @@ describe("havainto", () => {
     expect(h.poller.current()?.lifeCycleStatus).toBeNull();
   });
 
+  // Armonaika on numero jonka kommentti lupaa ääneen, joten se pinnataan
+  // kellona eikä laskurina: jos NOT_FOUND_CONFIRM_STREAK nostettaisiin
+  // kolmeen, tämä kaatuu. Suunta on hälytysherkkyyskysymys — #250 jättää
+  // tästä pushista FAIL_CONFIRM_MS:n pois tarkoituksella, joten armonaikaa ei
+  // saa hiipiä pidemmäksi huomaamatta.
+  it("armonaika on täsmälleen yksi perusväli (30 s), ei enempää", async () => {
+    const h = harness({ fetchBroadcast: vi.fn(async () => null) });
+    await settle();
+    expect(h.poller.current()?.notFound).toBe("unconfirmed");
+
+    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS - 1);
+    expect(h.poller.current()?.notFound).toBe("unconfirmed");
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.poller.current()?.notFound).toBe("confirmed");
+    expect(Date.now() - NOW).toBe(30_000);
+  });
+
+  // "Peräkkäistä" on väite, ei tyylikysymys: ilman nollausta tämä sekvenssi
+  // hälyttäisi, vaikka YouTube ehti sanoa "ei löydy" vain kerran.
+  it("virhe kierrosten välissä katkaisee sarjan — tyhjä → virhe → tyhjä ei varmista", async () => {
+    let round = 0;
+    const h = harness({
+      fetchBroadcast: vi.fn(async () => {
+        round += 1;
+        if (round === 2) throw new Error("verkko poikki");
+        return null;
+      }),
+    });
+
+    await settle(); // 1. kierros: tyhjä → unconfirmed
+    expect(h.poller.current()?.notFound).toBe("unconfirmed");
+
+    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS); // 2. kierros: virhe
+    expect(h.poller.current()?.error).toMatch(/verkko poikki/);
+
+    // 3. kierros: taas tyhjä. Virhe katkaisi sarjan, joten tämä on sarjan
+    // ensimmäinen — ei toinen.
+    await vi.advanceTimersByTimeAsync(60_000); // virhe nosti välin backoffilla
+    expect(h.fetchBroadcast).toHaveBeenCalledTimes(3);
+    expect(h.poller.current()?.notFound).toBe("unconfirmed");
+
+    // Ja vasta seuraava peräkkäinen tyhjä varmistaa.
+    await vi.advanceTimersByTimeAsync(BASE_INTERVAL_MS);
+    expect(h.poller.current()?.notFound).toBe("confirmed");
+  });
+
   it("lähetystä ei löydy kahdesti: varmistettu havainto ilman virhettä", async () => {
     const h = harness({ fetchBroadcast: vi.fn(async () => null) });
     await settle();
