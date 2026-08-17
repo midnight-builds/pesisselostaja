@@ -179,6 +179,18 @@ to the control file overrules the breaker and gives delta a fresh streak.
   echo '{"pollIntervalMs": 5000}' > apps/broadcast/run/.control-143280.json  # slower poll
   ```
 
+**The cadence backs off by itself in a fetch-failure streak** (issue #52). From
+the third consecutive failed poll the interval doubles — 3 s → 6 → 12 — and
+stops at **15 s**; the `HUOM, hakuvirhesarja …` line names the interval in force,
+so an operator seeing 15 s gaps in the log is reading a working backoff, not a
+stalled relay. It never polls faster than the interval you set, and it never
+exceeds 15 s, because that ceiling is also the worst-case extra lateness the
+narration carries once the API answers again. Recovery is immediate and needs no
+intervention: **one** successful fetch restores your cadence for the very next
+poll, and says so (`Haku onnistui jälleen … pollausväli takaisin 3000 ms`).
+Before this, a failure burst in match 146210 had to be nursed by hand — an
+operator raising `pollIntervalMs` mid-broadcast and lowering it afterwards.
+
 #### Every poll leaves a trace (issue #120)
 
 `api.delta_fetch` only logs when something *changed*, so a quiet stretch used to
