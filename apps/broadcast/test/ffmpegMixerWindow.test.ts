@@ -87,8 +87,16 @@ describe("respawn backoff against YouTube's bot check / 429", () => {
     ).toBeLessThanOrEqual(FINISHED_WINDOW / 2);
   });
 
-  it("still backs off at least as far as an ordinary outage would, whatever the window", () => {
-    expect(nextBackoffMs(1000, { throttled: true, giveUpWindowMs: 50 })).toBe(BACKOFF_MAX_MS);
+  it("caps at half the window for EVERY window, including short ones", () => {
+    // Aiempi versio piti 30 s lattian myös silloin kun ikkuna oli 30 s, eli
+    // yksi uni söi koko ikkunan. Katto on katto, ei toive.
+    for (const windowMs of [50, 2000, 30_000, 59_000, 120_000, 12 * 60 * 1000]) {
+      let ms = 1000;
+      for (let i = 0; i < 8; i++) {
+        ms = nextBackoffMs(ms, { throttled: true, giveUpWindowMs: windowMs });
+        expect(ms).toBeLessThanOrEqual(Math.max(1, Math.floor(windowMs / 2)));
+      }
+    }
   });
 
   it("tells the operator which END is in trouble, not just 'lähde failed'", async () => {

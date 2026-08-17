@@ -485,9 +485,25 @@ export function nextBackoffMs(
 ): number {
   const doubled = currentMs * 2;
   if (!opts.throttled) return Math.min(doubled, BACKOFF_MAX_MS);
-  const halfWindow = Math.max(1, Math.floor(opts.giveUpWindowMs / 2));
-  const cap = Math.min(THROTTLED_BACKOFF_MAX_MS, halfWindow);
+  const cap = Math.min(THROTTLED_BACKOFF_MAX_MS, halfWindowMs(opts.giveUpWindowMs));
   return Math.min(Math.max(doubled, Math.min(THROTTLED_BACKOFF_MIN_MS, cap)), cap);
+}
+
+function halfWindowMs(giveUpWindowMs: number): number {
+  return Math.max(1, Math.floor(giveUpWindowMs / 2));
+}
+
+/** Applies the same half-window ceiling at the moment of sleeping, because the
+ *  window can SHRINK between computing a backoff and using it: the match ends
+ *  mid-outage and maxFailureWindowMs (12 min) gives way to
+ *  finishedFailureWindowMs (2 min). A 5 min sleep computed under the old
+ *  window would then outlast the new one on its own — measured 300 s to give
+ *  up where an ordinary outage takes 150 s. Recomputing here costs nothing and
+ *  keeps the ceiling honest whichever window is in force when we actually
+ *  sleep. Only throttled sleeps need it; the ordinary 30 s cap is below every
+ *  window the relay ships with. */
+export function clampSleepToWindow(sleepMs: number, giveUpWindowMs: number): number {
+  return Math.min(sleepMs, halfWindowMs(giveUpWindowMs));
 }
 
 function formatEta(ms: number): string {

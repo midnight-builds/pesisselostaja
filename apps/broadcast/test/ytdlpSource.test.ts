@@ -2,13 +2,20 @@ import { describe, it, expect } from "vitest";
 import {
   classifyResolveFailure,
   isHlsManifestUrl,
+  parseSourceEndedFinal,
   parseSourceThrottled,
   SourceEndedError,
   SourceNotLiveYetError,
   SourceThrottledError,
   ytdlpExtractorArgs,
   ytdlpSourceArgs,
+  ytdlpVodArgs,
 } from "../src/ytdlpSource.js";
+
+/** True when `needle` appears as a contiguous run inside `haystack`. */
+function containsRun(haystack: string[], needle: string[]): boolean {
+  return haystack.some((_, i) => needle.every((v, j) => haystack[i + j] === v));
+}
 
 /** Real URLs shortened from a 27.7.2026 resolve of the same video, first
  *  without a JS runtime (progressive fallback) and then with one (HLS). */
@@ -75,6 +82,27 @@ describe("yt-dlp extractor args (issue #249)", () => {
       expect.arrayContaining(["-f", "best[protocol^=m3u8]/best", "--no-playlist", "--js-runtimes"])
     );
   });
+
+  /** simulate.ts downloads a finished VOD through the same YouTube and the
+   *  same IP, so the bot check hits it too — but it must NOT inherit the live
+   *  m3u8 format pick. The split is deliberate, and therefore worth guarding:
+   *  removing the shared extractor args left the whole suite green before. */
+  it("shares the extractor args with the VOD download, but not the live format pick", () => {
+    const vod = ytdlpVodArgs("/tmp/out.mp4");
+    expect(containsRun(vod, ["--extractor-args", "youtube:player_client=android"])).toBe(true);
+    // Ei elävän lähetyksen formaattivalintaa eikä JS-runtimea: eri kysymys.
+    expect(vod).not.toContain("best[protocol^=m3u8]/best");
+    expect(vod).toEqual(expect.arrayContaining(["-f", "bv*+ba/best", "-o", "/tmp/out.mp4"]));
+  });
+
+  it("lets the same env key steer the VOD download too", () => {
+    process.env.RELAY_YTDLP_EXTRACTOR_ARGS = "youtube:player_client=ios";
+    try {
+      expect(containsRun(ytdlpVodArgs("/tmp/out.mp4"), ["--extractor-args", "youtube:player_client=ios"])).toBe(true);
+    } finally {
+      delete process.env.RELAY_YTDLP_EXTRACTOR_ARGS;
+    }
+  });
 });
 
 describe("classifying a failed resolve (issue #249)", () => {
@@ -89,9 +117,42 @@ describe("classifying a failed resolve (issue #249)", () => {
   });
 
   it("never reads a throttled answer as 'the broadcast ended' — that would kill a live relay", () => {
+    // "Requested format is not available" is a SYMPTOM of a failed extraction,
+    // and failing to list formats is exactly what a bot check causes.
     const both = `${BOT_CHECK_STDERR}\nERROR: Requested format is not available`;
     expect(classifyResolveFailure(both)).toBeInstanceOf(SourceThrottledError);
     expect(classifyResolveFailure(both)).not.toBeInstanceOf(SourceEndedError);
+  });
+
+  /** The other half of that rule, and the one that bites the other way: yt-dlp
+   *  prints its 429 RETRY warnings on the same stderr it later prints the real
+   *  answer on. If the throttle outranked a final ending, the relay would hold
+   *  the slate over a finished match for the whole give-up window (#103). */
+  it("lets a FINAL ending outrank a 429 in the same stderr", () => {
+    const retriedThenEnded = [
+      "WARNING: [youtube] Unable to download webpage: HTTP Error 429: Too Many Requests. Retrying (1/3)…",
+      "ERROR: [youtube] abc123XYZ: This live event has ended.",
+    ].join("\n");
+    expect(parseSourceEndedFinal(retriedThenEnded)).toBe(true);
+    expect(classifyResolveFailure(retriedThenEnded)).toBeInstanceOf(SourceEndedError);
+    expect(classifyResolveFailure(retriedThenEnded)).not.toBeInstanceOf(SourceThrottledError);
+  });
+
+  it("keeps the ambiguous wordings ambiguous — they are symptoms, not statements", () => {
+    expect(parseSourceEndedFinal("ERROR: Requested format is not available")).toBe(false);
+    expect(parseSourceEndedFinal("ERROR: This live stream recording is not available")).toBe(false);
+    // …but on their own, with no throttle in sight, they still end the run.
+    expect(classifyResolveFailure("ERROR: Requested format is not available")).toBeInstanceOf(
+      SourceEndedError
+    );
+  });
+
+  it("still waits when a scheduled start arrives alongside a 429", () => {
+    const scheduledAnd429 = [
+      "WARNING: HTTP Error 429: Too Many Requests. Retrying (1/3)…",
+      "ERROR: This live event will begin in 12 minutes",
+    ].join("\n");
+    expect(classifyResolveFailure(scheduledAnd429)).toBeInstanceOf(SourceNotLiveYetError);
   });
 
   it("still ends on a plain ended answer, and still waits for a scheduled one", () => {

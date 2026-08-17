@@ -282,6 +282,47 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
     expect(mixer.sourceDetail ?? "").toMatch(/YouTube torjuu haun/);
   }, 25000);
 
+  /** Perääntyminen ei saa tehdä katveesta kuuroa. Uni katkeaa myös silloin kun
+   *  katvetilan ehdot lakkaavat kesken unen (ottelu päättyy): muuten
+   *  väripalkkeja työnnettäisiin päättyneeseen lähetykseen koko unen ajan —
+   *  ennen #249:ää enintään 30 s, sen jälkeen jopa 5 min. */
+  it("wakes from a long backoff sleep the moment the match ends (#249/#104)", async () => {
+    const spawns: string[][] = [];
+    let finished = false;
+    const mixer = harness({
+      slate: await preparedSlate(),
+      slateAfterMs: 0,
+      maxFailureWindowMs: 10 * 60 * 1000,
+      isMatchFinished: () => finished,
+      resolveTestSource: () => {
+        throw new SourceThrottledError("ERROR: HTTP Error 429: Too Many Requests");
+      },
+      spawns,
+    });
+
+    void mixer.start().catch(() => undefined);
+    // Odota että katve on päällä ja pitkä uni (≥60 s) on alkanut.
+    const sleeping = Date.now() + 8000;
+    while (Date.now() < sleeping && !logged().includes("seuraava yritys")) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(logged()).toContain("seuraava yritys");
+    expect(spawns.some(isSlateSpawn)).toBe(true);
+
+    // Ottelu päättyy KESKEN unen. Ilman korjausta silmukka nukkuisi minuutin.
+    const endedAt = Date.now();
+    finished = true;
+    const woke = Date.now() + 5000;
+    while (Date.now() < woke && !logged().includes("Katvekuva pois")) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const reactionMs = Date.now() - endedAt;
+    mixer.stop();
+
+    expect(logged()).toContain("Katvekuva pois");
+    expect(reactionMs).toBeLessThan(5000); // ei 60 s unen loppuun asti
+  }, 25000);
+
   /** Kaksi ffmpegiä samaan RTMP-avaimeen katkaisee lähetyksen YouTuben päässä.
    *  Lähdepolku ei voi joutua tähän (spawnOnce odottaa childDonea), mutta
    *  katvepolku lopettaa sessionsa itse valitsemallaan hetkellä — ennen
