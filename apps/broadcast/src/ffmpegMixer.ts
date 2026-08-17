@@ -476,9 +476,11 @@ export const THROTTLED_BACKOFF_MAX_MS = 5 * 60_000;
  *
  *  Note what this does NOT promise: the give-up MOMENT is unchanged. Fewer
  *  attempts mean the window is checked later, so a throttled outage postpones
- *  the shutdown (12 min window: ~722 s → ~1017 s). That is the safer
- *  direction — a blocked source can come back — but it is a consequence worth
- *  saying out loud rather than a property that survived. */
+ *  the shutdown — worst case ~721 s → ~991 s on the 12 min window, ~121 s →
+ *  ~151 s on the 2 min one. That is the safer direction (a blocked source can
+ *  come back), but it is a consequence worth saying out loud rather than a
+ *  property that survived. Keep these numbers in step with README.md's
+ *  "How the source is resolved" section; the two have already drifted once. */
 export function nextBackoffMs(
   currentMs: number,
   opts: { throttled: boolean; giveUpWindowMs: number }
