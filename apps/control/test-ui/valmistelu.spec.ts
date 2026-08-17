@@ -226,6 +226,69 @@ test.describe("valmistelu", () => {
     await expect(page.getByTestId("retitle-written")).toContainText("Pesä Ysit F-tytöt");
   });
 
+  /** #239: soittolistaan lisäys toimi, mutta se oli operaattorille näkymätön —
+   *  ja kun ikäluokka ei ratkennut joukkueiden nimistä, lisäys jäi kokonaan
+   *  tekemättä ilman että mikään kertoi siitä. Videot huomattiin listojen
+   *  ulkopuolelta vasta ottelupäivän jälkeen. */
+  test("soittolistan nimi näkyy esikatselussa ja luonti kertoo mihin listaan lähetykset menivät", async ({
+    page,
+    api,
+    openApp,
+  }) => {
+    api.authHealth = fixture.authHealthConnected();
+    await openApp(fixture.liveState({ job: draftJob(), health: "idle", headline: "Ei aktiivista lähetystä" }));
+
+    await expect(page.getByTestId("prep-playlist")).toHaveText("Pesä Ysit F 2026");
+    await expect(page.getByTestId("prep-playlist-missing")).toHaveCount(0);
+    // Kun ikäluokka ratkesi, kanavan listoja ei haeta turhaan.
+    expect(api.called("GET", "/api/youtube/playlists")).toBe(false);
+
+    await page.getByRole("button", { name: CREATE }).click();
+    await page.getByRole("button", { name: CONFIRM }).click();
+
+    await expect(page.getByTestId("prep-playlist-result")).toContainText("Pesä Ysit F 2026");
+  });
+
+  test("tunnistamaton ikäluokka sanotaan ääneen ja lista valitaan käsin", async ({ page, api, openApp }) => {
+    api.authHealth = fixture.authHealthConnected();
+    // Joukkueiden nimissä ei ole ikäluokan kirjainta: ohjaamon päättely ei osu.
+    api.playlist = null;
+    await openApp(fixture.liveState({ job: draftJob(), health: "idle", headline: "Ei aktiivista lähetystä" }));
+
+    await expect(page.getByTestId("prep-playlist")).toHaveText("Ei tunnistettu");
+    await expect(page.getByTestId("prep-playlist-missing")).toBeVisible();
+    // Valitsin on auki valmiiksi ja listat haetaan, koska korjaus tarvitaan nyt.
+    await expect.poll(() => api.calledWith("GET", "/api/youtube/playlists").length).toBe(1);
+
+    await page.getByTestId("playlist-select").selectOption("PLdee");
+    await expect(page.getByTestId("prep-playlist")).toHaveText("Pesä Ysit D 2026");
+
+    await page.getByRole("button", { name: CREATE }).click();
+    await page.getByRole("button", { name: CONFIRM }).click();
+
+    await expect.poll(() => api.calledWith("POST", "/api/youtube/broadcasts").length).toBe(1);
+    const body = api.calledWith("POST", "/api/youtube/broadcasts")[0].body as { playlistId?: string };
+    expect(body.playlistId).toBe("PLdee");
+    await expect(page.getByTestId("prep-playlist-result")).toContainText("Pesä Ysit D 2026");
+  });
+
+  test("ilman soittolistaa luotu pari sanoo sen ääneen", async ({ page, api, openApp }) => {
+    api.authHealth = fixture.authHealthConnected();
+    api.playlist = null;
+    api.playlists = [];
+    await openApp(fixture.liveState({ job: draftJob(), health: "idle", headline: "Ei aktiivista lähetystä" }));
+
+    await expect(page.getByTestId("prep-playlist-missing")).toBeVisible();
+    await page.getByRole("button", { name: CREATE }).click();
+    await page.getByRole("button", { name: CONFIRM }).click();
+
+    // Tämä on se hetki jossa vika oli hiljainen: pari syntyi normaalisti,
+    // mitään virhettä ei tullut, eivätkä videot olleet missään listassa.
+    const result = page.getByTestId("prep-playlist-result");
+    await expect(result).toContainText("eivät ole missään soittolistassa");
+    await expect(result).toHaveClass(/is-fail/);
+  });
+
   test("valmistelu mahtuu puhelimen leveyteen ilman vaakavieritystä", async ({ page, api, openApp }) => {
     api.authHealth = fixture.authHealthConnected();
     api.jobs = [scheduledJob()];
