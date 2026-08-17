@@ -1526,7 +1526,13 @@ export class FfmpegMixer {
    *  koetinvälin ennen kuin katkosta huomattaisiin. */
   private async sleepWhileSlateAlive(ms: number, alive: () => boolean): Promise<void> {
     const until = monoNow() + ms;
-    while (!this.stopped && alive() && monoNow() < until) {
+    // …and wakes when the slate's own conditions lapse (match finished, or the
+    // ohjaamo says the broadcast is complete). The caller re-checks
+    // slateStillAllowed() right after this returns, but only after it returns:
+    // without this the colour bars would keep pushing into a finished
+    // broadcast for the whole sleep. That used to be ≤30 s; with the throttled
+    // backoff (#249) a sleep can be 5 min, so the gap became a real one.
+    while (!this.stopped && alive() && this.slateStillAllowed() && monoNow() < until) {
       await delay(Math.min(200, until - monoNow()));
     }
   }
