@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildPlayerLookup,
   formatIdleSummary,
+  formatIntroFiller,
   formatWelcomeFiller,
   subEventToSpeech,
   groupToSpeech,
@@ -128,6 +129,34 @@ describe("welcome filler", () => {
   it("every variant names both teams and the field", () => {
     const variants = allVariants(3, () => formatWelcomeFiller(meta));
     expectEveryVariantCarries(variants, ["Ketut vastaan Sudet", "pelikenttänä Testikenttä"]);
+  });
+});
+
+describe("selostajan esittely (#247)", () => {
+  // Esittely on läpinäkyvyyslupaus, ei koristelua: jos variantti pudottaa
+  // vaikka palautekanavan, osa katsojista ei kuule sitä kertaakaan koko
+  // ottelun aikana. Sanamuoto on käyttäjän antama.
+  it("every variant says the speech is artificial, names the source, apologises and gives the feedback channel", () => {
+    const variants = allVariants(3, () => formatIntroFiller());
+    expectEveryVariantCarries(variants, [
+      "keinotekoisesti",
+      "pesistulokset.fi-palveluun kirjattuja tietoja",
+      "aukkoja",
+      "väärään aikaan",
+      "Otan mielelläni palautetta vastaan",
+      "verkosta minut löytää nimellä Pesisselostaja",
+    ]);
+  });
+
+  it("keeps the user's own wording as one of the variants, verbatim", () => {
+    // Issue #247, Ossi 16.8.2026. Variaatiot saavat vaihtaa sanajärjestystä,
+    // mutta alkuperäinen muotoilu ei saa hävitä matkalla.
+    const variants = allVariants(3, () => formatIntroFiller());
+    expect(variants).toContain(
+      "Minun puheeni on tuotettu keinotekoisesti ja luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja. " +
+        "Pahoittelen jos välillä selostuksessani on aukkoja tai asiat tulevat väärään aikaan. " +
+        "Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
+    );
   });
 });
 

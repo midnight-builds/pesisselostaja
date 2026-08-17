@@ -484,6 +484,17 @@ export interface FillerTimingState {
   announcementCount: number;
   /** `announcementCount` viimeisimmän tilannekatsauksen hetkellä. */
   lastSummaryCount: number;
+  /** Käynnissä oleva jakso (`event.period`). Merkitsevä vasta kun
+   *  `matchStarted` on tosi. */
+  currentPeriod: number;
+  /** Jakso, jolle esittely on jo puhuttu; `null` jos ei kertaakaan. Kutsupaikka
+   *  päivittää tämän vasta kun esittely on oikeasti annettu, joten lykätty
+   *  esittely jää odottamaan seuraavaa kierrosta eikä katoa. */
+  lastIntroPeriod: number | null;
+  /** Puhejono on tyhjä juuri nyt. Esittely ei saa kiilata tapahtumaselostusten
+   *  väliin (issue #247), joten se odottaa hiljaista hetkeä; muut täytteet
+   *  eivät lue tätä, koska niillä on jo oma porttinsa kutsupaikassa. */
+  speechQueueEmpty: boolean;
 }
 
 /** Kynnykset annetaan argumentteina, koska ne EROAVAT sovelluksittain
@@ -522,6 +533,20 @@ export function decideFiller(
     return state.now - state.lastSpeechAt < thresholds.welcomeFillerMs
       ? null
       : "welcome";
+  }
+  // Esittely (issue #247): kerran ottelun alussa ja kerran jokaisen
+  // jaksonvaihteen jälkeen — `currentPeriod` on avain, joten leirimuodossa,
+  // jossa jaksoja on vain yksi, väliesittelyä ei tule lainkaan.
+  //
+  // Ehtona tyhjä puhejono: esittely on parinkymmenen sekunnin puheenvuoro,
+  // eikä se saa asettua tapahtumaselostusten väliin. Kun jono ei ole tyhjä,
+  // tämä ei "kuluta" esittelyä vaan putoaa läpi tavallisiin täytteisiin, ja
+  // esittely jää odottamaan seuraavaa hiljaista kierrosta.
+  //
+  // Voittaa katsauksen ja täytteen: esittely on kertaluontoinen ja sidottu
+  // juuri tähän kohtaan ottelua, katsaus ja täyte toistuvat joka tapauksessa.
+  if (state.lastIntroPeriod !== state.currentPeriod && state.speechQueueEmpty) {
+    return "intro";
   }
   if (state.announcementCount === 0) return null;
   const countDue =
