@@ -1404,7 +1404,12 @@ export class FfmpegMixer {
     let endReason = "pysäytettiin";
     try {
       while (!this.stopped && childAlive) {
-        await this.sleepWhileSlateAlive(waitMs, () => childAlive);
+        // Sama kattolaskenta kuin pääloopissa, samasta syystä: ikkuna on
+        // voinut kutistua sitten waitMs:n laskennan.
+        await this.sleepWhileSlateAlive(
+          this.throttled ? clampSleepToWindow(waitMs, this.giveUpWindowMs()) : waitMs,
+          () => childAlive
+        );
         if (this.stopped) break;
         if (!childAlive) {
           // Katvetilan ffmpeg kuoli itsestään. Kertakytkin pois, jottei tästä
