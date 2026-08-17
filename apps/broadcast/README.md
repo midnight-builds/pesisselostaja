@@ -722,9 +722,18 @@ the ElevenLabs API (`elevenLabsTts.ts`) instead of Piper; Piper stays installed
 as the automatic per-utterance fallback (network error, credits exhausted, 429),
 so the stream never goes silent. Details:
 
-- **Voice/model:** `RELAY_ELEVENLABS_VOICE` (default Brian,
-  `nPczCjzI2devNBz1zQrb`, chosen by listening tests 2026-07-14) and
+- **Voice/model:** `RELAY_ELEVENLABS_VOICE` (default Daniel,
+  `onwK4e9ZLuTAKqWW03F9`, chosen by listening tests 2026-07-15) and
   `RELAY_ELEVENLABS_MODEL` (default `eleven_multilingual_v2`, 1 credit/char).
+  The web app has the same default, settable per browser in Asetukset.
+
+  > **Which voice the default *should* be is an open question — see issue #63.**
+  > This README said Brian (`nPczCjzI2devNBz1zQrb`) until 16.8.2026, while the
+  > code has read Daniel since 2026-07-15; the text was corrected to match the
+  > code, not the other way round. Both were listening decisions (Brian in
+  > PR #26, Daniel a day later), and which one is actually wanted can only be
+  > settled by listening. Don't "fix" the default in `config.ts` from the
+  > document alone.
 - **No pronunciation substitutions:** ElevenLabs reads abbreviations like `KPL`
   correctly, so it gets the readable text as-is. The `.pronunciations.json`
   substitutions still apply on the Piper fallback path.

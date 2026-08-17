@@ -12,6 +12,7 @@ import {
 import { fetchTodayMatches } from "@pesisselostaja/core";
 import { formatBuildInfo } from "./buildInfo.js";
 import { PIPER_VOICES, piperStored, piperDownload } from "./piper.js";
+import { ELEVENLABS_DEFAULT_VOICE_ID } from "./elevenlabs.js";
 import { debugLog } from "./debuglog.js";
 import type { LiveMatchSummary } from "@pesisselostaja/core";
 
@@ -34,6 +35,8 @@ interface Settings {
   voiceEngine: "browser" | "piper" | "elevenlabs";
   piperVoiceId: string;
   elevenLabsApiKey: string;
+  /** Empty = the default voice in elevenlabs.ts (issue #63). */
+  elevenLabsVoiceId: string;
   volumeBoost: boolean;
   keepScreenOn: boolean;
 }
@@ -63,12 +66,13 @@ function loadSettings(): Settings {
         voiceEngine: p.voiceEngine === "piper" || p.voiceEngine === "elevenlabs" ? p.voiceEngine : "browser",
         piperVoiceId: p.piperVoiceId ?? DEFAULT_PIPER_VOICE,
         elevenLabsApiKey: p.elevenLabsApiKey ?? "",
+        elevenLabsVoiceId: p.elevenLabsVoiceId ?? "",
         volumeBoost: p.volumeBoost ?? false,
         keepScreenOn: p.keepScreenOn ?? true,
       };
     }
   } catch { /* ignore */ }
-  return { apiKey: DEFAULT_API_KEY, apiBase: DEFAULT_API_BASE, pollInterval: 6, announceBatterChanges: true, voiceName: "", voiceEngine: "browser", piperVoiceId: DEFAULT_PIPER_VOICE, elevenLabsApiKey: "", volumeBoost: false, keepScreenOn: true };
+  return { apiKey: DEFAULT_API_KEY, apiBase: DEFAULT_API_BASE, pollInterval: 6, announceBatterChanges: true, voiceName: "", voiceEngine: "browser", piperVoiceId: DEFAULT_PIPER_VOICE, elevenLabsApiKey: "", elevenLabsVoiceId: "", volumeBoost: false, keepScreenOn: true };
 }
 
 function saveSettings(): void {
@@ -762,6 +766,13 @@ function voiceEngineHtml(): string {
         placeholder="sk_…" value="${esc(settings.elevenLabsApiKey)}" />
       <div class="b" style="margin-top:6px">Avain tallentuu vain tähän selaimeen. Synteesi kuluttaa
         ElevenLabs-krediittejäsi; virhetilanteessa palataan selaimen ääneen.</div>
+    </div>
+    <div class="adv-field" style="border-top:1px solid var(--line)">
+      <div class="a">ElevenLabs-ääni (Voice ID)</div>
+      <input id="elevenlabs-voice" type="text" spellcheck="false" autocomplete="off"
+        placeholder="${esc(ELEVENLABS_DEFAULT_VOICE_ID)} (oletus)" value="${esc(settings.elevenLabsVoiceId)}" />
+      <div class="b" style="margin-top:6px">Voice ID löytyy ElevenLabsin äänikirjastosta.
+        Tyhjänä käytetään oletusääntä.</div>
     </div>`;
   }
   const opts = PIPER_VOICES.map((v) =>
@@ -833,6 +844,7 @@ function applyVoiceEngine(): void {
   watcher?.setVoiceEngine(settings.voiceEngine);
   watcher?.setVolumeBoost(settings.volumeBoost);
   watcher?.setElevenLabsApiKey(settings.elevenLabsApiKey);
+  watcher?.setElevenLabsVoice(settings.elevenLabsVoiceId);
   if (settings.voiceEngine === "piper") {
     watcher?.setPiperVoice(settings.piperVoiceId);
   } else {
@@ -984,6 +996,14 @@ function bindSettings(): void {
     saveSettings();
     watcher?.setElevenLabsApiKey(settings.elevenLabsApiKey);
     toast(settings.elevenLabsApiKey ? "Avain tallennettu" : "Avain poistettu");
+  };
+
+  const elVoiceInput = root.querySelector<HTMLInputElement>("#elevenlabs-voice");
+  if (elVoiceInput) elVoiceInput.onchange = () => {
+    settings.elevenLabsVoiceId = elVoiceInput.value.trim();
+    saveSettings();
+    watcher?.setElevenLabsVoice(settings.elevenLabsVoiceId);
+    toast(settings.elevenLabsVoiceId ? "Ääni tallennettu" : "Käytetään oletusääntä");
   };
 
   const boostToggle = root.querySelector<HTMLElement>('[data-toggle="volumeBoost"]');
