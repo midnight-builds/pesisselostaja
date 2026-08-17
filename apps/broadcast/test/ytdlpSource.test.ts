@@ -133,14 +133,30 @@ describe("classifying a failed resolve (issue #249)", () => {
       "WARNING: [youtube] Unable to download webpage: HTTP Error 429: Too Many Requests. Retrying (1/3)…",
       "ERROR: [youtube] abc123XYZ: This live event has ended.",
     ].join("\n");
-    expect(parseSourceEndedFinal(retriedThenEnded)).toBe(true);
+    expect(parseSourceEndedFinal(retriedThenEnded)).toContain("This live event has ended");
     expect(classifyResolveFailure(retriedThenEnded)).toBeInstanceOf(SourceEndedError);
     expect(classifyResolveFailure(retriedThenEnded)).not.toBeInstanceOf(SourceThrottledError);
+    // Syyksi se rivi joka ratkaisi, ei viimeistä riviä.
+    expect(classifyResolveFailure(retriedThenEnded)?.message).toContain("This live event has ended");
+  });
+
+  /** yt-dlp kokeilee useaa player-clientiä ja alentaa yhden clientin
+   *  epäonnistumisen VAROITUKSEKSI jatkaen seuraavalla. Jos varoitus kelpaisi
+   *  lopulliseksi tuomioksi, relay sammuisi kesken elävän ottelun todisteella,
+   *  jonka yt-dlp itse jo päätti sivuuttaa. */
+  it("does not end a live broadcast on a WARNING line — only yt-dlp's own verdict counts", () => {
+    const warnedThen429 = [
+      "WARNING: [youtube] abc123XYZ: This live event has ended.",
+      "ERROR: [youtube] abc123XYZ: Sign in to confirm you’re not a bot. HTTP Error 429: Too Many Requests",
+    ].join("\n");
+    expect(parseSourceEndedFinal(warnedThen429)).toBeNull();
+    expect(classifyResolveFailure(warnedThen429)).toBeInstanceOf(SourceThrottledError);
+    expect(classifyResolveFailure(warnedThen429)).not.toBeInstanceOf(SourceEndedError);
   });
 
   it("keeps the ambiguous wordings ambiguous — they are symptoms, not statements", () => {
-    expect(parseSourceEndedFinal("ERROR: Requested format is not available")).toBe(false);
-    expect(parseSourceEndedFinal("ERROR: This live stream recording is not available")).toBe(false);
+    expect(parseSourceEndedFinal("ERROR: Requested format is not available")).toBeNull();
+    expect(parseSourceEndedFinal("ERROR: This live stream recording is not available")).toBeNull();
     // …but on their own, with no throttle in sight, they still end the run.
     expect(classifyResolveFailure("ERROR: Requested format is not available")).toBeInstanceOf(
       SourceEndedError

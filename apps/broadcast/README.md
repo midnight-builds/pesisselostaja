@@ -350,12 +350,14 @@ A throttled answer is classified separately from every other resolve failure
 
   **The give-up window is not a deadline, though, and the backoff moves the
   moment it bites.** The window is measured in time but *examined* only when an
-  attempt happens, so fewer attempts mean a later verdict. Measured against the
-  shipped defaults it costs nothing (12 min window: give-up at 722 s throttled
-  vs 727 s ordinary; 2 min window: 122 s vs 127 s), because the half-window cap
-  keeps at least two attempts inside the window. The general bound is what to
-  rely on: **a throttled outage can postpone the shutdown by at most half the
-  window**, and it can never bring it forward.
+  attempt happens, so fewer attempts mean a later verdict — never an earlier
+  one. It is not free: measured by driving the real supervisor loop and scanning
+  the worst case over when the block starts, the 12 min window gives up at
+  **991 s instead of 721 s**, and the 2 min window at 151 s instead of 121 s.
+  The bound to rely on is **window + half the window**, since the half-window
+  cap is what keeps one sleep from swallowing more than that. The direction is
+  the safe one (a blocked source can come back), but a 429 costs real minutes of
+  extra uptime, and the relay's own cleanup waits that long too.
 - **This applies in the slate prober too** (`runSlateSession`), which is where
   the relay actually sat during the 16.8. incident: the viewers' four minutes of
   slate were four minutes of that loop knocking on YouTube every 30 s. Its sleep

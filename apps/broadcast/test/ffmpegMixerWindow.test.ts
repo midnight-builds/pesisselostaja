@@ -99,15 +99,20 @@ describe("respawn backoff against YouTube's bot check / 429", () => {
     expect(clampSleepToWindow(5_000, 12 * 60 * 1000)).toBe(5_000);
   });
 
-  /** Puhdas funktio ei riitä: sen kutsu on se, mikä voi kadota. Tämä ajaa
-   *  oikeaa valvojasilmukkaa ja lukee unen pituuden siitä rivistä, jonka
-   *  operaattori näkee — ottelu päättyy kesken 60 s unen, jolloin ikkuna
-   *  kutistuu 20 s:iin eikä seuraava uni saa enää olla 60 s. */
+  /** Puhdas funktio ei riitä: sen kutsu on se, mikä voi kadota.
+   *
+   *  Ratkaiseva hetki on kapea ja siksi helppo testata väärin: silmukka laskee
+   *  seuraavan backoffin heti unen JÄLKEEN, joten unen aikana päättynyt ottelu
+   *  tulee huomioiduksi ilman kattoakin. Katto tarvitaan silloin kun ikkuna
+   *  kutistuu laskennan jälkeen mutta ennen seuraavaa unta — eli kesken itse
+   *  hakuyrityksen, joka oikealla yt-dlp:llä kestää sekunteja. Siksi ottelu
+   *  päätetään tässä resolverin sisällä. */
   it("applies the ceiling at the main loop's sleep, not just in the pure function", async () => {
     const lines: string[] = [];
     vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => void lines.push(String(a[0])));
     vi.spyOn(console, "error").mockImplementation(() => {});
     let finished = false;
+    let attempts = 0;
     const mixer = new FfmpegMixer({
       youtubeUrl: "https://example.invalid/live",
       rtmpUrl: "", streamKey: "",
@@ -118,17 +123,16 @@ describe("respawn backoff against YouTube's bot check / 429", () => {
       finishedFailureWindowMs: 20_000,
       isMatchFinished: () => finished,
       resolveTestSource: () => {
+        // Toinen yritys on se, jonka AIKANA ottelu päättyy: backoff (60 s) on
+        // jo laskettu 12 min ikkunalla, uni lasketaan vasta tämän jälkeen.
+        if (++attempts === 2) finished = true;
         throw new SourceThrottledError("ERROR: HTTP Error 429: Too Many Requests");
       },
     });
 
     void mixer.start().catch(() => undefined);
     const respawns = (): string[] => lines.filter((l) => l.includes("Uudelleenyritys"));
-    const until = Date.now() + 5000;
-    while (Date.now() < until && respawns().length < 1) await new Promise((r) => setTimeout(r, 20));
-    // Ottelu päättyy ENSIMMÄISEN unen aikana; toinen uni lasketaan jo
-    // kutistuneella ikkunalla.
-    finished = true;
+    const until = Date.now() + 6000;
     while (Date.now() < until && respawns().length < 2) await new Promise((r) => setTimeout(r, 20));
     mixer.stop();
 
