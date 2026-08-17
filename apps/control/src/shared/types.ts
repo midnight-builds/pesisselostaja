@@ -247,6 +247,14 @@ export interface SourceIngest {
   error: string | null;
 }
 
+/** Ohjaamon YouTube-API-havainto KOHTEESTA eli selostetusta lähetyksestä
+ *  (#250). Sama muoto kuin lähteen havainnolla: observedAt/videoId/tilat/error
+ *  tarkoittavat samaa, vain katsottava lähetys on eri. Toisin kuin lähteessä,
+ *  YouTube on kohteen tilan AINOA totuudenlähde — relayn RTMP-työntö onnistuu
+ *  myös kuolleeseen lähetykseen (16.8.2026, ottelu 136771), joten relayn oma
+ *  kirjanpito ei voi kertoa tästä mitään. */
+export type TargetIngest = SourceIngest;
+
 /** Everything the live view needs, in one payload, pushed over SSE. */
 export interface LiveState {
   /** Server time, so the client can render "N s sitten" without trusting the
@@ -265,6 +273,11 @@ export interface LiveState {
    *  olemassa olevaan sopimukseen, eivätkä testien fixtuurit (test-ui/support/
    *  state.ts) saa rikkoutua siitä että ohjaamo alkoi julkaista sen. */
   sourceIngest?: SourceIngest | null;
+  /** Ohjaamon viimeisin YouTube-havainto kohteesta eli selostetusta
+   *  lähetyksestä (#250), tai null kun sitä ei juuri nyt pollata. Valinnainen
+   *  samasta syystä kuin `sourceIngest`: kenttä lisättiin olemassa olevaan
+   *  sopimukseen. */
+  targetIngest?: TargetIngest | null;
   job: Job | null;
   /** Ohjaamon työ ja ajossa oleva relay ovat eri otteluista (#118), tai null
    *  kun ristiriitaa ei ole.
