@@ -330,6 +330,36 @@ vaan normaali lepotila, ja se näkyy ohjaamon Lähde-rivillä syynä.
 `run/` on symlinkattu ajokopiosta työpuuhun, joten ohjaamo näkee samat
 tiedostot jotka ajossa oleva relay kirjoittaa.
 
+### `targetIngest` — kohteen tila YouTube-API:sta (#250)
+
+Sama kuvio kohteelle eli selostetulle lähetykselle, mutta painoarvo on
+päinvastainen: lähteestä relay on itse paras todistaja, kohteesta se ei tiedä
+mitään — RTMP-työntö onnistuu myös kuolleeseen lähetykseen. 16.8.2026 (ottelu
+136771) YouTuben autostop päätti selostetun lähetyksen kesken ottelun, relay
+työnsi loppuottelun kuolleeseen kohteeseen eikä mikään huomannut.
+
+30 s välein ohjaamo hakee kohteen `lifeCycleStatus`in ja siihen sidotun
+striimin `streamStatus`in (kertoo ottaako YouTube meidän työntömme vastaan).
+Havaintoa **ei** kirjoiteta control-tiedostoon — relay ei voi tehdä tiedolle
+mitään — vaan se kulkee LiveStaten `targetIngest`-kenttänä tilakortille.
+Tuore `complete`/`revoked`-havainto kesken ottelun, relayn ollessa ajossa, on
+`fail`-tason vika: otsikko, Kohde-rivi, tilakortin hälytysrivi ja välitön
+push-ilmoitus ("Selostettu lähetys kuoli") kertovat sen. Sääntö on jaettu
+(`src/shared/targetHealth.ts`), jotta palvelin ja selain eivät voi erota.
+Ottelun päätyttyä sama `complete` on normaali lopputila eikä hälytä.
+
+Portit ovat samat kuin lähteen pollauksessa (työ `arming`/`live`, relay ajossa
+juuri tätä ottelua, token, kiintiövaraus) — molemmat pollerit väistävät
+itsenäisesti lähetysten luonnin kiintiötarpeen. Huomaa että kahden pollerin
+yhteiskulutus on ~4 yksikköä / 30 s eli ~480/h: `sourceIngest.ts`:n
+mitoituskommentin "yön yli ~3840" on nyt yhteissummana ~7680, joten pitkänä
+leiripäivänä kiintiövaraus voi sulkea molemmat havainnot samaan aikaan —
+silloin syy näkyy Lähde- ja Kohde-rivien notena, ei vikana.
+
+Toipumispolku (uuden selostetun lähetyksen luonti kesken ottelun ja relayn
+sidonta siihen) on issuen #250 kohta 2 eikä sisälly tähän: valvonta kertoo
+tilanteen, korjaus on toistaiseksi käsityötä.
+
 ### Yksi totuuslähde (#97)
 
 Kaikelle mitä sekä relay että ohjaamo tietävät, **relay on lähde**. Se on ainoa

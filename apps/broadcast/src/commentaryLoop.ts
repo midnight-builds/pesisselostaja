@@ -114,6 +114,37 @@ const DELTA_FETCH_TIMEOUT_MS = 1_000;
  *  a failure streak, and an aborted poll still waits for the next tick rather
  *  than retrying at once. That is issue #52, and it belongs there. */
 const DELTA_FETCH_TIMEOUT_SLOW_MS = 4_000;
+/** How many SUCCESSFUL polls the loosened delta timeout stays in force after a
+ *  failure streak opened it — the valve's hysteresis.
+ *
+ *  Without it the valve does nothing it promises. `recordPollSuccess()` clears
+ *  the failure streak, so a valve keyed on the streak alone would shut on the
+ *  very first poll it helped: against an API that genuinely answers in 1–4 s
+ *  the cycle would be 3 aborts at 1 s → one poll at 4 s → success → streak
+ *  cleared → back to 1 s → abort. Three deltas out of every four dropped,
+ *  fresh data every ~12 s instead of 3 s, and the log full of "HUOM,
+ *  hakuvirhesarja" lines that the ohjaamo puts in front of the operator.
+ *
+ *  10 is chosen from both directions, and deliberately from the small end:
+ *  - Long enough to be a state, not a blip. At the 3 s default cadence it is
+ *    ~30 s of uninterrupted healthy polling before the tight limit comes back,
+ *    while the noise it must ignore is a SINGLE stuck connection (~0.6 per
+ *    minute, i.e. one per ~100 polls, 31/31 retries succeeding first try —
+ *    #156). Ten clean polls in a row cannot be produced by that noise.
+ *  - Short enough to cost almost nothing when the valve opened by accident.
+ *    The only price of the loose limit is that a stuck connection is again
+ *    waited out for 4 s instead of 1 s, and at that failure rate ten polls
+ *    span at most one such connection: ~3 s of extra latency, once, before
+ *    the tight limit is back. A much larger N would quietly re-ship the
+ *    pre-#156 behaviour for the rest of the match.
+ *
+ *  Honest residual: a genuinely slow API makes this settle into ~10 good polls
+ *  followed by 3 aborts (23 % dropped, against 75 % with no dwell at all), not
+ *  a permanently open valve. Closing that gap needs the valve to key on the
+ *  MEASURED duration of successful deltas rather than on failures; that is a
+ *  bigger change and there is still no match's worth of data showing an API
+ *  that behaves this way. */
+const DELTA_SLOW_DWELL_POLLS = 10;
 /** Metadata (roster) fetch timeout: the startup fetch and the in-match roster
  *  refresh (`maybeRefreshRoster`).
  *
@@ -443,6 +474,10 @@ export class CommentaryLoop {
    *  alarm threshold (FETCH_FAILURE_ALARM_STREAK) and the streak position on
    *  the failure log line. */
   private consecutiveFetchFailures = 0;
+  /** Successful polls still owed to the loosened delta timeout (hysteresis, see
+   *  DELTA_SLOW_DWELL_POLLS). Armed when a failure streak reaches the alarm
+   *  threshold, decremented by each success — NOT cleared by the first one. */
+  private slowDeltaDwellPolls = 0;
   /** Consecutive reset answers of any kind; cleared by any delta that actually
    *  merges or 304s. Only drives the log (one line per streak, not per poll —
    *  the match-start streak is ~60 polls long at the default cadence). */
@@ -984,6 +1019,12 @@ export class CommentaryLoop {
     this.pollStats.fetchFailures++;
     this.pollWindow.failures++;
     const streak = ++this.consecutiveFetchFailures;
+    // Arm (and re-arm, for as long as the streak lasts) the loosened delta
+    // timeout. Arming here rather than reading the streak in apiTimeoutMs() is
+    // what makes the valve outlive the streak: recordPollSuccess() clears the
+    // streak, but the dwell counter it decrements takes DELTA_SLOW_DWELL_POLLS
+    // successes to run out.
+    if (streak >= FETCH_FAILURE_ALARM_STREAK) this.slowDeltaDwellPolls = DELTA_SLOW_DWELL_POLLS;
     const seconds = ((Date.now() - cycleStartedAt) / 1000).toFixed(1);
     const label = streak >= FETCH_FAILURE_ALARM_STREAK ? "HUOM, hakuvirhesarja" : "Hakuvirhe";
     logWarn("api.fetch_failed", `${label} (kesto ${seconds} s, ${streak}. peräkkäinen): ${err instanceof Error ? err.message : err}`);
@@ -997,6 +1038,10 @@ export class CommentaryLoop {
       logInfo("api.fetch_recovered", `Haku onnistui jälleen — ${this.consecutiveFetchFailures} peräkkäistä hakuvirhettä takana.`);
     }
     this.consecutiveFetchFailures = 0;
+    // One success is not evidence that the tight limit fits again — it may be
+    // the loose limit that let this very poll through. Hence a countdown, not
+    // a clear.
+    if (this.slowDeltaDwellPolls > 0) this.slowDeltaDwellPolls--;
   }
 
   /** Runs a startup fetch that must not be allowed to kill the process (#158).
@@ -1050,9 +1095,13 @@ export class CommentaryLoop {
    *  fetches the cadence itself expects to be slow. */
   private apiTimeoutMs(size: FetchSize): number {
     if (size === "delta") {
-      return this.consecutiveFetchFailures >= FETCH_FAILURE_ALARM_STREAK
-        ? DELTA_FETCH_TIMEOUT_SLOW_MS
-        : DELTA_FETCH_TIMEOUT_MS;
+      // Open on the streak, held open by the dwell counter (see
+      // DELTA_SLOW_DWELL_POLLS): the streak itself is gone the moment a poll
+      // succeeds, so keying only on it would give the loose limit to one poll
+      // in four instead of to the state that needs it.
+      const loosened =
+        this.consecutiveFetchFailures >= FETCH_FAILURE_ALARM_STREAK || this.slowDeltaDwellPolls > 0;
+      return loosened ? DELTA_FETCH_TIMEOUT_SLOW_MS : DELTA_FETCH_TIMEOUT_MS;
     }
     if (size === "meta") return META_FETCH_TIMEOUT_MS;
     return Math.max(FULL_FETCH_TIMEOUT_MS, this.pollIntervalMs);

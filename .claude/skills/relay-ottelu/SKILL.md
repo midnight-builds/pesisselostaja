@@ -88,7 +88,13 @@ ole olemassa; jos joku kuvailee sellaista, oletus on väärä.
    vain kun ohjaamon `CONTROL_HARD_STOP_SOURCE` on päällä. Siivouksen tekee
    ohjaamo itse; sinä et transitoi lähetyksiä käsin.
 2. **Uptime voittaa siisteyden.** Ottelun ollessa kesken kuollut raakalähetys voi
-   palata — älä pysäytä relayta.
+   palata — älä pysäytä relayta. **Restart kesken ottelun ei ole muutaman
+   sekunnin toimenpide** (#249, 16.8.2026): jokainen käynnistys ratkaisee
+   lähdeosoitteen uudelleen yt-dlp:llä, ja se ratkaisu voi kaatua tämän repon
+   ulkopuoliseen esteeseen — YouTube vastasi bottitarkistuksella ja katsojat
+   näkivät katvekuvaa ~4 min. Restarttaa vain rikkinäisen palauttamiseksi, ei
+   laatusäätöön; säädöt (selostusviive, pelaajanvaihdot) menevät perille ilman
+   uudelleenkäynnistystä.
 3. **Levytila alle 2 Gt → pysäytä kaikki kirjoittavat operaatiot heti** ja
    ilmoita käyttäjälle (globaali sääntö).
 

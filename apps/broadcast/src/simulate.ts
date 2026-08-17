@@ -17,6 +17,7 @@ import { loadState, addRun, getPeriodScore, periodsWon, periodsPlayed, type Watc
 import { loadPronunciations, applyPronunciations, preventOrdinalReading } from "./nodePronunciation.js";
 import { PiperTts } from "./piperTts.js";
 import { buildMixFilterComplex } from "./ffmpegMixer.js";
+import { ytdlpVodArgs } from "./ytdlpSource.js";
 import { log } from "./log.js";
 
 // Same .env.relay systemd's EnvironmentFile gives the live service, so an
@@ -70,13 +71,10 @@ async function downloadVod(youtubeUrl: string, outPath: string): Promise<void> {
     return;
   }
   log("Ladataan VOD yt-dlp:llä…");
-  await runInherit("yt-dlp", [
-    "--no-playlist",
-    "-f", "bv*+ba/best",
-    "--merge-output-format", "mp4",
-    "-o", outPath,
-    youtubeUrl,
-  ]);
+  // Argumentit ovat ytdlpVodArgsissa, jotta jako relayn kanssa (extractor-
+  // argumentit kyllä, formaattivalinta ei — #249) on testin ulottuvilla: tämä
+  // moduuli ajaa main():n importissa eikä sitä voi importata testiin.
+  await runInherit("yt-dlp", [...ytdlpVodArgs(outPath), youtubeUrl]);
 }
 
 async function probeDurationSec(path: string): Promise<number> {

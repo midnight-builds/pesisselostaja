@@ -19,6 +19,7 @@
 
 import type { LiveState, NotificationPrefs, PreflightResult } from "../shared/types.js";
 import { blockedPushTitle, jobArrivalPush, jobEndedPush } from "../shared/jobState.js";
+import { isTargetDeadMidMatch } from "../shared/targetHealth.js";
 import { sendPushDetailed } from "./push.js";
 import { createStore } from "./store.js";
 
@@ -113,6 +114,14 @@ interface Memory {
    *  käynnistyssääntö kuin yllä: eilen päättyneen ottelun siivousmerkintä ei
    *  ole tänään uutinen. */
   endedKey: string | null | undefined;
+  /** `<jobId>:<videoId>` sille kohteelle, jonka kuolemasta on jo ilmoitettu
+   *  (#250), `null` kun sellaista ei ole. Avaimessa on videoId eikä pelkkä
+   *  työ, koska toipumispolku luo SAMALLE työlle uuden kohteen — ja sen
+   *  uuden kohteen kuolema on uusi uutinen, ei saman episodin toistoa. EI
+   *  `undefined`-alkuarvoa tarkoituksella: kuollut kohde kesken ottelun on
+   *  ajankohtainen ja toimintaa vaativa myös silloin, kun ohjaamo käynnistyi
+   *  uudelleen kesken episodin — hiljaisuus olisi tässä se vika. */
+  targetDeadKey: string | null;
 }
 
 const memory: Memory = {
@@ -121,6 +130,7 @@ const memory: Memory = {
   failNotified: false,
   jobKey: undefined,
   endedKey: undefined,
+  targetDeadKey: null,
 };
 
 /** Test seam: the module keeps process-lifetime state, so a test that drives
@@ -131,6 +141,7 @@ export function resetNotificationState(): void {
   memory.failNotified = false;
   memory.jobKey = undefined;
   memory.endedKey = undefined;
+  memory.targetDeadKey = null;
   lastSentAt.clear();
   lastFailedAt.clear();
 }
@@ -251,6 +262,42 @@ async function observe(state: LiveState): Promise<void> {
     );
   }
 
+  // --- Selostettu lähetys kuoli YouTubessa kesken ottelun (#250).
+  //
+  // Ei FAIL_CONFIRM_MS-odotusta: vahvistusaika on lepatusta vastaan, ja
+  // YouTuben "complete" on lopullinen tila joka ei voi lepattaa — päättynyttä
+  // lähetystä ei voi palauttaa liveksi. Jokainen odotettu minuutti on pois
+  // siitä ajasta, jona loppuottelulle ehtii vielä pystyttää uuden lähetyksen.
+  // 16.8.2026 (ottelu 136771) tämä selvisi käsin tarkistamalla, ja
+  // loppuottelu meni katsojilta ohi.
+  let announcedTargetDead = false;
+  const targetDead = isTargetDeadMidMatch({
+    job: state.job,
+    relayActive: state.relay.active,
+    matchFinished: state.match.finished,
+    ingest: state.targetIngest,
+    nowMs: now,
+  });
+  const targetKey = state.job?.targetVideoId ? `${state.job.id}:${state.job.targetVideoId}` : null;
+  if (prefs.broken && targetDead && targetKey !== null && memory.targetDeadKey !== targetKey) {
+    announcedTargetDead = await notify(
+      `target-dead:${targetKey}`,
+      "Selostettu lähetys kuoli",
+      `${matchLabel(state)} — YouTube on päättänyt selostetun lähetyksen, mutta ottelu on kesken. Jaettu linkki ei enää näytä lähetystä.`
+    );
+    // Leima vasta onnistuneesta toimituksesta (sama sääntö kuin notify()n
+    // vaimennuksessa, #205): hukkunut push yritetään uudelleen seuraavilla
+    // tikeillä, ja toistoa rajoittavat notify()n omat suojat.
+    if (announcedTargetDead) memory.targetDeadKey = targetKey;
+  }
+  // Kuolleen kohteen episodi on auki niin kauan kuin työn kohde on yhä se,
+  // jonka kuolemasta ilmoitettiin. Kuolema on lopullinen (päättynyttä
+  // lähetystä ei voi palauttaa liveksi), joten mikään health-heilahdus —
+  // ottelun päättyminen, transientti API-virhe havainnon tilalla, portin
+  // hetkellinen sulkeutuminen — ei ole toipumista ennen kuin työlle on
+  // oikeasti luotu uusi kohde (videoId vaihtuu) tai työ vaihtuu.
+  const deadEpisodeOpen = targetKey !== null && memory.targetDeadKey === targetKey;
+
   // --- Selostettu lähetys päättyi: päivän kolmas ja viimeinen push (#174).
   //
   // Ehto EI ole työn siirtyminen `finished`-tilaan vaan siivouksen kirjaus
@@ -273,7 +320,10 @@ async function observe(state: LiveState): Promise<void> {
     // A mid-match stop we just announced IS this failure. Marking the episode
     // as announced keeps the phone from buzzing twice about one event a minute
     // apart — the second buzz would carry no information the first didn't.
-    if (announcedMidMatchStop) memory.failNotified = true;
+    // Sama sääntö kohteen kuolemalle (#250): deriveHealth kääntää saman
+    // havainnon failiksi samalla tikillä, ja toinen piippaus minuutin päästä
+    // ei kertoisi mitään uutta.
+    if (announcedMidMatchStop || announcedTargetDead || deadEpisodeOpen) memory.failNotified = true;
 
     if (prefs.broken && !memory.failNotified && now - memory.failSince >= FAIL_CONFIRM_MS) {
       memory.failNotified = true;
@@ -283,7 +333,15 @@ async function observe(state: LiveState): Promise<void> {
     // Recovery is only ever reported for a failure we actually reported. Left
     // out, an operator who got "Lähetys rikki" would have no way to learn from
     // the phone that it healed — and would drive back to the field for nothing.
-    if (memory.failNotified && prefs.broken) {
+    // Avoimen kohde-episodin aikana health voi käydä ok:ssa vain väärästä
+    // syystä: ottelu päättyi (mitään ei korjaantunut — loppuottelu meni jo
+    // katsojilta ohi) tai varma complete-havainto korvautui hetkeksi
+    // virheellä/portin sulkeutumisella (tiedon menetys ei ole toipumista).
+    // "Lähetys taas kunnossa" olisi silloin valhe — ja pahimmillaan se
+    // saapuisi juuri kun operaattori on lähdössä pystyttämään uutta
+    // lähetystä. Aito toipuminen kulkee uuden kohteen kautta, jolloin
+    // episodi ei enää ole auki.
+    if (memory.failNotified && prefs.broken && !deadEpisodeOpen) {
       await notify("health-recovered", "Lähetys taas kunnossa", state.headline);
     }
     memory.failSince = null;

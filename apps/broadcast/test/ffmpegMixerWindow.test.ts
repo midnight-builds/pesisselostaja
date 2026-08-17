@@ -1,5 +1,14 @@
-import { describe, it, expect } from "vitest";
-import { FfmpegMixer, SourceExhaustedError } from "../src/ffmpegMixer.js";
+import { describe, it, expect, vi } from "vitest";
+import { SourceThrottledError } from "../src/ytdlpSource.js";
+import {
+  BACKOFF_MAX_MS,
+  clampSleepToWindow,
+  FfmpegMixer,
+  nextBackoffMs,
+  SourceExhaustedError,
+  THROTTLED_BACKOFF_MAX_MS,
+  THROTTLED_BACKOFF_MIN_MS,
+} from "../src/ffmpegMixer.js";
 
 /** Drives the real supervisor loop with a source resolver that always throws,
  *  so no ffmpeg process is ever spawned — only the give-up window logic runs.
@@ -37,5 +46,135 @@ describe("FfmpegMixer give-up window after match end", () => {
     ]);
     mixer.stop();
     expect(outcome).toBe("still-retrying"); // same failures, but no give-up inside the short window
+  }, 10000);
+});
+
+/** Issue #249: on 16.8.2026 YouTube answered a mid-match re-resolve with HTTP
+ *  429 + the bot check. At the ordinary 30 s cap the relay would knock twice a
+ *  minute for as long as the block lasted. */
+describe("respawn backoff against YouTube's bot check / 429", () => {
+  const MID_MATCH_WINDOW = 12 * 60 * 1000;
+  const FINISHED_WINDOW = 2 * 60 * 1000;
+
+  it("keeps the ordinary fast backoff for an ordinary outage", () => {
+    expect(nextBackoffMs(1000, { throttled: false, giveUpWindowMs: MID_MATCH_WINDOW })).toBe(2000);
+    expect(nextBackoffMs(20000, { throttled: false, giveUpWindowMs: MID_MATCH_WINDOW })).toBe(
+      BACKOFF_MAX_MS
+    );
+  });
+
+  it("jumps straight to a minute when YouTube throttled us — no creeping up from 1 s", () => {
+    expect(nextBackoffMs(1000, { throttled: true, giveUpWindowMs: MID_MATCH_WINDOW })).toBe(
+      THROTTLED_BACKOFF_MIN_MS
+    );
+  });
+
+  it("backs off well past the ordinary cap instead of hammering the block", () => {
+    let ms = 1000;
+    const seen: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      ms = nextBackoffMs(ms, { throttled: true, giveUpWindowMs: MID_MATCH_WINDOW });
+      seen.push(ms);
+    }
+    expect(Math.min(...seen)).toBeGreaterThan(BACKOFF_MAX_MS);
+    expect(Math.max(...seen)).toBe(THROTTLED_BACKOFF_MAX_MS);
+  });
+
+  it("never sleeps past half the give-up window — the window owns the give-up decision", () => {
+    // A finished match cleans up in 2 min; a 5 min nap would decide that by
+    // oversleeping instead.
+    expect(
+      nextBackoffMs(60000, { throttled: true, giveUpWindowMs: FINISHED_WINDOW })
+    ).toBeLessThanOrEqual(FINISHED_WINDOW / 2);
+  });
+
+  /** Löydetty tätä korjatessa: katto laskettiin vain arvoa luotaessa, mutta
+   *  ikkuna KUTISTUU kun ottelu päättyy (12 min → 2 min). Vanha 5 min uni
+   *  eläisi uuden ikkunan yli omin voimin — mitattu 300 s luovutukseen siinä
+   *  missä tavallinen katkos vie 150 s. */
+  it("re-applies the ceiling at sleep time, after the window shrinks", () => {
+    const midMatchBackoff = THROTTLED_BACKOFF_MAX_MS; // 5 min, laskettu 12 min ikkunalla
+    expect(clampSleepToWindow(midMatchBackoff, 2 * 60 * 1000)).toBe(60_000);
+    // Ei kasvata mitään: lyhyempi uni menee läpi sellaisenaan.
+    expect(clampSleepToWindow(5_000, 12 * 60 * 1000)).toBe(5_000);
+  });
+
+  /** Puhdas funktio ei riitä: sen kutsu on se, mikä voi kadota.
+   *
+   *  Ratkaiseva hetki on kapea ja siksi helppo testata väärin: silmukka laskee
+   *  seuraavan backoffin heti unen JÄLKEEN, joten unen aikana päättynyt ottelu
+   *  tulee huomioiduksi ilman kattoakin. Katto tarvitaan silloin kun ikkuna
+   *  kutistuu laskennan jälkeen mutta ennen seuraavaa unta — eli kesken itse
+   *  hakuyrityksen, joka oikealla yt-dlp:llä kestää sekunteja. Siksi ottelu
+   *  päätetään tässä resolverin sisällä. */
+  it("applies the ceiling at the main loop's sleep, not just in the pure function", async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => void lines.push(String(a[0])));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    let finished = false;
+    let attempts = 0;
+    const mixer = new FfmpegMixer({
+      youtubeUrl: "https://example.invalid/live",
+      rtmpUrl: "", streamKey: "",
+      narrationGain: 1.3,
+      fifoPath: "/tmp/pesis-test-mixer-clamp.pcm",
+      maxFailureWindowMs: 12 * 60 * 1000,
+      // Ottelun päätyttyä ikkuna on 20 s, eli puolet siitä on 10 s.
+      finishedFailureWindowMs: 20_000,
+      isMatchFinished: () => finished,
+      resolveTestSource: () => {
+        // Toinen yritys on se, jonka AIKANA ottelu päättyy: backoff (60 s) on
+        // jo laskettu 12 min ikkunalla, uni lasketaan vasta tämän jälkeen.
+        if (++attempts === 2) finished = true;
+        throw new SourceThrottledError("ERROR: HTTP Error 429: Too Many Requests");
+      },
+    });
+
+    void mixer.start().catch(() => undefined);
+    const respawns = (): string[] => lines.filter((l) => l.includes("Uudelleenyritys"));
+    const until = Date.now() + 6000;
+    while (Date.now() < until && respawns().length < 2) await new Promise((r) => setTimeout(r, 20));
+    mixer.stop();
+
+    const second = respawns()[1] ?? "";
+    expect(second).toContain("Uudelleenyritys 10000ms");
+    expect(second).not.toContain("Uudelleenyritys 60000ms");
+  }, 15000);
+
+  it("caps at half the window for EVERY window, including short ones", () => {
+    // Aiempi versio piti 30 s lattian myös silloin kun ikkuna oli 30 s, eli
+    // yksi uni söi koko ikkunan. Katto on katto, ei toive.
+    for (const windowMs of [50, 2000, 30_000, 59_000, 120_000, 12 * 60 * 1000]) {
+      let ms = 1000;
+      for (let i = 0; i < 8; i++) {
+        ms = nextBackoffMs(ms, { throttled: true, giveUpWindowMs: windowMs });
+        expect(ms).toBeLessThanOrEqual(Math.max(1, Math.floor(windowMs / 2)));
+      }
+    }
+  });
+
+  it("tells the operator which END is in trouble, not just 'lähde failed'", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const mixer = new FfmpegMixer({
+      youtubeUrl: "https://example.invalid/live",
+      rtmpUrl: "", streamKey: "",
+      narrationGain: 1.3,
+      fifoPath: "/tmp/pesis-test-mixer-throttled.pcm",
+      resolveTestSource: () => {
+        throw new SourceThrottledError("ERROR: Sign in to confirm you’re not a bot. HTTP Error 429");
+      },
+    });
+    void mixer.start().catch(() => undefined);
+    for (let i = 0; i < 40 && mixer.sourceDetail === null; i++) await new Promise((r) => setTimeout(r, 50));
+    const detail = mixer.sourceDetail ?? "";
+    mixer.stop();
+
+    // The state itself stays in the union the ohjaamo already mirrors…
+    expect(mixer.sourceState).toBe("failed");
+    // …but the wording no longer sends the operator after the camera phone,
+    // which is the one end of the chain nobody can reach mid-match (#249).
+    expect(detail).toMatch(/YouTube torjuu haun/i);
+    expect(detail).toMatch(/raakalähetyksen omasta tilasta ei tietoa/i);
   }, 10000);
 });

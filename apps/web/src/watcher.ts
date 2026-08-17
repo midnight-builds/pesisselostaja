@@ -131,6 +131,7 @@ export class BrowserWatcher {
   private _volumeBoost = false;
   private _piperFailed = false; // sticky fallback to browser this session
   private _elevenLabsApiKey = "";
+  private _elevenLabsVoiceId = ""; // empty = the module default (issue #63)
   private _elevenLabsFailed = false; // sticky fallback to browser this session
   private _currentAudio: HTMLAudioElement | null = null;
   private _currentSource: AudioBufferSourceNode | null = null;
@@ -181,6 +182,14 @@ export class BrowserWatcher {
   setElevenLabsApiKey(apiKey: string): void {
     if (apiKey !== this._elevenLabsApiKey) this._elevenLabsFailed = false;
     this._elevenLabsApiKey = apiKey;
+  }
+
+  /** Voice ID from the settings; empty means the module default (issue #63).
+   *  Changing it clears the sticky fallback, the same way a new key does — a
+   *  bad ID that made synthesis fail must not keep the engine off after a fix. */
+  setElevenLabsVoice(voiceId: string): void {
+    if (voiceId !== this._elevenLabsVoiceId) this._elevenLabsFailed = false;
+    this._elevenLabsVoiceId = voiceId;
   }
 
   /** Speaker mode: boost Piper playback above unity gain (with a limiter). */
@@ -935,7 +944,7 @@ export class BrowserWatcher {
   private async _speakElevenLabs(text: string, token: number): Promise<void> {
     const startedAt = Date.now();
     debugLog("speak-elevenlabs-start", { text, chars: text.length });
-    const blob = await elevenLabsSynthesize(text, this._elevenLabsApiKey);
+    const blob = await elevenLabsSynthesize(text, this._elevenLabsApiKey, this._elevenLabsVoiceId);
     if (this._muted || token !== this._drainToken) return; // cancelled during synth
     await this._playBlob(blob);
     debugLog("speak-elevenlabs-end", { text, ms: Date.now() - startedAt });

@@ -64,6 +64,17 @@ const REWRITES: Rewrite[] = [
   { name: "Kohde", status: "ok", text: "Selostettu lähetys on valmis ottamaan kuvaa vastaan." },
   { name: "Ottelu", status: "fail", contains: "RELAY_MATCH_ID", text: "Ottelua ei ole sidottu — valitse ottelu uudelleen." },
   { name: "Lähde", status: "fail", contains: "RELAY_YOUTUBE_URL", text: "Raakalähetystä ei ole sidottu — luo lähetyspari." },
+  {
+    name: "Lähde",
+    status: "fail",
+    contains: "bottitarkistus",
+    // #249: YouTube torjuu HAKUPÄÄN, ei raakalähetystä. Ilman omaa riviä tästä
+    // tulisi "Lähde ei vastaa", joka lähettää operaattorin kuvaajan perään —
+    // sen ketjun päähän johon ottelun aikana ei edes ylety.
+    text:
+      "YouTube ei suostu antamaan kuvaa relaylle (bottitarkistus) — raakalähetys voi silti " +
+      "olla kunnossa. Relay perääntyy ja yrittää itse uudelleen; jos tila ei korjaannu, ilmoita ylläpitoon.",
+  },
 ];
 
 /** Viimeinen suoja: rivi jolle ei ole omaa käännöstä ei silti saa vuotaa
@@ -74,6 +85,11 @@ const ENV_WORD: Record<string, string> = {
   RELAY_YOUTUBE_URL: "raakalähetys",
   RELAY_STREAM_KEY: "selostetun lähetyksen kohde",
   RELAY_RTMP_URL: "kohteen osoite",
+  // #249: relayn oma rivi neuvoo kokeilemaan toista player_clientiä tällä
+  // avaimella. Ilman omaa sanaa yleiskorvaus teki siitä lauseen "Kokeile
+  // toista player_clientiä ohjaamon sidonta:lla" — eli ohjeen, joka osoittaa
+  // väärään asetukseen. Ei ohjaamon sidontaa, vaan relayn hakutapa.
+  RELAY_YTDLP_EXTRACTOR_ARGS: "relayn hakutavan asetus",
 };
 
 export function redactEnvKeys(detail: string): string {

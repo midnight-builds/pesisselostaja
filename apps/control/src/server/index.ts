@@ -23,6 +23,7 @@ import { watchUrlForVideo } from "../shared/youtubeUrl.js";
 import { hasBroadcastPair } from "../shared/jobState.js";
 import { startLiveAggregator } from "./live.js";
 import { createSourceIngestPoller } from "./sourceIngest.js";
+import { createTargetIngestPoller } from "./targetIngest.js";
 import { getDayMatches, getMatch } from "./matches.js";
 import {
   listJobs,
@@ -768,6 +769,10 @@ async function main(): Promise<void> {
   // aktiivista työtä, ajossa olevaa relayta ja Google-tunnuksia se ei kutsu
   // YouTubea kertaakaan (sourceIngest.ts).
   const sourceIngest = createSourceIngestPoller();
+  // Kohteen polleri (#250): sama porttimalli, mutta katsottava lähetys on se
+  // johon relay työntää. YouTube on kohteen tilan ainoa todistaja — relayn
+  // työntö onnistuu myös kuolleeseen lähetykseen.
+  const targetIngest = createTargetIngestPoller();
 
   // The live view needs to know which job is currently the relay's job to
   // know what to poll; the aggregator asks rather than the server pushing it
@@ -775,6 +780,7 @@ async function main(): Promise<void> {
   const live = startLiveAggregator({
     getActiveJob,
     getSourceIngest: () => ({ ingest: sourceIngest.current(), reason: sourceIngest.reason() }),
+    getTargetIngest: () => ({ ingest: targetIngest.current(), reason: targetIngest.reason() }),
   });
 
   // Push triggers ride along as an ordinary subscriber instead of being wired
@@ -837,6 +843,7 @@ async function main(): Promise<void> {
     // riippumaton, eikä kesken oleva YouTube-kutsu saa pitää prosessia
     // pystyssä sammutuksen jälkeen.
     sourceIngest.stop();
+    targetIngest.stop();
     authWatch();
     live.stop();
     server.close(() => process.exit(0));
