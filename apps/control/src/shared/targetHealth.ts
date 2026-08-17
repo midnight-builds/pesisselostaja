@@ -46,8 +46,8 @@ export type TargetDeathReason = "ended" | "missing";
  *
  *  Rajaus kesken ottelun ja ajossa olevaan työhön on yhtä tärkeä kuin itse
  *  tarkistus: ottelun jälkeen `complete` on normaali, terve lopputila
- *  (enableAutoStop tai hard stopin siivous sulkee lähetyksen), eikä siitä saa
- *  syntyä hälytystä. */
+ *  (hallittu lopetus #153, hard stopin siivous tai enableAutoStop sulkee
+ *  lähetyksen), eikä siitä saa syntyä hälytystä. */
 export function targetDeathReason(input: {
   job: Job | null;
   relayActive: boolean;

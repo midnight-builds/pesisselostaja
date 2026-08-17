@@ -69,9 +69,16 @@ inferring it. Getting this wrong ships to every broadcast.
 kosketa ottelun ollessa kesken.** Ainoa sallittu kirjoitus on hard stopin siivous päättyneen
 ottelun jälkeen (issue #123), ja sekin vain kun `CONTROL_HARD_STOP_SOURCE` on
 päällä (oletus pois). Siivouksen tekee ohjaamo laskevalla reunalla, kun relayn
-oma telemetria kertoo `endReason === "hard_stop"`. Selostettu lähetys transitoidaan
-`complete`ksi vain samassa tilanteessa — normaalissa lopetuksessa luotetaan
-YouTuben `enableAutoStop`iin.
+oma telemetria kertoo `endReason === "hard_stop"`.
+
+**Selostettu lähetys on eri asia, eikä sitä koske tämä sääntö.** Ohjaamo
+transitoi sen `complete`ksi kahdessa tilanteessa: hard stopissa, ja hallitussa
+lopetuksessa kun relayn telemetria kertoo sekä `endReason === "ended"` että
+`match.finished` (issue #153) — siis raakalähetys päättyi ja tulospalvelu on
+kirjannut ottelun päättyneeksi. Molemmat ehdot vaaditaan, koska pelkkä `ended`
+tulee myös kesken ottelun kuolleesta raakalähetyksestä (akku, verkko), ja
+`complete` silloin katkaisisi elävän lähetyksen katsojilta. Kun kumpikaan ehto
+ei täyty, kohteen sulkee edelleen YouTuben `enableAutoStop`.
 
 Aiempi ehdoton muotoilu ("alkuperäistä lähetystä ei kosketa koskaan") on
 korvattu tällä; älä palauta sitä. Sama teksti on `.claude/skills/relay-ottelu/`
@@ -126,6 +133,11 @@ itsestään.
 **Ei koeteltu kertaakaan:**
 
 - **Hard stopin siivous** — kaikki kolme lopetusta tulivat normaalina polkuna.
+- **Hallittu lopetus** (#153) — kirjoitettu vasta kolmen ajon jälkeen, joten
+  yksikään niistä ei kulkenut sitä polkua: kaikki kolme päättyivät YouTuben
+  AutoStopiin. Ensimmäisellä ottelupäivällä on siis katsottava, sulkeutuuko
+  selostettu lähetys ohjaamon omasta transitiosta ja miltä se näyttää
+  katsojalle.
 - **Työn sidonnan sovittelu ja ristiriitavaroitus** (#118). Ohjaamo ei
   kirjoittanut 5.8. lokiin riviäkään koko ottelun aikana (ks. #232), joten
   ajosta ei jäänyt näyttöä suuntaan eikä toiseen.

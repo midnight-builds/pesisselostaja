@@ -5,9 +5,14 @@
  *  roskaa (#121). Laskeva reuna live.ts:ssä on ainoa aina päällä oleva
  *  havainnoija, joten siivous tehdään siellä.
  *
- *  Kaksi rajaa, jotka nämä testit vartioivat:
- *   - siivous tehdään VAIN kun relay kertoo `endReason === "hard_stop"`;
- *   - LÄHDElähetykseen kosketaan vain kun CONTROL_HARD_STOP_SOURCE on päällä.
+ *  Kolme rajaa, jotka nämä testit vartioivat:
+ *   - HARD STOPIN siivous tehdään vain kun relay kertoo
+ *     `endReason === "hard_stop"`;
+ *   - RAAKALÄHETYKSEEN kosketaan vain hard stopissa ja vain kun
+ *     CONTROL_HARD_STOP_SOURCE on päällä;
+ *   - SELOSTETTU lähetys transitoidaan `complete`ksi lisäksi hallitussa
+ *     lopetuksessa: `endReason === "ended"` JA `match.finished` (#153).
+ *     Hallitun lopetuksen omat testit ovat tiedoston lopussa.
  *
  *  Erillään runEnd.test.ts:stä tarkoituksella: se on tunnetusti herkkä
  *  ajastinkilpailulle, eikä sen mockeja haluta sotkea tähän.
@@ -178,6 +183,8 @@ async function runFallingEdge(options: {
   transition?: (videoId: string) => Promise<TransitionResult>;
   telemetryOverrides?: Partial<RelayTelemetry>;
   jobOverrides?: Partial<Job>;
+  /** Koko telemetrian luvun korvaaja — sillä testataan luvun kaatuminen. */
+  readTelemetry?: () => Promise<RelayTelemetry | null>;
 }): Promise<{
   transition: ReturnType<typeof vi.fn>;
   closeRunningJob: ReturnType<typeof vi.fn>;
@@ -205,7 +212,8 @@ async function runFallingEdge(options: {
     // testissä työn tila pysyy sinä miksi se on asetettu.
     markRunStarted: async () => null,
     transitionBroadcast: transition,
-    readTelemetry: async () => telemetry(options.endReason, options.telemetryOverrides),
+    readTelemetry:
+      options.readTelemetry ?? (async () => telemetry(options.endReason, options.telemetryOverrides)),
     hardStopSource: options.hardStopSource ?? false,
     recordJobCleanup,
   });
@@ -253,12 +261,20 @@ describe("hard stop -siivous laskevalla reunalla", () => {
     expect(transition.mock.calls.map((c) => c[0])).toEqual([TARGET_VIDEO_ID, SOURCE_VIDEO_ID]);
   });
 
-  it("normaali lopetus: ei transitiota lainkaan (enableAutoStop hoitaa kohteen)", async () => {
+  // Ennen #153:a tämä testi väitti: "normaali lopetus: ei transitiota
+  // lainkaan (enableAutoStop hoitaa kohteen)". Väite piti paikkansa vain
+  // niin kauan kuin hallittua lopetusta ei ollut — nyt `ended` +
+  // `match.finished` sulkee SELOSTETUN lähetyksen itse. Se osa väitteestä,
+  // joka EI muuttunut, on tässä yhä ja on koko testin pointti: hard stopin
+  // lippu ei avaa raakalähetystä normaalissa lopetuksessa.
+  it("normaali lopetus: raakalähetykseen EI kosketa vaikka hard stop -lippu on päällä", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
     const { transition, closeRunningJob } = await runFallingEdge({
       endReason: "ended",
       hardStopSource: true,
     });
-    expect(transition).not.toHaveBeenCalled();
+    expect(transition.mock.calls.map((c) => c[0])).toEqual([TARGET_VIDEO_ID]);
+    expect(transition).not.toHaveBeenCalledWith(SOURCE_VIDEO_ID);
     expect(closeRunningJob).toHaveBeenCalledTimes(1);
   });
 
@@ -511,8 +527,13 @@ describe("hard stop -siivous sovittelun polulla", () => {
  *  myös silloin kun tehtävää ei ollut — ja sen on kerrottava sekä teot että se,
  *  mistä lopetus pääteltiin. */
 describe("siivouksen kirjaus työhön (#187)", () => {
-  it("kirjaa myös normaalin lopetuksen: tyhjä tekolista ei ole puuttuva siivous", async () => {
-    const { cleanup, transition } = await runFallingEdge({ endReason: "ended" });
+  // Skenaario vaihtui #153:ssa `ended` → `exhausted`, koska `ended` +
+  // `match.finished` sulkee nyt selostetun lähetyksen eikä sen tekolista ole
+  // enää tyhjä. Testin VÄITE on ennallaan ja pätee yhä: lopetus, jossa ei ole
+  // mitään tehtävää (relay luovutti luovutusikkunan umpeuduttua), kirjataan
+  // silti — tyhjä tekolista ei ole puuttuva siivous.
+  it("kirjaa myös lopetuksen jossa ei ollut tehtävää: tyhjä tekolista ei ole puuttuva siivous", async () => {
+    const { cleanup, transition } = await runFallingEdge({ endReason: "exhausted" });
 
     expect(transition).not.toHaveBeenCalled();
     expect(cleanup).not.toBeNull();
@@ -571,5 +592,212 @@ describe("siivouksen kirjaus työhön (#187)", () => {
     expect(transition).not.toHaveBeenCalled();
     expect(cleanup?.actions).toEqual([]);
     expect(cleanup?.indicators).not.toContain("Raakalähetys päättyi.");
+  });
+});
+
+/** Hallittu lopetus (#153).
+ *
+ *  Selostettu lähetys jäi ennen roikkumaan YouTuben `enableAutoStop`in varaan,
+ *  eikä katsoja voinut tietää oliko lähetys ohi, katkolla vai palaamassa.
+ *  Ohjaamo transitoi sen nyt itse `complete`ksi — mutta VAIN kun ottelu on
+ *  oikeasti päättynyt.
+ *
+ *  Pahin mahdollinen lopputulos on liian aikainen `complete`: se katkaisee
+ *  elävän lähetyksen kesken ottelun, eikä se näy testeissä vaan katsojille.
+ *  Siksi ei-laukea-testejä on tässä enemmän kuin laukea-testejä, ja ne ovat
+ *  tämän tiedoston tärkeimmät. */
+describe("hallittu lopetus: ended + match.finished sulkee selostetun lähetyksen (#153)", () => {
+  it("LAUKEAA: ottelu päättynyt ja raakalähetys päättyi — selostettu suljetaan", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const { transition, closeRunningJob, cleanup } = await runFallingEdge({
+      endReason: "ended",
+      telemetryOverrides: {
+        source: { state: "ended", detail: "raakalähetys päättyi" },
+        match: { finished: true, eventCount: 412, lastEventAt: isoAgo(3 * 60 * 1000) },
+      },
+    });
+
+    expect(transition).toHaveBeenCalledTimes(1);
+    expect(transition).toHaveBeenCalledWith(TARGET_VIDEO_ID);
+    expect(closeRunningJob).toHaveBeenCalledTimes(1);
+    // Kortille kirjataan TEKO, ei pelkkä lokirivi (#201): kortti lukee
+    // `cleanup.actions`ia, ja ilman tätä väitettä vika eläisi testissä.
+    expect(cleanup?.actions).toEqual([{ what: "Selostettu lähetys suljettiin.", ok: true, detail: null }]);
+  });
+
+  it("LAUKEAA myös kun lippu on päällä — mutta raakalähetykseen ei silti kosketa", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    // Hard stopin lippu ei ole hallitun lopetuksen lippu. Raakalähetys on
+    // kuvaajan oma, ja siihen saa kirjoittaa vain hard stopissa (CLAUDE.md).
+    const { transition, cleanup } = await runFallingEdge({
+      endReason: "ended",
+      hardStopSource: true,
+    });
+
+    expect(transition.mock.calls.map((c) => c[0])).toEqual([TARGET_VIDEO_ID]);
+    // Eikä raakalähetyksestä kirjata riviä ollenkaan — ei "suljettiin" eikä
+    // "jäi sulkematta": se päättyi itse, ja juuri siitä `ended` syntyi.
+    expect(JSON.stringify(cleanup?.actions)).not.toContain("aakalähetys");
+  });
+
+  it("EI LAUKEA: katve — relay luovutti eikä ottelu ollut päättynyt", async () => {
+    // Luovutusikkunan sisäinen signaalin katoaminen ei ole lopetus
+    // (CONTEXT.md). Umpeutunut ikkuna antaa syyksi `exhausted`, ei `ended`.
+    const { transition, closeRunningJob } = await runFallingEdge({
+      endReason: "exhausted",
+      hardStopSource: true,
+      telemetryOverrides: {
+        source: { state: "no_signal", detail: "kuvaa ei tule" },
+        match: { finished: false, eventCount: 210, lastEventAt: isoAgo(30 * 1000) },
+      },
+    });
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(closeRunningJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("EI LAUKEA: raakalähetys päättyi KESKEN ottelun (akku loppui) — ended ilman match.finished", async () => {
+    // Tämä on se tilanne, jonka takia `match.finished` on ehdossa. Kuvaus-
+    // puhelimen akku loppuu, YouTuben oma AutoStop sulkee raakalähetyksen,
+    // relay näkee `ended` — ja ottelu on yhä kesken. Selostetun lähetyksen
+    // sulkeminen tässä katkaisisi lähetyksen katsojilta.
+    const { transition, closeRunningJob } = await runFallingEdge({
+      endReason: "ended",
+      hardStopSource: true,
+      telemetryOverrides: {
+        source: { state: "ended", detail: "raakalähetys päättyi kesken ottelun" },
+        match: { finished: false, eventCount: 210, lastEventAt: isoAgo(30 * 1000) },
+      },
+    });
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(closeRunningJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("EI LAUKEA: match.finished ilman ended — ottelu ohi mutta relay ei kertonut lopetussyytä", async () => {
+    // Vanha deploy, tai relay joka kaatui ehtimättä kirjata syytä. Ottelu on
+    // päättynyt, mutta MIKÄÄN ei kerro että raakalähetys olisi päättynyt:
+    // sitä ei saa päätellä pelkästä tulospalvelun kirjauksesta.
+    const { transition, closeRunningJob } = await runFallingEdge({
+      endReason: null,
+      hardStopSource: true,
+      telemetryOverrides: {
+        match: { finished: true, eventCount: 412, lastEventAt: isoAgo(3 * 60 * 1000) },
+      },
+    });
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(closeRunningJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("EI LAUKEA: telemetrian luku kaatuu — ei suljeta lähetystä arvauksen varassa", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const { transition, closeRunningJob, cleanup } = await runFallingEdge({
+      endReason: "ended",
+      hardStopSource: true,
+      readTelemetry: async () => {
+        throw new Error("ENOENT: run/status-145900.json");
+      },
+    });
+
+    expect(transition).not.toHaveBeenCalled();
+    // Ja lopputulos näkyy operaattorille tekona — hiljainen ohitus on juuri se
+    // vika, jonka takia lähetys jäi ottelussa 145900 työntämään roskaa (#121).
+    expect(cleanup?.actions.some((a) => !a.ok)).toBe(true);
+    expect(closeRunningJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("EI LAUKEA: status on toisesta ottelusta, vaikka se sanoisi ended + finished", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    // Sama tuoreusvartija kuin hard stopilla: levylle jäänyt VIERAAN ajon syy
+    // sulkisi lähetyksen, joka on vasta alkamassa.
+    const { transition, cleanup } = await runFallingEdge({
+      endReason: "ended",
+      telemetryOverrides: { matchId: 999999 },
+    });
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(cleanup?.actions).toEqual([]);
+    expect(warn.mock.calls.map((c) => c.join(" ")).join("\n")).toContain("999999");
+  });
+
+  it("EI LAUKEA: status on vanha kirjoitus", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const { transition } = await runFallingEdge({
+      endReason: "ended",
+      telemetryOverrides: { at: isoAgo(10 * 60 * 1000) },
+    });
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(warn.mock.calls.map((c) => c.join(" ")).join("\n")).toMatch(/ohitettu.*vanha/i);
+  });
+
+  it("EI LAUKEA: relayn hetkellinen pudotus settle-ikkunan sisällä ei ole lopetus", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    // Relayn oma uudelleenkäynnistys kestää sekunteja (#200). Vaikka levyllä
+    // olisi TÄYSIN laukaiseva syy, ajon ei ole päätelty päättyneen ennen kuin
+    // relay on ollut alhaalla yli settle-ikkunan.
+    let active: Job | null = job();
+    const closeRunningJob = vi.fn(async () => {
+      const closed: Job = { ...(active as Job), status: "finished" };
+      active = null;
+      return closed;
+    });
+    const transition = vi.fn(async (videoId: string) => ok(videoId));
+
+    relayState = { ...relayState, activeState: "active", active: true };
+    const live = startLiveAggregator({
+      getActiveJob: async () => active,
+      closeRunningJob,
+      markRunStarted: async () => null,
+      transitionBroadcast: transition,
+      readTelemetry: async () => telemetry("ended"),
+      hardStopSource: false,
+    });
+    await tick();
+    relayState = { ...relayState, activeState: "inactive", active: false };
+    await tick();
+    await tick(); // 10 s alhaalla = alle 30 s settle-ikkunan
+    relayState = { ...relayState, activeState: "active", active: true };
+    await tick();
+    live.stop();
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(closeRunningJob).not.toHaveBeenCalled();
+  });
+
+  it("transitio kaatuu hallitussa lopetuksessa: teko kirjataan käskynä ja työ suljetaan silti", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const { transition, closeRunningJob, cleanup } = await runFallingEdge({
+      endReason: "ended",
+      transition: async () => {
+        throw new Error("YouTube API liveBroadcasts/transition -> HTTP 403");
+      },
+    });
+
+    expect(transition).toHaveBeenCalledTimes(1);
+    expect(cleanup?.actions).toEqual([
+      {
+        what: "Selostettu lähetys ei sulkeutunut.",
+        ok: false,
+        detail: "Sulje selostettu lähetys YouTubessa itse.",
+      },
+    ]);
+    // YouTuben oma virheteksti EI päädy operaattorin riville (#176).
+    expect(JSON.stringify(cleanup)).not.toContain("HTTP 403");
+    expect(closeRunningJob).toHaveBeenCalledTimes(1);
   });
 });
