@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, openSync, closeSync, constants } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -49,6 +49,37 @@ function isSlateSpawn(args: string[]): boolean {
   return args.includes("-loop");
 }
 
+/** Vapauttaa FIFO-kirjoitusavauksen, joka jäi kerneliin odottamaan lukijaa.
+ *
+ *  TÄMÄ on häilynnän juurisyy (#255), eikä se ollut mikään testin aikabudjetti.
+ *  `createWriteStream(fifo)` jää kernelissä jumiin kunnes joku avaa putken
+ *  lukua varten, ja se odotus istuu koko ajan yhdessä libuvin **neljästä**
+ *  säiepoolisäikeestä. Jokainen sessio, joka ei ehdi kätellä loppuun ennen
+ *  kuin sen ffmpeg-sijainen kuolee tai `mixer.stop()` tulee väliin, jättää
+ *  yhden säikeen jumiin pysyvästi — `fifo.closeIo()` ei voi perua avausta.
+ *  Kun neljäs säie menee, KAIKKI seuraavat tiedosto-operaatiot samassa
+ *  prosessissa (myös `fifo.prepare()`) jäävät roikkumaan loppusviitin ajaksi,
+ *  ja loput testit kaatuvat "timeout" / "kuvayhteyttä odotetaan" -muodossa.
+ *
+ *  Kuorma ei siis tehnyt mistään "vain hitaampaa": se muutti sitä, moniko
+ *  sessio jäi kesken, ja neljännen kohdalla sviitti kaatui. Siksi tiedosto
+ *  meni yksin läpi ja kaatui täydessä ajossa.
+ *
+ *  O_NONBLOCK-lukuavaus onnistuu heti ilman kirjoittajaa, herättää jumissa
+ *  olevan kirjoitusavauksen eikä itse käytä säiepoolia (openSync on synkroninen).
+ *  Lukupää pidetään auki hetki, jotta herätetty avaus ehtii valmistua ennen
+ *  kuin lukijoiden määrä palaa nollaan. */
+async function releaseBlockedFifoWriter(path: string): Promise<void> {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch {
+    return; // FIFOa ei ole — ei mitään vapautettavaa.
+  }
+  await new Promise((r) => setTimeout(r, 20));
+  closeSync(fd);
+}
+
 describe("FfmpegMixer no-signal slate (issue #104)", () => {
   let runDir: string;
   let fifoPath: string;
@@ -59,7 +90,9 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
     fifoPath = join(runDir, "relay-1.pcm");
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   });
-  afterEach(() => {
+  afterEach(async () => {
+    // Ennen siivousta: säiepooli takaisin käyttöön seuraavalle testille.
+    await releaseBlockedFifoWriter(fifoPath);
     logSpy.mockRestore();
     rmSync(runDir, { recursive: true, force: true });
   });
@@ -95,6 +128,9 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
     spawns: string[][];
     /** Mitä spawnataan; oletuksena pitkäikäinen sijainen. */
     spawnFor?: (args: string[]) => ChildProcess;
+    /** Laukeaa kun lähdesession FIFO-kättely on VALMIS. Tällä testi lopettaa
+     *  sijaisprosessin tapahtumaan eikä kelloon (#255). */
+    onSessionStart?: (epochMs: number) => void;
   }
 
   function harness(o: HarnessOpts): FfmpegMixer {
@@ -114,11 +150,27 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
       slate: o.slate,
       slateAfterMs: o.slateAfterMs,
       sourceIngest: o.sourceIngest,
+      onSessionStart: o.onSessionStart,
       spawnMixerProcess: (args) => {
         o.spawns.push(args);
         return (o.spawnFor ?? (() => fakeFfmpeg(fifoPath)))(args);
       },
     });
+  }
+
+  /** Odottaa TAPAHTUMAA, ei määräaikaa (#255). Aikaraja on vain viimeinen
+   *  turvaverkko, jottei rikkinäinen testi jää roikkumaan — sitä ei ole
+   *  tarkoitus koskaan osua, joten se on reilusti yli sen mitä kuormitettu
+   *  kone tarvitsee. Kiinteät ms-budjetit sijaisprosessien elinajassa olivat
+   *  juuri se mikä teki tästä sviitistä häilyvän: täydessä ajossa aliprosessin
+   *  käynnistys ja FIFO-kättely hävisivät kellolle. */
+  async function waitForEvent(condition: () => boolean, timeoutMs = 20_000): Promise<boolean> {
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) {
+      if (condition()) return true;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return false;
   }
 
   /** Ajaa valvojaa kunnes ehto täyttyy tai aika loppuu, ja pysäyttää sen. */
@@ -168,7 +220,12 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
     const spawns: string[][] = [];
     const mixer = harness({ slate, slateAfterMs: 0, resolveTestSource: noSource, spawns });
 
-    const outcome = await runUntil(mixer, () => spawns.some(isSlateSpawn), 6000);
+    // Odotetaan KÄTTELYN valmistumista eikä pelkkää spawnia: runUntil
+    // pysäyttää mikserin heti ehdon täytyttyä, ja pysäytys tappaa kesken
+    // kättelyn olevan prosessin — jolloin ffmpeg.slate_start ei ehdi lokiin
+    // eikä alla oleva väite pidä. Kuormitetulla koneella juuri niin kävi
+    // (#255).
+    const outcome = await runUntil(mixer, () => logged().includes("ffmpeg.slate_start"), 6000);
     expect(outcome).toBe("condition");
 
     const args = spawns.find(isSlateSpawn)!;
@@ -449,8 +506,20 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
       slateAfterMs: 0,
       resolveTestSource: noSource,
       spawns,
-      // Kättely onnistuu, mutta prosessi kuolee alta sekunnin päästä.
-      spawnFor: (args) => fakeFfmpeg(fifoPath, isSlateSpawn(args) ? 700 : 600_000),
+      // Kättely onnistuu, mutta prosessi kuolee heti sen jälkeen. Tappo on
+      // sidottu KÄTTELYN VALMISTUMISEEN (ffmpeg.slate_start), ei kelloon:
+      // kiinteä 700 ms elinaika hävisi kuormitetulla koneella kättelylle,
+      // jolloin testi ajoi "ffmpeg ei käynnistynyt katvetilassa" -haaraa eikä
+      // sitä mitä se väittää mittaavansa (#255).
+      spawnFor: (args) => {
+        const child = fakeFfmpeg(fifoPath);
+        if (isSlateSpawn(args)) {
+          void waitForEvent(() => logged().includes("ffmpeg.slate_start")).then((seen) => {
+            if (seen) child.kill("SIGTERM");
+          });
+        }
+        return child;
+      },
     });
     const outcome = await runUntil(mixer, () => spawns.filter(isSlateSpawn).length > 1, 8000);
     expect(outcome).toBe("timeout");
@@ -565,6 +634,7 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
       const slate = await preparedSlate();
       const spawns: string[][] = [];
       let attempts = 0;
+      let sourceChild: ChildProcess | null = null;
       const mixer = harness({
         slate,
         slateAfterMs: 0,
@@ -575,7 +645,18 @@ describe("FfmpegMixer no-signal slate (issue #104)", () => {
           throw new Error("lähde katkesi");
         },
         spawns,
-        spawnFor: (args) => (isSlateSpawn(args) ? fakeFfmpeg(fifoPath) : fakeFfmpeg(fifoPath, 300)),
+        // Lähdesessio on lyhyt mutta se PÄÄTTYY VASTA KÄTTELYN JÄLKEEN, koska
+        // juuri kättely on se mikä tekee sanamuodosta "kuvayhteys katkesi"
+        // (hasHadSource). Aiemmin sijainen eli kiinteät 300 ms, ja täydessä
+        // ajossa kättely hävisi sille kilpajuoksun: mikseri kirjasi "ffmpeg ei
+        // käynnistynyt", lähdettä ei ollut koskaan ollut, ja katvekuvan rivi
+        // luki "kuvayhteyttä odotetaan" (#255).
+        onSessionStart: () => sourceChild?.kill("SIGTERM"),
+        spawnFor: (args) => {
+          const child = fakeFfmpeg(fifoPath);
+          if (!isSlateSpawn(args)) sourceChild = child;
+          return child;
+        },
       });
       mixer.setSlateSituation({ score: "Testilä Tähdet 3 - 1 Esimerkki Eagles", situation: "1. jakso, 2 paloa" });
 
