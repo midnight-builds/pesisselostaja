@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { createWriteStream, type WriteStream } from "node:fs";
+import { closeSync, constants, createWriteStream, openSync, type WriteStream } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { logError, logWarn } from "./log.js";
 
@@ -11,6 +11,9 @@ const FRAME_BYTES = (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE * FRAME_MS) / 100
 /** ~700 ms of silence between consecutive clips, so narration bursts (several
  *  events announced in one poll) don't run together into one long sentence. */
 const CLIP_GAP_FRAMES = 700 / FRAME_MS;
+/** Kuinka kauan herätyslukupäätä pidetään auki, jos jumissa ollut avaus ei
+ *  ehdi valmistua heti. Ks. releaseBlockedOpen. */
+const OPEN_RELEASE_HOLD_MS = 250;
 
 function mkfifo(path: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -86,6 +89,10 @@ export class NarrationFifo {
   private tickCount = 0;
   private startTime = 0;
   private stopped = false;
+  /** Ei-null vain niin kauan kuin open() odottaa kernelin avausta. stopIo()
+   *  käyttää tätä sekä tunnisteena ("avaus on yhä jumissa") että keinona
+   *  päättää roikkuva open()-lupaus. */
+  private abortOpen: (() => void) | null = null;
 
   constructor(public readonly path: string) {}
 
@@ -101,12 +108,27 @@ export class NarrationFifo {
    *  blocks until a reader attaches — so it must be called AFTER ffmpeg has
    *  been spawned with this path as one of its -i inputs, never before. */
   async open(): Promise<void> {
-    this.stream = createWriteStream(this.path);
-    await new Promise<void>((resolve, reject) => {
-      this.stream!.once("open", () => resolve());
-      this.stream!.once("error", reject);
+    const stream = createWriteStream(this.path);
+    this.stream = stream;
+    const outcome = await new Promise<"open" | "aborted" | Error>((resolve) => {
+      stream.once("open", () => resolve("open"));
+      stream.once("error", (err: Error) => resolve(err));
+      this.abortOpen = () => resolve("aborted");
     });
-    this.stream.on("error", (err) => logError("fifo.write_failed", `FIFO-kirjoitusvirhe: ${err.message}`));
+    this.abortOpen = null;
+
+    // closeIo()/stop() ehti väliin: stopIo() omistaa nyt streamin, on jo
+    // kutsunut end():n ja vapauttanut kernelissä roikkuneen avauksen. Ei
+    // tikitystä eikä poikkeusta — molemmat kutsupaikat (ffmpegMixer) ovat
+    // hylänneet tämän lupauksen Promise.racessa, ja heitto muuttuisi
+    // käsittelemättömäksi rejectioniksi kesken lähetyksen.
+    if (outcome === "aborted" || this.stream !== stream) {
+      logWarn("fifo.open_aborted", "FIFO-avaus keskeytettiin ennen lukijan liittymistä.");
+      return;
+    }
+    if (outcome !== "open") throw outcome;
+
+    stream.on("error", (err) => logError("fifo.write_failed", `FIFO-kirjoitusvirhe: ${err.message}`));
 
     this.stopped = false;
     this.tickCount = 0;
@@ -141,8 +163,54 @@ export class NarrationFifo {
   private stopIo(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
-    this.stream?.end();
+    const stream = this.stream;
     this.stream = null;
+    if (!stream) return;
+
+    // Avaus on yhä jumissa kernelissä (abortOpen elää vain open():n odotuksen
+    // ajan). end() ei peru sitä: pyyntö istuu yhdessä libuvin neljästä
+    // säiepoolisäikeestä, ja katvekuvasilmukka toistaa tämän kierros
+    // kierrokselta, kunnes kaikki fs-operaatiot roikkuvat (#274).
+    const blockedOpen = this.abortOpen;
+    this.abortOpen = null;
+    stream.end();
+    if (blockedOpen) {
+      this.releaseBlockedOpen(stream);
+      blockedOpen();
+    }
+  }
+
+  /** Herättää kirjoitusavauksen, joka odottaa kernelissä lukijaa.
+   *
+   *  `openSync(O_RDONLY|O_NONBLOCK)` palaa FIFOlla heti ilman kirjoittajaa
+   *  eikä käytä säiepoolia (se on synkroninen), mutta lukijan ilmestyminen
+   *  riittää päästämään jumissa olevan kirjoitusavauksen läpi — jolloin sen
+   *  säiepoolisäie vapautuu. Sama temppu kuin testiharnessissa (PR #272).
+   *
+   *  Lukupää pidetään auki kunnes avaus on oikeasti valmistunut, koska
+   *  välitön sulkeminen voi ehtiä ennen herätystä ja jättää kirjoittajan
+   *  takaisin odottamaan. Kutsutaan VAIN kun avaus ei ollut vielä auennut,
+   *  joten se ei koskaan häiritse käynnissä olevaa kirjoitusta. */
+  private releaseBlockedOpen(stream: WriteStream): void {
+    let fd: number;
+    try {
+      fd = openSync(this.path, constants.O_RDONLY | constants.O_NONBLOCK);
+    } catch {
+      return; // FIFOa ei ole (tai se ei aukea) — ei mitään herätettävää.
+    }
+    let released = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      try {
+        closeSync(fd);
+      } catch {
+        /* jo suljettu */
+      }
+    };
+    stream.once("open", release);
+    stream.once("error", release);
+    setTimeout(release, OPEN_RELEASE_HOLD_MS).unref();
   }
 
   private scheduleNextTick(): void {
