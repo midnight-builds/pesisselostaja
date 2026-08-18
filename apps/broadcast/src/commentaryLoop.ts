@@ -18,6 +18,7 @@ import {
   formatIdleSummary,
   formatMatchEnd,
   formatWelcomeFiller,
+  formatIntroFiller,
   decideFiller,
   periodName,
   type PlayerLookup,
@@ -383,6 +384,8 @@ export class CommentaryLoop {
   private lastSpeech: string | null = null;
   private lastSpeechAt = 0;                // wall clock of the last spoken announcement
   private lastSummaryCount = 0;
+  /** Jakso, jolle selostajan esittely on jo puhuttu (issue #247). */
+  private lastIntroPeriod: number | null = null;
   /** Order-preserving queue for sink calls (TTS synthesis + mix), decoupled
    *  from the poll loop — see speak(). */
   private synthQueue: Promise<void> = Promise.resolve();
@@ -1555,6 +1558,13 @@ export class CommentaryLoop {
         lastSpeechAt: this.lastSpeechAt,
         announcementCount: this.state.announcementCount,
         lastSummaryCount: this.lastSummaryCount,
+        currentPeriod: this.state.currentPeriod,
+        lastIntroPeriod: this.lastIntroPeriod,
+        // Sama tyhjä-jono-ehto kuin narrationReadyForFiller()-portissa alla;
+        // core lukee sen erikseen, koska webissä vastaavaa porttia ei ole.
+        speechQueueEmpty: this.narrationStatus
+          ? this.narrationStatus.pendingClips() === 0
+          : true,
       },
       {
         welcomeFillerMs: WELCOME_FILLER_MS,
@@ -1573,6 +1583,16 @@ export class CommentaryLoop {
     if (!this.narrationReadyForFiller()) return;
     if (decision === "welcome") {
       this.speak(formatWelcomeFiller(meta), false);
+      return;
+    }
+    // Merkintä vasta tässä, puhumisen yhteydessä: jos gate yllä ohitti
+    // kierroksen, esittely on yhä velkaa eikä sitä saa kuitata annetuksi.
+    if (decision === "intro") {
+      // `lastIntroPeriod === null` ⇒ tämä on ottelun ensimmäinen esittely, eikä
+      // sanamuoto saa viitata aiempaan kertaan. Luetaan ENNEN merkintää.
+      const firstOfMatch = this.lastIntroPeriod === null;
+      this.lastIntroPeriod = this.state.currentPeriod;
+      this.speak(formatIntroFiller(firstOfMatch), false);
       return;
     }
     this.lastSummaryCount = this.state.announcementCount;

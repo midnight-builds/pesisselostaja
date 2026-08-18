@@ -21,6 +21,7 @@ import {
   formatSituationSummary,
   formatIdleSummary,
   formatWelcomeFiller,
+  formatIntroFiller,
   decideFiller,
   periodName,
   type SpeechContext,
@@ -145,6 +146,8 @@ export class BrowserWatcher {
    *  returns the full history, so an empty history means the game genuinely
    *  hasn't started and the watcher speaks welcome fillers instead of recaps. */
   private _matchStarted = false;
+  /** Jakso, jolle selostajan esittely on jo puhuttu (issue #247). */
+  private _lastIntroPeriod: number | null = null;
 
   constructor(
     private config: WatcherConfig,
@@ -319,6 +322,7 @@ export class BrowserWatcher {
     state.finished = false;
     this.processEventsSilent(initial.events, state, meta);
     this._matchStarted = initial.events.length > 0;
+    this._lastIntroPeriod = null;
 
     if (initial.team != null) state.currentBatTeamId = initial.team;
     if ((initial.period ?? 0) > state.currentPeriod)
@@ -769,6 +773,11 @@ export class BrowserWatcher {
         lastSpeechAt: this._lastSpeechAt,
         announcementCount: state.announcementCount,
         lastSummaryCount: this._lastSummaryCount,
+        currentPeriod: state.currentPeriod,
+        lastIntroPeriod: this._lastIntroPeriod,
+        // Esittely odottaa täysin hiljaista hetkeä: jono tyhjä JA mikään ei ole
+        // juuri nyt äänessä. Vain esittely lukee tätä (ks. decideFiller).
+        speechQueueEmpty: this._speechQueue.length === 0 && !this._speechBusy,
       },
       {
         welcomeFillerMs: WELCOME_FILLER_MS,
@@ -782,6 +791,18 @@ export class BrowserWatcher {
       const welcome = formatWelcomeFiller(meta);
       this.emitFeed("info", welcome);
       if (!this._muted) this.speakRaw(welcome);
+      return;
+    }
+    // Merkintä vasta puhumisen yhteydessä: lykätty esittely jää velaksi.
+    if (decision === "intro") {
+      // `_lastIntroPeriod === null` ⇒ tämä on ottelun ensimmäinen esittely, eikä
+      // sanamuoto saa viitata aiempaan kertaan. Luetaan ENNEN merkintää.
+      const firstOfMatch = this._lastIntroPeriod === null;
+      this._lastIntroPeriod = state.currentPeriod;
+      this._lastSpeechAt = now;
+      const intro = formatIntroFiller(firstOfMatch);
+      this.emitFeed("info", intro);
+      if (!this._muted) this.speakRaw(intro);
       return;
     }
     this._lastSummaryCount = state.announcementCount;

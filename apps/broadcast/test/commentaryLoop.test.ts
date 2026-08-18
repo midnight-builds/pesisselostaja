@@ -116,6 +116,7 @@ interface LoopInternals {
   lastSpeech: string | null;
   lastSpeechAt: number;
   lastSummaryCount: number;
+  lastIntroPeriod: number | null;
   narrationEverReady: boolean;
 }
 
@@ -188,6 +189,9 @@ describe("CommentaryLoop in-game filler gating", () => {
     const loop = latchedLoop(sink, s, port);
     loop.matchStarted = true;
     loop.state.announcementCount = 1; // countDue stays false; idleDue drives the filler
+    // The self-introduction (#247) is already given for this period, so these
+    // tests keep measuring what they claim to measure: the recap/idle gating.
+    loop.lastIntroPeriod = loop.state.currentPeriod;
     // lastSpeechAt stays 0 → far past IDLE_FILLER_MS, so idleDue is true.
     return loop;
   }
@@ -230,6 +234,120 @@ describe("CommentaryLoop in-game filler gating", () => {
   });
 });
 
+// ------------------------------------------------------------------ issue #247
+// Selostajan esittely: ottelun alussa ja jaksojen välissä, vain kun jono on
+// tyhjä. Nämä testit ajavat sen putken läpi (decideFiller + kutsupaikan
+// kirjanpito), koska juuri kirjanpidon kuittaus väärään aikaan on se virhe,
+// joka joko toistaisi esittelyn tai hukkaisi sen kokonaan.
+describe("CommentaryLoop selostajan esittely (#247)", () => {
+  const INTRO = /puheeni on tuotettu keinotekoisesti|Luen ääneen pesistulokset\.fi/;
+
+  /** Käynnissä oleva ottelu, ffmpeg kiinni ja jono tyhjä: mikään muu portti ei
+   *  ole esittelyn tiellä. lastSpeechAt = 0 ⇒ myös hiljaisuustäyte erääntyy,
+   *  joten testit näyttävät samalla kumpi voittaa. */
+  function startedMatch(sink: SpeechSink, pending = 0) {
+    const { s, port } = mutableStatus(true, pending);
+    const loop = latchedLoop(sink, s, port);
+    loop.matchStarted = true;
+    loop.state.announcementCount = 1;
+    loop.state.currentPeriod = 0;
+    return { loop, s };
+  }
+
+  it("esittelee itsensä ottelun alussa", async () => {
+    const sink = recordingSink();
+    const { loop } = startedMatch(sink);
+
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+
+    expect(sink.calls).toHaveLength(1);
+    expect(sink.calls[0].text).toMatch(INTRO);
+  });
+
+  it("ei toista esittelyä samassa jaksossa — seuraava kierros on tavallista täytettä", async () => {
+    const sink = recordingSink();
+    const { loop } = startedMatch(sink);
+
+    await loop.maybeAnnounceSummary(META);
+    loop.lastSpeechAt = 0; // hiljaisuustäyte erääntyy taas
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+
+    expect(sink.calls).toHaveLength(2);
+    expect(sink.calls[1].text).not.toMatch(INTRO);
+  });
+
+  it("esittelee itsensä uudelleen jaksojen välissä", async () => {
+    const sink = recordingSink();
+    const { loop } = startedMatch(sink);
+
+    await loop.maybeAnnounceSummary(META); // 1. jakso
+    loop.state.currentPeriod = 1;
+    loop.lastSpeechAt = 0;
+    await loop.maybeAnnounceSummary(META); // 2. jakso alkoi
+    await loop.synthQueue;
+
+    expect(sink.calls).toHaveLength(2);
+    expect(sink.calls[1].text).toMatch(INTRO);
+  });
+
+  it("ei puhu kesken tapahtumaryöpyn, eikä kuittaa esittelyä annetuksi", async () => {
+    const sink = recordingSink();
+    const { loop, s } = startedMatch(sink, 3); // klippejä yhä jonossa
+
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+    expect(sink.calls).toHaveLength(0);
+    expect(loop.lastIntroPeriod).toBeNull();
+
+    // Ryöppy ohi → esittely on yhä velkaa ja tulee nyt.
+    s.pending = 0;
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+    expect(sink.calls).toHaveLength(1);
+    expect(sink.calls[0].text).toMatch(INTRO);
+    expect(loop.lastIntroPeriod).toBe(0);
+  });
+
+  // Kutsupaikan johdotus: `formatIntroFiller(firstOfMatch)` saa oikean lipun
+  // vain kun `lastIntroPeriod` luetaan ENNEN kuittausta. Jos lippu jäisi aina
+  // falseksi, arpa voisi antaa lähetyksen ensimmäiseksi lauseeksi
+  // "Muistutan että…" — muistutus asiasta, jota ei ole vielä kerrottu.
+  it("ottelun ensimmäinen esittely ei viittaa aiempaan kertaan", async () => {
+    const realRandom = Math.random;
+    try {
+      const draws = 20;
+      for (let i = 0; i < draws; i++) {
+        Math.random = () => i / draws;
+        const sink = recordingSink();
+        const { loop } = startedMatch(sink);
+
+        await loop.maybeAnnounceSummary(META);
+        await loop.synthQueue;
+
+        expect(sink.calls).toHaveLength(1);
+        expect(sink.calls[0].text).toMatch(INTRO);
+        expect(sink.calls[0].text).not.toMatch(/^Muistutan/);
+      }
+    } finally {
+      Math.random = realRandom;
+    }
+  });
+
+  it("ei esittele itseään ennen ottelun alkua", async () => {
+    const sink = recordingSink();
+    const { loop } = startedMatch(sink);
+    loop.matchStarted = false;
+
+    await loop.maybeAnnounceSummary(META);
+    await loop.synthQueue;
+
+    expect(sink.calls).toHaveLength(1);
+    expect(sink.calls[0].text).not.toMatch(INTRO);
+  });
+});
+
 // ------------------------------------------------------------------- issue #60
 // 90 sekunnin hiljaisuusfilleri ei ollut lauennut kertaakaan kolmessa
 // live-ajossa, eikä yksikään testi koetellut sen rajaa tai sisältöä: yllä
@@ -260,6 +378,9 @@ describe("CommentaryLoop 90 s hiljaisuusfilleri (#60)", () => {
     loop.state.currentOuts = 2;
     loop.state.currentBatTeamId = META.away.id;
     loop.state.periodRuns[0] = { home: 4, away: 1 };
+    // Esittely (#247) on jo annettu tälle jaksolle — muuten se olisi ainoa
+    // asia, jota nämä testit mittaisivat.
+    loop.lastIntroPeriod = loop.state.currentPeriod;
     loop.lastSpeechAt = T0; // hiljaisuus alkaa nyt, ei "joskus ennen aikojen alkua"
     return { loop, s };
   }

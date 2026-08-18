@@ -27,6 +27,17 @@ export interface SpeechContext {
   currentBatTurn: number;
 }
 
+/** Onko `event.period` **jakso** — eli 1. tai 2. jakso?
+ *
+ *  Repon termistö (CLAUDE.md, "Scoring"): 0 = 1. jakso, 1 = 2. jakso,
+ *  **2 = supervuoro, 3 = kotiutuslyöntikilpailu**. Kaksi jälkimmäistä eivät ole
+ *  jaksoja vaan ratkaisuvaiheita, joten "jaksojen välissä" ei tarkoita niitä.
+ *  Tämä on olemassa siksi, että `currentPeriod`-vertailu näyttää muuten
+ *  harmittomalta lukuvertailulta eikä paljasta mitä lukujen takana on. */
+export function isJakso(period: number): boolean {
+  return period === 0 || period === 1;
+}
+
 export function periodName(period: number): string {
   switch (period) {
     case 0: return "ensimmäinen jakso";
@@ -149,13 +160,33 @@ function vuoropariLabel(inning: number, batTurn: number): string {
  *  nobody noticed. `test/variantParity.test.ts` walks every variant of every
  *  group and fails if one drops a fact its siblings carry. */
 const lastVariantPick = new Map<string, number>();
-function pickVariant(group: string, variants: string[]): string {
+/** `allowed` rajaa arvonnan osajoukkoon ILMAN että ryhmä pilkotaan kahdeksi:
+ *  "älä toista edellistä" -muisti on indeksipohjainen, joten eri mittaiset
+ *  joukot samassa ryhmässä — tai sama joukko kahdessa ryhmässä — antaisivat
+ *  saman tekstin kahdesti peräkkäin. Kutsupaikat vaimentavat peräkkäiset
+ *  identtiset lauseet, joten toisinto ei kuuluisi toistona vaan katoaisi. */
+function pickVariant(
+  group: string,
+  variants: string[],
+  allowed?: (index: number) => boolean,
+): string {
   if (variants.length === 1) return variants[0];
   const prev = lastVariantPick.get(group);
-  let idx = Math.floor(Math.random() * variants.length);
-  if (idx === prev) idx = (idx + 1) % variants.length;
-  lastVariantPick.set(group, idx);
-  return variants[idx];
+  const start = Math.floor(Math.random() * variants.length);
+  let chosen = -1;
+  let fallback = -1; // sallittu mutta sama kuin edellinen: parempi kuin ei mitään
+  for (let step = 0; step < variants.length; step++) {
+    const cand = (start + step) % variants.length;
+    if (allowed && !allowed(cand)) continue;
+    if (fallback < 0) fallback = cand;
+    if (cand !== prev) {
+      chosen = cand;
+      break;
+    }
+  }
+  if (chosen < 0) chosen = fallback >= 0 ? fallback : start;
+  lastVariantPick.set(group, chosen);
+  return variants[chosen];
 }
 
 function ttsClean(text: string): string {
@@ -441,12 +472,65 @@ export function formatWelcomeFiller(meta: MatchMetadata): string {
   ]);
 }
 
+interface IntroVariant {
+  text: string;
+  /** Tosi, jos teksti viittaa aiempaan kertaan ("Muistutan että…"). Sellainen
+   *  variantti EI kelpaa ottelun ensimmäiseksi esittelyksi: `pickVariant` on
+   *  arpa, joten se voisi osua lähetyksen ensimmäiseksi lauseeksi, ja selostaja
+   *  muistuttaisi asiasta jota se ei ole vielä kertonut. */
+  assumesEarlierIntro: boolean;
+}
+
+/** Esittelyn variantit. Kaikki kertovat saman viiden asian — ks.
+ *  {@link formatIntroFiller} ja `test/variantParity.test.ts`. */
+const INTRO_VARIANTS: IntroVariant[] = [
+  {
+    text: "Minun puheeni on tuotettu keinotekoisesti ja luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja. Pahoittelen jos välillä selostuksessani on aukkoja tai asiat tulevat väärään aikaan. Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
+    assumesEarlierIntro: false,
+  },
+  {
+    text: "Muistutan että puheeni on tuotettu keinotekoisesti: luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja. Pahoittelen jos selostuksessani on välillä aukkoja tai asiat tulevat väärään aikaan. Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
+    assumesEarlierIntro: true,
+  },
+  {
+    text: "Luen ääneen pesistulokset.fi-palveluun kirjattuja tietoja, ja puheeni on tuotettu keinotekoisesti. Pahoittelen jos asiat tulevat väärään aikaan tai selostuksessani on välillä aukkoja. Otan mielelläni palautetta vastaan, ja verkosta minut löytää nimellä Pesisselostaja.",
+    assumesEarlierIntro: false,
+  },
+];
+
+/**
+ * Selostajan esittely: koneellisesti tuotettu puhe, mihin se perustuu ja mistä
+ * antaa palautetta. Puhutaan ottelun alussa ja jokaisen jaksonvaihteen jälkeen
+ * kerran (issue #247).
+ *
+ * **Sanamuoto on käyttäjän antama** (Ossi 16.8.2026, issue #247) — ensimmäinen
+ * variantti on se teksti sanatarkasti. Muut variantit vaihtavat vain
+ * sanajärjestystä, jottei sama virke toistu identtisenä joka jaksotauolla; ne
+ * kertovat kaikki saman viiden asian: puhe on keinotekoista, lähde on
+ * pesistulokset.fi, aukoista ja ajoitusheitoista pahoitellaan, palautetta
+ * otetaan vastaan ja verkosta löytyy nimellä Pesisselostaja.
+ *
+ * `firstOfMatch` kertoo, onko tämä ottelun ENSIMMÄINEN esittely. Silloin
+ * arvonta rajataan variantteihin, jotka eivät oleta aiempaa kertaa — muuten
+ * "Muistutan että…" voisi olla koko lähetyksen ensimmäinen lause. Kutsupaikka
+ * tietää tämän `lastIntroPeriod === null` -tilasta. Myöhemmissä esittelyissä
+ * koko joukko on käytettävissä.
+ */
+export function formatIntroFiller(firstOfMatch: boolean): string {
+  return pickVariant(
+    "intro",
+    INTRO_VARIANTS.map((v) => v.text),
+    firstOfMatch ? (i) => !INTRO_VARIANTS[i].assumesEarlierIntro : undefined,
+  );
+}
+
 /** Mikä täyte on vuorossa, jos mikään:
  *  - `"welcome"` → {@link formatWelcomeFiller}, ennen ottelun alkua
+ *  - `"intro"`   → {@link formatIntroFiller}, ottelun alussa ja jaksojen välissä
  *  - `"recap"`   → {@link formatSituationSummary}, kun puheita on kertynyt
  *  - `"idle"`    → {@link formatIdleSummary}, kun on ollut liian hiljaista
  *  - `null`      → ei mitään juuri nyt */
-export type FillerDecision = "welcome" | "recap" | "idle" | null;
+export type FillerDecision = "welcome" | "intro" | "recap" | "idle" | null;
 
 /** Tilannekuva päätöstä varten. Pelkkiä lukuja ja lippuja — ei soittimia,
  *  ei syötettä, ei mykistystä. */
@@ -463,6 +547,17 @@ export interface FillerTimingState {
   announcementCount: number;
   /** `announcementCount` viimeisimmän tilannekatsauksen hetkellä. */
   lastSummaryCount: number;
+  /** Käynnissä oleva jakso (`event.period`). Merkitsevä vasta kun
+   *  `matchStarted` on tosi. */
+  currentPeriod: number;
+  /** Jakso, jolle esittely on jo puhuttu; `null` jos ei kertaakaan. Kutsupaikka
+   *  päivittää tämän vasta kun esittely on oikeasti annettu, joten lykätty
+   *  esittely jää odottamaan seuraavaa kierrosta eikä katoa. */
+  lastIntroPeriod: number | null;
+  /** Puhejono on tyhjä juuri nyt. Esittely ei saa kiilata tapahtumaselostusten
+   *  väliin (issue #247), joten se odottaa hiljaista hetkeä; muut täytteet
+   *  eivät lue tätä, koska niillä on jo oma porttinsa kutsupaikassa. */
+  speechQueueEmpty: boolean;
 }
 
 /** Kynnykset annetaan argumentteina, koska ne EROAVAT sovelluksittain
@@ -501,6 +596,31 @@ export function decideFiller(
     return state.now - state.lastSpeechAt < thresholds.welcomeFillerMs
       ? null
       : "welcome";
+  }
+  // Esittely (issue #247): kerran ottelun alussa ja kerran jokaisen
+  // jaksonvaihteen jälkeen — `currentPeriod` on avain, joten leirimuodossa,
+  // jossa jaksoja on vain yksi, väliesittelyä ei tule lainkaan.
+  //
+  // VAIN JAKSOISSA. `event.period` on repon termistössä (CLAUDE.md, "Scoring")
+  // 0 = 1. jakso, 1 = 2. jakso, 2 = supervuoro, 3 = kotiutuslyöntikilpailu.
+  // Supervuoro ja kotiutuslyöntikilpailu EIVÄT ole jaksoja, ja issue #247
+  // pyytää esittelyä "ottelun alussa ja jaksojen välissä" — ne ovat lisäksi
+  // ottelun kireimmät kohdat, joihin parinkymmenen sekunnin puheenvuoro
+  // osuisi pahiten. Älä "korjaa" tätä takaisin yleiseksi period-vertailuksi.
+  //
+  // Ehtona tyhjä puhejono: esittely on parinkymmenen sekunnin puheenvuoro,
+  // eikä se saa asettua tapahtumaselostusten väliin. Kun jono ei ole tyhjä,
+  // tämä ei "kuluta" esittelyä vaan putoaa läpi tavallisiin täytteisiin, ja
+  // esittely jää odottamaan seuraavaa hiljaista kierrosta.
+  //
+  // Voittaa katsauksen ja täytteen: esittely on kertaluontoinen ja sidottu
+  // juuri tähän kohtaan ottelua, katsaus ja täyte toistuvat joka tapauksessa.
+  if (
+    isJakso(state.currentPeriod) &&
+    state.lastIntroPeriod !== state.currentPeriod &&
+    state.speechQueueEmpty
+  ) {
+    return "intro";
   }
   if (state.announcementCount === 0) return null;
   const countDue =
