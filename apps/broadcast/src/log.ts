@@ -117,7 +117,8 @@ export type EventCode =
   | "control.poll_interval"
   // narration FIFO
   | "fifo.write_failed"
-  | "fifo.tick_failed";
+  | "fifo.tick_failed"
+  | "fifo.open_aborted";
 
 const PRIORITY: Record<LogLevel, number> = {
   debug: 7,
