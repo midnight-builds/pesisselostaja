@@ -151,11 +151,105 @@ hallittu lopetus tunnistetaan omakseen eikä sitä yritetä palauttaa. Katve
 luovutusikkunan sisällä **ei ole lopetus** — selostettu lähetys pysyy pystyssä
 sen ajan.
 
+Pituuksia on kaksi. **Ottelun ollessa kesken ikkuna on pitkä** (oletuksena 12
+min): keskeytynyt ottelu jatkuu yleensä, ja katsojille on parempi että relay
+odottaa. **Ottelun päätyttyä ikkuna on lyhyt** (oletuksena 2 min): kun ottelu on
+ohi, kadonnutta lähdettä ei kannata jäädä odottamaan. Koodissa ja englanniksi
+sama asia on `giveUpWindowMs` / *give-up window*.
+
+**Olennaisin kohta: ikkunaa tarkastellaan vain yrityksen yhteydessä, ei kellon
+mukaan.** Relay ei katso ajastinta ja luovuta hetkellä X. Se yrittää avata
+lähteen uudelleen, ja *vasta silloin* se laskee, kuinka pitkään epäonnistuminen
+on jatkunut. Jos yritysten väli on venynyt minuutteihin (ks. **Perääntyminen**),
+12 minuutin ikkuna voi umpeutua vasta reilusti myöhemmin — luovutus tapahtuu
+seuraavalla yrityksellä, ei sillä sekunnilla kun ikkuna teoriassa täyttyi.
+Suunta on turvallinen, koska katkennut lähde ehtii palata, mutta **ikkunan
+pituus ei ole lupaus siitä, milloin relay sammuu**.
+
 **Hard stop**:
 Ohjaamon tai relayn tekemä sammutus silloin kun normaalia lopetusta ei tullut:
 ottelu on päättynyt, uusia tapahtumia ei tule ja raakalähetys oireilee (#123).
 Erikoistilanne, ei vaihtoehtoinen oletus — ja ainoa tilanne jossa ohjaamo saa
 kirjoittaa raakalähetykseen.
+
+## Valvonta ja hälytykset
+
+**Kohdevahti**:
+Ohjaamon toiminto, joka kysyy YouTubelta noin puolen minuutin välein, onko
+selostettu lähetys yhä elossa. Se on olemassa siksi, ettei relay voi tietää sitä
+itse: RTMP-työntö onnistuu myös kuolleeseen lähetykseen, joten relayn mielestä
+kaikki on kunnossa samalla kun katsojat eivät näe mitään. Näin kävi 16.8.2026
+(ottelu 136771) — YouTuben autostop päätti selostetun lähetyksen kesken ottelun,
+relay työnsi loppuottelun tyhjään, ja asia selvisi vasta käsin tarkistamalla.
+Vahti huomaa kaksi eri kuolemaa: YouTuben päättämän lähetyksen ja käsin
+poistetun lähetyksen, jota ei enää löydy kanavalta lainkaan.
+
+**Kohdevahti vain lukee; se ei korjaa mitään.** Se ei kirjoita YouTubelle eikä
+luo uutta lähetystä. Havainto menee tilakortille, otsikkoon ja
+push-ilmoitukseen, ja korjaus jää operaattorille. (#250, #252)
+
+**Vaimennuslukko**:
+Lippu, joka menee päälle kun hälytys on kerran annettu, ja vaimentaa saman
+hälytyksen toistumisen. Ilman sitä yksi vika piippaisi operaattorin puhelimessa
+joka pollikierroksella — kerran puolessa minuutissa koko loppuottelun ajan —
+eikä yksikään piippaus kertoisi mitään uutta.
+
+Lukko **ei purkaudu ajan kulumisesta**. Se aukeaa vain tietystä tapahtumasta:
+siitä, että vikajakso todella päättyy — esimerkiksi siitä, että työlle on luotu
+uusi selostettu lähetys entisen kuolleen tilalle. Vertaa palovaroittimeen, jonka
+hiljennys ei raukea itsestään vaan vasta kun koko laite vaihdetaan.
+
+**Ongelma syntyy, jos purkavaa tapahtumaa ei voi saada aikaan.** Kohdevahdin
+lukko aukeaa vasta kun työn selostettu lähetys vaihtuu toiseksi, mutta sitä ei
+voi tehdä ohjaamon käyttöliittymästä. Vahti hälyttää siis kerran ottelua kohti ja
+vaikenee sen jälkeen — myös aivan muista vioista kuin siitä, josta se ehti
+kertoa. (#265)
+
+**Vaimennuslukon avaaminen**:
+Toimenpide, joka purkaa vaimennuslukon, minkä jälkeen hälytykset voivat taas
+laueta. Operaattori päätti 18.8.2026, että tällainen avaaminen tehdään (#265).
+
+Toteutustapaa ei ole vielä suunniteltu, eikä tämä merkintä ota siihen kantaa.
+Termi on kirjattu tähän, jotta asiasta voi puhua yksiselitteisesti ennen kuin se
+on rakennettu.
+
+## Relayn sinnikkyys ja sen rajat
+
+**Perääntyminen**:
+Uudelleenyritysten välin kasvattaminen, jottei epäonnistuva yritys toistu
+tiheästi: ensimmäisen epäonnistumisen jälkeen odotetaan hetki, seuraavan jälkeen
+pidempään, ja niin edelleen kattoon asti.
+
+Tavallisessa katkoksessa perääntyminen säästää lähinnä turhaa työtä. **YouTuben
+bottitarkistuksessa (HTTP 429) se on ainoa asia joka auttaa:** tiheä koputtelu
+pitää eston voimassa, joten nopeampi yrittäminen tekee tilanteesta huonomman
+eikä paremman. Relay tunnistaa torjunnan ja siirtyy silloin selvästi harvempaan
+tahtiin — minuutteihin, ei sekunteihin. Samasta syystä relayn restart on tässä
+tilanteessa huono keino: raakalähetys voi olla aivan kunnossa, ja tuore prosessi
+aloittaa koputtelun alusta. (#249)
+
+Perääntyminen ja **luovutusikkuna** kytkeytyvät toisiinsa: koska ikkunaa
+tarkastellaan vain yrityksen yhteydessä, harvemmat yritykset siirtävät myös
+luovutushetkeä myöhemmäksi. Siksi torjunnan aikainen odotus katkaistaan
+enintään puoleen kulloinkin voimassa olevasta luovutusikkunasta — muuten yksi
+uni voisi niellä koko ikkunan.
+
+**Säiepooli**:
+Node ei tee tiedosto-operaatioita pääsäikeessä vaan antaa ne pienelle joukolle
+taustasäikeitä — **oletuksena neljälle**. Säie palaa joukkoon, kun operaatio
+valmistuu. Jos operaatio ei koskaan valmistu, säie ei palaa: se on pois
+käytöstä pysyvästi.
+
+Neljä on vähän. Kun kaikki neljä ovat jumissa, jokainen seuraava
+tiedosto-operaatio jää jonottamaan loputtomiin, ja **relay ei kaadu vaan lakkaa
+etenemästä** — prosessi on pystyssä, palvelu näyttää elävän, mutta mikään ei
+enää edisty. Se on vaikeampi huomata kuin kaatuminen, koska mikään ei ilmoita
+mitään.
+
+Konkreettinen esimerkki: nimetyn putken (FIFO) avaaminen jää käyttöjärjestelmän
+tasolla odottamaan lukijaa, joka ei koskaan ilmesty. Odotus istuu yhdessä
+neljästä säikeestä, ja jos sama epäonnistuva yritys toistuu silmukassa, pooli
+täyttyy sekunneissa. (#274)
 
 ## Muualla määritelty
 
