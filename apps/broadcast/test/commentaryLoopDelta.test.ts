@@ -81,6 +81,8 @@ interface LoopInternals {
   recordPollSuccess(): void;
   writeControlFile(): void;
   announceBatterChanges: boolean;
+  deltaBreakerRetryAtMs: number | null;
+  deltaBreakerTrips: number;
 }
 
 function makeLoop(overrides: Partial<RelayConfig> = {}): LoopInternals {
@@ -506,6 +508,171 @@ describe("CommentaryLoop delta reset breaker (observed live 27.7.)", () => {
       logSpy.mockRestore();
       rmSync(controlFile, { force: true });
     }
+  });
+});
+
+/** #52 kohta 1+2. Katkaisija oli ennen näitä testejä käytännössä tehoton: se
+ *  muutti vain muistissa olevan kentän, kun taas control-tiedostoon jäi
+ *  käynnistyksessä kirjoitettu `deltaFetch: true`. Seuraava polli luki
+ *  tiedoston, tulkitsi eron operaattorin muutokseksi ja kytki deltan takaisin
+ *  noin kolmessa sekunnissa — eli aidosti resetoiva palvelin olisi jäänyt
+ *  ikuiseen laukea–palaudu-sykliin, eikä operaattori olisi ehtinyt nähdä
+ *  sydänäänestä mitään. */
+describe("CommentaryLoop delta-katkaisijan palautuminen (#52)", () => {
+  const UNEXPLAINED_RESET_ISO = new Date(T0 - 600 * 1000).toISOString();
+  const RETRY_BASE_MS = 2 * 60 * 1000;
+
+  function mockAlwaysResetting() {
+    fetchMock.mockImplementation(async (_id, opts) => {
+      const after = (opts as { after?: string } | undefined)?.after;
+      const events = [ev({ id: 1 }, [palo]), ev({ id: 2 }, [run])];
+      return after ? result(events, { reset: UNEXPLAINED_RESET_ISO }) : result(events);
+    });
+  }
+
+  /** Vie ajon katkaisijan laukeamiseen asti, tiedosto käynnistystilassa. */
+  async function tripBreaker(controlFile: string): Promise<LoopInternals> {
+    const loop = makeLoop({ controlFile });
+    loop.writeControlFile(); // kirjoittaa deltaFetch: true, kuten run() tekee
+    mockAlwaysResetting();
+    await loop.fetchFullEvents();
+    for (let i = 0; i < 5; i++) await loop.fetchEventsForPoll();
+    return loop;
+  }
+
+  const controlFile = "/tmp/pesis-test-control-52.json";
+  /** Vaimentaa lokin ja kerää rivit talteen samalla kertaa. */
+  function captureLog(lines: string[]) {
+    return vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      lines.push(String(args[0]));
+    });
+  }
+  let logLines: string[];
+  let logSpy: ReturnType<typeof captureLog>;
+  beforeEach(() => {
+    logLines = [];
+    logSpy = captureLog(logLines);
+  });
+  afterEach(() => {
+    logSpy.mockRestore();
+    vi.useRealTimers();
+    rmSync(controlFile, { force: true });
+  });
+
+  it("katkaisu EI kumoudu käynnistyksessä kirjoitetusta control-tiedostosta", async () => {
+    const loop = await tripBreaker(controlFile);
+    expect(loop.deltaFetch).toBe(false);
+
+    // Tasan se polku joka ennen kytki deltan takaisin päälle yhdessä pollissa.
+    await loop.refreshRuntimeControls();
+    expect(loop.deltaFetch).toBe(false);
+    expect(loop.pollStatsSummary).toContain("delta POIS (katkaisija)");
+
+    // Eikä kymmenen pollin jälkeenkään — odotus ei ole vielä umpeutunut.
+    for (let i = 0; i < 10; i++) {
+      await loop.refreshRuntimeControls();
+      await loop.fetchEventsForPoll();
+    }
+    expect(loop.deltaFetch).toBe(false);
+  });
+
+  it("kirjaa katkaisun control-tiedostoon, josta ohjaamokin sen näkee", async () => {
+    await tripBreaker(controlFile);
+    const written = JSON.parse(readFileSync(controlFile, "utf8"));
+    expect(written.deltaFetch).toBe(false);
+    expect(written.deltaBreakerTripped).toBe(true);
+    // Muut asetukset säilyvät — kirjoitus on osittainen, ei ylikirjoitus.
+    expect(written.pollIntervalMs).toBe(3000);
+  });
+
+  it("kytkee deltan takaisin odotuksen umpeuduttua ja antaa sille tuoreen sarjan", async () => {
+    vi.useFakeTimers({ now: T0 });
+    const loop = await tripBreaker(controlFile);
+    expect(loop.deltaFetch).toBe(false);
+
+    // Juuri ennen määräaikaa: yhä pois.
+    vi.setSystemTime(T0 + RETRY_BASE_MS - 1000);
+    await loop.fetchEventsForPoll();
+    expect(loop.deltaFetch).toBe(false);
+
+    vi.setSystemTime(T0 + RETRY_BASE_MS);
+    await loop.fetchEventsForPoll();
+    expect(loop.deltaFetch).toBe(true);
+    expect(loop.pollStatsSummary).not.toContain("katkaisija");
+    const retryLines = logLines.filter((l) => l.includes("Kokeillaan delta-hakua uudelleen"));
+    expect(retryLines).toHaveLength(1);
+
+    // Tuore sarja, ei jatkoa vanhalle: laskuri lähti nollasta, ja koska
+    // uusintayrityksen polli itse näki jo yhden resetin, kolme lisää ei vielä
+    // riitä — vanhalla laskurilla (5) katkaisija olisi lauennut heti.
+    for (let i = 0; i < 3; i++) await loop.fetchEventsForPoll();
+    expect(loop.deltaFetch).toBe(true);
+    // Viides peräkkäinen laukaisee sen uudelleen, kuten pitääkin.
+    await loop.fetchEventsForPoll();
+    expect(loop.deltaFetch).toBe(false);
+  });
+
+  it("tuplaa odotuksen joka laukeamisella", async () => {
+    vi.useFakeTimers({ now: T0 });
+    const loop = await tripBreaker(controlFile);
+    expect(loop.deltaBreakerTrips).toBe(1);
+    expect(loop.deltaBreakerRetryAtMs).toBe(T0 + RETRY_BASE_MS);
+
+    // Palautuminen, ja palvelin resetoi yhä → toinen laukeaminen.
+    const retriedAt = T0 + RETRY_BASE_MS;
+    vi.setSystemTime(retriedAt);
+    for (let i = 0; i < 6; i++) await loop.fetchEventsForPoll();
+    expect(loop.deltaFetch).toBe(false);
+    expect(loop.deltaBreakerTrips).toBe(2);
+    expect(loop.deltaBreakerRetryAtMs).toBe(retriedAt + 2 * RETRY_BASE_MS);
+  });
+
+  it("operaattorin oma 'pois' peruu odottavan uusintayrityksen", async () => {
+    vi.useFakeTimers({ now: T0 });
+    const loop = await tripBreaker(controlFile);
+
+    // Delta on jo pois, joten operaattori ilmaisee tahtonsa kytkemällä sen
+    // ensin päälle ja heti takaisin pois — kumpikin on aito muutos.
+    writeFileSync(controlFile, JSON.stringify({ deltaFetch: true }));
+    await loop.refreshRuntimeControls();
+    expect(loop.deltaFetch).toBe(true);
+    expect(loop.deltaBreakerRetryAtMs).toBeNull();
+
+    writeFileSync(controlFile, JSON.stringify({ deltaFetch: false }));
+    await loop.refreshRuntimeControls();
+    expect(loop.deltaFetch).toBe(false);
+    expect(loop.deltaBreakerRetryAtMs).toBeNull();
+
+    // Ajastin ei kytke deltaa takaisin vasten operaattorin käskyä.
+    vi.setSystemTime(T0 + 60 * RETRY_BASE_MS);
+    await loop.fetchEventsForPoll();
+    expect(loop.deltaFetch).toBe(false);
+  });
+
+  it("edellisen ajon katkaisijamerkintä ei sido uutta ajoa", () => {
+    writeFileSync(
+      controlFile,
+      JSON.stringify({ deltaFetch: false, deltaBreakerTripped: true, pollIntervalMs: 4000 })
+    );
+    const loop = makeLoop({ controlFile, deltaFetch: true });
+    loop.writeControlFile();
+
+    // Uusi ajo saa tuoreen yrityksen: uusintayrityksen ajastin elää vain
+    // muistissa, joten periytyvä `false` jäisi muuten pysyväksi.
+    expect(loop.deltaFetch).toBe(true);
+    const written = JSON.parse(readFileSync(controlFile, "utf8"));
+    expect(written.deltaFetch).toBe(true);
+    expect(written.deltaBreakerTripped).toBeUndefined();
+    expect(written.pollIntervalMs).toBe(4000); // operaattorin muu säätö säilyy
+  });
+
+  it("operaattorin oma 'pois' sen sijaan säilyy uudelleenkäynnistyksen yli (#206)", () => {
+    writeFileSync(controlFile, JSON.stringify({ deltaFetch: false }));
+    const loop = makeLoop({ controlFile, deltaFetch: true });
+    loop.writeControlFile();
+
+    expect(loop.deltaFetch).toBe(false);
+    expect(JSON.parse(readFileSync(controlFile, "utf8")).deltaFetch).toBe(false);
   });
 });
 

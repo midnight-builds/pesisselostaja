@@ -80,6 +80,10 @@ export type EventCode =
   | "api.fetch_recovered"
   | "api.delta_reset"
   | "api.delta_inconsistent"
+  // Katkaisijan tarkoituksellinen uusintayritys (#52): delta kytketään takaisin
+  // odotuksen umpeuduttua. Erillään `api.delta_fetch`ista, joka on operaattorin
+  // control-tiedostosta tekemä muutos — nämä kaksi on voitava erottaa lokista.
+  | "api.delta_breaker_retry"
   | "api.delta_fetch"
   | "api.poll_window"
   | "api.poll_trace"
