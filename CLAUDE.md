@@ -191,11 +191,53 @@ So, in order of preference:
    same day beat four branches held open for review.
 2. **If they must overlap, stack them:** branch the second off the *first branch*, not
    off `main`, and say so in the PR body ("perustuu #112:een"). The second PR's diff
-   then shows only its own change, and there is nothing to reconcile later.
+   then shows only its own change, and there is nothing to reconcile later. **A stack
+   is only half a plan until you know how it gets merged — see below.**
 3. **If they truly are independent, prove it before opening the second PR:**
    `gh pr list` then compare `git diff --name-only main...` between them. Overlap in a
    *file* is a warning; overlap in one function, one `switch`, or one union type means
    go back to option 1 or 2.
+
+### Purkaminen: pinotun PR:n mergaaminen
+
+Pinon luominen on helppoa, sen purkaminen ei. **Älä koskaan mergaa pinon
+vanhempaa `--delete-branch`illa niin kauan kuin joku PR osoittaa siihen.**
+
+19.8.2026 tehtiin juuri niin: `gh pr merge 277 --merge --delete-branch` poisti
+base-haaran, ja GitHub **sulki** lapsi-PR:n (#279) samalla sekunnilla sen sijaan
+että olisi siirtänyt sen `main`iin. Aikajana sanoo sen suoraan:
+`base_ref_deleted` → `closed`. Repon `delete_branch_on_merge` on `false`, joten
+tämä ei ollut asetus vaan komennon lippu.
+
+Sulkeutuminen ei ole se paha osa, vaan **umpikuja**: base-haaraa ei voi vaihtaa
+suljetusta PR:stä (422), eikä PR:ää voi avata koska sen base-haara on poistettu
+(422). Ainoa ulospääsy on työntää poistettu haara takaisin — mikä onnistuu vain
+jos sen SHA on yhä tiedossa. Muuten edessä on reflog-arkeologia tai PR:n luonti
+uusiksi, jolloin kuvaus ja keskustelu menetetään.
+
+Järjestys, joka ei jää kiinni:
+
+1. **Uudelleenkohdista lapsi `main`iin ENNEN vanhemman mergaamista.**
+2. Mergaa vanhempi. Vasta sitten haaran voi poistaa.
+3. Tarkista lapsen diffi (`git log --oneline origin/main..origin/<lapsi>`) —
+   sen pitää kaventua vanhemman commitit pois.
+4. Mergaa lapsi.
+
+**Uudelleenkohdistus tehdään `gh api`lla, ei `gh pr edit`illä:**
+
+```bash
+gh api -X PATCH repos/midnight-builds/pesisselostaja/pulls/<n> -f base=main
+```
+
+`gh pr edit --base` epäonnistuu tässä repossa **hiljaa** Projects-classic-
+GraphQL-vian takia (sama vika kaataa `gh issue view`n ja `gh pr view`n; käytä
+`gh api repos/.../issues/<n>` niidenkin sijaan). Hiljainen epäonnistuminen
+tarkoittaa, että merge menisi vanhaan baseen ja `gh pr view` väittäisi silti
+kaiken olevan kunnossa.
+
+**`gh pr merge` ei tulosta mitään onnistuessaan.** Älä päättele lopputulosta
+komennon paluusta, vaan tarkista erikseen:
+`gh api repos/.../pulls/<n> --jq '.merged'`.
 
 When integrating anyway:
 
