@@ -166,10 +166,28 @@ redundant full fetch — two API requests per poll for the whole streak, which i
 what made the 4 s timeout bite in two live matches on 27.7.
 
 A reset whose instant our own `after` does **not** explain still counts toward a
-breaker: **5 in a row** turn delta off for the rest of the run with one
-`HUOM: delta-haku vastasi selittämättömällä reset-leimalla …` line, and later
-heartbeats keep saying `delta POIS (katkaisija)`. Writing `{"deltaFetch": true}`
-to the control file overrules the breaker and gives delta a fresh streak.
+breaker: **5 in a row** turn delta off with one `HUOM: delta-haku vastasi
+selittämättömällä reset-leimalla …` line, and later heartbeats keep saying
+`delta POIS (katkaisija)`.
+
+**The breaker recovers by itself** (issue #52). It is no longer "off for the rest
+of the run": delta is retried after **2 minutes**, doubling on each further trip
+and capped at **15 minutes**, with an `api.delta_breaker_retry` line each time.
+The retry resets the breaker's counters, so delta gets a full fresh streak before
+it can trip again — and since a reset answer costs exactly one request either way,
+retrying is nearly free even against a server that is still resetting. Writing
+`{"deltaFetch": true}` to the control file still overrules the breaker
+immediately; writing either value also cancels a pending retry, because the
+setting is then the operator's.
+
+The breaker **writes its own state to the control file** (`deltaFetch: false`
+plus a `deltaBreakerTripped` marker). That is not cosmetic: before it did, the
+file still said `deltaFetch: true` from startup, the next poll read that as an
+operator change and turned delta back on within ~3 seconds — the breaker never
+actually held. The marker exists so the *next* run is not bound by it: the retry
+timer only lives in memory, so an inherited `deltaFetch: false` would otherwise
+be permanent. A `false` you wrote yourself has no marker and still survives a
+restart (#206).
 
 - **At startup:** `RELAY_DELTA_FETCH=false` reverts to plain full fetches.
 - **Live, without restarting:** control file keys `deltaFetch` (boolean) and

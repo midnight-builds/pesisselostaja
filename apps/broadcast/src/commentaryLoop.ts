@@ -271,6 +271,26 @@ const POLL_BACKOFF_MAX_DOUBLINGS = 4;
  *  see. 5 in a row is well past noise and still trips within ~15 s at the
  *  default cadence. */
 const DELTA_RESET_BREAKER_STREAK = 5;
+/** Kuinka kauan delta pysyy katkaisijan sammuttamana ennen kuin sitä
+ *  kokeillaan uudelleen.
+ *
+ *  Katkaisija oli ennen tätä pysyvä ("delta pois tältä ajolta"), ja koska
+ *  reset-vastaus maksaa nykyään täsmälleen yhden pyynnön (ks.
+ *  handleResetResponse), pysyvyys ei suojannut miltään mitattavalta — se vain
+ *  vei ajolta 304-ohitukset ja kevyet vastaukset lopullisesti. Uusintayritys on
+ *  siis lähes ilmainen: jos palvelin resetoi yhä, viisi pollia kääntää
+ *  katkaisijan takaisin eikä pyyntöjen määrä muutu.
+ *
+ *  Kaksi minuuttia on valittu niin, että se on selvästi pidempi kuin
+ *  katkaisijan laukeaminen (~15 s oletustahdilla) — muuten ajo värähtelisi
+ *  päälle ja pois — mutta lyhyt suhteessa otteluun (~100 min), jotta ohimenevä
+ *  palvelinhäiriö ei vie deltaa koko loppupeliksi. */
+const DELTA_BREAKER_RETRY_BASE_MS = 2 * 60 * 1000;
+/** Katto uusintayrityksen odotukselle. Peräkkäiset laukeamiset tuplaavat
+ *  odotuksen (2 → 4 → 8 → 15 min), jottei aidosti rikkinäinen palvelin tuota
+ *  lokiin trippi/yritys-sykliä koko ottelun ajan. Katto on silti ottelua
+ *  lyhyempi: sitkeästikin resetoiva palvelin saa vielä muutaman tilaisuuden. */
+const DELTA_BREAKER_RETRY_MAX_MS = 15 * 60 * 1000;
 
 /** How many consecutive failed poll cycles before the failure log line turns
  *  alarming. A lone timeout is routine — one live match saw 22 isolated 8 s
@@ -523,6 +543,14 @@ export class CommentaryLoop {
   /** Set when the breaker turned delta off by itself, so the reset log line
    *  stays silent afterwards and a manual re-enable can tell the two apart. */
   private deltaBreakerTripped = false;
+  /** Hetki (ms) jolloin katkaisijan sammuttamaa deltaa kokeillaan uudelleen,
+   *  tai null kun mitään yritystä ei ole odottamassa. Ainoa asia joka *virittää*
+   *  tämän on katkaisijan laukeaminen; operaattorin tekemä muutos purkaa sen,
+   *  koska asetus on silloin hänen. */
+  private deltaBreakerRetryAtMs: number | null = null;
+  /** Montako kertaa katkaisija on lauennut tällä ajolla. Kasvattaa seuraavan
+   *  uusintayrityksen odotusta (DELTA_BREAKER_RETRY_BASE_MS). */
+  private deltaBreakerTrips = 0;
   /** Monotonic per-run counter behind each clip's telemetry id. */
   private clipSeq = 0;
   /** Wall clock of the last time a NEW event appeared — our own observation
@@ -710,6 +738,16 @@ export class CommentaryLoop {
       const parsed: unknown = JSON.parse(readFileSync(this.config.controlFile, "utf8"));
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         existing = parsed as Record<string, unknown>;
+        // Edellisen ajon katkaisijan jälki ei saa sitoa tätä ajoa. `deltaFetch:
+        // false` YHDESSÄ katkaisijamerkinnän kanssa on relayn oma kirjaus, ei
+        // operaattorin valinta, ja uusintayrityksen ajastin elää vain muistissa
+        // — ilman tätä kaatunut tai uudelleenkäynnistetty ajo jättäisi deltan
+        // pysyvästi pois, eli tasan sen oireen jota #52 koskee. Operaattorin
+        // oma `false` (ilman merkintää) säilyy normaalisti, #206:n mukaisesti.
+        if (existing.deltaBreakerTripped === true && existing.deltaFetch === false) {
+          delete existing.deltaFetch;
+        }
+        delete existing.deltaBreakerTripped;
         this.applyControlValues(existing, "käynnistyksessä");
       }
     } catch {
@@ -717,26 +755,96 @@ export class CommentaryLoop {
       // ja tiedosto kirjoitetaan alta pois. Sama sietokyky kuin
       // refreshRuntimeControlsilla.
     }
+    this.writeControlValues(existing, {
+      announceBatterChanges: this.announceBatterChanges,
+      narrationDelayMs: this.narrationDelayMs,
+      deltaFetch: this.deltaFetch,
+      pollIntervalMs: this.pollIntervalMs,
+    });
+  }
+
+  /** Atominen temp+rename-kirjoitus, joka säilyttää tuntemattomat avaimet.
+   *  Jaettu käynnistyskirjoituksen ja katkaisijan kirjauksen kesken, koska
+   *  atomisuus ja avainten säilytys ovat molemmilla sama vaatimus. */
+  private writeControlValues(base: Record<string, unknown>, values: Record<string, unknown>): void {
     try {
       const temp = `${this.config.controlFile}.tmp`;
-      writeFileSync(
-        temp,
-        JSON.stringify(
-          {
-            ...existing,
-            announceBatterChanges: this.announceBatterChanges,
-            narrationDelayMs: this.narrationDelayMs,
-            deltaFetch: this.deltaFetch,
-            pollIntervalMs: this.pollIntervalMs,
-          },
-          null,
-          2
-        ) + "\n"
-      );
+      writeFileSync(temp, JSON.stringify({ ...base, ...values }, null, 2) + "\n");
       renameSync(temp, this.config.controlFile);
     } catch (err) {
       logWarn("control.write_failed", `Control-tiedoston kirjoitus epäonnistui: ${err instanceof Error ? err.message : err}`);
     }
+  }
+
+  /** Kirjaa katkaisijan tekemän delta-tilan muutoksen control-tiedostoon.
+   *
+   *  Tämä on koko #52:n kohta 2, ja ilman sitä kohta 1 ei näy mitenkään.
+   *  Katkaisija muutti ennen vain muistissa olevan kentän, mutta tiedostoon jäi
+   *  käynnistyksessä kirjoitettu `deltaFetch: true`. Seuraava polli luki
+   *  tiedoston, näki "muutoksen" jota kukaan ei ollut tehnyt ja kytki deltan
+   *  takaisin päälle noin kolmessa sekunnissa — katkaisija oli käytännössä
+   *  tehoton, ja aidosti resetoiva palvelin olisi jäänyt ikuiseen
+   *  laukea–palaudu-sykliin. Kun tiedosto kertoo saman kuin muisti, tiedoston
+   *  poikkeava arvo tarkoittaa taas sitä mitä sen kuuluukin: operaattori muutti
+   *  asetusta.
+   *
+   *  Sivuhyötynä tila tulee ulos relaystä: ohjaamo lukee tämän saman tiedoston
+   *  (`relay.ts:knobsFromRaw`), joten katkaistu delta näkyy `/api/knobs`in
+   *  vastauksessa. Ruudulla se ei vielä näy — ohjaamon käyttöliittymässä ei ole
+   *  delta-säädintä lainkaan — joten operaattorin kanava on toistaiseksi
+   *  sydänäänen `delta POIS (katkaisija)` ja lokirivit.
+   *
+   *  Synkroninen kirjoitus on tässä turvallinen toisin kuin pollin lukupolulla:
+   *  tätä kutsutaan vain laukeamisessa ja uusintayrityksessä, ei joka pollilla.
+   *
+   *  Luku–muokkaa–kirjoita voi teoriassa hävitä ohjaamon yhtaikaiselle
+   *  kirjoitukselle. Ikkuna on mikrosekunteja ja tapahtuma harvinainen, ja
+   *  käynnistyksen kirjoitus on kantanut saman riskin alusta asti — prosessien
+   *  välistä lukitusta ei rakenneta tämän takia. */
+  private persistBreakerState(): void {
+    let existing: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(this.config.controlFile, "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        existing = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Sama sietokyky kuin muualla: lukukelvoton tiedosto ei estä kirjoitusta.
+    }
+    this.writeControlValues(existing, {
+      deltaFetch: this.deltaFetch,
+      // Merkintä erottaa katkaisijan `false`n operaattorin omasta valinnasta
+      // seuraavan ajon käynnistyksessä (ks. writeControlFile).
+      deltaBreakerTripped: this.deltaBreakerTripped,
+    });
+  }
+
+  /** Odotus katkaisijan seuraavaan uusintayritykseen. Tuplaantuu joka
+   *  laukeamisella, katto DELTA_BREAKER_RETRY_MAX_MS. */
+  private deltaBreakerRetryDelayMs(): number {
+    const doublings = Math.max(0, this.deltaBreakerTrips - 1);
+    // Kattoon verrataan ennen potenssiin korotusta äärettömyyden välttämiseksi
+    // — sama syy kuin POLL_BACKOFF_MAX_DOUBLINGSissa.
+    if (doublings > 10) return DELTA_BREAKER_RETRY_MAX_MS;
+    return Math.min(DELTA_BREAKER_RETRY_MAX_MS, DELTA_BREAKER_RETRY_BASE_MS * 2 ** doublings);
+  }
+
+  /** Tarkoituksellinen palautuminen: kun katkaisijan asettama odotus on kulunut,
+   *  delta kytketään takaisin ja katkaisijan laskurit nollataan, jotta se saa
+   *  täyden DELTA_RESET_BREAKER_STREAKin verran uutta näyttöä. Jos palvelin
+   *  resetoi yhä, katkaisija laukeaa uudelleen ja odotus tuplaantuu. */
+  private maybeRetryDeltaAfterBreaker(): void {
+    if (this.deltaBreakerRetryAtMs === null || Date.now() < this.deltaBreakerRetryAtMs) return;
+    this.deltaBreakerRetryAtMs = null;
+    this.deltaFetch = true;
+    this.deltaBreakerTripped = false;
+    this.consecutiveDeltaResets = 0;
+    this.consecutiveUnexplainedResets = 0;
+    this.persistBreakerState();
+    logInfo(
+      "api.delta_breaker_retry",
+      `Kokeillaan delta-hakua uudelleen katkaisijan jälkeen (${this.deltaBreakerTrips}. laukeaminen tällä ajolla).`
+    );
   }
 
   /** Re-reads the roster while it can still change, and hands back the names
@@ -838,6 +946,11 @@ export class CommentaryLoop {
     // very next poll (the local history is simply rebuilt from each response).
     if (typeof parsed.deltaFetch === "boolean" && parsed.deltaFetch !== this.deltaFetch) {
       this.deltaFetch = parsed.deltaFetch;
+      // Tiedosto kertoo nyt saman kuin muisti (persistBreakerState), joten
+      // eroava arvo on operaattorin tahto — ja se omistaa asetuksen kumpaan
+      // suuntaan tahansa: katkaisijan odottava uusintayritys peruuntuu, jottei
+      // ajastin myöhemmin kytke deltaa takaisin vasten juuri annettua käskyä.
+      this.deltaBreakerRetryAtMs = null;
       // A manual re-enable overrules the breaker and gives delta a fresh
       // streak — otherwise one earlier bad patch would keep it off for good.
       if (this.deltaFetch) {
@@ -1255,11 +1368,18 @@ export class CommentaryLoop {
     if (this.consecutiveUnexplainedResets >= DELTA_RESET_BREAKER_STREAK && this.deltaFetch) {
       this.deltaFetch = false;
       this.deltaBreakerTripped = true;
+      this.deltaBreakerTrips++;
+      const retryInMs = this.deltaBreakerRetryDelayMs();
+      this.deltaBreakerRetryAtMs = Date.now() + retryInMs;
+      // Ennen lokiriviä: tiedoston on kerrottava sama kuin muistin, tai
+      // seuraava polli kumoaa tämän katkaisun (ks. persistBreakerState).
+      this.persistBreakerState();
       logWarn(
         "api.delta_inconsistent",
         `HUOM: delta-haku vastasi selittämättömällä reset-leimalla ${this.consecutiveUnexplainedResets} kertaa peräkkäin ` +
-          "— kytketään delta pois tältä ajolta ja jatketaan täyshauilla. " +
-          "Takaisin päälle control-tiedostosta: {\"deltaFetch\": true}."
+          "— kytketään delta pois ja jatketaan täyshauilla. " +
+          `Kokeillaan uudelleen ${Math.round(retryInMs / 1000)} s kuluttua. ` +
+          "Heti takaisin päälle control-tiedostosta: {\"deltaFetch\": true}."
       );
     } else if (firstOfStreak) {
       // One line per streak, not per poll: the match-start streak runs for
@@ -1291,6 +1411,9 @@ export class CommentaryLoop {
   private async fetchEventsForPoll(): Promise<LiveEventsResult | null> {
     this.pollStats.polls++;
     this.pollWindow.polls++;
+    // Ennen delta-tilan lukemista, jotta erääntynyt uusintayritys vaikuttaa jo
+    // tähän polliin eikä vasta seuraavaan.
+    this.maybeRetryDeltaAfterBreaker();
     if (!this.deltaFetch) return this.fetchFullEvents();
     // While the local history is empty (match not started / being initialized)
     // the server answers every delta with the reset flag, which made each poll
