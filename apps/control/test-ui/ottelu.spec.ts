@@ -3,11 +3,13 @@
  *  Väitteet vastaavat yksi yhteen niitä päätöksiä, jotka tämän tilan muodon
  *  ratkaisivat:
  *
- *  - Ottelun aikana katsotaan viittä tietoa ja kosketaan kahta säätöä (#169),
- *    ja kaiken on mahduttava 393 px:n ruudulle ILMAN vieritystä (#173). Tämä
- *    tiedosto on se lupaus testinä.
- *  - Viive säädetään olemassa olevan control-tiedostosauman kautta (#172):
- *    napit ovat suhteellisia, ja ohjaamosta relayyn ei avata uutta kanavaa.
+ *  - Ottelun aikana katsotaan viittä tietoa ja kosketaan kolmea säätöä (#169,
+ *    kolmas lisätty #244:ssä), ja kaiken on mahduttava 393 px:n ruudulle ILMAN
+ *    vieritystä (#173). Tämä tiedosto on se lupaus testinä — ja juuri siksi
+ *    säädön lisääminen tarkistetaan täällä eikä silmämääräisesti.
+ *  - Viive JA miksaussuhde säädetään olemassa olevan control-tiedostosauman
+ *    kautta (#172, #244): napit ovat suhteellisia, ja ohjaamosta relayyn ei
+ *    avata uutta kanavaa.
  *  - Koneen kieli ei näy ottelupäivän polulla (#176): ei ffmpegiä, ei
  *    yt-dlp:tä, ei stream keytä, ei commit-tunnusta.
  *  - Katvekuva ja irronnut ffmpeg ovat ne kaksi tilaa, joissa lähetys näyttää
@@ -74,7 +76,7 @@ async function fullyOnScreen(
 }
 
 test.describe("ottelunaikainen", () => {
-  test("viisi tietoa ja kaksi säätöä mahtuvat ruudulle ilman vieritystä", async ({
+  test("viisi tietoa ja kolme säätöä mahtuvat ruudulle ilman vieritystä", async ({
     page,
     api,
     openApp,
@@ -98,9 +100,12 @@ test.describe("ottelunaikainen", () => {
     // Sisävuoro on oma tietonsa: palot kuuluvat vain lyövälle joukkueelle.
     await expect(page.locator(".fact").nth(4)).toContainText("LAP");
 
-    // Kaksi säätöä ja selostuslista, kaikki näkyvissä yhtä aikaa.
+    // Kolme säätöä ja selostuslista, kaikki näkyvissä yhtä aikaa.
     await expect(page.getByRole("button", { name: /liian aikaisin/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /liian myöhään/i })).toBeVisible();
+    // Miksaussuhde (#244): napit nimeävät kuultavan oireen, kuten viiveenkin.
+    await expect(page.getByRole("button", { name: /kentän äänet liian hiljaa/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /selostus liian hiljaa/i })).toBeVisible();
     await expect(page.getByRole("switch", { name: /vaihtoselostus/i })).toBeVisible();
     await expect(page.getByTestId("narration-list")).toBeVisible();
 
@@ -114,6 +119,47 @@ test.describe("ottelunaikainen", () => {
     expect(list?.height ?? 0).toBeGreaterThan(120);
     const toggle = await page.getByRole("switch", { name: /vaihtoselostus/i }).boundingBox();
     expect((toggle?.y ?? 0) + (toggle?.height ?? 0)).toBeLessThanOrEqual(853);
+  });
+
+  /** Miksaussuhteen säätö (#244). Ottelussa 136770 (16.8.2026) kentän äänet
+   *  olivat liian hiljaa suhteessa selostukseen, ja ainoa keino oli
+   *  `.env.relay` + relayn restart — eli katko selostettuun lähetykseen kesken
+   *  ottelun. Säätö kulkee samaa control-tiedostosaumaa kuin viive, joten
+   *  relay ottaa sen käyttöön seuraavassa klipissä ilman katkoa. */
+  test("miksaussuhdetta voi säätää kesken ottelun ja arvo näkyy heti", async ({
+    page,
+    api,
+    openApp,
+  }) => {
+    api.jobs = [liveJob()];
+    // Sekä SSE-tila (mitä ruutu näyttää) että api.knobs (mitä reitti muuttaa):
+    // ilman jälkimmäistä napautus laskisi oletuksesta eikä tästä arvosta.
+    api.knobs = fixture.knobs({ narrationGain: 1.3 });
+    await openLive(openApp, { knobs: fixture.knobs({ narrationGain: 1.3 }) });
+
+    const glance = page.getByTestId("match-glance");
+    await expect(glance).toContainText("1.30");
+
+    await page.getByRole("button", { name: /kentän äänet liian hiljaa/i }).click();
+    // Optimistinen arvo näkyy heti eikä vasta SSE-kierroksen jälkeen: säätöä
+    // haetaan korvakuulolta monella napautuksella peräkkäin.
+    await expect(glance).toContainText("1.25");
+    expect(api.knobs.narrationGain).toBe(1.25);
+
+    await page.getByRole("button", { name: /selostus liian hiljaa/i }).click();
+    await expect(glance).toContainText("1.30");
+    expect(api.knobs.narrationGain).toBe(1.3);
+  });
+
+  test("miksaussuhteen säätö pysähtyy rajoihinsa", async ({ page, api, openApp }) => {
+    api.jobs = [liveJob()];
+    api.knobs = fixture.knobs({ narrationGain: 0.5 });
+    await openLive(openApp, { knobs: fixture.knobs({ narrationGain: 0.5 }) });
+
+    // Alarajalla vaimennusnappi on pois käytöstä — napautus, joka ei tee
+    // mitään, on pahempi kuin nappi joka kertoo olevansa lopussa.
+    await expect(page.getByRole("button", { name: /kentän äänet liian hiljaa/i })).toBeDisabled();
+    await expect(page.getByRole("button", { name: /selostus liian hiljaa/i })).toBeEnabled();
   });
 
   /** #228: ajossa olevasta kortista ei päässyt kumpaankaan lähetykseen, joten

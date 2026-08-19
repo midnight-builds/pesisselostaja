@@ -117,6 +117,9 @@ export type EventCode =
   | "control.write_failed"
   | "control.batter_changes"
   | "control.narration_delay"
+  // Selostuksen gainin ajonaikainen säätö ja sen leikkausvaroitus (#244).
+  | "control.narration_gain"
+  | "control.narration_gain_clipping"
   | "control.delta_fetch"
   | "control.poll_interval"
   // narration FIFO

@@ -262,6 +262,12 @@ function alertsFor(live: LiveState): string[] {
  *  ylärajassa naputtelu näyttäisi kasvavaa lukua, jota relay ei koskaan saa. */
 const DELAY_MIN_MS = 0;
 const DELAY_MAX_MS = 15_000;
+/** Selostuksen gainin säätöväli ja askel (#244). Sama väli kuin palvelimen
+ *  `clampGain`illa; askel 0.05 on pienin, joka kuuluu yhdellä napautuksella
+ *  ilman että tasapainon hakeminen vaatii kymmeniä napautuksia. */
+const GAIN_MIN = 0.5;
+const GAIN_MAX = 2;
+const GAIN_STEP = 0.05;
 
 /** Kuinka kauan paikallista arvoa uskotaan, ellei palvelin vahvista sitä.
  *
@@ -298,6 +304,7 @@ export function MatchGlance({ live, notify }: Props) {
     const agreed =
       served != null &&
       served.narrationDelayMs === pending.knobs.narrationDelayMs &&
+      served.narrationGain === pending.knobs.narrationGain &&
       served.announceBatterChanges === pending.knobs.announceBatterChanges;
     // Joko palvelin sanoi saman, tai paikallinen arvo on elänyt tarpeeksi
     // kauan ilman vahvistusta. Kumpikin päättää sen: jäätynyt luku ruudulla on
@@ -327,6 +334,19 @@ export function MatchGlance({ live, notify }: Props) {
     if (!knobs) return;
     const next = Math.min(DELAY_MAX_MS, Math.max(DELAY_MIN_MS, knobs.narrationDelayMs + deltaMs));
     apply({ ...knobs, narrationDelayMs: next }, () => api.delayNudge(deltaMs));
+  };
+
+  /** Gainin säätö on suhteellinen samasta syystä kuin viiveenkin (#172):
+   *  tasapaino haetaan korvakuulolta kesken lähetyksen, eikä operaattorin
+   *  kuulu tietää nykyistä kerrointa. Pyöristys kahteen desimaaliin täsmää
+   *  palvelimen `clampGain`iin, jottei optimistinen arvo eroa vahvistetusta
+   *  liukuluvun hännän verran ja jätä `pending`iä roikkumaan. */
+  const nudgeGain = (delta: number) => {
+    if (!knobs) return;
+    const raw = Math.min(GAIN_MAX, Math.max(GAIN_MIN, knobs.narrationGain + delta));
+    const next = Math.round(raw * 100) / 100;
+    if (next === knobs.narrationGain) return;
+    apply({ ...knobs, narrationGain: next }, () => api.knobs({ narrationGain: next }));
   };
 
   const toggleBatterChanges = () => {
@@ -407,6 +427,44 @@ export function MatchGlance({ live, notify }: Props) {
             >
               <span className="btn__big">Puhui liian myöhään</span>
               <span className="btn__sub">puhu aiemmin</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Miksaussuhde (#244). Ennen tätä suhdetta pystyi säätämään vain
+            `.env.relay`:llä ja relayn restartilla — eli katkolla selostettuun
+            lähetykseen kesken ottelun (136770, 16.8.2026). Nyt relay skaalaa
+            klipin PCM:n, joten muutos kuuluu seuraavassa selostuksessa eikä
+            ffmpegiä käynnistetä uudelleen.
+
+            Vain selostuksen puoli liikkuu: kentän ääni ei kulje relayn läpi
+            PCM:nä. Suhteen säätöön se riittää, ja napit nimeävät siksi
+            KUULTAVAN oireen eivätkä sitä kumpaa raitaa kerroin koskee. */}
+        <div className="delay">
+          <span className="knob__label">
+            Selostuksen voimakkuus
+            <span className="delay__value num">
+              {knobs ? knobs.narrationGain.toFixed(2) : "–"}
+            </span>
+          </span>
+          <div className="delay__buttons">
+            <button
+              type="button"
+              className="btn btn--nudge"
+              disabled={!knobs || (knobs?.narrationGain ?? 0) <= GAIN_MIN}
+              onClick={() => nudgeGain(-GAIN_STEP)}
+            >
+              <span className="btn__big">Kentän äänet liian hiljaa</span>
+              <span className="btn__sub">vaimenna selostusta</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn--nudge"
+              disabled={!knobs || (knobs?.narrationGain ?? 0) >= GAIN_MAX}
+              onClick={() => nudgeGain(GAIN_STEP)}
+            >
+              <span className="btn__big">Selostus liian hiljaa</span>
+              <span className="btn__sub">voimista selostusta</span>
             </button>
           </div>
         </div>

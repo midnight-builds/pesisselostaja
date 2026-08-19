@@ -45,6 +45,7 @@ const MATCH_SCOPED_ENV_KEYS = [
 const KNOB_DEFAULTS: ControlKnobs = {
   announceBatterChanges: true, // config.ts: on unless RELAY_ANNOUNCE_BATTER_CHANGES=false
   narrationDelayMs: DEFAULT_NARRATION_DELAY_MS, // imported, so it can't drift from the relay's default
+  narrationGain: 1.3, // config.ts: RELAY_NARRATION_GAIN default
   deltaFetch: true, // config.ts: on unless RELAY_DELTA_FETCH=false
   pollIntervalMs: 3000, // config.ts default poll interval
 };
@@ -58,6 +59,20 @@ const MIN_POLL_INTERVAL_MS = 2000;
 const MAX_POLL_INTERVAL_MS = 60_000;
 const MIN_NARRATION_DELAY_MS = 0;
 const MAX_NARRATION_DELAY_MS = 15_000;
+/** Gainin säätöväli ohjaamossa (#244). Kapeampi kuin relayn oma yläraja (4),
+ *  koska tämä on se väli jota kuulokkeilla haetaan: 0.5 vaimentaa selostuksen
+ *  selvästi kentän alle, 2.0 nostaa sen selvästi yli. Relay kiinnittää arvon
+ *  vielä omaan rajaansa, joten tämä on käyttöliittymäpolitiikkaa, ei suoja. */
+const MIN_NARRATION_GAIN = 0.5;
+const MAX_NARRATION_GAIN = 2;
+/** Gain on murtoluku, joten se EI saa kulkea `clamp`in läpi — se pyöristää
+ *  kokonaisluvuksi, ja 1.3 muuttuisi ykköseksi. */
+function clampGain(value: number): number {
+  const bounded = Math.min(MAX_NARRATION_GAIN, Math.max(MIN_NARRATION_GAIN, value));
+  // Kaksi desimaalia: liukusäätimen askel on 0.05, eikä liukuluvun häntä
+  // (1.3000000000000003) kuulu control-tiedostoon eikä käyttöliittymään.
+  return Math.round(bounded * 100) / 100;
+}
 
 // ---------------------------------------------------------------- unit state
 
@@ -364,6 +379,10 @@ function knobsFromRaw(raw: Record<string, unknown>): ControlKnobs {
       typeof raw.narrationDelayMs === "number" && Number.isFinite(raw.narrationDelayMs)
         ? clamp(raw.narrationDelayMs, MIN_NARRATION_DELAY_MS, MAX_NARRATION_DELAY_MS)
         : KNOB_DEFAULTS.narrationDelayMs,
+    narrationGain:
+      typeof raw.narrationGain === "number" && Number.isFinite(raw.narrationGain)
+        ? clampGain(raw.narrationGain)
+        : KNOB_DEFAULTS.narrationGain,
     deltaFetch: typeof raw.deltaFetch === "boolean" ? raw.deltaFetch : KNOB_DEFAULTS.deltaFetch,
     pollIntervalMs:
       typeof raw.pollIntervalMs === "number" && Number.isFinite(raw.pollIntervalMs)
@@ -410,6 +429,7 @@ async function writeKnobsUnlocked(
       MAX_NARRATION_DELAY_MS
     );
   }
+  if (patch.narrationGain !== undefined) merged.narrationGain = clampGain(patch.narrationGain);
   if (patch.deltaFetch !== undefined) merged.deltaFetch = patch.deltaFetch;
   if (patch.pollIntervalMs !== undefined) {
     merged.pollIntervalMs = clamp(patch.pollIntervalMs, MIN_POLL_INTERVAL_MS, MAX_POLL_INTERVAL_MS);

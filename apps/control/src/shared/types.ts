@@ -225,6 +225,11 @@ export interface SystemState {
 export interface ControlKnobs {
   announceBatterChanges: boolean;
   narrationDelayMs: number;
+  /** Selostuksen äänenvoimakkuus suhteessa kentän ääneen (#244). Sama suure
+   *  kuin relayn `RELAY_NARRATION_GAIN`; 1.3 on oletus, alle sen vaimentaa
+   *  selostusta suhteessa kenttään. Relay skaalaa klipin PCM:n tähän ilman
+   *  ffmpegin uudelleenkäynnistystä, joten säätö ei katkaise lähetystä. */
+  narrationGain: number;
   deltaFetch: boolean;
   pollIntervalMs: number;
 }
