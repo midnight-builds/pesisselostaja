@@ -206,6 +206,10 @@ async function main(): Promise<void> {
       // (se on relayn oma paikallinen päätös), vaan estää sen kun lähetys on
       // päätetty ja tarkentaa tilannerivin sanamuotoa.
       sourceIngest: () => loop.sourceIngest,
+      // Selostuksen gain livenä (#244): loop lukee control-tiedoston, mikseri
+      // skaalaa klipin sen mukaan. Konfiguroitu arvo pysyy leivottuna ffmpegin
+      // graafiin, joten säätämättömässä ajossa kerroin on tasan 1.
+      narrationGainNow: () => loop.narrationGain,
     });
     pushSlateSituation();
     mixer.start().catch((err) => {

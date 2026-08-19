@@ -119,6 +119,48 @@ stalls the poll loop or reorders clips.
   there — currently the `sourceIngest` key (below). Nothing breaks: the control
   app republishes within one of its own polls.
 
+### Mixing balance (narration vs. field audio), incl. mid-match
+
+Narration is mixed against the phone's field audio with a gain baked into
+ffmpeg's filter graph at startup (`[1:a]volume=…`). Match 136770 (16.8.2026)
+found the field audio too quiet against the narration, and the only cure was
+editing `.env.relay` and restarting the relay — i.e. a **break in the narrated
+broadcast** mid-match, while hunting a balance that takes several attempts.
+
+The gain is now adjustable live. The relay scales the narration clip's PCM
+samples before they reach the FIFO, so a new value applies **from the next clip
+on** and ffmpeg is never restarted.
+
+- **At startup:** `RELAY_NARRATION_GAIN=0.9` in `.env.relay`, or
+  `--narration-gain 0.9`. Default `1.3`.
+- **Live, without restarting:** the same control file, `narrationGain` key:
+  ```bash
+  echo '{"narrationGain": 0.9}' > apps/broadcast/run/.control-143280.json
+  ```
+- **From the ohjaamo:** two buttons on the state card, named after the symptom
+  you hear ("Kentän äänet liian hiljaa" / "Selostus liian hiljaa"), 0.05 per
+  tap over the range 0.5–2.0.
+
+Three things worth knowing:
+
+- **Only the narration side moves.** The field audio never passes through the
+  relay as PCM, so it cannot be scaled here — but moving one side is all a
+  *ratio* needs.
+- **The value survives a restart**, like the narration delay: the relay adopts
+  the control file's value at startup rather than overwriting it from env/CLI
+  (#206). Calibration done by ear mid-match is the freshest knowledge there is.
+- **Raising it can clip.** Samples are 16-bit, so a value far above the baked
+  one hard-clips before ffmpeg's `alimiter` ever sees the signal. That is
+  audible as distortion, so the relay says so —
+  `control.narration_gain_clipping`, one line per clip, naming how many samples
+  clipped. If you see it, come back down. The relay also refuses anything above
+  `4`, so a mistyped `13` cannot turn a clip into pure clipped noise.
+
+An **automatic** target difference in dB (measure both sides, hold the gap) was
+considered and deliberately left out: setting its response speed is an
+audio-by-ear judgement (a fast loop pumps), and that cannot be settled without
+listening to a real broadcast.
+
 ### `sourceIngest` — what the control app publishes here
 
 The relay ignores every key it does not know, and `sourceIngest` is one of

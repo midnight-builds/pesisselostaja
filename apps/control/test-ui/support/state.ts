@@ -155,6 +155,7 @@ export function knobs(p: Partial<ControlKnobs> = {}): ControlKnobs {
   return {
     announceBatterChanges: true,
     narrationDelayMs: 4000,
+    narrationGain: 1.3,
     deltaFetch: true,
     pollIntervalMs: 3000,
     ...p,

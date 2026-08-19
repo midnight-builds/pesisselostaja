@@ -292,6 +292,13 @@ const DELTA_BREAKER_RETRY_BASE_MS = 2 * 60 * 1000;
  *  lyhyempi: sitkeästikin resetoiva palvelin saa vielä muutaman tilaisuuden. */
 const DELTA_BREAKER_RETRY_MAX_MS = 15 * 60 * 1000;
 
+/** Yläraja selostuksen ajonaikaiselle gainille (#244). Ei akustinen totuus
+ *  vaan suoja kirjoitusvirheeltä: control-tiedostoon näpätty 13 kertoisi
+ *  näytteet kymmenkertaisiksi, jolloin klippi olisi pelkkää int16:n rajaan
+ *  leikattua säröä — ja se tapahtuisi keskellä lähetystä. Käytännön säätöväli
+ *  on 0,5–1,5 oletuksen 1.3 ympärillä, joten 4 on väljä mutta ei vaarallinen. */
+const MAX_NARRATION_GAIN = 4;
+
 /** How many consecutive failed poll cycles before the failure log line turns
  *  alarming. A lone timeout is routine — one live match saw 22 isolated 8 s
  *  client-timeout blips in 45 min with zero events lost (the next poll always
@@ -417,6 +424,14 @@ export class CommentaryLoop {
    *  mid-match via the control file. See speak() for how it's applied without
    *  touching dedupe/state bookkeeping. */
   private narrationDelayMs: number;
+  /** Voimassa oleva selostuksen gain (#244). Sama suure kuin
+   *  `RELAY_NARRATION_GAIN`, josta tämä myös alustetaan — mikseri skaalaa
+   *  klipin PCM:n tähän arvoon ennen FIFOa, joten muutos vaikuttaa
+   *  seuraavasta klipistä alkaen ilman ffmpegin uudelleenkäynnistystä.
+   *
+   *  Loop omistaa tämän siksi, että loop on ainoa control-tiedoston lukija;
+   *  mikseri lukee arvon takaisinkutsulla, kuten `sourceIngest`inkin. */
+  private narrationGainValue: number;
   /** Latched permanently true the first time the ffmpeg reader is seen
    *  attached (or immediately when there is no status port — dry-run/tests).
    *  Before the latch, speak() runs its bookkeeping but skips the sink handoff
@@ -578,6 +593,7 @@ export class CommentaryLoop {
     this.pronunciations = loadPronunciations(config.pronunciationsFile);
     this.announceBatterChanges = config.announceBatterChanges;
     this.narrationDelayMs = config.narrationDelayMs;
+    this.narrationGainValue = config.narrationGain;
     this.pollIntervalMs = config.pollInterval;
     this.deltaFetch = config.deltaFetch;
     // No status port = nothing to wait for: latch immediately (old behavior).
@@ -639,6 +655,13 @@ export class CommentaryLoop {
    *  ole. Välitetään sellaisenaan mikserille; tulkinta kuuluu sinne. */
   get sourceIngest(): SourceIngestObservation | null {
     return this.sourceIngestValue;
+  }
+
+  /** Voimassa oleva selostuksen gain (#244). Mikseri lukee tämän joka klipille.
+   *  Yksi totuuslähde (#97): relay kertoo mitä on voimassa, ohjaamo ei
+   *  päättele — control-tiedostoon kirjoitettu arvo on sama luku. */
+  get narrationGain(): number {
+    return this.narrationGainValue;
   }
 
   /** Ikkunoitu yhteenveto jokaisesta pollista (#120).
@@ -758,6 +781,7 @@ export class CommentaryLoop {
     this.writeControlValues(existing, {
       announceBatterChanges: this.announceBatterChanges,
       narrationDelayMs: this.narrationDelayMs,
+      narrationGain: this.narrationGainValue,
       deltaFetch: this.deltaFetch,
       pollIntervalMs: this.pollIntervalMs,
     });
@@ -940,6 +964,22 @@ export class CommentaryLoop {
       if (next !== this.narrationDelayMs) {
         this.narrationDelayMs = next;
         logInfo("control.narration_delay", `Selostusviive ${when === "käynnistyksessä" ? "säilytetty" : "vaihdettu"} ${when}: ${next} ms (control-tiedostosta).`);
+      }
+    }
+    // Selostuksen gain livenä (#244). Sama kelpuutus kuin viiveellä: ei-luku
+    // ja epäkelpo arvo jätetään huomiotta, jottei puolikas editti kerro
+    // näytteitä NaN:llä ja vaienna selostusta lopullisesti. Kiinnitys
+    // [0, MAX_NARRATION_GAIN]: 0 on laillinen ("selostus kiinni"), ja yläraja
+    // on olemassa siksi ettei kirjoitusvirhe (13 vs 1.3) tee klipistä pelkkää
+    // leikattua säröä keskellä lähetystä.
+    if (typeof parsed.narrationGain === "number" && Number.isFinite(parsed.narrationGain)) {
+      const next = Math.min(MAX_NARRATION_GAIN, Math.max(0, parsed.narrationGain));
+      if (next !== this.narrationGainValue) {
+        this.narrationGainValue = next;
+        logInfo(
+          "control.narration_gain",
+          `Selostuksen gain ${when === "käynnistyksessä" ? "säilytetty" : "vaihdettu"} ${when}: ${next} (control-tiedostosta).`
+        );
       }
     }
     // Delta polling on/off live — false reverts to plain full fetches on the

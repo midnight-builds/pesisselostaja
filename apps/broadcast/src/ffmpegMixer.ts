@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { SourceEndReason } from "@pesisselostaja/core";
 import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import { NarrationFifo } from "./narrationFifo.js";
+import { applyPcmGain } from "./pcmGain.js";
 import {
   resolveSourceUrl,
   SourceEndedError,
@@ -74,6 +75,12 @@ export interface FfmpegMixerOptions {
   rtmpUrl: string;
   streamKey: string;
   narrationGain: number;
+  /** Operaattorin juuri nyt haluama selostuksen gain (#244), tai puuttuva kun
+   *  ajonaikaista säätöä ei ole käytössä (simulate, testit). Luetaan JOKA
+   *  klipille, koska arvo voi vaihtua kesken lähetyksen; loop omistaa sen,
+   *  koska loop on ainoa control-tiedoston lukija. Puuttuva = käytä leivottua
+   *  arvoa = ei skaalausta. */
+  narrationGainNow?: () => number;
   fifoPath: string;
   /** Force a respawn on this cadence even if ffmpeg looks healthy, so a
    *  rotated source URL gets picked up (default 15 min). */
@@ -631,8 +638,37 @@ export class FfmpegMixer {
     this.minProductiveRunMs = opts.minProductiveRunMs ?? 60 * 1000;
   }
 
+  /** Klippikohtainen gain-skaalaus (#244).
+   *
+   *  `opts.narrationGain` on se arvo, joka on LEIVOTTU ffmpegin graafiin
+   *  (`[1:a]volume=…`) käynnistyksessä, eikä se voi muuttua ilman ffmpegin
+   *  uudelleenkäynnistystä. `narrationGainNow` on operaattorin juuri nyt
+   *  haluama arvo. Skaalataan siis erotuksella `haluttu / leivottu`, jolloin
+   *  ffmpegin läpi tullut lopputulos on täsmälleen `haluttu`.
+   *
+   *  Tämä tarkoittaa myös, että säätämättömässä ajossa kerroin on tasan 1 ja
+   *  puskuri menee läpi koskemattomana — käytös on silloin bitilleen sama kuin
+   *  ennen tätä muutosta.
+   *
+   *  Leikkausvaroitus lokitetaan vain kerran klippiä kohti eikä näytettä
+   *  kohti: särö kestää klipin verran, ja rivi näytettä kohti täyttäisi lokin
+   *  juuri silloin kun operaattori yrittää lukea sitä. */
   enqueueNarration(pcm: Buffer): void {
-    this.fifo.enqueue(pcm);
+    const baked = this.opts.narrationGain;
+    const wanted = this.opts.narrationGainNow?.() ?? baked;
+    // Leivottu 0 tekee tästä äärettömän (tai 0/0 = NaN). Sitä ei tarkisteta
+    // täällä vaan yhdessä paikassa: applyPcmGain hylkää epäkelvon kertoimen ja
+    // palauttaa puskurin koskemattomana. Se on oikea vastaus myös tähän —
+    // ffmpeg vaimentaa selostuksen nollaan joka tapauksessa, eikä
+    // PCM-skaalauksella ole asiaan mitään sanottavaa.
+    const { pcm: scaled, clipped } = applyPcmGain(pcm, wanted / baked);
+    if (clipped > 0) {
+      logWarn(
+        "control.narration_gain_clipping",
+        `Selostuksen gain ${wanted} leikkasi ${clipped} näytettä rajaan — ääni särisee. Laske gainia.`
+      );
+    }
+    this.fifo.enqueue(scaled);
   }
 
   /** True while ffmpeg is attached and reading the FIFO, i.e. queued narration

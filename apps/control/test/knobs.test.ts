@@ -44,6 +44,7 @@ describe("readKnobs", () => {
     expect(knobs).toEqual({
       announceBatterChanges: true,
       narrationDelayMs: DEFAULT_NARRATION_DELAY_MS,
+      narrationGain: 1.3,
       deltaFetch: true,
       pollIntervalMs: 3000,
     });
@@ -87,6 +88,31 @@ describe("writeKnobs", () => {
     expect(tooHigh.narrationDelayMs).toBe(15000);
     const tooLow = await writeKnobs(MATCH_ID, { narrationDelayMs: -500 });
     expect(tooLow.narrationDelayMs).toBe(0);
+  });
+
+  // Miksaussuhteen säätö (#244). Gain on ainoa MURTOLUKU-säädin, ja siksi se
+  // ei saa kulkea muiden `clamp`in läpi — se pyöristää kokonaisluvuksi, jolloin
+  // oletus 1.3 muuttuisi ykköseksi ja jokainen säätö olisi joko 1 tai 2.
+  it("säilyttää gainin desimaalit eikä pyöristä kokonaisluvuksi", async () => {
+    const result = await writeKnobs(MATCH_ID, { narrationGain: 0.85 });
+    expect(result.narrationGain).toBe(0.85);
+    expect(readControlFile().narrationGain).toBe(0.85);
+  });
+
+  it("kiinnittää gainin välille [0.5, 2]", async () => {
+    expect((await writeKnobs(MATCH_ID, { narrationGain: 13 })).narrationGain).toBe(2);
+    expect((await writeKnobs(MATCH_ID, { narrationGain: 0 })).narrationGain).toBe(0.5);
+  });
+
+  it("ei päästä liukuluvun häntää control-tiedostoon", async () => {
+    // 1.25 + 0.05 = 1.3000000000000003 selaimessa; tiedostoon kuuluu 1.3.
+    const result = await writeKnobs(MATCH_ID, { narrationGain: 1.25 + 0.05 });
+    expect(result.narrationGain).toBe(1.3);
+  });
+
+  it("lukee relayn kirjoittaman gainin sellaisenaan", async () => {
+    writeControlFile({ narrationGain: 0.9 });
+    expect((await readKnobs(MATCH_ID)).narrationGain).toBe(0.9);
   });
 
   it("clamps pollIntervalMs to a 2000 ms floor", async () => {
