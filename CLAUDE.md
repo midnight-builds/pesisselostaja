@@ -191,11 +191,53 @@ So, in order of preference:
    same day beat four branches held open for review.
 2. **If they must overlap, stack them:** branch the second off the *first branch*, not
    off `main`, and say so in the PR body ("perustuu #112:een"). The second PR's diff
-   then shows only its own change, and there is nothing to reconcile later.
+   then shows only its own change, and there is nothing to reconcile later. **A stack
+   is only half a plan until you know how it comes apart — see below.**
 3. **If they truly are independent, prove it before opening the second PR:**
    `gh pr list` then compare `git diff --name-only main...` between them. Overlap in a
    *file* is a warning; overlap in one function, one `switch`, or one union type means
    go back to option 1 or 2.
+
+### Unstacking: how to merge a stacked PR
+
+Building a stack is easy; taking one apart is not. **Never merge a stack's
+parent with `--delete-branch` while another PR still points at it.**
+
+That is exactly what happened on 19.8.2026: `gh pr merge 277 --merge
+--delete-branch` deleted the base branch, and GitHub **closed** the child PR
+(#279) in the same second instead of retargeting it to `main`. The timeline says
+it plainly: `base_ref_deleted` → `closed`. The repo's `delete_branch_on_merge`
+is `false`, so this was the command's flag, not a setting.
+
+Being closed is not the bad part — the **deadlock** is. You cannot change the
+base of a closed PR (422), and you cannot reopen a PR whose base branch is gone
+(422). The only way out is to push the deleted branch back, which works only if
+you still know its SHA. Otherwise it is reflog archaeology, or recreating the PR
+and losing its description and discussion.
+
+The order that doesn't get stuck:
+
+1. **Retarget the child to `main` BEFORE merging the parent.**
+2. Merge the parent. Only then may its branch be deleted.
+3. Check the child's diff (`git log --oneline origin/main..origin/<child>`) — it
+   must shrink to exclude the parent's commits.
+4. Merge the child.
+
+**Retarget with `gh api`, not `gh pr edit`:**
+
+```bash
+gh api -X PATCH repos/midnight-builds/pesisselostaja/pulls/<n> -f base=main
+```
+
+`gh pr edit --base` fails **silently** in this repo because of the
+Projects-classic GraphQL bug (the same bug breaks `gh issue view` and
+`gh pr view` — use `gh api repos/.../issues/<n>` for those too). Silent failure
+means the merge would go to the old base while `gh pr view` still claims
+everything is fine.
+
+**`gh pr merge` prints nothing on success.** Don't infer the outcome from the
+command's return; check it separately with
+`gh api repos/.../pulls/<n> --jq '.merged'`.
 
 When integrating anyway:
 
