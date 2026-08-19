@@ -192,51 +192,51 @@ So, in order of preference:
 2. **If they must overlap, stack them:** branch the second off the *first branch*, not
    off `main`, and say so in the PR body ("perustuu #112:een"). The second PR's diff
    then shows only its own change, and there is nothing to reconcile later. **A stack
-   is only half a plan until you know how it gets merged — see below.**
+   is only half a plan until you know how it comes apart — see below.**
 3. **If they truly are independent, prove it before opening the second PR:**
    `gh pr list` then compare `git diff --name-only main...` between them. Overlap in a
    *file* is a warning; overlap in one function, one `switch`, or one union type means
    go back to option 1 or 2.
 
-### Purkaminen: pinotun PR:n mergaaminen
+### Unstacking: how to merge a stacked PR
 
-Pinon luominen on helppoa, sen purkaminen ei. **Älä koskaan mergaa pinon
-vanhempaa `--delete-branch`illa niin kauan kuin joku PR osoittaa siihen.**
+Building a stack is easy; taking one apart is not. **Never merge a stack's
+parent with `--delete-branch` while another PR still points at it.**
 
-19.8.2026 tehtiin juuri niin: `gh pr merge 277 --merge --delete-branch` poisti
-base-haaran, ja GitHub **sulki** lapsi-PR:n (#279) samalla sekunnilla sen sijaan
-että olisi siirtänyt sen `main`iin. Aikajana sanoo sen suoraan:
-`base_ref_deleted` → `closed`. Repon `delete_branch_on_merge` on `false`, joten
-tämä ei ollut asetus vaan komennon lippu.
+That is exactly what happened on 19.8.2026: `gh pr merge 277 --merge
+--delete-branch` deleted the base branch, and GitHub **closed** the child PR
+(#279) in the same second instead of retargeting it to `main`. The timeline says
+it plainly: `base_ref_deleted` → `closed`. The repo's `delete_branch_on_merge`
+is `false`, so this was the command's flag, not a setting.
 
-Sulkeutuminen ei ole se paha osa, vaan **umpikuja**: base-haaraa ei voi vaihtaa
-suljetusta PR:stä (422), eikä PR:ää voi avata koska sen base-haara on poistettu
-(422). Ainoa ulospääsy on työntää poistettu haara takaisin — mikä onnistuu vain
-jos sen SHA on yhä tiedossa. Muuten edessä on reflog-arkeologia tai PR:n luonti
-uusiksi, jolloin kuvaus ja keskustelu menetetään.
+Being closed is not the bad part — the **deadlock** is. You cannot change the
+base of a closed PR (422), and you cannot reopen a PR whose base branch is gone
+(422). The only way out is to push the deleted branch back, which works only if
+you still know its SHA. Otherwise it is reflog archaeology, or recreating the PR
+and losing its description and discussion.
 
-Järjestys, joka ei jää kiinni:
+The order that doesn't get stuck:
 
-1. **Uudelleenkohdista lapsi `main`iin ENNEN vanhemman mergaamista.**
-2. Mergaa vanhempi. Vasta sitten haaran voi poistaa.
-3. Tarkista lapsen diffi (`git log --oneline origin/main..origin/<lapsi>`) —
-   sen pitää kaventua vanhemman commitit pois.
-4. Mergaa lapsi.
+1. **Retarget the child to `main` BEFORE merging the parent.**
+2. Merge the parent. Only then may its branch be deleted.
+3. Check the child's diff (`git log --oneline origin/main..origin/<child>`) — it
+   must shrink to exclude the parent's commits.
+4. Merge the child.
 
-**Uudelleenkohdistus tehdään `gh api`lla, ei `gh pr edit`illä:**
+**Retarget with `gh api`, not `gh pr edit`:**
 
 ```bash
 gh api -X PATCH repos/midnight-builds/pesisselostaja/pulls/<n> -f base=main
 ```
 
-`gh pr edit --base` epäonnistuu tässä repossa **hiljaa** Projects-classic-
-GraphQL-vian takia (sama vika kaataa `gh issue view`n ja `gh pr view`n; käytä
-`gh api repos/.../issues/<n>` niidenkin sijaan). Hiljainen epäonnistuminen
-tarkoittaa, että merge menisi vanhaan baseen ja `gh pr view` väittäisi silti
-kaiken olevan kunnossa.
+`gh pr edit --base` fails **silently** in this repo because of the
+Projects-classic GraphQL bug (the same bug breaks `gh issue view` and
+`gh pr view` — use `gh api repos/.../issues/<n>` for those too). Silent failure
+means the merge would go to the old base while `gh pr view` still claims
+everything is fine.
 
-**`gh pr merge` ei tulosta mitään onnistuessaan.** Älä päättele lopputulosta
-komennon paluusta, vaan tarkista erikseen:
+**`gh pr merge` prints nothing on success.** Don't infer the outcome from the
+command's return; check it separately with
 `gh api repos/.../pulls/<n> --jq '.merged'`.
 
 When integrating anyway:
