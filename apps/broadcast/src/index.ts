@@ -62,7 +62,7 @@ async function main(): Promise<void> {
 
   const loop = new CommentaryLoop(
     config,
-    async (spoken, readable) => {
+    async (spoken, readable, priority = "critical") => {
       if (config.dryRun || !mixer) {
         logDebug("speech.dry_run", `[DRY-RUN synteesi] ${readable}`);
         return;
@@ -86,7 +86,7 @@ async function main(): Promise<void> {
       // two-argument port shared with the dry-run path), so the synthesis
       // record is keyed by text. Detected/spoken still carry the id.
       telemetry.narrationSynthesized({ id: "", text: readable }, engine, Date.now() - startedAt);
-      mixer.enqueueNarration(pcm);
+      mixer.enqueueNarration(pcm, priority);
     },
     {
       // Dry-run never attaches ffmpeg but should still log fillers, so report
@@ -187,6 +187,7 @@ async function main(): Promise<void> {
       rtmpUrl: config.rtmpUrl,
       streamKey: config.streamKey,
       narrationGain: config.narrationGain,
+      maxQueuedNarrationMs: config.maxQueuedNarrationMs,
       urlRefreshMs: config.urlRefreshMs,
       ytdlpExtractorArgs: config.ytdlpExtractorArgs,
       maxFailureWindowMs: config.maxFailureWindowMs,

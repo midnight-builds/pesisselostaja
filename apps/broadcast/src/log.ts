@@ -99,6 +99,7 @@ export type EventCode =
   | "api.roster_settled"
   | "api.lineup_changed"
   | "api.source_lag"
+  | "narration.queue_trimmed"
   // match events worth seeing in the log
   | "match.score"
   | "match.palo"

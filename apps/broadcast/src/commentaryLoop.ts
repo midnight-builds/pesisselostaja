@@ -49,6 +49,7 @@ import type { SlateSituation, SourceIngestObservation } from "./ffmpegMixer.js";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { logDebug, logError, logInfo, logWarn } from "./log.js";
+import type { ClipPriority } from "./narrationFifo.js";
 import type { RelayConfig } from "./config.js";
 
 /** Kuinka usein pollien yhteenveto kirjataan (#120). 20 s on kompromissi:
@@ -356,7 +357,14 @@ function parseSourceIngest(raw: unknown): SourceIngestObservation | null {
   };
 }
 
-export type SpeechSink = (spokenText: string, readableText: string) => Promise<void>;
+/** Kolmas parametri on valinnainen tarkoituksella: kuiva-ajon ja testien
+ *  toteutukset eivät välitä siitä, ja puuttuva arvo tarkoittaa `critical` eli
+ *  vanhaa käytöstä (#57). */
+export type SpeechSink = (
+  spokenText: string,
+  readableText: string,
+  priority?: ClipPriority
+) => Promise<void>;
 
 /** Lets the loop see the narration output stage so it can decide whether a
  *  pre-game filler is worth synthesizing right now. Kept as a
@@ -1215,7 +1223,7 @@ export class CommentaryLoop {
     if (this.matchStarted) {
       this.speak(formatStartupSpeech(meta, this.buildContext()));
     } else if (this.narrationReadyForFiller()) {
-      this.speak(formatWelcomeFiller(meta));
+      this.speak(formatWelcomeFiller(meta), true, undefined, "droppable");
     }
     // Startup already gives the full situation — don't fire the periodic
     // summary immediately on top of it.
@@ -1718,7 +1726,10 @@ export class CommentaryLoop {
         const msg = formatBatTurnChangeSpeech(
           meta, prevBatTeamId, event.team, cur.home, cur.away, state.currentInning, state.currentBatTurn
         );
-        this.speak(msg);
+        // Lyöjänvaihto on jonon ainoa selostus, josta vain viimeisin on
+        // relevantti: jälkijunassa puhuttu "nyt vuorossa X" kertoo
+        // pelaajasta, joka on jo lyönyt (#57, #246).
+        this.speak(msg, true, undefined, "droppable");
         state.announcedTurnKey = turnKey;
       }
 
@@ -1893,7 +1904,7 @@ export class CommentaryLoop {
     // through a long ffmpeg outage. Event narration is unaffected.
     if (!this.narrationReadyForFiller()) return;
     if (decision === "welcome") {
-      this.speak(formatWelcomeFiller(meta), false);
+      this.speak(formatWelcomeFiller(meta), false, undefined, "droppable");
       return;
     }
     // Merkintä vasta tässä, puhumisen yhteydessä: jos gate yllä ohitti
@@ -1903,7 +1914,7 @@ export class CommentaryLoop {
       // sanamuoto saa viitata aiempaan kertaan. Luetaan ENNEN merkintää.
       const firstOfMatch = this.lastIntroPeriod === null;
       this.lastIntroPeriod = this.state.currentPeriod;
-      this.speak(formatIntroFiller(firstOfMatch), false);
+      this.speak(formatIntroFiller(firstOfMatch), false, undefined, "droppable");
       return;
     }
     this.lastSummaryCount = this.state.announcementCount;
@@ -1912,7 +1923,7 @@ export class CommentaryLoop {
     const ctx = this.buildContext();
     const summary =
       decision === "recap" ? formatSituationSummary(meta, ctx) : formatIdleSummary(meta, ctx);
-    this.speak(summary, false);
+    this.speak(summary, false, undefined, "droppable");
   }
 
   private buildContext(): SpeechContext {
@@ -1944,7 +1955,16 @@ export class CommentaryLoop {
    *  of several announcements in one poll delayed the next poll by several
    *  seconds. synthQueue keeps clips in order while
    *  letting the poll loop run on its own fixed cadence. */
-  private speak(text: string, countAnnouncement = true, dedupeKey: string = text): void {
+  private speak(
+    text: string,
+    countAnnouncement = true,
+    dedupeKey: string = text,
+    /** `droppable` vain sille, minkä pois jäänti ei jätä kuulijalle aukkoa:
+     *  täytteet, määräaikaiset tilannekatsaukset ja lyöjänvaihdot. Oletus on
+     *  `critical`, jotta uusi selostus ei koskaan päädy pudotettavaksi siksi
+     *  että kukaan ei muistanut luokitella sitä (#57). */
+    priority: ClipPriority = "critical"
+  ): void {
     if (dedupeKey === this.lastSpeech) return;
     this.lastSpeech = dedupeKey;
     this.lastSpeechAt = Date.now();
@@ -1983,7 +2003,7 @@ export class CommentaryLoop {
       .then(async () => {
         const wait = decidedAt + delayMs - Date.now();
         if (wait > 0) await this.sleep(wait);
-        await this.sink(spoken, text);
+        await this.sink(spoken, text, priority);
         this.observer?.spoken(clip, false);
       })
       .catch((err) => {

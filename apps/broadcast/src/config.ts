@@ -17,6 +17,9 @@ export interface RelayConfig {
    *  Default DEFAULT_NARRATION_DELAY_MS. Runtime-overridable
    *  via the control file — see commentaryLoop. */
   narrationDelayMs: number;
+  /** Ceiling (ms of audio) on the narration backlog waiting to be heard, or 0
+   *  for none. Default DEFAULT_MAX_QUEUED_NARRATION_MS. See issue #57. */
+  maxQueuedNarrationMs: number;
   /** Don't speak until ffmpeg has been attached this long, measured from the
    *  FIRST attach ever (not relay start — the source can go live minutes
    *  later), so early viewers have time to join before the first line.
@@ -94,6 +97,19 @@ export interface RelayConfig {
  *  control file's `narrationDelayMs` (and at startup via
  *  `RELAY_NARRATION_DELAY_MS` / `--narration-delay-ms`). */
 export const DEFAULT_NARRATION_DELAY_MS = 4000;
+
+/** Kuinka paljon puhumatonta selostusta jonossa saa olla ennen kuin vanhinta
+ *  ei-kriittistä aletaan pudottaa (#57).
+ *
+ *  20 s, koska se on jo selvästi kuulijalle näkyvä ero: `narrationDelayMs`
+ *  (4 s) on tarkoituksellinen ja kalibroitu, mutta sen päälle kertyvä 20 s
+ *  tarkoittaa että selostus kertoo pelitilanteesta jonka katsoja on jo nähnyt
+ *  menevän ohi. Havaittu ryöppy oli 3–4 klippiä, mikä on ~15–25 s puhetta —
+ *  raja osuu siis juuri sen yläpäähän eikä laukea tavanomaisesta parin klipin
+ *  ruuhkasta.
+ *
+ *  0 = ei kattoa, eli täsmälleen vanha käytös. */
+export const DEFAULT_MAX_QUEUED_NARRATION_MS = 20_000;
 
 function requireValue(name: string, cliValue: string | undefined, envName: string): string {
   const value = cliValue ?? process.env[envName];
@@ -173,6 +189,16 @@ export function parseRelayConfig(): RelayConfig {
   const narrationDelayMs = Number.isNaN(narrationDelayRaw)
     ? DEFAULT_NARRATION_DELAY_MS
     : Math.max(0, narrationDelayRaw);
+  // Selostusjonon katto (#57). Kelvoton arvo putoaa oletukseen eikä NaN:iin,
+  // jolloin katto olisi käytännössä pois päältä juuri kun sitä luullaan
+  // asetetun.
+  const maxQueuedRaw = parseInt(
+    process.env.RELAY_MAX_QUEUED_NARRATION_MS ?? String(DEFAULT_MAX_QUEUED_NARRATION_MS),
+    10
+  );
+  const maxQueuedNarrationMs = Number.isNaN(maxQueuedRaw)
+    ? DEFAULT_MAX_QUEUED_NARRATION_MS
+    : Math.max(0, maxQueuedRaw);
   // ~20 s grace from the FIRST ffmpeg attach before anything is spoken, so
   // viewers have time to open the stream. 0 = off.
   const firstSpeechDelayRaw = parseInt(process.env.RELAY_FIRST_SPEECH_DELAY_MS ?? "20000", 10);
@@ -270,6 +296,7 @@ export function parseRelayConfig(): RelayConfig {
     pollInterval,
     narrationGain,
     narrationDelayMs,
+    maxQueuedNarrationMs,
     firstSpeechDelayMs,
     urlRefreshMs,
     ytdlpExtractorArgs,

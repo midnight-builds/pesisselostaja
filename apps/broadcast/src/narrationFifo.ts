@@ -21,24 +21,108 @@ function mkfifo(path: string): Promise<void> {
   });
 }
 
+/** Whether a clip may be dropped when the queue is over its ceiling (#57).
+ *
+ *  **`critical` is the default on purpose.** An announcement nobody classified
+ *  is one nobody thought about, and the failure of guessing wrong is asymmetric:
+ *  a run that never got spoken is a hole in the broadcast, while an extra
+ *  batter-change line is a few seconds of lag. Only what is explicitly known to
+ *  be skippable — fillers, periodic summaries, batter changes — is marked
+ *  droppable. */
+export type ClipPriority = "critical" | "droppable";
+
+interface QueuedClip {
+  pcm: Buffer;
+  priority: ClipPriority;
+}
+
+/** What enforcing the ceiling had to throw away. */
+export interface QueueDrop {
+  droppedClips: number;
+  droppedFrames: number;
+  /** Frames still over the ceiling after dropping everything droppable — i.e.
+   *  a backlog made entirely of announcements too important to cut. Non-zero
+   *  means the cap did NOT bring the queue down, and the operator should hear
+   *  about it rather than see a cap that silently failed. */
+  overFrames: number;
+}
+
 /** Pure frame-slicing logic, split out from NarrationFifo's I/O so it can be
  *  unit-tested without a real pipe/ffmpeg. Clips never bleed into each
  *  other: a clip's final partial frame is padded with silence rather than
  *  reading into the next queued clip, and `gapFrames` of silence separate
  *  consecutive clips so back-to-back announcements stay distinguishable. */
 export class NarrationQueue {
-  private queue: Buffer[] = [];
+  private queue: QueuedClip[] = [];
   private offset = 0;
   private gapRemaining = 0;
 
-  constructor(private frameBytes: number, private gapFrames = 0) {}
+  /** @param maxQueuedFrames Backlog ceiling in 20 ms frames, or 0 for none.
+   *  Frames rather than milliseconds so this class stays free of a sample rate
+   *  it does not otherwise need; NarrationFifo converts. */
+  constructor(
+    private frameBytes: number,
+    private gapFrames = 0,
+    private maxQueuedFrames = 0
+  ) {}
 
-  enqueue(pcm: Buffer): void {
-    this.queue.push(pcm);
+  /** Queues a clip and enforces the backlog ceiling (issue #57).
+   *
+   *  Returns what had to be dropped, or null when nothing did — the caller
+   *  logs it, because a silently shortened broadcast is worse than a long one.
+   *
+   *  **The OLDEST droppable clip goes first**, not the newest. In a burst the
+   *  oldest clip is the most stale: it describes a game state the viewer has
+   *  already watched go past, while the newest describes what is on screen
+   *  now. Dropping from the other end would keep the narration reciting
+   *  history and never let it catch up. */
+  enqueue(pcm: Buffer, priority: ClipPriority = "critical"): QueueDrop | null {
+    this.queue.push({ pcm, priority });
+    return this.enforceCap();
   }
 
   get pendingClips(): number {
     return this.queue.length;
+  }
+
+  /** Frames still to be played, the partially played head counted from where
+   *  playback actually is. Inter-clip gaps are NOT counted: they are 700 ms of
+   *  padding the listener hears as breathing room, and counting them would
+   *  make the ceiling tighten as the queue grows. */
+  get pendingFrames(): number {
+    let frames = 0;
+    for (const [i, clip] of this.queue.entries()) {
+      const remaining = clip.pcm.length - (i === 0 ? this.offset : 0);
+      if (remaining > 0) frames += Math.ceil(remaining / this.frameBytes);
+    }
+    return frames;
+  }
+
+  private enforceCap(): QueueDrop | null {
+    if (this.maxQueuedFrames <= 0) return null;
+    let droppedClips = 0;
+    let droppedFrames = 0;
+    // `length > 1`: the ceiling governs a BACKLOG, and one clip is not a
+    // backlog. A single announcement longer than the ceiling (a long summary
+    // against a tight setting) must still be spoken in full — dropping it
+    // would mean the queue silently ate the only thing in it.
+    while (this.queue.length > 1 && this.pendingFrames > this.maxQueuedFrames) {
+      const index = this.queue.findIndex(
+        // Never the clip that is already playing: cutting it mid-word is the
+        // very defect #67 is about, and a cap must not create one.
+        (clip, i) => clip.priority === "droppable" && !(i === 0 && this.offset > 0)
+      );
+      if (index < 0) break; // Everything left is critical — over the cap on purpose.
+      const [dropped] = this.queue.splice(index, 1) as [QueuedClip];
+      droppedClips++;
+      droppedFrames += Math.ceil(dropped.pcm.length / this.frameBytes);
+      // Dropping the clip that was about to start (index 0, offset 0) leaves a
+      // gap armed for a clip that no longer exists; the next nextFrame() call
+      // simply plays it as silence, which is the correct sound for "nothing to
+      // say right now".
+    }
+    if (droppedClips === 0) return null;
+    return { droppedClips, droppedFrames, overFrames: Math.max(0, this.pendingFrames - this.maxQueuedFrames) };
   }
 
   nextFrame(): Buffer {
@@ -47,7 +131,7 @@ export class NarrationQueue {
         this.gapRemaining--;
         return Buffer.alloc(this.frameBytes);
       }
-      const head = this.queue[0];
+      const head = this.queue[0]?.pcm;
       if (!head) return Buffer.alloc(this.frameBytes);
       const remaining = head.length - this.offset;
       if (remaining <= 0) {
@@ -84,7 +168,7 @@ export class NarrationQueue {
  *  filter graph instead. */
 export class NarrationFifo {
   private stream: WriteStream | null = null;
-  private queue = new NarrationQueue(FRAME_BYTES, CLIP_GAP_FRAMES);
+  private queue: NarrationQueue;
   private timer: NodeJS.Timeout | null = null;
   private tickCount = 0;
   private startTime = 0;
@@ -94,7 +178,11 @@ export class NarrationFifo {
    *  päättää roikkuva open()-lupaus. */
   private abortOpen: (() => void) | null = null;
 
-  constructor(public readonly path: string) {}
+  /** @param maxQueuedMs Backlog ceiling in milliseconds of queued audio, or 0
+   *  to keep the old unbounded behaviour (#57). */
+  constructor(public readonly path: string, maxQueuedMs = 0) {
+    this.queue = new NarrationQueue(FRAME_BYTES, CLIP_GAP_FRAMES, Math.max(0, Math.floor(maxQueuedMs / FRAME_MS)));
+  }
 
   /** Creates the named pipe file. Must complete BEFORE ffmpeg is spawned
    *  (ffmpeg errors immediately if the path doesn't exist yet), and BEFORE
@@ -136,9 +224,15 @@ export class NarrationFifo {
     this.scheduleNextTick();
   }
 
-  /** Queue narration PCM (already 48kHz/stereo/s16le) for playback, in order. */
-  enqueue(pcm: Buffer): void {
-    this.queue.enqueue(pcm);
+  /** Queue narration PCM (already 48kHz/stereo/s16le) for playback, in order.
+   *  Returns what the backlog ceiling had to drop, or null when nothing did. */
+  enqueue(pcm: Buffer, priority: ClipPriority = "critical"): QueueDrop | null {
+    return this.queue.enqueue(pcm, priority);
+  }
+
+  /** Milliseconds of narration still waiting to be heard. */
+  get pendingMs(): number {
+    return this.queue.pendingFrames * FRAME_MS;
   }
 
   /** Clips still queued (not yet handed to the write stream). Used to let a
