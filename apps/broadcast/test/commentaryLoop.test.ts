@@ -38,6 +38,7 @@ function makeConfig(overrides: Partial<RelayConfig> = {}): RelayConfig {
     pollInterval: 4000,
     narrationGain: 1.3,
     narrationDelayMs: 0,
+    maxQueuedNarrationMs: 0,
     firstSpeechDelayMs: 0, // most tests exercise gating/latching without the start-up grace
     urlRefreshMs: 900000,
     ytdlpExtractorArgs: "",

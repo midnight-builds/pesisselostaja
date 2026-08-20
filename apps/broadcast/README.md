@@ -119,6 +119,44 @@ stalls the poll loop or reorders clips.
   there — currently the `sourceIngest` key (below). Nothing breaks: the control
   app republishes within one of its own polls.
 
+### Narration backlog ceiling (issue #57)
+
+`narrationDelayMs` above is a *deliberate* offset. What this is about is the
+**accidental** one: in a run burst the queue grew to 3–4 clips, narration fell
+behind the picture on top of the delay, and it did not come back into sync until
+the burst was over. Nothing capped it.
+
+The FIFO now has a ceiling on how much unspoken audio may be waiting:
+
+- `RELAY_MAX_QUEUED_NARRATION_MS` in `.env.relay`. Default **20000**; `0`
+  disables the ceiling and restores the old unbounded behaviour exactly.
+- Over the ceiling, the **oldest droppable** clip goes first. Oldest, because in
+  a burst it is the most stale — it describes a game state the viewer already
+  watched go past, while the newest describes what is on screen now. Dropping
+  from the other end would keep the narration reciting history.
+- Every trim logs `narration.queue_trimmed` as a **warning**. A silently
+  shortened broadcast is worse than a long one.
+
+**What may be dropped, and what may not.** Clips are `critical` by default —
+runs, palot, match end, the startup line, the latch recap. Only three kinds are
+marked `droppable`: fillers, the periodic score summary, and batter changes
+(where only the latest is relevant anyway — see #246). An announcement nobody
+classified is one nobody thought about, and the failure is asymmetric: a run
+that never got spoken is a hole in the broadcast, an extra batter-change line is
+a few seconds of lag.
+
+Two things the ceiling deliberately will **not** do:
+
+- **It never cuts the clip that is already playing.** Cutting mid-word is the
+  defect #67 is about, and a cap must not create one.
+- **It never drops the only clip in the queue**, even one longer than the
+  ceiling. One clip is not a backlog.
+
+So a backlog made entirely of criticals stays over the ceiling — on purpose. The
+log line says so (`yhä N s yli katon (loput kriittisiä)`) rather than letting a
+cap look like it worked when it did not. Merging such a backlog into one
+sentence is #246, not this.
+
 ### Mixing balance (narration vs. field audio), incl. mid-match
 
 Narration is mixed against the phone's field audio with a gain baked into

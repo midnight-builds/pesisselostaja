@@ -35,6 +35,7 @@ function mixerWithGain(baked: number, now?: () => number): { enqueued: Buffer[];
     rtmpUrl: "",
     streamKey: "",
     narrationGain: baked,
+    maxQueuedNarrationMs: 0,
     fifoPath: "/tmp/pesis-test-gain-unused.pcm",
     narrationGainNow: now,
   });
@@ -111,7 +112,7 @@ function makeConfig(overrides: Partial<RelayConfig> = {}): RelayConfig {
     youtubeUrl: "https://example.invalid/live",
     rtmpUrl: "", streamKey: "",
     voice: "harri-medium", piperBin: "piper",
-    pollInterval: 3000, narrationGain: 1.3, narrationDelayMs: 0, firstSpeechDelayMs: 0,
+    pollInterval: 3000, narrationGain: 1.3, narrationDelayMs: 0, maxQueuedNarrationMs: 0, firstSpeechDelayMs: 0,
     urlRefreshMs: 900000, ytdlpExtractorArgs: "", maxFailureWindowMs: 720000,
     finishedFailureWindowMs: 120000, hardStopQuietMs: 180000,
     noSignalSlate: false, noSignalSlateAfterMs: 8000,

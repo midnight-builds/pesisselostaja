@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import type { SourceEndReason } from "@pesisselostaja/core";
 import { logDebug, logError, logInfo, logWarn } from "./log.js";
-import { NarrationFifo } from "./narrationFifo.js";
+import { NarrationFifo, type ClipPriority } from "./narrationFifo.js";
 import { applyPcmGain } from "./pcmGain.js";
 import {
   resolveSourceUrl,
@@ -75,6 +75,9 @@ export interface FfmpegMixerOptions {
   rtmpUrl: string;
   streamKey: string;
   narrationGain: number;
+  /** Selostusjonon katto millisekunteina puhumatonta ääntä, 0 = ei kattoa
+   *  (#57). */
+  maxQueuedNarrationMs?: number;
   /** Operaattorin juuri nyt haluama selostuksen gain (#244), tai puuttuva kun
    *  ajonaikaista säätöä ei ole käytössä (simulate, testit). Luetaan JOKA
    *  klipille, koska arvo voi vaihtua kesken lähetyksen; loop omistaa sen,
@@ -633,7 +636,7 @@ export class FfmpegMixer {
   private imminentSince: number | null = null;
 
   constructor(private opts: FfmpegMixerOptions) {
-    this.fifo = new NarrationFifo(opts.fifoPath);
+    this.fifo = new NarrationFifo(opts.fifoPath, opts.maxQueuedNarrationMs ?? 0);
     this.maxFailureWindowMs = opts.maxFailureWindowMs ?? 5 * 60 * 1000;
     this.minProductiveRunMs = opts.minProductiveRunMs ?? 60 * 1000;
   }
@@ -653,7 +656,7 @@ export class FfmpegMixer {
    *  Leikkausvaroitus lokitetaan vain kerran klippiä kohti eikä näytettä
    *  kohti: särö kestää klipin verran, ja rivi näytettä kohti täyttäisi lokin
    *  juuri silloin kun operaattori yrittää lukea sitä. */
-  enqueueNarration(pcm: Buffer): void {
+  enqueueNarration(pcm: Buffer, priority: ClipPriority = "critical"): void {
     const baked = this.opts.narrationGain;
     const wanted = this.opts.narrationGainNow?.() ?? baked;
     // Leivottu 0 tekee tästä äärettömän (tai 0/0 = NaN). Sitä ei tarkisteta
@@ -668,7 +671,19 @@ export class FfmpegMixer {
         `Selostuksen gain ${wanted} leikkasi ${clipped} näytettä rajaan — ääni särisee. Laske gainia.`
       );
     }
-    this.fifo.enqueue(scaled);
+    const drop = this.fifo.enqueue(scaled, priority);
+    if (drop) {
+      // Ääneen, aina: hiljaa lyhennetty lähetys on pahempi kuin pitkä. Rivi
+      // kertoo myös jos katto EI riittänyt, koska jäljellä oleva ruuhka on
+      // pelkkää kriittistä — silloin operaattorin on tiedettävä, ettei tästä
+      // enää leikata.
+      const over = drop.overFrames > 0 ? `, yhä ${Math.round(drop.overFrames * 20 / 1000)} s yli katon (loput kriittisiä)` : "";
+      logWarn(
+        "narration.queue_trimmed",
+        `Selostusjono ylitti katon — pudotettiin ${drop.droppedClips} ohitettavaa klippiä ` +
+          `(${Math.round(drop.droppedFrames * 20 / 1000)} s puhetta)${over}.`
+      );
+    }
   }
 
   /** True while ffmpeg is attached and reading the FIFO, i.e. queued narration
