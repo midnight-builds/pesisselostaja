@@ -93,9 +93,10 @@ const FULL_FETCH_TIMEOUT_MS = 10_000;
  *  The gain per stuck poll is therefore ~1 s of latency at the head of the
  *  speech chain (fetch -> state -> TTS -> speak) — and, more to the point, a
  *  poll cadence that stops being knocked out of step ~0.6 times a minute.
- *  Retrying an aborted poll immediately instead of waiting for the cadence is
- *  the rest of the win; it is still not done (issue #52), though the backoff it
- *  was waiting for now exists (effectivePollIntervalMs).
+ *  The rest of the win — retrying an aborted poll at once instead of waiting
+ *  for the cadence — is in run() now (issue #281), gated on the same streak
+ *  this comment's sibling constant is: one retry per poll, and none while a
+ *  failure streak is open.
  *
  *  NOT floored at `pollIntervalMs` — see apiTimeoutMs(). */
 const DELTA_FETCH_TIMEOUT_MS = 1_000;
@@ -113,11 +114,14 @@ const DELTA_FETCH_TIMEOUT_MS = 1_000;
  *  connections came in ones (31/31 retries succeeded first try, #156), so a
  *  third failure in a row means the assumption itself is off.
  *
- *  Still not a general backoff: the poll cadence flexes on the same streak now
- *  (effectivePollIntervalMs, issue #52 kohta 2), but an aborted poll continues
- *  to wait for the next tick rather than retrying at once — that half of #52 is
- *  open. The two valves are keyed on one streak and recover differently on
- *  purpose; effectivePollIntervalMs() says why. */
+ *  Still not a general backoff: the poll cadence flexes on the same streak
+ *  (effectivePollIntervalMs, issue #52 kohta 2), and the same streak is what
+ *  switches the immediate retry off (run(), issue #281) — precisely so the two
+ *  mechanisms cannot fight: below the streak a stuck connection is retried at
+ *  once at the tight limit, at the streak the limit loosens AND the retry stops,
+ *  leaving the stretched cadence in charge. The three valves are keyed on one
+ *  streak and recover differently on purpose; effectivePollIntervalMs() says
+ *  why. */
 const DELTA_FETCH_TIMEOUT_SLOW_MS = 4_000;
 /** How many SUCCESSFUL polls the loosened delta timeout stays in force after a
  *  failure streak opened it — the valve's hysteresis.
@@ -1133,6 +1137,10 @@ export class CommentaryLoop {
     // guard). The interval itself is the operator's, except while a fetch-
     // failure streak stretches it — see effectivePollIntervalMs().
     let nextPollAt = Date.now() + this.effectivePollIntervalMs();
+    // Whether the poll about to run IS the one immediate retry a failed poll is
+    // allowed (issue #281) — so a retry that fails as well waits out the cadence
+    // instead of retrying again. See recordPollFailure() for the whole rule.
+    let retryingImmediately = false;
     while (!signal.aborted) {
       // The instant this poll was DUE — the anchor the next tick is measured
       // from, so neither a slow fetch nor a roster refresh can add to the wait.
@@ -1149,6 +1157,7 @@ export class CommentaryLoop {
       // covers the suppressed past, the events then narrate the present.
       this.maybeLatchNarrationReady(meta);
       const cycleStartedAt = Date.now();
+      let retryNow = false;
       try {
         // Full fetch or delta merge; either way `history` holds the complete
         // event list afterwards, which is what ALL processing below runs on —
@@ -1197,15 +1206,27 @@ export class CommentaryLoop {
         await saveState(this.config.stateFile, this.state);
         this.recordPollSuccess();
       } catch (err) {
-        this.recordPollFailure(err, cycleStartedAt);
+        retryNow = this.recordPollFailure(err, cycleStartedAt, retryingImmediately);
+      }
+      retryingImmediately = retryNow;
+      if (retryNow) {
+        // Straight back to the top with no wait: the poll that just failed
+        // brought no data, and a stuck connection is over the instant it is
+        // abandoned (issue #281). Deliberately NOT anchored on `dueAt` — the
+        // next ordinary poll is then measured from the retry, so a retry that
+        // succeeds is followed by a full cadence of fresh data rather than by
+        // another fetch a few hundred ms later.
+        nextPollAt = Date.now();
+        continue;
       }
       // Scheduled AFTER the cycle, so this poll's OUTCOME governs the very next
       // wait: a failure streak stretches it here, and the single success that
       // ends the streak shortens it here — not one poll later, which would hand
       // a recovering API up to MAX_POLL_INTERVAL_MS of extra lag for free.
-      // Anchored on `dueAt` rather than on now, so the property the tight delta
-      // timeout was tuned against still holds exactly: an abort that overran the
-      // cadence retries at once, one that fits inside it waits out the rest.
+      // Anchored on `dueAt` rather than on now, so a cycle that overran the
+      // cadence — a slow-but-successful fetch, a roster refresh, or the second
+      // failure of a poll that already used its retry — resumes the cadence
+      // instead of adding its own overrun to the next wait.
       nextPollAt = Math.max(dueAt + this.effectivePollIntervalMs(), Date.now());
     }
   }
@@ -1244,8 +1265,34 @@ export class CommentaryLoop {
   /** A lone poll failure is routine noise (8 s client-timeout blips — one
    *  live match had 22 in 45 min with zero events lost); the log line carries the
    *  cycle duration and the streak position, and only a streak of
-   *  FETCH_FAILURE_ALARM_STREAK+ turns the line alarming. */
-  private recordPollFailure(err: unknown, cycleStartedAt: number): void {
+   *  FETCH_FAILURE_ALARM_STREAK+ turns the line alarming.
+   *
+   *  Returns whether run() should retry this poll AT ONCE instead of waiting for
+   *  the next tick (issue #281). The decision is made here, not in run(), for one
+   *  reason: it depends on the streak this call just advanced, and it belongs in
+   *  the same log line as the failure it explains — an operator reading
+   *  "Hakuvirhe" must not have to infer from the next line's timestamp whether
+   *  the relay waited or went straight back.
+   *
+   *  Two limits, both from the measurement in DELTA_FETCH_TIMEOUT_MS (match
+   *  136745: 67 aborts, all at exactly the timeout, ~0.6/min, singly rather than
+   *  in streaks, and 31/31 retries succeeding first try):
+   *
+   *  - **At most one immediate retry per poll** (`alreadyRetried`). The data
+   *    justifies one attempt and nothing more; a second would be a guess.
+   *  - **None once a failure streak is open.** At FETCH_FAILURE_ALARM_STREAK the
+   *    assumption behind the retry — a lone stuck connection against a healthy
+   *    API — is exactly what has been disproved, and effectivePollIntervalMs()
+   *    takes over. It must win: an immediate retry that survived the streak
+   *    would hammer a struggling API at double rate precisely while the backoff
+   *    was trying to back off.
+   *
+   *  Deliberately NOT restricted to abort/timeout errors, even though aborts are
+   *  what was measured. Classifying by error identity is fragile (the shape of a
+   *  fetch abort differs by runtime), and it buys nothing: the two limits above
+   *  already cap ANY failure at one extra request per poll and shut the retry off
+   *  entirely once failures start coming in a row. */
+  private recordPollFailure(err: unknown, cycleStartedAt: number, alreadyRetried = false): boolean {
     this.pollStats.fetchFailures++;
     this.pollWindow.failures++;
     const streak = ++this.consecutiveFetchFailures;
@@ -1261,7 +1308,10 @@ export class CommentaryLoop {
     // not have to infer from the gaps between lines that the relay slowed down.
     const slowed = this.effectivePollIntervalMs();
     const cadence = slowed > this.pollIntervalMs ? `, pollausväli ${slowed} ms` : "";
-    logWarn("api.fetch_failed", `${label} (kesto ${seconds} s, ${streak}. peräkkäinen${cadence}): ${err instanceof Error ? err.message : err}`);
+    const retryNow = !alreadyRetried && streak < FETCH_FAILURE_ALARM_STREAK;
+    const retry = retryNow ? ", yritetään heti uudelleen" : "";
+    logWarn("api.fetch_failed", `${label} (kesto ${seconds} s, ${streak}. peräkkäinen${cadence}${retry}): ${err instanceof Error ? err.message : err}`);
+    return retryNow;
   }
 
   /** Closes an alarming failure streak with an explicit all-clear line, so a
