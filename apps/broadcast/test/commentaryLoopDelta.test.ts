@@ -77,7 +77,7 @@ interface LoopInternals {
   pollStatsSummary: string;
   maybeLogPollWindow(): void;
   lastPollSummaryAtMs: number;
-  recordPollFailure(err: unknown, cycleStartedAt: number): void;
+  recordPollFailure(err: unknown, cycleStartedAt: number, alreadyRetried?: boolean): boolean;
   recordPollSuccess(): void;
   writeControlFile(): void;
   announceBatterChanges: boolean;
@@ -329,7 +329,10 @@ describe("CommentaryLoop poll statistics + failure streaks", () => {
       const startedAt = Date.now() - 8000;
       loop.recordPollFailure(new Error("This operation was aborted"), startedAt);
       loop.recordPollFailure(new Error("This operation was aborted"), startedAt);
-      expect(logSpy.mock.calls[0][0]).toMatch(/Hakuvirhe \(kesto 8\.\d s, 1\. peräkkäinen\): This operation was aborted/);
+      // Rivi kertoo myös, että tätä pollia yritetään heti uudelleen (#281):
+      // muuten operaattori päättelisi odotti/ei odottanut seuraavan rivin
+      // kellonajasta.
+      expect(logSpy.mock.calls[0][0]).toMatch(/Hakuvirhe \(kesto 8\.\d s, 1\. peräkkäinen, yritetään heti uudelleen\): This operation was aborted/);
       expect(logSpy.mock.calls[1][0]).toContain("2. peräkkäinen");
       expect(logSpy.mock.calls[1][0]).not.toContain("HUOM");
 
@@ -339,6 +342,31 @@ describe("CommentaryLoop poll statistics + failure streaks", () => {
       // lokirivien väleistä.
       expect(logSpy.mock.calls[2][0]).toMatch(/HUOM, hakuvirhesarja \(kesto 8\.\d s, 3\. peräkkäinen, pollausväli \d+ ms\)/);
       expect(loop.pollStatsSummary).toContain("hakuvirheitä 3");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  /** Uusintapäätöksen molemmat rajat yhdessä paikassa (#281). Silmukan puoli on
+   *  testattu ajamalla oikea poll-silmukka (commentaryLoop.test.ts); tämä pitää
+   *  kiinni siitä sopimuksesta, jonka varassa silmukka toimii. */
+  it("kertoo välittömän uusinnan: enintään kerran per polli, eikä sarjan ollessa auki", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const loop = makeLoop();
+      const startedAt = Date.now();
+
+      // 1. ja 2. virhe ovat yksittäisiä (sarja ei ole vielä auki) → uusinta.
+      expect(loop.recordPollFailure(new Error("aborted"), startedAt)).toBe(true);
+      // …mutta ei kun tämä polli jo käytti uusintansa.
+      expect(loop.recordPollFailure(new Error("aborted"), startedAt, true)).toBe(false);
+      // 3. peräkkäinen avaa sarjan: tästä eteenpäin ohjaksissa on jousto.
+      expect(loop.recordPollFailure(new Error("aborted"), startedAt)).toBe(false);
+      expect(loop.recordPollFailure(new Error("aborted"), startedAt)).toBe(false);
+
+      // Yksi onnistuminen nollaa sarjan, joten uusinta on taas käytettävissä.
+      loop.recordPollSuccess();
+      expect(loop.recordPollFailure(new Error("aborted"), startedAt)).toBe(true);
     } finally {
       logSpy.mockRestore();
     }

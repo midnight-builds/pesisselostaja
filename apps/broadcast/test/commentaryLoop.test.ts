@@ -982,8 +982,9 @@ describe("CommentaryLoop pollausvälin jousto hakuvirhesarjassa (#52 kohta 2)", 
     const gaps = await pollGaps(() => false, 5);
 
     // Kaksi ensimmäistä virhettä ovat rutiinikohinaa (FETCH_FAILURE_ALARM_STREAK),
-    // eivätkä saa vaikuttaa tahtiin lainkaan.
-    expect(gaps.slice(0, 2)).toEqual([3000, 3000]);
+    // eivätkä saa vaikuttaa tahtiin lainkaan. Ensimmäinen niistä yritetään heti
+    // uudelleen (#281) — siitä nollaväli — ja uusinta odottaa tahdin loppuun.
+    expect(gaps.slice(0, 2)).toEqual([0, 3000]);
     // Kolmannesta peräkkäisestä virheestä alkaen väli tuplaantuu.
     expect(gaps[2]).toBe(6000);
     expect(gaps[3]).toBe(12000);
@@ -1019,7 +1020,10 @@ describe("CommentaryLoop pollausvälin jousto hakuvirhesarjassa (#52 kohta 2)", 
     const gaps = await pollGaps(() => false, 5, 20_000);
 
     expect(gaps.length).toBeGreaterThan(2);
-    expect(gaps.every((g) => g === 20_000)).toBe(true);
+    // Ainoa tahtia lyhyempi väli on ensimmäisen virheen välitön uudelleenyritys
+    // (#281), ja niitä on tasan yksi: sarjan auettua vain venytetty tahti ohjaa.
+    expect(gaps[0]).toBe(0);
+    expect(gaps.slice(1).every((g) => g === 20_000)).toBe(true);
   });
 
   it("ei tuota MIN_POLL_INTERVAL_MS:ää lyhyempää väliä", () => {
@@ -1030,5 +1034,46 @@ describe("CommentaryLoop pollausvälin jousto hakuvirhesarjassa (#52 kohta 2)", 
 
     loop.consecutiveFetchFailures = 3;
     expect(loop.effectivePollIntervalMs()).toBeGreaterThanOrEqual(2000);
+  });
+
+  // Issue #281, #52:n viimeinen avoin kohta. Abortoitu polli jäi odottamaan
+  // seuraavaa tahtia, vaikka se ei tuonut dataa lainkaan: seuraava polli
+  // ankkuroidaan siihen hetkeen jolloin tämä ERÄÄNTYI, joten 1 s:n abortti
+  // mahtuu 3 s:n tahtiin ja ~2 s paloi tyhjään puheketjun alkupäässä.
+  //
+  // Mittausdata (ottelu 136745, 1.8.2026): 67 aborttia, kaikki tasan
+  // aikakatkaisussa, ~0,6/min, yksittäin eikä sarjoissa — ja 31/31 uusintaa
+  // onnistui ensimmäisellä kerralla. Juuri se profiili perustelee YHDEN
+  // välittömän yrityksen ja vain sen: sarjassa oletus on kumottu, ja silloin
+  // ohjaksissa on effectivePollIntervalMs().
+  describe("abortoidun pollin välitön uudelleenyritys (#281)", () => {
+    it("yrittää epäonnistuneen pollin heti uudelleen odottamatta seuraavaa tahtia", async () => {
+      const gaps = await pollGaps((poll) => poll !== 1, 4);
+
+      // Tämä nolla on koko issue: ennen #281:tä tässä oli 3000.
+      expect(gaps[0]).toBe(0);
+      // Ja uusinnan onnistuttua tahti jatkuu uusinnasta mitattuna — ei niin,
+      // että perään tulisi heti toinen haku alkuperäisen ankkurin takia.
+      expect(gaps.slice(1)).toEqual([3000, 3000]);
+    });
+
+    it("yrittää heti VAIN kerran per polli — uusinnan kaatuessa odotetaan tahti", async () => {
+      const gaps = await pollGaps((poll) => poll >= 3, 4);
+
+      // 1. polli kaatuu → uusinta heti (0). Uusintakin kaatuu, mutta toista
+      // välitöntä yritystä ei tule: mittausdata perustelee yhden, ei useampaa.
+      expect(gaps).toEqual([0, 3000, 3000]);
+    });
+
+    it("ei yritä heti kun hakuvirhesarja on auki — venytetty tahti voittaa", async () => {
+      const gaps = await pollGaps(() => false, 6);
+
+      // Sarjan auettua (FETCH_FAILURE_ALARM_STREAK) välitön uusinta olisi
+      // API:n hakkaamista tuplatahtiin juuri kun jousto yrittää hidastaa.
+      // Nollavälejä on siis tasan yksi, ja se on ennen sarjan avautumista.
+      expect(gaps.indexOf(0)).toBe(0);
+      expect(gaps.lastIndexOf(0)).toBe(0);
+      expect(gaps.slice(1)).toEqual([3000, 6000, 12_000, 15_000]);
+    });
   });
 });
