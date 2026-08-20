@@ -55,6 +55,11 @@ function num(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+/** Kuten `num`, mutta puuttuva arvo on null eikä nolla. */
+function optionalNum(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function bool(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
@@ -142,6 +147,10 @@ export function parseRelayStatus(text: string): RelayTelemetry | null {
       finished: bool(match.finished),
       eventCount: num(match.eventCount),
       lastEventAt: str(match.lastEventAt),
+      // Ei `num(...)`: sen oletusarvo 0 kääntäisi puuttuvan mittauksen
+      // väitteeksi "ei viivettä lainkaan" — tarkalleen se sekaannus, jota
+      // #120 yrittää poistaa.
+      sourceLagMs: optionalNum(match.sourceLagMs),
     },
     narration: {
       detected: num(narration.detected),

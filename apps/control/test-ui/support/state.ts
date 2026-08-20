@@ -261,7 +261,7 @@ export function telemetry(p: Partial<RelayTelemetry> = {}): RelayTelemetry {
     pendingClips: 1,
     respawns: 0,
     source: { state: "live", detail: "ffmpeg käynnissä" },
-    match: { finished: false, eventCount: 412, lastEventAt: "2026-07-29T05:29:40.000Z" },
+    match: { finished: false, eventCount: 412, lastEventAt: "2026-07-29T05:29:40.000Z", sourceLagMs: 6000 },
     narration: { detected: 3, spoken: 2, muted: 1, queued: 1 },
     tts: { engine: "piper", elevenLabsCharsUsed: 0 },
     lastProblem: null,

@@ -124,7 +124,7 @@ function baseTelemetry(overrides: Partial<RelayTelemetry> = {}): RelayTelemetry 
     pendingClips: 1,
     respawns: 0,
     source: { state: "live", detail: "ffmpeg käynnissä" },
-    match: { finished: false, eventCount: 5, lastEventAt: new Date().toISOString() },
+    match: { finished: false, eventCount: 5, lastEventAt: new Date().toISOString(), sourceLagMs: null },
     narration: { detected: 10, spoken: 9, muted: 0, queued: 1 },
     tts: { engine: "piper", elevenLabsCharsUsed: 0 },
     lastProblem: null,
@@ -337,7 +337,7 @@ describe("buildChain: lähde-rivi ja YouTube-havainto", () => {
     const row = sourceRow({
       telemetry: baseTelemetry({
         source: { state: "ended", detail: "yt-dlp: live_status=post_live" },
-        match: { finished: true, eventCount: 5, lastEventAt: new Date().toISOString() },
+        match: { finished: true, eventCount: 5, lastEventAt: new Date().toISOString(), sourceLagMs: null },
       }),
     });
     // Kuvaaja lopetti lähteen ottelun jälkeen: normaali lopputila, ei vika

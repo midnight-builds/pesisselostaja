@@ -59,12 +59,26 @@ function narrationFact(telemetry: RelayTelemetry | null, relayActive: boolean): 
   if (telemetry.pendingClips >= QUEUE_WARN_CLIPS) {
     return { label: "Selostus", value: `Jää jälkeen (${telemetry.pendingClips} jonossa)`, tone: "warn" };
   }
+  // Sama rivi, eri syy (#120): jono voi olla tyhjä ja selostus silti puoli
+  // minuuttia jäljessä, jos tapahtumat saadaan tulospalvelusta myöhässä.
+  // Jonon ruuhka tarkistetaan ensin, koska se on meidän oma vikamme ja
+  // korjattavissa; tämä kertoo lähteestä.
+  const lagMs = telemetry.match.sourceLagMs;
+  if (lagMs !== null && lagMs >= SOURCE_LAG_WARN_MS) {
+    return { label: "Selostus", value: `Jäljessä tulospalvelusta (${Math.round(lagMs / 1000)} s)`, tone: "warn" };
+  }
   return { label: "Selostus", value: "Kuuluu lähetyksessä", tone: "ok" };
 }
 
 /** Sama raja kuin palvelimen tilarivillä (`live.ts`): kymmenen jonossa olevaa
  *  klippiä tarkoittaa että selostus laahaa kuvan perässä. */
 const QUEUE_WARN_CLIPS = 10;
+
+/** Sama raja kuin relayn `SOURCE_LAG_WARN_MS` (`commentaryLoop.ts`) — kaksi
+ *  lukua eri paikoissa tarkoittaisi, että ohjaamo ja loki ovat eri mieltä
+ *  siitä milloin selostus on myöhässä. Perustelu 30 s:lle on relayn puolella:
+ *  ottelun 145900 mitattu jakauma. */
+const SOURCE_LAG_WARN_MS = 30_000;
 
 /** Näkyykö kuvauspuhelimen raakalähetys.
  *

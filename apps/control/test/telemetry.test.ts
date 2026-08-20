@@ -206,7 +206,7 @@ describe("parseRelayStatus", () => {
     pendingClips: 2,
     respawns: 1,
     source: { state: "live", detail: "ffmpeg käynnissä" },
-    match: { finished: false, eventCount: 412, lastEventAt: "2026-07-29T04:59:50.000Z" },
+    match: { finished: false, eventCount: 412, lastEventAt: "2026-07-29T04:59:50.000Z", sourceLagMs: 12_000 },
     narration: { detected: 90, spoken: 88, muted: 1, queued: 1 },
     tts: { engine: "piper", elevenLabsCharsUsed: 0 },
     lastProblem: null,
@@ -217,6 +217,16 @@ describe("parseRelayStatus", () => {
 
   it("reads a full snapshot back verbatim", () => {
     expect(parseRelayStatus(JSON.stringify(full))).toEqual(full);
+  });
+
+  it("lukee puuttuvan viivemittauksen nulliksi eikä nollaksi (#120)", () => {
+    // Vanhempi deploy ei julkaise kenttää lainkaan, ja `created` on muutenkin
+    // valinnainen. Nolla väittäisi ettei viivettä ole — juuri se sekaannus,
+    // jonka takia mittaus ylipäätään lisättiin.
+    const { sourceLagMs, ...matchWithout } = full.match;
+    void sourceLagMs;
+    const parsed = parseRelayStatus(JSON.stringify({ ...full, match: matchWithout }));
+    expect(parsed?.match.sourceLagMs).toBeNull();
   });
 
   it("a snapshot with no usable timestamp is refused — an undateable snapshot cannot be judged stale", () => {

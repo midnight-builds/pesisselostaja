@@ -283,6 +283,35 @@ one line per poll with the cursor and the response size. It is off by default fo
 the reason above — the cost is paid in the control app's status row, not in log
 space.
 
+#### How far behind the scorer we are (issue #120, part 2)
+
+The poll trace answers *what our own polling did*. It cannot answer the question
+the listener actually asked — **"why did I hear the palo 49 s after the
+scoreboard showed it?"** — because that gap starts before our first poll.
+
+The feed's `created` field is the scorer's marking instant in unix seconds, and
+the only wall clock it carries (`timestamp` is null on this feed, #119). The
+relay now measures `havaittu − created` for every newly seen event:
+
+- the window summary gains `viive kirjauksesta viimeisin 20 s, suurin 43 s (5 kpl)`
+- crossing **30 s** logs `api.source_lag` as a **warning**, at most once per
+  20 s window (a burst shares one lag; ten identical lines would be ten copies
+  of the same news)
+- `status-<ID>.json` carries `match.sourceLagMs`, and the control app's
+  *Selostus* row reads "Jäljessä tulospalvelusta (43 s)" above the same threshold
+
+Two things this number is **not**:
+
+- **Not a stopwatch.** `created` comes from someone else's server and our clock
+  is ours, so a skewed clock shows as a constant offset. Read the trend.
+- **Not zero when absent.** `created`'s presence in every response has never
+  been verified, so an unmeasurable event counts separately and the summary says
+  `ei mitattavissa (3 ilman created-kenttää)` rather than claiming 0 s.
+
+The 30 s threshold comes from match 145900's measured distribution: five palot
+observed 13, 20, 20, 27 and **43** s after being recorded. Below 30 s is this
+feed's ordinary publish delay, and warning on it would produce a line per poll.
+
 Fetches are aborted on **three different timeouts**, one per fetch shape:
 
 | Fetch | Timeout | Floored at the poll interval? | Why |

@@ -3,6 +3,9 @@ import { EventHistory } from "./eventHistory.js";
 import {
   buildPlayerLookup,
   collectLineupChanges,
+  emptyLagWindow,
+  formatLagWindow,
+  recordEventLag,
   withLineups,
   groupSubEventsForSpeech,
   groupToSpeech,
@@ -52,6 +55,15 @@ import type { RelayConfig } from "./config.js";
  *  tiheämpi täyttäisi ohjaamon 50 rivin lokikkunan, harvempi ei erottelisi
  *  145900:n kaltaista ~50 sekunnin katvetta. */
 const POLL_SUMMARY_MS = 20_000;
+
+/** Milloin tulospalvelusta jäljessä oleminen on kertomisen arvoista (#120).
+ *
+ *  30 s eikä vähempää, koska ottelun 145900 mittaus antaa jakauman: viisi paloa
+ *  havaittiin 13, 20, 20, 27 ja 43 s kirjaamisen jälkeen. Alle 30 s on siis
+ *  tämän syötteen tavanomaista julkaisuviivettä, ja sillä varoittaminen
+ *  tuottaisi rivin lähes joka pollista. 43 s:n tapaus — se jonka kuulija
+ *  huomasi — ylittää tämän. */
+const SOURCE_LAG_WARN_MS = 30_000;
 
 const SUMMARY_EVERY_N = 10;
 /** No speech for this long → break the silence with an idle filler. 90 s
@@ -588,6 +600,13 @@ export class CommentaryLoop {
    *  entering results", not "how far into the match are we". (Events also
    *  carry a wall-clock `created` field, see LiveEvent; not needed here.) */
   private lastEventSeenAt: string | null = null;
+  /** Viive toimitsijan kirjauksesta siihen kun tapahtuma nähtiin, ikkunoituna
+   *  samaan tahtiin kuin pollikirjanpito (#120). */
+  private lagWindow = emptyLagWindow();
+  /** Viimeisin mitattu viive telemetriaa varten, ikkunan nollauksesta
+   *  riippumatta — ohjaamo lukee tilannekuvan, ei ikkunaa. */
+  private sourceLagMs: number | null = null;
+  private lagWarnedThisWindow = false;
   /** Ottelutiedot, haettu kerran run():n alussa. Talletetaan, jotta katvekuvan
    *  pisterivi osaa joukkueiden nimet ilman toista hakua. */
   private meta: MatchMetadata | null = null;
@@ -625,6 +644,12 @@ export class CommentaryLoop {
 
   get lastEventAt(): string | null {
     return this.lastEventSeenAt;
+  }
+
+  /** Viive tulospalvelun kirjauksesta havaintoon, viimeisimmän mitatun
+   *  tapahtuman mukaan, tai null kun mitään ei ole mitattu (#120). */
+  get sourceLag(): number | null {
+    return this.sourceLagMs;
   }
 
   /** Whether the match has ended ("Ottelu päättyi" seen, not reopened) — read
@@ -696,6 +721,30 @@ export class CommentaryLoop {
    *
    *  Kutsutaan pollisilmukasta joka kierroksella; emittoi vain kun ikkuna on
    *  täynnä JA polleja on ollut. */
+  /** Mittaa kuinka kaukana toimitsijan kirjauksesta ollaan, kun tapahtuma
+   *  nähdään ensimmäistä kertaa (#120).
+   *
+   *  Ottelussa 145900 kolmas palo kuului 49 s kirjaamisen jälkeen, ja ero
+   *  selvisi vasta jälkikäteen ajetusta `created`-vertailusta. Tämä tekee
+   *  samasta luvusta ajonaikaisen: rivi kun viive ylittää kynnyksen, ja arvo
+   *  telemetriaan josta ohjaamo lukee sen.
+   *
+   *  Varoitus on kerran per yhteenvetoikkuna: ryöpyssä kymmenen tapahtumaa
+   *  nähdään samalla pollilla ja kaikilla on sama viive, joten rivi per
+   *  tapahtuma olisi kymmenen kertaa sama uutinen. */
+  private recordSourceLag(event: LiveEvent): void {
+    const lagMs = recordEventLag(this.lagWindow, event, Date.now());
+    if (lagMs === null) return;
+    this.sourceLagMs = lagMs;
+    if (lagMs >= SOURCE_LAG_WARN_MS && !this.lagWarnedThisWindow) {
+      this.lagWarnedThisWindow = true;
+      logWarn(
+        "api.source_lag",
+        `Selostus on ${Math.round(lagMs / 1000)} s jäljessä tulospalvelun kirjauksesta (id=${event.id}).`
+      );
+    }
+  }
+
   /** Rivi per polli, vain kun RELAY_POLL_TRACE on päällä (#120). */
   private tracePoll(detail: string): void {
     if (!this.config.pollTrace) return;
@@ -716,9 +765,14 @@ export class CommentaryLoop {
         `${w.newEvents} uutta tapahtumaa, ${answered}, historiassa ${this.history.size}, ` +
         `kestot delta ${formatFetchDurations(w.fetchMs.delta)} / meta ${formatFetchDurations(w.fetchMs.meta)} / ` +
         `täys ${formatFetchDurations(w.fetchMs.full)}, ` +
+        `viive kirjauksesta ${formatLagWindow(this.lagWindow)}, ` +
         `kursori ${cursor}.`
     );
     this.lastPollSummaryAtMs = Date.now();
+    // Ikkunan mukana nollautuu myös varoituksen kertakäyttöisyys: pitkittyneen
+    // katveen on saatava rivi kerran per ikkuna, ei yhtä koko ottelun ajalle.
+    this.lagWindow = emptyLagWindow();
+    this.lagWarnedThisWindow = false;
     this.pollWindow = {
       polls: 0,
       notModified: 0,
@@ -1678,6 +1732,7 @@ export class CommentaryLoop {
       // nulliksi (#119).
       if (hasNewSubEvent) {
         this.lastEventSeenAt = new Date().toISOString();
+        this.recordSourceLag(event);
       }
       if (hasNewSubEvent && event.timestamp !== null) {
         const candidateEpochMs = Date.now() - event.timestamp * 1000;

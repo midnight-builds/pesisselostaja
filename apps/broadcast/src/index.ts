@@ -121,6 +121,7 @@ async function main(): Promise<void> {
       matchFinished: loop.matchFinished,
       eventCount: loop.eventCount,
       lastEventAt: loop.lastEventAt,
+      sourceLagMs: loop.sourceLag,
       ttsEngine: elevenLabs ? "elevenlabs" : "piper",
       elevenLabsCharsUsed: elevenLabs?.totalCharsUsed ?? 0,
     });

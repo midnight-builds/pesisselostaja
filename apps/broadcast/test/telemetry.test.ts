@@ -22,6 +22,7 @@ const PROBE: StatusProbe = {
   sourceState: "live",
   sourceDetail: "ffmpeg käynnissä",
   matchFinished: false,
+  sourceLagMs: 4200,
   eventCount: 137,
   lastEventAt: "2026-07-29T08:00:00.000Z",
   ttsEngine: "elevenlabs",

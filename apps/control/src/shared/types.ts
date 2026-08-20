@@ -116,6 +116,11 @@ export interface RelayTelemetry {
     finished: boolean;
     eventCount: number;
     lastEventAt: string | null;
+    /** Kuinka kaukana selostus on tulospalvelun kirjaushetkestä, millisekunteina
+     *  (#120). **Null ei ole nolla:** relayn `created`-kenttä on valinnainen, ja
+     *  vanhempi deploy ei julkaise tätä lainkaan — kumpikin tarkoittaa "ei
+     *  mitattu". Vain relay mittaa tämän; ohjaamo lukee eikä päättele (#97). */
+    sourceLagMs: number | null;
   };
   narration: {
     detected: number;

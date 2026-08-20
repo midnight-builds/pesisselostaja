@@ -867,6 +867,70 @@ describe("CommentaryLoop lastEventAt (#119)", () => {
 
     expect(loop.lastEventAt).toBe(first);
   });
+
+  // --------------------------------------------------------------- issue #120
+  // Ottelussa 145900 kolmas palo kuului 49 s sen jälkeen kun toimitsija kirjasi
+  // sen, ja ero selvisi vasta jälkikäteen ajetusta `created`-vertailusta. Nämä
+  // koettelevat että sama luku syntyy ajon aikana.
+  describe("viive tulospalvelun kirjauksesta (#120)", () => {
+    /** Sama palotapahtuma, mutta `created` annettuna sekunteina taaksepäin. */
+    function agedEvent(secondsAgo: number | null): LiveEvent {
+      const e = nullTimestampEvent();
+      return secondsAgo === null ? e : { ...e, created: Math.floor(Date.now() / 1000) - secondsAgo };
+    }
+
+    async function process(loop: CommentaryLoop, event: LiveEvent): Promise<void> {
+      const inner = loop as unknown as ProcessInternals;
+      await inner.processEventsLive([event], META, buildPlayerLookup(META));
+      await inner.synthQueue;
+    }
+
+    it("mittaa viiveen uudelle tapahtumalle", async () => {
+      const loop = new CommentaryLoop(makeConfig(), recordingSink());
+      expect(loop.sourceLag).toBeNull();
+
+      await process(loop, agedEvent(43));
+
+      expect(loop.sourceLag).toBeGreaterThanOrEqual(43_000);
+      expect(loop.sourceLag).toBeLessThan(46_000);
+    });
+
+    it("jättää viiveen mittaamatta kun tapahtumalla ei ole created-kenttää", async () => {
+      // Null eikä nolla: "ei mitattu" ei saa näyttää siltä että viivettä ei ole.
+      const loop = new CommentaryLoop(makeConfig(), recordingSink());
+      await process(loop, agedEvent(null));
+      expect(loop.sourceLag).toBeNull();
+    });
+
+    it("varoittaa kun viive ylittää kynnyksen — ja vain kerran ikkunassa", async () => {
+      const codes: (string | null)[] = [];
+      setLogSink((entry) => codes.push(entry.code));
+      try {
+        const loop = new CommentaryLoop(makeConfig(), recordingSink());
+        await process(loop, agedEvent(43));
+        // Toinen tapahtuma samassa ikkunassa: ryöpyssä näitä on kymmenen, ja
+        // kaikilla sama viive — rivi per tapahtuma olisi sama uutinen kymmenesti.
+        await process(loop, { ...agedEvent(44), id: 2 });
+        expect(codes.filter((c) => c === "api.source_lag")).toHaveLength(1);
+      } finally {
+        setLogSink(null);
+      }
+    });
+
+    it("ei varoita tavanomaisesta julkaisuviiveestä", async () => {
+      // 20 s on tämän syötteen normaalia (145900: 13, 20, 20, 27, 43 s).
+      const codes: (string | null)[] = [];
+      setLogSink((entry) => codes.push(entry.code));
+      try {
+        const loop = new CommentaryLoop(makeConfig(), recordingSink());
+        await process(loop, agedEvent(20));
+        expect(codes).not.toContain("api.source_lag");
+        expect(loop.sourceLag).toBeGreaterThanOrEqual(20_000);
+      } finally {
+        setLogSink(null);
+      }
+    });
+  });
 });
 
 // Issue #52, kohta 2. Ottelussa 146210 hakuvirheryöppy vaati operaattorin

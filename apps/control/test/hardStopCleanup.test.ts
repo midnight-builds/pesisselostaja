@@ -159,7 +159,7 @@ function telemetry(
     pendingClips: 0,
     respawns: 3,
     source: { state: "no_signal", detail: "ffmpeg poistui heti" },
-    match: { finished: true, eventCount: 412, lastEventAt: isoAgo(3 * 60 * 1000) },
+    match: { finished: true, eventCount: 412, lastEventAt: isoAgo(3 * 60 * 1000), sourceLagMs: null },
     narration: { detected: 90, spoken: 90, muted: 0, queued: 0 },
     tts: { engine: "piper", elevenLabsCharsUsed: 0 },
     lastProblem: null,
@@ -614,7 +614,7 @@ describe("hallittu lopetus: ended + match.finished sulkee selostetun lähetyksen
       endReason: "ended",
       telemetryOverrides: {
         source: { state: "ended", detail: "raakalähetys päättyi" },
-        match: { finished: true, eventCount: 412, lastEventAt: isoAgo(3 * 60 * 1000) },
+        match: { finished: true, eventCount: 412, lastEventAt: isoAgo(3 * 60 * 1000), sourceLagMs: null },
       },
     });
 
@@ -651,7 +651,7 @@ describe("hallittu lopetus: ended + match.finished sulkee selostetun lähetyksen
       hardStopSource: true,
       telemetryOverrides: {
         source: { state: "no_signal", detail: "kuvaa ei tule" },
-        match: { finished: false, eventCount: 210, lastEventAt: isoAgo(30 * 1000) },
+        match: { finished: false, eventCount: 210, lastEventAt: isoAgo(30 * 1000), sourceLagMs: null },
       },
     });
 
@@ -669,7 +669,7 @@ describe("hallittu lopetus: ended + match.finished sulkee selostetun lähetyksen
       hardStopSource: true,
       telemetryOverrides: {
         source: { state: "ended", detail: "raakalähetys päättyi kesken ottelun" },
-        match: { finished: false, eventCount: 210, lastEventAt: isoAgo(30 * 1000) },
+        match: { finished: false, eventCount: 210, lastEventAt: isoAgo(30 * 1000), sourceLagMs: null },
       },
     });
 
@@ -685,7 +685,7 @@ describe("hallittu lopetus: ended + match.finished sulkee selostetun lähetyksen
       endReason: null,
       hardStopSource: true,
       telemetryOverrides: {
-        match: { finished: true, eventCount: 412, lastEventAt: isoAgo(3 * 60 * 1000) },
+        match: { finished: true, eventCount: 412, lastEventAt: isoAgo(3 * 60 * 1000), sourceLagMs: null },
       },
     });
 
