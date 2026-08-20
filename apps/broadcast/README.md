@@ -302,9 +302,20 @@ more: **not a faster retry.** `run()` sets the next poll time *before* the fetch
 so a 4 s abort overran the 3 s cadence and the retry fired immediately, whereas a
 1 s abort fits inside the cadence and the retry waits out the remaining ~2 s. The
 gain is ~1 s of latency per stuck poll at the head of the speech chain, and a poll
-cadence that stops being knocked out of step ~0.6 times a minute. Retrying an
-aborted poll immediately instead of waiting for the cadence is the rest of the
-win — but it needs a backoff for a genuinely dead API first (#52).
+cadence that stops being knocked out of step ~0.6 times a minute.
+
+**The rest of that win — retrying a failed poll at once — landed in #281.** A
+failed poll brought no data, so it goes straight back for another attempt
+instead of waiting out the cadence it was anchored in (~2 s per stuck poll at
+the 3 s default). Two limits keep it from becoming a way to hammer the API, both
+read off the same measurement: **at most one immediate retry per poll** (the 67
+aborts came singly, ~0.6/min, and 31/31 retries succeeded on the first attempt),
+and **none at all once a fetch-failure streak is open** — from the third
+consecutive failure the backoff above takes over and the retry switches off,
+because a streak is exactly the evidence that the "lone stuck connection"
+assumption behind the retry is wrong. The failure line says which happened
+(`… 1. peräkkäinen, yritetään heti uudelleen: …`), so the log never leaves you
+inferring it from the gap to the next line.
 
 Two things to know before retuning any of them:
 
