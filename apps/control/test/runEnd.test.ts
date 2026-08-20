@@ -299,7 +299,7 @@ describe("relay run starting", () => {
       pendingClips: 0,
       respawns: 0,
       source: { state: "live", detail: "ffmpeg käynnissä" },
-      match: { finished: false, eventCount: 3, lastEventAt: new Date().toISOString() },
+      match: { finished: false, eventCount: 3, lastEventAt: new Date().toISOString(), sourceLagMs: null },
       narration: { detected: 3, spoken: 3, muted: 0, queued: 0 },
       tts: { engine: "piper", elevenLabsCharsUsed: 0 },
       lastProblem: null,

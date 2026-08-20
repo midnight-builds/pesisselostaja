@@ -337,6 +337,48 @@ test.describe("ottelunaikainen", () => {
     await expect(page.locator(".fact--fail")).toContainText("Ei kuulu lähetyksessä");
   });
 
+  test("tulospalvelusta jäljessä oleva selostus sanotaan sekunteina (#120)", async ({ page, api, openApp }) => {
+    api.jobs = [liveJob()];
+    // Jono on tyhjä eikä relayssä ole mitään vikaa — tapahtumat vain saadaan
+    // tulospalvelusta myöhässä. Ottelussa 145900 tämä oli 43 s, ja kuulija
+    // huomasi sen ennen kuin ohjaamo olisi voinut kertoa siitä mitään.
+    await openLive(openApp, {
+      telemetry: fixture.telemetry({
+        pendingClips: 0,
+        match: { finished: false, eventCount: 412, lastEventAt: "2026-07-29T05:29:40.000Z", sourceLagMs: 43_000 },
+      }),
+    });
+
+    await expect(page.locator(".fact--warn")).toContainText("Jäljessä tulospalvelusta (43 s)");
+  });
+
+  test("tavanomainen julkaisuviive ei riko vihreää riviä (#120)", async ({ page, api, openApp }) => {
+    api.jobs = [liveJob()];
+    // 20 s on tämän syötteen normaalia. Jos tämä värjäytyisi, kortti olisi
+    // keltainen koko ottelun ja lakkaisi kertomasta mitään.
+    await openLive(openApp, {
+      telemetry: fixture.telemetry({
+        match: { finished: false, eventCount: 412, lastEventAt: "2026-07-29T05:29:40.000Z", sourceLagMs: 20_000 },
+      }),
+    });
+
+    await expect(page.getByTestId("match-glance")).toContainText("Kuuluu lähetyksessä");
+  });
+
+  test("mittaamaton viive ei ole sama kuin nolla (#120)", async ({ page, api, openApp }) => {
+    api.jobs = [liveJob()];
+    // Vanhempi deploy ei julkaise kenttää lainkaan. Rivi ei saa siitä muuttua
+    // — muttei myöskään väittää mitään viiveestä.
+    await openLive(openApp, {
+      telemetry: fixture.telemetry({
+        match: { finished: false, eventCount: 412, lastEventAt: "2026-07-29T05:29:40.000Z", sourceLagMs: null },
+      }),
+    });
+
+    await expect(page.getByTestId("match-glance")).toContainText("Kuuluu lähetyksessä");
+    await expect(page.getByTestId("match-glance")).not.toContainText("Jäljessä tulospalvelusta");
+  });
+
   test("katvekuva ei näytä vihreältä", async ({ page, api, openApp }) => {
     api.jobs = [liveJob()];
     await openLive(openApp, {

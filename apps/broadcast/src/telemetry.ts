@@ -80,6 +80,11 @@ export interface RelayStatus {
     finished: boolean;
     eventCount: number;
     lastEventAt: string | null;
+    /** Kuinka monta millisekuntia viimeisin nähty tapahtuma oli jäljessä
+     *  toimitsijan kirjauksesta (`created`), tai null kun sitä ei ole voitu
+     *  mitata (#120). Null ei tarkoita nollaa: `created` on valinnainen kenttä,
+     *  ja "ei mitattu" on eri asia kuin "ei viivettä". */
+    sourceLagMs?: number | null;
   };
   narration: {
     detected: number;
@@ -116,6 +121,7 @@ export interface StatusProbe {
   matchFinished: boolean;
   eventCount: number;
   lastEventAt: string | null;
+  sourceLagMs: number | null;
   ttsEngine: string;
   elevenLabsCharsUsed: number;
   /** null while running; set once the run's end reason is known (#123). */
@@ -230,6 +236,7 @@ export class Telemetry {
         finished: probe.matchFinished,
         eventCount: probe.eventCount,
         lastEventAt: probe.lastEventAt,
+        sourceLagMs: probe.sourceLagMs,
       },
       narration: {
         detected: this.counts.detected,

@@ -5,6 +5,7 @@ export const CORE_PACKAGE_NAME = "@pesisselostaja/core";
 export * from "./types.js";
 export * from "./api.js";
 export * from "./speech.js";
+export * from "./eventLag.js";
 export * from "./state.js";
 export * from "./pronunciation.js";
 export * from "./numberSpeech.js";
