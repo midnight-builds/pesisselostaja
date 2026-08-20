@@ -30,16 +30,16 @@ function team(id: number, shorthand: string, players: Player[]): Team {
   return { id, name: shorthand, shorthand, players, all_players: players.map((p) => p.id) };
 }
 
-const LYOJA = player(11, 5, "Milla", "Mäyrä");
-const A = player(12, 8, "Aino", "Ilves");
-const B = player(13, 9, "Liisa", "Karhu");
+const LYOJA = player(11, 1, "Milla", "Mäyrä");
+const A = player(12, 2, "Aino", "Ilves");
+const B = player(13, 3, "Liisa", "Karhu");
 const C = player(14, 4, "Sanni", "Kettu");
 
 const meta: MatchMetadata = {
   id: 1,
   date: "2026-07-31",
   home: team(100, "Ketut", [LYOJA, A, B, C]),
-  away: team(200, "Sudet", [player(21, 3, "Veera", "Susi")]),
+  away: team(200, "Sudet", [player(21, 1, "Veera", "Susi")]),
   series: {},
   stadium: { name: "Testikenttä" },
   live: true,

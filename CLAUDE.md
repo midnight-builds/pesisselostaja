@@ -53,6 +53,11 @@ nearly acted on — do not re-derive this from general baseball intuition:
   3. pesä in the meantime. No batter is credited — the API sends the phrase
   *"toi juoksun harhaheitolla"* ready-made.
 
+**`players[].number` is a batting-order slot, not a jersey number** — and the
+metadata never follows in-match changes to it. Details and the corrected model
+are in `packages/core/README.md` ("Kokoonpano"); read it before touching
+anything that renders a player's number. Issue #241.
+
 **"Vuorossa" and "lyömässä" mean the same thing** — both refer to the player
 now batting. The speech variants may use either freely.
 

@@ -1,7 +1,7 @@
 /** Issue #90: the relay fetched the lineup exactly once, at startup.
  *
- *  `online/{id}/events` carries no names — only a jersey number and a team id —
- *  so every name comes from that one fetch. When the lineup is edited between
+ *  `online/{id}/events` carries no names — only player ids and a team id — so
+ *  every name comes from that one fetch. When the lineup is edited between
  *  the relay starting and the scorer opening the match, the whole broadcast is
  *  narrated with the wrong names while the scores, palot and turns stay
  *  perfectly right. Live on 28.7.2026 that got past everyone except a viewer
@@ -25,8 +25,17 @@ import { setLogSink } from "../src/log.js";
 
 const metaMock = vi.mocked(fetchMatchMetadata);
 
-function player(id: number, number: number, last: string): Player {
-  return { id, number, name: `Testi ${last}`, first_name: "Testi", last_name: last };
+/** `number` mirrors the API: the batting-order slot at fetch time, i.e. the
+ *  player's 1-based position in `players` (issue #241). Callers below build
+ *  rosters in slot order, so it is derived rather than passed in. */
+function roster(...names: string[]): Player[] {
+  return names.map((last, i) => ({
+    id: 10 + i,
+    number: i + 1,
+    name: `Testi ${last}`,
+    first_name: "Testi",
+    last_name: last,
+  }));
 }
 
 function team(id: number, shorthand: string, players: Player[]): Team {
@@ -46,9 +55,9 @@ function meta(home: Player[], away: Player[]): MatchMetadata {
   };
 }
 
-const EARLY = meta([player(11, 5, "Mäyrä")], []);
-/** Same jersey number, different player — the case that produced #90. */
-const FINAL = meta([player(12, 5, "Ilves")], [player(21, 3, "Karhu")]);
+const EARLY = meta(roster("Aho", "Ranta", "Salo", "Vuori", "Mäyrä"), []);
+/** Same batting slot, different player — the case that produced #90. */
+const FINAL = meta(roster("Aho", "Ranta", "Salo", "Vuori", "Ilves"), roster("Karhu"));
 
 function makeConfig(): RelayConfig {
   return {
@@ -91,9 +100,9 @@ function snapshot(m: MatchMetadata) {
   return { meta: m, lookup: buildPlayerLookup(m) };
 }
 
-/** Name for jersey 5 of the home team — the thing the listener actually hears. */
+/** Name in the home team's 5th batting slot — the thing the listener hears. */
 function homeNumberFive(lookup: PlayerLookup): string | undefined {
-  return lookup.byTeamNumber.get("100:5")?.last_name;
+  return lookup.byTeamSlot.get("100:5")?.last_name;
 }
 
 const codes: string[] = [];

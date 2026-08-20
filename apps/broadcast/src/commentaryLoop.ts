@@ -2,6 +2,8 @@ import { fetchMatchMetadata, fetchLiveEvents, formatHelsinkiTimestamp, type Live
 import { EventHistory } from "./eventHistory.js";
 import {
   buildPlayerLookup,
+  collectLineupChanges,
+  withLineups,
   groupSubEventsForSpeech,
   groupToSpeech,
   subEventFeedDetail,
@@ -388,12 +390,13 @@ function rostersPopulated(meta: MatchMetadata): boolean {
   return meta.home.players.length > 0 && meta.away.players.length > 0;
 }
 
-/** Jersey number -> surname, per team, as one comparable string. Compared
- *  rather than counted, because the failure this guards against is a number
- *  pointing at a DIFFERENT player, not a shorter list. */
+/** Batting-order slot -> surname, per team, as one comparable string. Compared
+ *  rather than counted, because the failure this guards against is a slot
+ *  pointing at a DIFFERENT player, not a shorter list. The slot is the array
+ *  index, not `Player.number` — see the field's doc in core/types.ts (#241). */
 function rosterSignature(meta: MatchMetadata): string {
   return [meta.home, meta.away]
-    .map((team) => `${team.id}:${team.players.map((p) => `${p.number}=${p.last_name}`).sort().join(",")}`)
+    .map((team) => `${team.id}:${team.players.map((p, i) => `${i + 1}=${p.last_name}`).sort().join(",")}`)
     .join("|");
 }
 
@@ -454,6 +457,14 @@ export class CommentaryLoop {
   private rosterRefreshedAt = 0;
   private rosterRefreshedAfterStart = false;
   private rosterSettled = false;
+  /** Latest batting order per team, as the event stream reported it. The only
+   *  source that follows in-match changes — `/public/match` does not (#241) —
+   *  so it is kept here and replayed onto every lookup we build, including the
+   *  ones rebuilt from freshly fetched metadata. */
+  private lineupChanges = new Map<number, (string | number | null)[]>();
+  /** Signature of the orders already logged, so a change is announced once and
+   *  not on every poll (the history is re-read in full each time). */
+  private loggedLineupSignature = "";
   /** False until the match has produced any event — the endpoint always
    *  returns the full history, so an empty history means the game genuinely
    *  hasn't started and the loop speaks welcome fillers instead of recaps. */
@@ -886,9 +897,14 @@ export class CommentaryLoop {
    *  reason it was caught is that a viewer knew the players by sight.
    *
    *  Refreshed until it cannot change any more: the match has started AND both
-   *  rosters carry players. After that the numbers stop moving (substitutions
-   *  arrive as events, from a lineup that is already published), so the polling
-   *  stops rather than running all game against someone else's API. */
+   *  rosters carry players. After that the polling stops rather than running
+   *  all game against someone else's API.
+   *
+   *  Settling costs nothing, but NOT for the reason this comment used to give
+   *  ("the numbers stop moving"). They do move: a team can reorder its batting
+   *  line-up mid-match, even mid-vuoropari. Settling is safe only because the
+   *  reorder arrives as a `substitution` event and `this.lineupChanges` tracks
+   *  it — the metadata would not have shown it anyway (#241). */
   private async maybeRefreshRoster(current: RosterSnapshot, now = Date.now()): Promise<RosterSnapshot> {
     if (this.rosterSettled) return current;
     const dueByTime = now - this.rosterRefreshedAt >= ROSTER_REFRESH_MS;
@@ -932,7 +948,31 @@ export class CommentaryLoop {
     // sieltä (#104), ja kaksi eri metaa samassa luokassa on juuri se
     // kahden totuuden tilanne jota vältetään.
     this.meta = meta;
-    return { meta, lookup: buildPlayerLookup(meta) };
+    // Replay the in-match order onto the fresh names: a plain rebuild would
+    // silently restore the pre-match batting order, which is the only order
+    // the metadata ever returns (#241).
+    return { meta, lookup: withLineups(buildPlayerLookup(meta), this.lineupChanges) };
+  }
+
+  /** Folds this poll's `substitution` events into the tracked batting order and
+   *  returns the lookup to narrate with. Idempotent: `history` is the complete
+   *  event list every poll, so the same changes are re-read each time and each
+   *  one replaces its team's order wholesale. */
+  private applyLineupChanges(events: LiveEvent[], lookup: PlayerLookup): PlayerLookup {
+    collectLineupChanges(events, this.lineupChanges);
+    if (this.lineupChanges.size === 0) return lookup;
+    const signature = [...this.lineupChanges]
+      .map(([team, ids]) => `${team}:${ids.join(",")}`)
+      .sort()
+      .join("|");
+    if (signature !== this.loggedLineupSignature) {
+      this.loggedLineupSignature = signature;
+      logInfo(
+        "api.lineup_changed",
+        `Lyöntijärjestys muuttui tapahtumavirrassa (${this.lineupChanges.size} joukkuetta) — paikat päivitetty.`
+      );
+    }
+    return withLineups(lookup, this.lineupChanges);
   }
 
   /** Re-reads the control file each poll and applies a changed setting live.
@@ -1168,6 +1208,9 @@ export class CommentaryLoop {
         this.maybeLogPollWindow();
         if (data !== null) {
           const events = this.history.events;
+          // Before anything is rendered: a lineup change in this batch has to
+          // be in force for the events that follow it (#241).
+          lookup = this.applyLineupChanges(events, lookup);
 
           // Ordinary bat-turn changes have no dedicated API text marker; they are
           // detected and announced inside processEventsLive, keyed off

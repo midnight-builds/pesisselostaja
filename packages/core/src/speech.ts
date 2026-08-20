@@ -4,10 +4,22 @@ import { finnishOrdinal } from "./numberSpeech.js";
 
 export interface PlayerLookup {
   byId: Map<number, Player>;
-  byTeamNumber: Map<string, Player>;
+  /** `teamId:slot` -> player, where slot is the player's **current position in
+   *  the batting order** (1-based), NOT a jersey number. See `Player.number`
+   *  in types.ts for why those are not the same thing (issue #241). Kept as a
+   *  lookup because the API's `{type:"player", number, team}` elements are
+   *  addressed by that pair. */
+  byTeamSlot: Map<string, Player>;
+  /** `teamId:playerId` -> current batting-order slot (1-based). The inverse of
+   *  `byTeamSlot`, needed when rendering a known player's slot. */
+  slotOf: Map<string, number>;
   /** Surnames shared by more than one player in the match (both rosters,
    *  case-insensitive) — these need the first name to stay unambiguous. */
   ambiguousSurnames: Set<string>;
+}
+
+function slotKey(teamId: number, playerId: number): string {
+  return `${teamId}:${playerId}`;
 }
 
 export interface SpeechContext {
@@ -56,23 +68,119 @@ function formatPeriodsWon(meta: MatchMetadata, home: number, away: number): stri
   return `Jaksot ${meta.home.shorthand} ${home}, ${meta.away.shorthand} ${away}`;
 }
 
+/** The batting order as the metadata knew it *at fetch time*.
+ *
+ *  The slot is taken from the array index, not from `Player.number`. The two
+ *  agree in every roster observed (`number` runs 1..N in `players` order), but
+ *  only the index is a definition — `number` is a field whose meaning we
+ *  already misread once (issue #241). */
 export function buildPlayerLookup(meta: MatchMetadata): PlayerLookup {
   const byId = new Map<number, Player>();
-  const byTeamNumber = new Map<string, Player>();
+  const byTeamSlot = new Map<string, Player>();
+  const slotOf = new Map<string, number>();
   const surnameCounts = new Map<string, number>();
   for (const team of [meta.home, meta.away]) {
-    for (const p of team.players) {
+    team.players.forEach((p, index) => {
       byId.set(p.id, p);
-      byTeamNumber.set(`${team.id}:${p.number}`, p);
+      byTeamSlot.set(`${team.id}:${index + 1}`, p);
+      slotOf.set(slotKey(team.id, p.id), index + 1);
       const key = p.last_name.toLowerCase();
       surnameCounts.set(key, (surnameCounts.get(key) ?? 0) + 1);
-    }
+    });
   }
   const ambiguousSurnames = new Set<string>();
   for (const [surname, count] of surnameCounts) {
     if (count > 1) ambiguousSurnames.add(surname);
   }
-  return { byId, byTeamNumber, ambiguousSurnames };
+  return { byId, byTeamSlot, slotOf, ambiguousSurnames };
+}
+
+/** The batting order carried by one `substitution` element, as player ids in
+ *  slot order. Ids arrive as strings; empty/missing slots are dropped rather
+ *  than shifting everyone below them, because a hole in the list would
+ *  renumber players who did not move. */
+function parseLineUp(newLineUp: (string | number | null)[] | undefined): number[] {
+  return (newLineUp ?? [])
+    .filter((id): id is string | number => id != null && id !== "")
+    .map((id) => (typeof id === "string" ? Number(id) : id))
+    .filter((id) => Number.isFinite(id));
+}
+
+/** A lookup with `teamId`'s batting order replaced by `lineUp` (player ids in
+ *  slot order). Returns a new object; the input is not mutated.
+ *
+ *  This is the only correct source of the order once the match is running.
+ *  `/public/match` does NOT follow in-match lineup changes — verified 6.8.2026
+ *  against match 136765, whose metadata still returned the pre-match order when
+ *  fetched *after* the match had ended. The event stream is all there is
+ *  (issue #241). */
+export function withLineup(
+  lookup: PlayerLookup,
+  teamId: number,
+  lineUp: (string | number | null)[] | undefined
+): PlayerLookup {
+  const ids = parseLineUp(lineUp);
+  if (ids.length === 0) return lookup;
+  const byTeamSlot = new Map(lookup.byTeamSlot);
+  const slotOf = new Map(lookup.slotOf);
+  // Clear the team's old slots first: a shortened order must not leave the
+  // dropped tail addressable at its former slot.
+  for (const key of [...byTeamSlot.keys()]) {
+    if (key.startsWith(`${teamId}:`)) byTeamSlot.delete(key);
+  }
+  for (const key of [...slotOf.keys()]) {
+    if (key.startsWith(`${teamId}:`)) slotOf.delete(key);
+  }
+  ids.forEach((id, index) => {
+    const slot = index + 1;
+    slotOf.set(slotKey(teamId, id), slot);
+    const player = lookup.byId.get(id);
+    // An id outside the published roster (a jokeri, or anyone only listed in
+    // `all_players`) has a slot but no name we can resolve — record the slot
+    // anyway so the ORDER stays right, and let the name fall back.
+    if (player) byTeamSlot.set(`${teamId}:${slot}`, player);
+  });
+  return { ...lookup, byTeamSlot, slotOf };
+}
+
+/** Applies every lineup change in `changes` (team id -> ids in slot order).
+ *  Kept separate from `withLineup` so a caller that rebuilt the lookup from
+ *  fresh metadata can replay the in-match changes it has already seen — a
+ *  roster refresh would otherwise silently restore the pre-match order. */
+export function withLineups(
+  lookup: PlayerLookup,
+  changes: ReadonlyMap<number, (string | number | null)[]>
+): PlayerLookup {
+  let out = lookup;
+  for (const [teamId, lineUp] of changes) out = withLineup(out, teamId, lineUp);
+  return out;
+}
+
+/** Every lineup change carried by these events, latest-per-team, in arrival
+ *  order. Only the newest matters: each `newLineUp` is the complete order, not
+ *  a delta. */
+export function collectLineupChanges(
+  events: LiveEvent[],
+  into: Map<number, (string | number | null)[]> = new Map()
+): Map<number, (string | number | null)[]> {
+  for (const event of events) {
+    for (const sub of event.events ?? []) {
+      for (const el of sub.texts ?? []) {
+        if (typeof el !== "object" || el === null || el.type !== "substitution") continue;
+        if (el.team == null || !el.newLineUp) continue;
+        if (parseLineUp(el.newLineUp).length === 0) continue;
+        into.set(el.team, el.newLineUp);
+      }
+    }
+  }
+  return into;
+}
+
+/** Current batting-order slot of a known player, or null when the team is
+ *  unknown or the player is not in the order (jokeri). */
+export function slotOfPlayer(lookup: PlayerLookup, teamId: number | null | undefined, playerId: number): number | null {
+  if (teamId == null) return null;
+  return lookup.slotOf.get(slotKey(teamId, playerId)) ?? null;
 }
 
 export function getTeamName(meta: MatchMetadata, teamId: number | null): string {
@@ -100,14 +208,16 @@ function resolvePlayerName(lookup: PlayerLookup, el: EventTextElement): string |
   let player = undefined as ReturnType<typeof lookup.byId.get>;
   if ("id" in el && el.id !== undefined) player = lookup.byId.get(el.id);
   if (!player && "number" in el && el.number !== undefined && "team" in el && el.team !== undefined)
-    player = lookup.byTeamNumber.get(`${el.team}:${el.number}`);
+    player = lookup.byTeamSlot.get(`${el.team}:${el.number}`);
   if (!player && "number" in el && el.number !== undefined) player = lookup.byId.get(el.number);
   if (!player) return null;
   // TTS swallows the raw "5 M Mäyrä" form — speak the surname alone, and
   // qualify with the first name only when the match has two players sharing
   // the surname (the API's first_name is the full name, not just an initial).
   if (lookup.ambiguousSurnames.has(player.last_name.toLowerCase())) {
-    const qualifier = player.first_name || String(player.number);
+    const team = typeof el === "object" && "team" in el ? el.team : undefined;
+    const qualifier =
+      player.first_name || String(slotOfPlayer(lookup, team, player.id) ?? player.number);
     return `${qualifier} ${player.last_name}`;
   }
   return player.last_name;
@@ -211,9 +321,24 @@ function dropDanglingClause(text: string): string | null {
   return cut || null;
 }
 
-function feedPlayerLabel(lookup: PlayerLookup, id: string | number): string {
-  const player = lookup.byId.get(typeof id === "string" ? Number(id) : id);
-  return player ? `${player.number} ${player.last_name}` : `pelaaja ${id}`;
+/** `<slot> <surname>` for the feed, or a bare id when the player is not in the
+ *  published roster. `slot` is passed in rather than read off the player,
+ *  because the caller usually knows a slot the lookup does not yet: the index
+ *  in a `newLineUp` IS the new position, and that is the very line announcing
+ *  it (issue #241 — the feed used to print each player's OLD slot next to the
+ *  new order). Falls back to the player's current slot when the caller has
+ *  none, and prints no number at all when neither is known. */
+function feedPlayerLabel(
+  lookup: PlayerLookup,
+  teamId: number | null | undefined,
+  id: string | number,
+  slot?: number
+): string {
+  const playerId = typeof id === "string" ? Number(id) : id;
+  const player = lookup.byId.get(playerId);
+  if (!player) return `pelaaja ${id}`;
+  const shown = slot ?? slotOfPlayer(lookup, teamId, playerId);
+  return shown != null ? `${shown} ${player.last_name}` : player.last_name;
 }
 
 /** What the speech deliberately leaves unsaid, rendered for a reader. The feed
@@ -229,11 +354,16 @@ export function subEventFeedDetail(sub: SubEvent, lookup: PlayerLookup): string 
     // a match with no designated pitcher sends `pitcher: null`, which used to
     // render as "Lukkarina pelaaja null." Every id is checked with `!= null`,
     // including individual lineup slots.
-    const lineUp = (el.newLineUp ?? [])
-      .filter((id) => id != null && id !== "")
-      .map((id) => feedPlayerLabel(lookup, id));
+    const ids = (el.newLineUp ?? []).filter((id) => id != null && id !== "");
+    // Slot from the array index: this element IS the new order, so its own
+    // positions are authoritative and need no lookup (issue #241).
+    const lineUp = ids.map((id, index) => feedPlayerLabel(lookup, el.team, id, index + 1));
     if (lineUp.length > 0) parts.push(`Uusi lyöntijärjestys: ${lineUp.join(", ")}.`);
-    if (el.pitcher != null) parts.push(`Lukkarina ${feedPlayerLabel(lookup, el.pitcher)}.`);
+    if (el.pitcher != null) {
+      const inNewOrder = ids.findIndex((id) => Number(id) === el.pitcher);
+      const pitcherSlot = inNewOrder >= 0 ? inNewOrder + 1 : undefined;
+      parts.push(`Lukkarina ${feedPlayerLabel(lookup, el.team, el.pitcher, pitcherSlot)}.`);
+    }
   }
   return parts.length > 0 ? parts.join(" ") : null;
 }

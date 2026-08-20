@@ -61,6 +61,16 @@ export interface LiveEventsResponse {
 
 export interface Player {
   id: number;
+  /** **Not a jersey number** — the player's position in the batting order at
+   *  the moment the metadata was fetched (issue #241). Every roster observed
+   *  runs 1..N in `players` order, and `/public/match` does not follow in-match
+   *  lineup changes at all: match 136765's metadata still returned the
+   *  pre-match order when fetched after the match had ended, though the event
+   *  stream carried two `substitution` events reordering slots 7–11.
+   *
+   *  The field keeps the API's name because this type mirrors the wire format.
+   *  Do not read it as a current position: `PlayerLookup.slotOf` (speech.ts) is
+   *  maintained from the event stream and is the one that stays right. */
   number: number;
   name: string;
   first_name: string;

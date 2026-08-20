@@ -97,6 +97,7 @@ export type EventCode =
   | "api.roster_refresh_failed"
   | "api.roster_changed"
   | "api.roster_settled"
+  | "api.lineup_changed"
   // match events worth seeing in the log
   | "match.score"
   | "match.palo"
