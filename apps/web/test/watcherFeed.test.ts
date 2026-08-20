@@ -97,11 +97,11 @@ const meta: MatchMetadata = {
   id: 999001,
   date: "2026-08-16",
   home: team(HOME, "Kuusiston Kipinä", "Kipinä", [
-    player(11, 5, "Ilona", "Karpalo"),
-    player(12, 8, "Sanni", "Vuokko"),
-    player(13, 9, "Peppi", "Nokkonen"),
+    player(11, 1, "Ilona", "Karpalo"),
+    player(12, 2, "Sanni", "Vuokko"),
+    player(13, 3, "Peppi", "Nokkonen"),
   ]),
-  away: team(AWAY, "Lahdenperän Salama", "Salama", [player(21, 3, "Roosa", "Sammal")]),
+  away: team(AWAY, "Lahdenperän Salama", "Salama", [player(21, 1, "Roosa", "Sammal")]),
   series: { name: "Testisarja" },
   stadium: { name: "Testikenttä" },
   live: true,
@@ -251,7 +251,7 @@ describe("BrowserWatcher.processEventsLive: syötteen johdotus (#86)", () => {
     await flushSpeech();
 
     expect(feedTexts(h)).toEqual([
-      "Kipinä muutti lyöntijärjestystä. Uusi lyöntijärjestys: 5 Karpalo, 8 Vuokko, 9 Nokkonen. Lukkarina 9 Nokkonen.",
+      "Kipinä muutti lyöntijärjestystä. Uusi lyöntijärjestys: 1 Karpalo, 2 Vuokko, 3 Nokkonen. Lukkarina 3 Nokkonen.",
     ]);
     expect(spoken).toEqual(["Kipinä muutti lyöntijärjestystä."]);
     // 11 nimeä peräkkäin on kuuntelukelvotonta (#48) — puheessa ei nimiä.
@@ -264,7 +264,7 @@ describe("BrowserWatcher.processEventsLive: syötteen johdotus (#86)", () => {
     h.process([liveEvent(1, [lineupOnlySub])]);
     await flushSpeech();
 
-    expect(feedTexts(h)).toEqual(["Uusi lyöntijärjestys: 5 Karpalo, 8 Vuokko."]);
+    expect(feedTexts(h)).toEqual(["Uusi lyöntijärjestys: 1 Karpalo, 2 Vuokko."]);
     expect(h.feed[0].type).toBe("info");
     expect(spoken).toEqual([]);
   });
@@ -299,7 +299,7 @@ describe("BrowserWatcher.processEventsLive: syötteen johdotus (#86)", () => {
     await flushSpeech();
 
     expect(h.feed).toHaveLength(2);
-    expect(h.feed[0].text).toMatch(/Uusi lyöntijärjestys: 5 Karpalo, 8 Vuokko, 9 Nokkonen\./);
+    expect(h.feed[0].text).toMatch(/Uusi lyöntijärjestys: 1 Karpalo, 2 Vuokko, 3 Nokkonen\./);
     expect(h.feed[1].type).toBe("run");
     expect(spoken).toEqual([]);
   });

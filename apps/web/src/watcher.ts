@@ -5,6 +5,8 @@ import {
 } from "@pesisselostaja/core";
 import {
   buildPlayerLookup,
+  collectLineupChanges,
+  withLineups,
   subEventToSpeech,
   groupSubEventsForSpeech,
   groupToSpeech,
@@ -297,7 +299,10 @@ export class BrowserWatcher {
     this.log(`Haetaan ottelutietoja (ID: ${matchId})…`);
     const meta = await fetchMatchMetadata(matchId, apiOpts);
     this._meta = meta;
-    const lookup = buildPlayerLookup(meta);
+    // Not const: a team can reorder its batting line-up mid-match, and the
+    // event stream is the only place that shows it (issue #241).
+    let lookup = buildPlayerLookup(meta);
+    const lineupChanges = new Map<number, (string | number | null)[]>();
 
     const matchInfo = `${meta.home.name} vs ${meta.away.name}`;
     const seriesName = meta.series.custom_name ?? meta.series.name ?? null;
@@ -400,6 +405,11 @@ export class BrowserWatcher {
         // detected and announced inside processEventsLive, keyed off
         // seenFingerprints — see the comment there for why this can't be
         // done from the raw poll response.
+        // Batting order first: a change in this batch has to be in force for
+        // the events that follow it (issue #241).
+        collectLineupChanges(data.events, lineupChanges);
+        lookup = withLineups(lookup, lineupChanges);
+
         this.processEventsLive(data.events, state, meta, lookup);
 
         // Outs for the current turn, kept monotonic per turn. Outs never decrease

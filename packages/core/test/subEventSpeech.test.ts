@@ -24,11 +24,11 @@ function team(id: number, shorthand: string, players: Player[]): Team {
 const meta: MatchMetadata = {
   id: 1, date: "2026-07-14",
   home: team(100, "Ketut", [
-    player(11, 5, "Milla", "Mäyrä"),
-    player(12, 8, "Aino", "Ilves"),
-    player(13, 9, "Liisa", "Susi"),
+    player(11, 1, "Milla", "Mäyrä"),
+    player(12, 2, "Aino", "Ilves"),
+    player(13, 3, "Liisa", "Susi"),
   ]),
-  away: team(200, "Sudet", [player(21, 3, "Veera", "Susi")]),
+  away: team(200, "Sudet", [player(21, 1, "Veera", "Susi")]),
   series: {}, stadium: { name: "Testikenttä" },
   live: true, started: true,
 };
@@ -356,7 +356,7 @@ describe("subEventToFeedText: lineup change (issue #74)", () => {
 
     const feed = subEventToFeedText(speech, substitutionSub, lookup);
     expect(feed).toBe(
-      "Ketut muutti lyöntijärjestystä. Uusi lyöntijärjestys: 5 Mäyrä, 8 Ilves, 9 Susi. Lukkarina 9 Susi."
+      "Ketut muutti lyöntijärjestystä. Uusi lyöntijärjestys: 1 Mäyrä, 2 Ilves, 3 Susi. Lukkarina 3 Susi."
     );
   });
 
@@ -375,12 +375,12 @@ describe("subEventToFeedText: lineup change (issue #74)", () => {
     };
     const speech = subEventToSpeech(liveEvent(), sub, meta, lookup);
     expect(speech).toBeNull();
-    expect(subEventToFeedText(speech, sub, lookup)).toBe("Uusi lyöntijärjestys: 5 Mäyrä, 8 Ilves.");
+    expect(subEventToFeedText(speech, sub, lookup)).toBe("Uusi lyöntijärjestys: 1 Mäyrä, 2 Ilves.");
   });
 
   it("falls back to the raw id for a player missing from the rosters", () => {
     const sub: SubEvent = { texts: [{ type: "substitution", newLineUp: ["11", "999"] }] };
-    expect(subEventFeedDetail(sub, lookup)).toBe("Uusi lyöntijärjestys: 5 Mäyrä, pelaaja 999.");
+    expect(subEventFeedDetail(sub, lookup)).toBe("Uusi lyöntijärjestys: 1 Mäyrä, pelaaja 999.");
   });
 
   it("omits a null pitcher instead of writing 'pelaaja null'", () => {
@@ -390,7 +390,7 @@ describe("subEventToFeedText: lineup change (issue #74)", () => {
       texts: [{ type: "substitution", newLineUp: ["11", "12"], pitcher: null } as never],
     };
     const detail = subEventFeedDetail(sub, lookup);
-    expect(detail).toBe("Uusi lyöntijärjestys: 5 Mäyrä, 8 Ilves.");
+    expect(detail).toBe("Uusi lyöntijärjestys: 1 Mäyrä, 2 Ilves.");
     expect(detail).not.toMatch(/null/);
   });
 
@@ -398,7 +398,7 @@ describe("subEventToFeedText: lineup change (issue #74)", () => {
     const sub: SubEvent = {
       texts: [{ type: "substitution", newLineUp: ["11", null, "", "12"] } as never],
     };
-    expect(subEventFeedDetail(sub, lookup)).toBe("Uusi lyöntijärjestys: 5 Mäyrä, 8 Ilves.");
+    expect(subEventFeedDetail(sub, lookup)).toBe("Uusi lyöntijärjestys: 1 Mäyrä, 2 Ilves.");
   });
 
   it("shows nothing for a substitution with a null lineup", () => {
