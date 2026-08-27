@@ -109,7 +109,7 @@ export interface WatcherCallbacks {
   onMatchInfo: (info: {
     matchInfo: string;
     seriesName: string | null;
-    stadiumName: string;
+    stadiumName: string | null;
   }) => void;
   onFinished: () => void;
   onError: (err: string) => void;
@@ -306,11 +306,11 @@ export class BrowserWatcher {
 
     const matchInfo = `${meta.home.name} vs ${meta.away.name}`;
     const seriesName = meta.series.custom_name ?? meta.series.name ?? null;
-    const stadiumName = meta.stadium.name;
+    const stadiumName = meta.stadium?.name ?? null;
     this.callbacks.onMatchInfo({ matchInfo, seriesName, stadiumName });
 
     this.log(matchInfo);
-    this.log(`Sarja: ${seriesName ?? "–"} | Kenttä: ${stadiumName}`);
+    this.log(`Sarja: ${seriesName ?? "–"} | Kenttä: ${stadiumName ?? "–"}`);
     this.log(`Pelaajia: ${lookup.byId.size}`);
 
     const state = loadState(matchId);

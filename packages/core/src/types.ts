@@ -100,7 +100,11 @@ export interface MatchMetadata {
   home: Team;
   away: Team;
   series: { custom_name?: string; name?: string };
-  stadium: { name: string };
+  /** Null kun tulospalvelu ei ole kirjannut kenttää — tavallista alue- ja
+   *  leirisarjoissa (27.8.2026 molemmat ottelut, #288). Ohjaamo on pitänyt
+   *  tätä nullable-arvona alusta asti; core väitti muuta ja kaatoi
+   *  tervetulotäytteen. */
+  stadium: { name: string } | null;
   result?: MatchResult;
   live: boolean;
   started: boolean;

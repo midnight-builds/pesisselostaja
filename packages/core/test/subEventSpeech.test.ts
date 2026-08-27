@@ -267,6 +267,17 @@ describe("formatWelcomeFiller and stadium name", () => {
     for (const f of fillers) expect(f).toContain("Ketut vastaan Sudet");
     expect([...fillers].some((f) => f.includes("pelikenttänä Testikenttä"))).toBe(true);
   });
+
+  it("welcomes without a venue when the results service has none (#288)", () => {
+    // 27.8.2026: stadium was null for both matches of the day, and the filler
+    // threw — which the relay's poll loop then counted as a fetch failure.
+    const noVenue: MatchMetadata = { ...meta, stadium: null };
+    for (let i = 0; i < 20; i++) {
+      const f = formatWelcomeFiller(noVenue);
+      expect(f).toContain("Ketut vastaan Sudet");
+      expect(f).not.toContain("pelikenttänä");
+    }
+  });
 });
 
 describe("source attribution variants", () => {

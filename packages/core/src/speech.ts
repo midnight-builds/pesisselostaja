@@ -593,7 +593,7 @@ export function stadiumSpeechName(rawName: string): string {
  */
 export function formatWelcomeFiller(meta: MatchMetadata): string {
   const pair = `${meta.home.name} vastaan ${meta.away.name}`;
-  const stadium = stadiumSpeechName(meta.stadium.name);
+  const stadium = meta.stadium?.name ? stadiumSpeechName(meta.stadium.name) : "";
   const at = stadium ? `, pelikenttänä ${stadium}` : "";
   return pickVariant("welcome", [
     `Tervetuloa seuraamaan ottelua ${pair}${at}.`,

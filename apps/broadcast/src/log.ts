@@ -109,6 +109,7 @@ export type EventCode =
   | "speech.spoken"
   | "speech.muted"
   | "speech.failed"
+  | "speech.filler_failed"
   | "speech.resumed"
   | "speech.dry_run"
   // synthesis
