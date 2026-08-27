@@ -356,13 +356,24 @@ Fetches are aborted on **three different timeouts**, one per fetch shape:
 |---|---|---|---|
 | Full history (startup, 60 s resync, delta fallbacks) | **10 s** | yes | The response holds the whole match history and keeps growing, so the earlier 4 s cut healthy requests short late in a match — one broadcast logged 12 aborts in two minutes, all at exactly 4.0 s (#47). |
 | Metadata / roster (startup + in-match refresh) | **4 s** | no | Fetched a handful of times per match, returns both rosters. Deliberately left at the pre-#156 value: a too-tight limit here fails **silently** — `maybeRefreshRoster` keeps the names it has, so the relay would speak stale player numbers all match. |
-| Delta poll | **1 s** | no | Runs *every* poll and returns only the new events (a 304 not even that), so it is what decides how fast a hung connection is noticed. |
+| Delta poll | **2 s** | no | Runs *every* poll and returns only the new events (a 304 not even that), so it is what decides how fast a hung connection is noticed. |
 
 **The delta timeout was retuned 4 s → 1 s in #156, on the relay's own numbers.**
 A whole match (136745, 1.8.2026, 104 min) measured a median of 72–83 ms and a max
 of 90–132 ms — and 67 aborts at exactly 4.0 s. There is nothing in between: a
 delta either answers inside ~150 ms or the connection is stuck. The timeout is a
 stuck-connection detector, not an allowance for slowness.
+
+**Then 1 s → 2 s on 27.8.2026 (#290), on the first match day that contradicted
+that dichotomy.** Two matches (144136, 144139, 100 min) measured the same median
+(77 ms, p90 94 ms) — but 331 aborts at exactly 1.0 s (~4/min), and under the
+loosened 4 s limit *successful* deltas took 1.1–3.8 s in 16 windows, full fetches
+up to 8.7 s. The API had a genuine slow tail that evening. Every immediate retry
+succeeded, so the cost was log noise plus 15 alarm streaks stretching the cadence
+to 6 s for a poll each. 2 s halves the false aborts and still fits inside the 3 s
+cadence, which is the property the first retune was really about. The proper fix
+— keying the loose limit on the measured duration of successful deltas rather
+than on failures — remains open; this was the first data arguing for it.
 
 What the retune actually buys, stated plainly, because the issue first claimed
 more: **not a faster retry.** `run()` sets the next poll time *before* the fetch,

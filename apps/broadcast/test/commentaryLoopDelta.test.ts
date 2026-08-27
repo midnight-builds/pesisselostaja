@@ -802,8 +802,8 @@ describe("API fetch timeout", () => {
     expect(timeoutOf(0)).toBe(10_000);
   });
 
-  it("is a much shorter 1 s for the delta poll — the two are not the same value", async () => {
-    // Retuned 4 s -> 1 s in #156 on a whole match's worth of the relay's own
+  it("is a much shorter 2 s for the delta poll — the two are not the same value", async () => {
+    // Retuned 4 s -> 1 s in #156, then 2 s in #290 (27.8.2026: a real slow tail), on a whole match's worth of the relay's own
     // measurements: median 72-83 ms, max 90-132 ms, and 67 aborts at exactly
     // 4.0 s with nothing in between. A delta either answers inside ~150 ms or
     // the connection is stuck, so this limit detects stuck connections; it is
@@ -811,7 +811,7 @@ describe("API fetch timeout", () => {
     const loop = await seeded();
     fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])], { serverDateMs: T0 + 3000 }));
     await loop.fetchEventsForPoll();
-    expect(timeoutOf(1)).toBe(1_000);
+    expect(timeoutOf(1)).toBe(2_000);
     expect(timeoutOf(1)).not.toBe(timeoutOf(0));
   });
 
@@ -836,7 +836,7 @@ describe("API fetch timeout", () => {
 
       fetchMock.mockResolvedValueOnce(result([ev({ id: 2 }, [run])], { serverDateMs: T0 + 3000 }));
       await loop.fetchEventsForPoll();
-      expect(timeoutOf(1)).toBe(1_000); // unchanged by the cadence…
+      expect(timeoutOf(1)).toBe(2_000); // unchanged by the cadence…
 
       fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
       await loop.fetchFullEvents();
@@ -854,7 +854,7 @@ describe("API fetch timeout", () => {
       fetchMock.mockResolvedValueOnce(result([ev({ id: 1 }, [palo])]));
       await loop.fetchEventsForPoll();
 
-      expect(timeoutOf(1)).toBe(1_000); // the delta that got the reset
+      expect(timeoutOf(1)).toBe(2_000); // the delta that got the reset
       expect(timeoutOf(2)).toBe(10_000); // the full refetch it forced
     } finally {
       logSpy.mockRestore();
