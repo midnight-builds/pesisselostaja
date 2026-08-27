@@ -1005,6 +1005,11 @@ describe("CommentaryLoop pollausvälin jousto hakuvirhesarjassa (#52 kohta 2)", 
       const poll = call++;
       // Poll 0 = run():n käynnistyshaku, ei osa pollaustahtia.
       if (poll === 0) return { events: [], team: null, period: null } as never;
+      // Pyydetyn määrän jälkeen ei mitata enää mitään: kun silmukka alla
+      // pysähtyy, jonossa on jo seuraavan tahdin ajastin, ja alasajon
+      // `runAllTimersAsync` laukaisee sen — ylimääräinen polli teki `gaps`ista
+      // yhtä pidemmän kuin väitteet olettivat, noin joka toisella ajolla (#287).
+      if (instants.length >= wantedPolls) return { events: [], team: null, period: null } as never;
       instants.push(Date.now());
       if (!succeeds(poll)) throw new Error("API ei vastaa");
       return { events: [], team: null, period: null } as never;
@@ -1040,7 +1045,7 @@ describe("CommentaryLoop pollausvälin jousto hakuvirhesarjassa (#52 kohta 2)", 
     await vi.runAllTimersAsync();
     await run;
 
-    expect(instants.length).toBeGreaterThanOrEqual(wantedPolls);
+    expect(instants.length).toBe(wantedPolls);
     return instants.slice(1).map((t, i) => t - (instants[i] as number));
   }
 
