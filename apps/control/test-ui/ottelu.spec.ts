@@ -379,6 +379,41 @@ test.describe("ottelunaikainen", () => {
     await expect(page.getByTestId("match-glance")).not.toContainText("Jäljessä tulospalvelusta");
   });
 
+  test("päättyneen ottelun viimeinen viive ei jää kortille (#291)", async ({ page, openApp }) => {
+    // 27.8.2026: kortti näytti "47 s" vielä minuutteja ottelun päättymisen
+    // jälkeen. Päättyneessä ottelussa uutta mittausta ei tule, joten luku on
+    // historiaa eikä nykyhetken tila.
+    await openLive(openApp, {
+      telemetry: fixture.telemetry({
+        match: { finished: true, eventCount: 109, lastEventAt: "2026-07-29T05:29:50.000Z", sourceLagMs: 47_000 },
+      }),
+    });
+
+    await expect(page.getByTestId("match-glance")).toContainText("Kuuluu lähetyksessä");
+    await expect(page.getByTestId("match-glance")).not.toContainText("Jäljessä tulospalvelusta");
+  });
+
+  test("yli kaksi minuuttia vanha viivemittaus vanhenee kortilta (#291)", async ({ page, openApp }) => {
+    await openLive(openApp, {
+      telemetry: fixture.telemetry({
+        match: { finished: false, eventCount: 109, lastEventAt: "2026-07-29T05:25:00.000Z", sourceLagMs: 47_000 },
+      }),
+    });
+
+    await expect(page.getByTestId("match-glance")).toContainText("Kuuluu lähetyksessä");
+    await expect(page.getByTestId("match-glance")).not.toContainText("Jäljessä tulospalvelusta");
+  });
+
+  test("minuutin ikäinen viivemittaus kertoo ikänsä (#291)", async ({ page, openApp }) => {
+    await openLive(openApp, {
+      telemetry: fixture.telemetry({
+        match: { finished: false, eventCount: 109, lastEventAt: "2026-07-29T05:28:45.000Z", sourceLagMs: 47_000 },
+      }),
+    });
+
+    await expect(page.locator(".fact--warn")).toContainText("Jäljessä tulospalvelusta (47 s) — mitattu 1 min sitten");
+  });
+
   test("katvekuva ei näytä vihreältä", async ({ page, api, openApp }) => {
     api.jobs = [liveJob()];
     await openLive(openApp, {
