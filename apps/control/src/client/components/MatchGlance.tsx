@@ -4,7 +4,7 @@ import { TELEMETRY_STALE_MS } from "../../shared/types";
 import { targetDeathReason } from "../../shared/targetHealth";
 import { watchUrlForVideo } from "../../shared/youtubeUrl";
 import { api } from "../api";
-import { periodName, seconds } from "../format";
+import { periodName, seconds, since } from "../format";
 import { NarrationList } from "./NarrationList";
 
 /** Ottelunaikainen kertasilmäys (#186).
@@ -50,7 +50,7 @@ interface Fact {
  *  näyttää täydeltä ajolta silloinkin kun ffmpeg on irti eikä yksikään klippi
  *  päädy lähetykseen — ottelun 145889 viisi hiljaista minuuttia. Siksi
  *  `readerAttached` on oma punainen rivinsä eikä yksi luku muiden joukossa. */
-function narrationFact(telemetry: RelayTelemetry | null, relayActive: boolean): Fact {
+function narrationFact(telemetry: RelayTelemetry | null, relayActive: boolean, now: string): Fact {
   if (!relayActive) return { label: "Selostus", value: "Ei ajossa", tone: "fail" };
   if (!telemetry) return { label: "Selostus", value: "Ei tietoa", tone: "warn" };
   if (!telemetry.readerAttached) {
@@ -63,9 +63,23 @@ function narrationFact(telemetry: RelayTelemetry | null, relayActive: boolean): 
   // minuuttia jäljessä, jos tapahtumat saadaan tulospalvelusta myöhässä.
   // Jonon ruuhka tarkistetaan ensin, koska se on meidän oma vikamme ja
   // korjattavissa; tämä kertoo lähteestä.
+  //
+  // Viive mitataan vain uudesta tapahtumasta, ja `lastEventAt` on juuri se
+  // hetki. Ilman ikää rivi jäätyy viimeiseen arvoon: 27.8.2026 kortti näytti
+  // "47 s" vielä minuutteja ottelun päättymisen jälkeen, ja operaattori luki
+  // sen nykyhetken tilana (#291). Päättyneessä ottelussa uutta tapahtumaa ei
+  // tule, joten viimeinen viive on historiaa; kesken ottelun se vanhenee
+  // parissa minuutissa, ja siihen asti sen ikä sanotaan ääneen.
   const lagMs = telemetry.match.sourceLagMs;
-  if (lagMs !== null && lagMs >= SOURCE_LAG_WARN_MS) {
-    return { label: "Selostus", value: `Jäljessä tulospalvelusta (${Math.round(lagMs / 1000)} s)`, tone: "warn" };
+  if (lagMs !== null && lagMs >= SOURCE_LAG_WARN_MS && !telemetry.match.finished) {
+    const measuredAt = telemetry.match.lastEventAt;
+    const ageMs = measuredAt === null ? null : Date.parse(now) - Date.parse(measuredAt);
+    const stale = ageMs !== null && Number.isFinite(ageMs) && ageMs > SOURCE_LAG_STALE_MS;
+    if (!stale) {
+      const aged = ageMs !== null && Number.isFinite(ageMs) && ageMs >= SOURCE_LAG_AGE_SHOWN_MS;
+      const age = aged ? ` — mitattu ${since(measuredAt, now)}` : "";
+      return { label: "Selostus", value: `Jäljessä tulospalvelusta (${Math.round(lagMs / 1000)} s)${age}`, tone: "warn" };
+    }
   }
   return { label: "Selostus", value: "Kuuluu lähetyksessä", tone: "ok" };
 }
@@ -79,6 +93,12 @@ const QUEUE_WARN_CLIPS = 10;
  *  siitä milloin selostus on myöhässä. Perustelu 30 s:lle on relayn puolella:
  *  ottelun 145900 mitattu jakauma. */
 const SOURCE_LAG_WARN_MS = 30_000;
+/** Kuinka vanha viivemittaus vielä kelpaa kortille. Kaksi minuuttia on
+ *  pidempi kuin pisin tavallinen tauko tapahtumien välillä kesken vuoron,
+ *  lyhyempi kuin jaksotauko — sen jälkeen luku kertoo menneestä (#291). */
+const SOURCE_LAG_STALE_MS = 120_000;
+/** Tätä nuorempi mittaus on "nyt"; vanhemman ikä sanotaan rivillä. */
+const SOURCE_LAG_AGE_SHOWN_MS = 60_000;
 
 /** Näkyykö kuvauspuhelimen raakalähetys.
  *
@@ -377,7 +397,7 @@ export function MatchGlance({ live, notify }: Props) {
   const narratedUrl = live.job?.targetVideoId ? watchUrlForVideo(live.job.targetVideoId) : null;
   const rawUrl = live.job?.sourceUrl ?? null;
   const facts = [
-    { ...narrationFact(telemetry, live.relay.active), href: narratedUrl },
+    { ...narrationFact(telemetry, live.relay.active, live.now), href: narratedUrl },
     { ...sourceFact(telemetry, live.relay.active), href: rawUrl },
     ...matchFacts(live.match),
   ];
