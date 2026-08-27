@@ -113,8 +113,22 @@ const FULL_FETCH_TIMEOUT_MS = 10_000;
  *  this comment's sibling constant is: one retry per poll, and none while a
  *  failure streak is open.
  *
+ *  Retuned again 1 s → 2 s on 27.8.2026 (#290), the first match day whose
+ *  data contradicted "inside ~150 ms or stuck". Two matches (144136, 144139,
+ *  100 min): delta median 77 ms and p90 94 ms as before — but 331 aborts at
+ *  1.0 s (~4/min, 70 % of 20 s windows had one), and under the loosened 4 s
+ *  limit successful deltas measured 1.1–3.8 s in 16 windows, full fetches up
+ *  to 8.7 s. The API simply had a slow tail that evening. Every immediate
+ *  retry succeeded, so the cost was log noise plus 15 alarm streaks that
+ *  stretched the cadence to 6 s for a poll each; the value below halves the
+ *  false aborts while still fitting inside the 3 s cadence, which is the
+ *  property the 4 s → 1 s retune was really about. The honest fix — keying the
+ *  loose limit on the MEASURED duration of successful deltas rather than on
+ *  failures — is still the follow-up noted under DELTA_SLOW_DWELL_POLLS; this
+ *  is the first match's worth of data arguing for it.
+ *
  *  NOT floored at `pollIntervalMs` — see apiTimeoutMs(). */
-const DELTA_FETCH_TIMEOUT_MS = 1_000;
+const DELTA_FETCH_TIMEOUT_MS = 2_000;
 /** The delta timeout after FETCH_FAILURE_ALARM_STREAK consecutive failures —
  *  i.e. the pre-#156 value, given back exactly when the tight one might be
  *  wrong.
@@ -166,8 +180,8 @@ const DELTA_FETCH_TIMEOUT_SLOW_MS = 4_000;
  *  followed by 3 aborts (23 % dropped, against 75 % with no dwell at all), not
  *  a permanently open valve. Closing that gap needs the valve to key on the
  *  MEASURED duration of successful deltas rather than on failures; that is a
- *  bigger change and there is still no match's worth of data showing an API
- *  that behaves this way. */
+ *  bigger change. 27.8.2026 (#290) delivered the first match's worth of data
+ *  showing an API that behaves this way — see DELTA_FETCH_TIMEOUT_MS. */
 const DELTA_SLOW_DWELL_POLLS = 10;
 /** Metadata (roster) fetch timeout: the startup fetch and the in-match roster
  *  refresh (`maybeRefreshRoster`).
@@ -554,7 +568,7 @@ export class CommentaryLoop {
      *  Kaksi syytä pitää ne erillään, ja molemmat opittiin kantapään kautta:
      *
      *  1. Niitä säätelee ERI raja (`FULL_FETCH_TIMEOUT_MS` 10 s,
-     *     `META_FETCH_TIMEOUT_MS` 4 s, `DELTA_FETCH_TIMEOUT_MS` 1 s). Yhteen
+     *     `META_FETCH_TIMEOUT_MS` 4 s, `DELTA_FETCH_TIMEOUT_MS` 2 s). Yhteen
      *     taulukkoon sekoitettuna raportoitu maksimi voi olla haku, jota
      *     arvioitava raja ei koske — ja koko #156 on olemassa siksi, ettei
      *     rajaa perusteltaisi väärällä joukolla. Sekoitus olisi ollut sama

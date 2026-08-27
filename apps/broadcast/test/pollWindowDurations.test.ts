@@ -187,12 +187,12 @@ describe("apiTimeoutMs (#156:n viritys)", () => {
   it("delta-haku EI ole sidottu pollausväliin", () => {
     // Tämä on se rivi, joka olisi nollannut koko virityksen hiljaa. Ennen
     // #156:tta efektiivinen raja oli `max(base, pollIntervalMs)`, joten
-    // vakion laskeminen 4000 → 1000 olisi tuottanut 3000 ms eikä 1000 ms —
+    // vakion laskeminen 4000 → 2000 olisi tuottanut 3000 ms eikä 2000 ms —
     // eikä mikään lokissa olisi kertonut sitä. Perustelu (#89) sekoitti
     // kadenssin vasteaikaan: pollausväli kertoo kuinka usein kysytään, ei
     // kuinka kauan vastaus saa kestää.
-    expect(makeLoop().apiTimeoutMs("delta")).toBe(1000);
-    expect(makeLoop({ pollInterval: 8000 }).apiTimeoutMs("delta")).toBe(1000);
+    expect(makeLoop().apiTimeoutMs("delta")).toBe(2000);
+    expect(makeLoop({ pollInterval: 8000 }).apiTimeoutMs("delta")).toBe(2000);
   });
 
   it("kokoonpanohaku pitää oman, väljemmän rajansa deltan virityksestä huolimatta", () => {
@@ -233,18 +233,18 @@ describe("delta-aikakatkaisun höllennys hakuvirhesarjassa (#156)", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("antaa deltalle takaisin väljemmän rajan kolmannen peräkkäisen virheen jälkeen", () => {
-    // 1 s riittää KUNNOSSA olevaa APIa vasten (mediaani ~80 ms). Jos API
-    // joskus vastaa aidosti 1–4 s:ssä, kiinteä 1 s katkaisisi joka ikisen
+    // 2 s riittää (#290: 1 s → 2 s 27.8.2026) KUNNOSSA olevaa APIa vasten (mediaani ~80 ms). Jos API
+    // joskus vastaa aidosti 1–4 s:ssä, kiinteä 2 s katkaisisi joka ikisen
     // deltan ja läpi menisi enää 60 s välein tehtävä täyshaku — selostus
     // laahaisi minuutin perässä. Sarja erottaa nämä kaksi tapausta:
     // jumittuneet yhteydet tulivat yksittäin (31/31 uusintaa onnistui
     // ensiyrittämällä), joten kolmas peräkkäinen virhe tarkoittaa että
     // oletus itsessään on väärä.
     const loop = makeLoop() as LoopInternals & { consecutiveFetchFailures: number };
-    expect(loop.apiTimeoutMs("delta")).toBe(1000);
+    expect(loop.apiTimeoutMs("delta")).toBe(2000);
 
     loop.consecutiveFetchFailures = 2;
-    expect(loop.apiTimeoutMs("delta")).toBe(1000);
+    expect(loop.apiTimeoutMs("delta")).toBe(2000);
 
     loop.consecutiveFetchFailures = 3;
     expect(loop.apiTimeoutMs("delta")).toBe(4000);
@@ -262,7 +262,7 @@ describe("delta-aikakatkaisun höllennys hakuvirhesarjassa (#156)", () => {
       expect(loop.apiTimeoutMs("delta"), `polli ${i + 1} onnistui, venttiilin pitää olla yhä auki`).toBe(4000);
     }
     loop.recordPollSuccess(); // 10.
-    expect(loop.apiTimeoutMs("delta")).toBe(1000);
+    expect(loop.apiTimeoutMs("delta")).toBe(2000);
   });
 
   it("turvaventtiili pysyy auki eikä nollaudu ensimmäisestä onnistumisesta", () => {
@@ -270,8 +270,8 @@ describe("delta-aikakatkaisun höllennys hakuvirhesarjassa (#156)", () => {
     // nollasi `consecutiveFetchFailures`in, ja koska väljä raja luettiin
     // pelkästä laskurista, venttiili sulkeutui juuri sillä pollilla jonka se
     // päästi läpi. Aidosti 1–4 s:ssä vastaavaa APIa vasten syntyi nelivaiheinen
-    // silmukka: 3 katkaisua 1 s:ssä → 4. polli saa 4 s ja onnistuu → laskuri
-    // nollaantuu → seuraava polli on taas 1 s ja katkeaa. Kolme deltaa neljästä
+    // silmukka: 3 katkaisua 2 s:ssä → 4. polli saa 4 s ja onnistuu → laskuri
+    // nollaantuu → seuraava polli on taas 2 s ja katkeaa. Kolme deltaa neljästä
     // hylättiin, tuoretta dataa tuli ~12 s välein 3 s sijaan, ja loki täyttyi
     // "HUOM, hakuvirhesarja" -riveistä, jotka ohjaamo näyttää operaattorille.
     const loop = failingLoop();
@@ -283,7 +283,7 @@ describe("delta-aikakatkaisun höllennys hakuvirhesarjassa (#156)", () => {
     // Vaihe 4: väljä raja päästää pollin läpi.
     loop.recordPollSuccess();
 
-    // Tässä silmukka ennen katkesi: raja putosi takaisin 1 s:ään.
+    // Tässä silmukka ennen katkesi: raja putosi takaisin 2 s:iin.
     expect(loop.apiTimeoutMs("delta"), "onnistuminen ei saa sulkea venttiiliä").toBe(4000);
 
     // Ja sama simuloituna kokonaisena ajona: API vastaa aidosti 2000 ms:ssä,
