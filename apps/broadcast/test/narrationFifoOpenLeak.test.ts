@@ -5,6 +5,7 @@ import { stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NarrationFifo, FIFO_FRAME_BYTES } from "../src/narrationFifo.js";
+import { setLogSink } from "../src/log.js";
 
 /** Libuvin säiepoolin koko. Testi EI vaadi ympäristömuuttujaa: ilman sitä
  *  pooli on neljä säiettä, ja jos ajaja on kasvattanut sitä, luetaan kasvatettu
@@ -137,6 +138,47 @@ describe("NarrationFifo: jumissa oleva avaus ei saa vuotaa säiepoolisäiettä (
 
       // Ja putki on uudelleenkäytettävissä samalla tavalla kuin respawnissa.
       await expect(fifo.prepare()).resolves.toBeUndefined();
+    } finally {
+      reader.kill("SIGKILL");
+    }
+  });
+});
+
+describe("NarrationFifo: lukijan katoaminen ei ryöpytä lokia (#289)", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "pesis-fifo-epipe-"));
+  });
+  afterEach(() => {
+    setLogSink(null);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("lokittaa yhden tick-virheen puskurin pituudella, ei yhtä per puskuroitu kehys", async () => {
+    const entries: { code: string | null; msg: string }[] = [];
+    setLogSink((e) => entries.push({ code: e.code, msg: e.msg }));
+    const fifoPath = join(dir, "narration.pcm");
+    const fifo = new NarrationFifo(fifoPath);
+    await fifo.prepare();
+
+    // Lukija avaa putken, ei lue mitään 800 ms:iin (kirjoittaja puskuroi ~40
+    // kehystä, joista kernelin 64 KiB nielee ~17 ja loput jäävät Nodeen) ja
+    // sulkee — sama kuin ffmpegin exit kesken lähetyksen.
+    const reader = spawn("sh", ["-c", 'exec 3<"$1"; sleep 0.8; exec 3<&-', "sh", fifoPath], {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    try {
+      await withTimeout(fifo.open(), 5000, "fifo.open lukijan kanssa");
+      await new Promise<void>((r) => reader.once("exit", () => r()));
+      await sleep(300);
+      fifo.closeIo();
+      await sleep(50);
+
+      const ticks = entries.filter((e) => e.code === "fifo.tick_failed");
+      expect(ticks.length).toBe(1);
+      expect(ticks[0].msg).toMatch(/puskurissa oli \d+ kehystä \(\d+ s\)/);
+      // Kuolleeseen putkeen ei tikitetä: rivejä ei tule lisää odotuksen aikana.
+      expect(entries.filter((e) => e.code === "fifo.tick_failed").length).toBe(1);
     } finally {
       reader.kill("SIGKILL");
     }

@@ -177,6 +177,13 @@ export class NarrationFifo {
    *  käyttää tätä sekä tunnisteena ("avaus on yhä jumissa") että keinona
    *  päättää roikkuva open()-lupaus. */
   private abortOpen: (() => void) | null = null;
+  /** Putki jonka kirjoitus on jo kerran epäonnistunut. Node purkaa EPIPE:ssä
+   *  jokaisen puskuroidun write-callbackin virheellä ennen `error`-tapahtumaa,
+   *  ja puskurissa on lähteen viiveen verran kehyksiä — 27.8.2026 se oli
+   *  ~3 000 riviä samassa sekunnissa ffmpegin päättyessä (#289). Ensimmäinen
+   *  virhe lokitetaan puskurin pituuden kanssa, loput samasta putkesta
+   *  vaiennetaan. */
+  private deadStream: WriteStream | null = null;
 
   /** @param maxQueuedMs Backlog ceiling in milliseconds of queued audio, or 0
    *  to keep the old unbounded behaviour (#57). */
@@ -318,11 +325,34 @@ export class NarrationFifo {
     this.tickCount++;
 
     const frame = this.queue.nextFrame();
-    this.stream.write(frame, (err) => {
-      if (err) logWarn("fifo.tick_failed", `FIFO-tick-virhe: ${err.message}`);
+    const stream = this.stream;
+    stream.write(frame, (err) => {
+      if (err) this.noteTickFailure(stream, err);
     });
 
     this.scheduleNextTick();
+  }
+
+  /** Yksi rivi per kuollut putki. Rivi kertoo myös montako sekuntia
+   *  selostusvirtaa oli vielä puskurissa: se on suoraan se matka, jonka
+   *  ffmpeg oli wall-clockia jäljessä (HLS-viive), ja hyödyllisempi tieto kuin
+   *  tuhat kertaa "broken pipe". Tikitys kuolleeseen putkeen lopetetaan heti —
+   *  closeIo()/open() käynnistää sen uudelleen seuraavalle ffmpegille. */
+  private noteTickFailure(stream: WriteStream, err: Error): void {
+    if (this.deadStream === stream) return;
+    this.deadStream = stream;
+    const bufferedFrames = Math.ceil(stream.writableLength / FRAME_BYTES);
+    const bufferedSec = Math.round((bufferedFrames * FRAME_MS) / 1000);
+    logWarn(
+      "fifo.tick_failed",
+      `FIFO-tick-virhe: ${err.message} — puskurissa oli ${bufferedFrames} kehystä (${bufferedSec} s), ` +
+        `jotka eivät ehtineet ffmpegille; saman putken loput virheet vaiennetaan.`
+    );
+    if (this.stream === stream) {
+      if (this.timer) clearTimeout(this.timer);
+      this.timer = null;
+      this.stream = null;
+    }
   }
 }
 
