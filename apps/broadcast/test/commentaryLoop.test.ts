@@ -101,6 +101,7 @@ interface LoopInternals {
   narrationReadyForFiller(): boolean;
   maybeLatchNarrationReady(meta: MatchMetadata): void;
   maybeAnnounceSummary(meta: MatchMetadata): Promise<void>;
+  announceSummarySafely(meta: MatchMetadata): Promise<void>;
   speak(text: string, countAnnouncement?: boolean, dedupeKey?: string): void;
   synthQueue: Promise<void>;
   state: {
@@ -1140,5 +1141,24 @@ describe("CommentaryLoop pollausvälin jousto hakuvirhesarjassa (#52 kohta 2)", 
       expect(gaps.lastIndexOf(0)).toBe(0);
       expect(gaps.slice(1)).toEqual([3000, 6000, 12_000, 15_000]);
     });
+  });
+});
+
+describe("filler failure is not a fetch failure (#288)", () => {
+  // 27.8.2026: `stadium: null` threw inside the welcome filler, the poll
+  // loop's catch counted it as a fetch failure and backed the cadence off to
+  // 15 s for the whole pre-match wait. The guard must swallow the throw and
+  // say so under its own log code.
+  it("logs speech.filler_failed and does not rethrow", async () => {
+    const codes: (string | null)[] = [];
+    setLogSink((entry) => { codes.push(entry.code); });
+    const loop = new CommentaryLoop(makeConfig(), recordingSink());
+    const boom = new Error("Cannot read properties of null (reading 'name')");
+    vi.spyOn(internals(loop) as unknown as { maybeAnnounceSummary(): Promise<void> }, "maybeAnnounceSummary")
+      .mockRejectedValue(boom);
+    await expect(internals(loop).announceSummarySafely(META)).resolves.toBeUndefined();
+    expect(codes).toContain("speech.filler_failed");
+    expect(codes).not.toContain("api.fetch_failed");
+    setLogSink(null);
   });
 });

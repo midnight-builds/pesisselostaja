@@ -1306,7 +1306,7 @@ export class CommentaryLoop {
           }
         }
 
-        await this.maybeAnnounceSummary(meta);
+        await this.announceSummarySafely(meta);
 
         await saveState(this.config.stateFile, this.state);
         this.recordPollSuccess();
@@ -1863,6 +1863,22 @@ export class CommentaryLoop {
    *  announcement). Busy game: full recap every SUMMARY_EVERY_N announcements.
    *  Quiet game: a "tilanne on edelleen…" filler once nothing has been said
    *  for IDLE_FILLER_MS. */
+  /** Täytteen muodostus ei saa näkyä hakuvirheenä. 27.8.2026 `stadium: null`
+   *  kaatoi tervetulotäytteen, poikkeus valui pollisilmukan catchiin ja
+   *  `recordPollFailure` nosti pollausvälin 15 sekuntiin koko odotusajaksi —
+   *  ottelun alku havaittiin backoff-tilassa (#288). Haku onnistui koko ajan;
+   *  vika oli puheessa, ja sen kuuluu maksaa vain yksi täyte, ei kadenssia. */
+  private async announceSummarySafely(meta: MatchMetadata): Promise<void> {
+    try {
+      await this.maybeAnnounceSummary(meta);
+    } catch (err) {
+      logWarn(
+        "speech.filler_failed",
+        `Täytteen muodostus epäonnistui, ohitetaan tämä kierros: ${err instanceof Error ? err.message : err}`
+      );
+    }
+  }
+
   private async maybeAnnounceSummary(meta: MatchMetadata): Promise<void> {
     const now = Date.now();
     // The timing decision itself lives in core (decideFiller, issue #62) —
