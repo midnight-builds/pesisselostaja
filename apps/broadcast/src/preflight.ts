@@ -121,11 +121,26 @@ export async function fetchWithOneRetry<T>(
   }
 }
 
-async function checkMatch(matchId: number, apiKey?: string, apiBase?: string): Promise<Check[]> {
+/** Testisauma (#299): oletukset ovat oikeat core-haut, ja testi voi antaa omat.
+ *  Sauma on täällä eikä testissä siksi, että retryn KYTKENTÄ checkMatchiin on
+ *  juuri se asia jonka pitää olla regressiotestattavissa — pelkkä apurin
+ *  yksikkötesti jäisi vihreäksi vaikka kytkennän purkaisi. */
+export interface MatchFetchers {
+  fetchMeta: typeof fetchMatchMetadata;
+  fetchEvents: typeof fetchLiveEvents;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export async function checkMatch(
+  matchId: number,
+  apiKey?: string,
+  apiBase?: string,
+  fetchers: MatchFetchers = { fetchMeta: fetchMatchMetadata, fetchEvents: fetchLiveEvents }
+): Promise<Check[]> {
   const opts = { apiKey, apiBase, timeoutMs: 8000 };
   const checks: Check[] = [];
   try {
-    const meta = await fetchWithOneRetry(() => fetchMatchMetadata(matchId, opts));
+    const meta = await fetchWithOneRetry(() => fetchers.fetchMeta(matchId, opts), fetchers.sleep);
     checks.push({ name: "Ottelu", status: "ok", detail: `${meta.home.name} vs ${meta.away.name}` });
   } catch (err) {
     checks.push({
@@ -136,7 +151,10 @@ async function checkMatch(matchId: number, apiKey?: string, apiBase?: string): P
     return checks;
   }
   try {
-    const events = await fetchWithOneRetry(() => fetchLiveEvents(matchId, { ...opts, skipDelay: true }));
+    const events = await fetchWithOneRetry(
+      () => fetchers.fetchEvents(matchId, { ...opts, skipDelay: true }),
+      fetchers.sleep
+    );
     checks.push({
       name: "Tapahtumat",
       status: "ok",
