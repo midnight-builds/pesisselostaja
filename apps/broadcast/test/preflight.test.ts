@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { checkSource, fetchWithOneRetry, parseEnvFile, summarize, type Check } from "../src/preflight.js";
+import { checkMatch, checkSource, fetchWithOneRetry, parseEnvFile, summarize, type Check } from "../src/preflight.js";
 import { ytdlpSourceArgs } from "../src/ytdlpSource.js";
 
 /** True when `needle` appears as a contiguous run inside `haystack`. */
@@ -139,5 +139,37 @@ describe("fetchWithOneRetry", () => {
       }, noSleep)
     ).rejects.toThrow("virhe 2");
     expect(calls).toBe(2);
+  });
+});
+
+// Retryn KYTKENTÄ checkMatchiin — pelkkä apurin testi jäisi vihreäksi vaikka
+// checkMatch palaisi suoriin fetch-kutsuihin (katselmuslöydös, #299).
+describe("checkMatch + retry", () => {
+  const META = { home: { name: "Koti" }, away: { name: "Vieras" } };
+
+  it("transientti abortti ensimmäisessä meta-haussa ei tuota estettä", async () => {
+    let metaCalls = 0;
+    const checks = await checkMatch(123, undefined, undefined, {
+      fetchMeta: (async () => {
+        metaCalls += 1;
+        if (metaCalls === 1) throw new Error("This operation was aborted");
+        return META;
+      }) as never,
+      fetchEvents: (async () => ({ events: [] })) as never,
+      sleep: () => Promise.resolve(),
+    });
+    expect(checks.find((c) => c.name === "Ottelu")?.status).toBe("ok");
+    expect(metaCalls).toBe(2);
+  });
+
+  it("molemmilla yrityksillä kaatuva haku on yhä este", async () => {
+    const checks = await checkMatch(123, undefined, undefined, {
+      fetchMeta: (async () => {
+        throw new Error("This operation was aborted");
+      }) as never,
+      fetchEvents: (async () => ({ events: [] })) as never,
+      sleep: () => Promise.resolve(),
+    });
+    expect(checks.find((c) => c.name === "Ottelu")?.status).toBe("fail");
   });
 });
