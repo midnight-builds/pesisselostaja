@@ -1167,3 +1167,65 @@ describe("filler failure is not a fetch failure (#288)", () => {
     setLogSink(null);
   });
 });
+
+// --------------------------------------------------------------- issue #302
+// Jaksotauko: jakson päättymismerkintä avaa tauon tilassa, ja mikä tahansa
+// seuraava merkintä (uuden jakson tapahtuma) sulkee sen. Ilman tätä idle-täyte
+// puhuu "sisävuorossa on X" keskellä jaksotaukoa (livenä 6.9.2026).
+describe("jaksotauon tila (#302)", () => {
+  interface BreakInternals {
+    processEventsLive(events: LiveEvent[], meta: MatchMetadata, lookup: PlayerLookup): Promise<void>;
+    state: { periodBreak: boolean };
+    buildContext(): { periodBreak: boolean };
+    synthQueue: Promise<void>;
+  }
+
+  const periodEndSub: SubEvent = {
+    texts: [{ type: "event", text: "Ensimmäinen jakso päättyi", base: null }],
+  };
+  const paloSub2: SubEvent = {
+    texts: [
+      { type: "event", text: "Palo", base: null },
+      { type: "stat", out: 1 },
+    ],
+  };
+
+  function ev(overrides: Partial<LiveEvent>): LiveEvent {
+    return {
+      id: 1, groupType: "x", period: 0, inning: 0, batTurn: 0, team: 1, hTeam: 1,
+      batter: null, pairIndex: null, hitNumber: null, hit: null,
+      events: [paloSub2], timestamp: 100, updated: null,
+      ...overrides,
+    };
+  }
+
+  it("päättymismerkintä avaa tauon ja se näkyy puhekontekstissa", async () => {
+    const loop = new CommentaryLoop(makeConfig(), recordingSink());
+    const inner = loop as unknown as BreakInternals;
+    await inner.processEventsLive(
+      [ev({ id: 5, inning: 3, events: [periodEndSub] })],
+      META,
+      buildPlayerLookup(META)
+    );
+    await inner.synthQueue;
+    expect(inner.state.periodBreak).toBe(true);
+    expect(inner.buildContext().periodBreak).toBe(true);
+  });
+
+  it("seuraavan jakson tapahtuma sulkee tauon", async () => {
+    const loop = new CommentaryLoop(makeConfig(), recordingSink());
+    const inner = loop as unknown as BreakInternals;
+    await inner.processEventsLive(
+      [ev({ id: 5, inning: 3, events: [periodEndSub] })],
+      META,
+      buildPlayerLookup(META)
+    );
+    await inner.processEventsLive(
+      [ev({ id: 1, period: 1, inning: 0, timestamp: 200 })],
+      META,
+      buildPlayerLookup(META)
+    );
+    await inner.synthQueue;
+    expect(inner.state.periodBreak).toBe(false);
+  });
+});
