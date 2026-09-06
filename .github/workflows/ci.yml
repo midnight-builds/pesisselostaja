@@ -30,7 +30,9 @@ jobs:
       # läpi kehityskoneella — ja ne on parempi ASENTAA kuin ohittaa: skripti
       # on ainoa asia joka tuottaa julkaistavan kuvan.
       - name: Install Pillow (thumbnail renderer)
-        run: sudo apt-get install -y --no-install-recommends python3-pil
+        # apt-get update ensin: runnerin esiladatut paketti-listat vanhenevat,
+        # ja peilistä poistunut versio kaataa asennuksen 404:ään (6.9.2026).
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-pil
 
       - name: Lint
         run: npm run lint
