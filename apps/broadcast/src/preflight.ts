@@ -102,11 +102,30 @@ async function checkTool(name: string, bin: string, args: string[]): Promise<Che
   }
 }
 
+/** Yksi uusintayritys lyhyellä viiveellä ennen kuin haun virhe julistetaan
+ *  esteeksi (#299): 6.9.2026 yksi transientti abortoitunut API-haku
+ *  preflightissa maksoi käynnistysikkunassa 5 minuutin backoffin, vaikka sama
+ *  haku onnistui sekunteja myöhemmin. Yksi retry riittää siihen luokkaan;
+ *  aidosti alhaalla oleva API failaa molemmat ja este jää voimaan. */
+const FETCH_RETRY_DELAY_MS = 2000;
+
+export async function fetchWithOneRetry<T>(
+  fetchOnce: () => Promise<T>,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))
+): Promise<T> {
+  try {
+    return await fetchOnce();
+  } catch {
+    await sleep(FETCH_RETRY_DELAY_MS);
+    return await fetchOnce();
+  }
+}
+
 async function checkMatch(matchId: number, apiKey?: string, apiBase?: string): Promise<Check[]> {
   const opts = { apiKey, apiBase, timeoutMs: 8000 };
   const checks: Check[] = [];
   try {
-    const meta = await fetchMatchMetadata(matchId, opts);
+    const meta = await fetchWithOneRetry(() => fetchMatchMetadata(matchId, opts));
     checks.push({ name: "Ottelu", status: "ok", detail: `${meta.home.name} vs ${meta.away.name}` });
   } catch (err) {
     checks.push({
@@ -117,7 +136,7 @@ async function checkMatch(matchId: number, apiKey?: string, apiBase?: string): P
     return checks;
   }
   try {
-    const events = await fetchLiveEvents(matchId, { ...opts, skipDelay: true });
+    const events = await fetchWithOneRetry(() => fetchLiveEvents(matchId, { ...opts, skipDelay: true }));
     checks.push({
       name: "Tapahtumat",
       status: "ok",
