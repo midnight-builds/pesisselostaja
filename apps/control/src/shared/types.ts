@@ -153,6 +153,14 @@ export interface RelayTelemetry {
    *
    *  Muissa tapauksissa kohteen sulkee YouTuben `enableAutoStop`. */
   endReason?: SourceEndReason | null;
+  /** Lopetusajo (#301) käynnissä: lähde on päättynyt ja relay ajaa
+   *  selostusjonoa tyhjäksi katvekuvan päälle ennen sammutusta. Lähetys elää
+   *  TARKOITUKSELLA vielä useita minuutteja — kortin on sanottava se, ettei
+   *  operaattori hard-stoppaa juuri niitä loppuselostuksia, joita drain
+   *  pelastaa. Puuttuva (vanha deploy) = false. `endReason` kirjoitetaan
+   *  vasta drainin valmistuttua, joten hallittu lopetus (#153) ei laukea
+   *  tämän aikana. */
+  draining?: boolean;
 }
 
 /** Ohjaamon pysyväisasetukset (#133).
