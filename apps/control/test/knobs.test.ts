@@ -83,9 +83,9 @@ describe("writeKnobs", () => {
     expect(readControlFile().announceBatterChanges).toBe(false);
   });
 
-  it("clamps narrationDelayMs to [0, 15000]", async () => {
+  it("clamps narrationDelayMs to [0, 30000]", async () => {
     const tooHigh = await writeKnobs(MATCH_ID, { narrationDelayMs: 999_999 });
-    expect(tooHigh.narrationDelayMs).toBe(15000);
+    expect(tooHigh.narrationDelayMs).toBe(30000);
     const tooLow = await writeKnobs(MATCH_ID, { narrationDelayMs: -500 });
     expect(tooLow.narrationDelayMs).toBe(0);
   });
@@ -133,10 +133,10 @@ describe("nudgeDelay", () => {
     expect(result.narrationDelayMs).toBe(4500);
   });
 
-  it("clamps at the 15000 ms ceiling when nudging up near the limit", async () => {
-    await writeKnobs(MATCH_ID, { narrationDelayMs: 14_800 });
+  it("clamps at the 30000 ms ceiling when nudging up near the limit", async () => {
+    await writeKnobs(MATCH_ID, { narrationDelayMs: 29_800 });
     const result = await nudgeDelay(MATCH_ID, 500);
-    expect(result.narrationDelayMs).toBe(15_000);
+    expect(result.narrationDelayMs).toBe(30_000);
   });
 
   it("clamps at the 0 ms floor when nudging down near zero", async () => {
