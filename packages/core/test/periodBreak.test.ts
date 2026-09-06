@@ -115,6 +115,9 @@ describe("isPeriodEndSubEvent", () => {
     expect(isPeriodEndSubEvent(textSub("Ensimmäinen jakso päättyi"))).toBe(true);
     expect(isPeriodEndSubEvent(textSub("Toinen jakso päättyi"))).toBe(true);
     expect(isPeriodEndSubEvent(textSub("Supervuoro päättyi"))).toBe(true);
+    // Nähty livenä 6.9.2026: oma merkintänsä, joka voi edeltää "Ottelu
+    // päättyi" -merkintää pitkälläkin viiveellä.
+    expect(isPeriodEndSubEvent(textSub("Kotiutuslyöntikilpailu päättyi"))).toBe(true);
     expect(isPeriodEndSubEvent(textSub("Ottelu päättyi"))).toBe(false);
     expect(isPeriodEndSubEvent(textSub("Palo"))).toBe(false);
     expect(isPeriodEndSubEvent(textSub("Toinen jakso alkoi"))).toBe(false);
