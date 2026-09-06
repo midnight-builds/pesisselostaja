@@ -255,6 +255,11 @@ export class NarrationFifo {
     return this.queue.pendingClips;
   }
 
+  /** Poistaa jonokaton (#57) loppuajaksi — ks. NarrationQueue.disableCap. */
+  disableCap(): void {
+    this.queue.disableCap();
+  }
+
   /** Tears down the current pipe's I/O without touching the queue, so
    *  pending narration survives a respawn. Caller must prepare()+open()
    *  again around the fresh ffmpeg process. */
