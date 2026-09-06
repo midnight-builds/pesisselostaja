@@ -13,6 +13,7 @@ import {
   isRunScoringSubEvent,
   isOutSubEvent,
   isMatchEndSubEvent,
+  isPeriodEndSubEvent,
   runValueOfSubEvent,
   eventFingerprint,
   recomputeCurrentOutsKeyed,
@@ -1788,6 +1789,9 @@ export class CommentaryLoop {
           }
 
           if (isMatchEndSubEvent(sub)) state.finished = true;
+          // Jaksotauko (#302): päättymismerkintä avaa tauon, mikä tahansa muu
+          // merkintä sulkee sen.
+          state.periodBreak = isPeriodEndSubEvent(sub);
 
           if (isRunScoringSubEvent(sub) && event.team !== null) {
             addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
@@ -1861,6 +1865,8 @@ export class CommentaryLoop {
         const sub = event.events[i];
         state.seenFingerprints.add(eventFingerprint(event, i));
         if (isMatchEndSubEvent(sub)) state.finished = true;
+        // Jaksotauko (#302): sama sääntö kuin live-polussa.
+        state.periodBreak = isPeriodEndSubEvent(sub);
         if (isRunScoringSubEvent(sub) && event.team !== null) {
           addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
         }
@@ -1970,6 +1976,7 @@ export class CommentaryLoop {
       currentBatTeamId: this.state.currentBatTeamId,
       currentInning: this.state.currentInning,
       currentBatTurn: this.state.currentBatTurn,
+      periodBreak: this.state.periodBreak,
     };
   }
 

@@ -10,6 +10,7 @@ import {
   isRunScoringSubEvent,
   isOutSubEvent,
   isMatchEndSubEvent,
+  isPeriodEndSubEvent,
   runValueOfSubEvent,
   type SpeechContext,
 } from "@pesisselostaja/core";
@@ -135,6 +136,8 @@ async function buildTimeline(
       for (const i of group) {
         const sub = event.events[i];
         if (isMatchEndSubEvent(sub)) state.finished = true;
+        // Jaksotauko (#302): sama sääntö kuin oikeissa poluissa.
+        state.periodBreak = isPeriodEndSubEvent(sub);
         if (isRunScoringSubEvent(sub)) {
           const value = runValueOfSubEvent(sub);
           if (event.team != null && value > 0) addRun(state, event.period, event.team === meta.home.id, value);
@@ -155,6 +158,7 @@ async function buildTimeline(
         currentBatTeamId: state.currentBatTeamId,
         currentInning: state.currentInning,
         currentBatTurn: state.currentBatTurn,
+        periodBreak: state.periodBreak,
       };
       const readable = groupToSpeech(event, event.events, group, meta, lookup, true, ctx);
       if (!readable || readable === lastSpoken) continue;
