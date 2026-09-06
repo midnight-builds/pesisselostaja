@@ -14,6 +14,8 @@ import {
   isRunScoringSubEvent,
   isOutSubEvent,
   isMatchEndSubEvent,
+  isPeriodEndSubEvent,
+  closesPeriodBreak,
   runValueOfSubEvent,
   eventFingerprint,
   recomputeCurrentOutsKeyed,
@@ -506,6 +508,14 @@ export class BrowserWatcher {
         const fp = eventFingerprint(event, i);
         state.seenFingerprints.add(fp);
         if (isMatchEndSubEvent(sub)) state.finished = true;
+        // Jaksotauko (#302): päättymismerkintä avaa tauon; vain pelitapahtuma
+        // sulkee sen (kirjurin vaihdot tauolla eivät saa sulkea). Talteen
+        // event.period, EI currentPeriod: rekonsiliaatio voi olla nostanut
+        // currentPeriodin jo uuteen jaksoon, mutta päättymismerkintä kulkee
+        // aina päättyneen jakson eventillä (todennettu ottelun 136777 datasta).
+        if (isPeriodEndSubEvent(sub)) state.periodBreak = event.period;
+        else if (state.periodBreak !== null && closesPeriodBreak(sub, event.period, state.periodBreak))
+          state.periodBreak = null;
         if (isRunScoringSubEvent(sub)) {
           if (event.team !== null)
             addRun(
@@ -624,6 +634,10 @@ export class BrowserWatcher {
           }
 
           if (isMatchEndSubEvent(sub)) state.finished = true;
+          // Jaksotauko (#302): sama sääntö kuin catchup-polussa.
+          if (isPeriodEndSubEvent(sub)) state.periodBreak = event.period;
+          else if (state.periodBreak !== null && closesPeriodBreak(sub, event.period, state.periodBreak))
+            state.periodBreak = null;
 
           if (isRunScoringSubEvent(sub)) {
             if (event.team !== null) {
@@ -746,7 +760,9 @@ export class BrowserWatcher {
   }
 
   private buildContext(state: WatcherState): SpeechContext {
-    const cur = getPeriodScore(state, state.currentPeriod);
+    // Tauolla (#302) pisteet päättyneestä jaksosta — currentPeriod voi olla
+    // rekonsiliaation jäljiltä jo uusi jakso, jonka pisteet ovat 0, 0.
+    const cur = getPeriodScore(state, state.periodBreak ?? state.currentPeriod);
     const won = periodsWon(state);
     return {
       periodHomeRuns: cur.home,
@@ -759,6 +775,7 @@ export class BrowserWatcher {
       currentBatTeamId: state.currentBatTeamId,
       currentInning: state.currentInning,
       currentBatTurn: state.currentBatTurn,
+      periodBreak: state.periodBreak,
     };
   }
 

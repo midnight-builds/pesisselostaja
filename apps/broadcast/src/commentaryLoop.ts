@@ -13,6 +13,8 @@ import {
   isRunScoringSubEvent,
   isOutSubEvent,
   isMatchEndSubEvent,
+  isPeriodEndSubEvent,
+  closesPeriodBreak,
   runValueOfSubEvent,
   eventFingerprint,
   recomputeCurrentOutsKeyed,
@@ -1788,6 +1790,11 @@ export class CommentaryLoop {
           }
 
           if (isMatchEndSubEvent(sub)) state.finished = true;
+          // Jaksotauko (#302): päättymismerkintä avaa tauon; vain pelitapahtuma
+          // sulkee sen (kirjurin vaihdot tauolla eivät saa sulkea).
+          if (isPeriodEndSubEvent(sub)) state.periodBreak = event.period;
+          else if (state.periodBreak !== null && closesPeriodBreak(sub, event.period, state.periodBreak))
+            state.periodBreak = null;
 
           if (isRunScoringSubEvent(sub) && event.team !== null) {
             addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
@@ -1861,6 +1868,10 @@ export class CommentaryLoop {
         const sub = event.events[i];
         state.seenFingerprints.add(eventFingerprint(event, i));
         if (isMatchEndSubEvent(sub)) state.finished = true;
+        // Jaksotauko (#302): sama sääntö kuin live-polussa.
+        if (isPeriodEndSubEvent(sub)) state.periodBreak = event.period;
+        else if (state.periodBreak !== null && closesPeriodBreak(sub, event.period, state.periodBreak))
+          state.periodBreak = null;
         if (isRunScoringSubEvent(sub) && event.team !== null) {
           addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
         }
@@ -1957,7 +1968,8 @@ export class CommentaryLoop {
   }
 
   private buildContext(): SpeechContext {
-    const cur = getPeriodScore(this.state, this.state.currentPeriod);
+    // Tauolla (#302) pisteet päättyneestä jaksosta, ks. web-vastine.
+    const cur = getPeriodScore(this.state, this.state.periodBreak ?? this.state.currentPeriod);
     const won = periodsWon(this.state);
     return {
       periodHomeRuns: cur.home,
@@ -1970,6 +1982,7 @@ export class CommentaryLoop {
       currentBatTeamId: this.state.currentBatTeamId,
       currentInning: this.state.currentInning,
       currentBatTurn: this.state.currentBatTurn,
+      periodBreak: this.state.periodBreak,
     };
   }
 

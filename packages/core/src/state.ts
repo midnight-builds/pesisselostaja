@@ -22,6 +22,11 @@ export interface WatcherState {
   currentInning: number;
   currentBatTurn: number;
   finished: boolean;
+  /** Jaksotauko (#302): PÄÄTTYNEEN jakson numero, tai null kun peli käy.
+   *  Numero eikä lippu — currentPeriod voi liikkua tauon aikana (vastaustason
+   *  period-rekonsiliaatio), ja taukofraasin on puhuttava päättyneestä
+   *  jaksosta. Suljetaan vain pelitapahtumasta (closesPeriodBreak). */
+  periodBreak: number | null;
   announcementCount: number;
   lastSummaryTime: number;
   /** Turn key (period:inning:batTurn:team) of the last bat-turn change spoken aloud. */
@@ -79,6 +84,7 @@ export function emptyState(): WatcherState {
     currentInning: 0,
     currentBatTurn: 0,
     finished: false,
+    periodBreak: null,
     announcementCount: 0,
     lastSummaryTime: 0,
     announcedTurnKey: null,
@@ -100,6 +106,7 @@ export function serializeWatcherState(state: WatcherState): unknown {
     currentInning: state.currentInning,
     currentBatTurn: state.currentBatTurn,
     finished: state.finished,
+    periodBreak: state.periodBreak,
     announcedTurnKey: state.announcedTurnKey,
   };
 }
@@ -121,6 +128,9 @@ export function deserializeWatcherState(raw: unknown): WatcherState {
     currentInning: (parsed.currentInning as number) ?? 0,
     currentBatTurn: (parsed.currentBatTurn as number) ?? 0,
     finished: (parsed.finished as boolean) ?? false,
+    // Vain numero kelpaa: ?? päästäisi esim. vanhan boolean-muodon läpi, ja
+    // false kulkeutuisi periodName()iin asti ("Jakso 1 on pelattu").
+    periodBreak: typeof parsed.periodBreak === "number" ? parsed.periodBreak : null,
     announcementCount: 0,
     lastSummaryTime: 0,
     announcedTurnKey: (parsed.announcedTurnKey as string | null) ?? null,

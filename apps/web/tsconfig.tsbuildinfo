@@ -1,0 +1,1 @@
+{"root":["./src/buildInfo.ts","./src/debuglog.ts","./src/elevenlabs.ts","./src/main.ts","./src/piper.ts","./src/pronunciation.ts","./src/state.ts","./src/watcher.ts","./test/buildInfo.test.ts","./test/elevenlabs.test.ts","./test/watcherFeed.test.ts"],"version":"5.9.3"}
