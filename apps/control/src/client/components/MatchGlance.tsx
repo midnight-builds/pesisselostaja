@@ -295,7 +295,11 @@ function alertsFor(live: LiveState): string[] {
  *  jotta ruudulla näkyvä luku on se, jonka palvelin oikeasti asettaa — muuten
  *  ylärajassa naputtelu näyttäisi kasvavaa lukua, jota relay ei koskaan saa. */
 const DELAY_MIN_MS = 0;
-const DELAY_MAX_MS = 15_000;
+/** 30 s, koska 15 s katto tuli livenä vastaan 6.9.2026: viive ajettiin
+ *  portaittain kattoon asti eikä varaa jäänyt (#300). Jononpudotusraja
+ *  (broadcastin DEFAULT_MAX_QUEUED_NARRATION_MS) mittaa viiveen JÄLKEEN
+ *  FIFO:on kertyvää puhetta, joten iso viive ei laukaise sitä. */
+const DELAY_MAX_MS = 30_000;
 /** Selostuksen gainin säätöväli ja askel (#244). Sama väli kuin palvelimen
  *  `clampGain`illa; askel 0.05 on pienin, joka kuuluu yhdellä napautuksella
  *  ilman että tasapainon hakeminen vaatii kymmeniä napautuksia. */
