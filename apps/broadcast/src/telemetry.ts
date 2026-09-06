@@ -104,8 +104,17 @@ export interface RelayStatus {
    *  exits (#123). Absent while the relay is running — and absent in every
    *  snapshot older deploys wrote, so readers must treat it as optional.
    *  (The control app mirrors RelayStatus by hand and ignores unknown keys,
-   *  so adding this here is safe without touching apps/control.) */
+   *  so adding this here is safe without touching apps/control.)
+   *
+   *  #301: endReason kirjoitetaan vasta lopetusajon (drain) VALMISTUTTUA —
+   *  ohjaamon hallittu lopetus (#153) laukeaa endReasonista, eikä se saa
+   *  katkaista lähetystä kesken loppuselostusten. */
   endReason?: SourceEndReason;
+  /** True while the relay is draining the narration backlog over the slate
+   *  after the source has ended (#301) — the broadcast is deliberately still
+   *  running, and the operator must not mistake it for a hung relay. Optional:
+   *  absent in snapshots from older deploys. */
+  draining?: boolean;
 }
 
 /** Everything the snapshot cannot observe for itself, supplied by the relay on
