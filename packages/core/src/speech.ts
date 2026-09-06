@@ -467,7 +467,17 @@ export function isMatchEndSubEvent(sub: SubEvent): boolean {
 export function isPeriodEndSubEvent(sub: SubEvent): boolean {
   for (const el of sub.texts) {
     const t = getEventText(el);
-    if (t && t.includes("päättyi") && (t.includes("jakso") || t.includes("Supervuoro"))) return true;
+    // "Kotiutuslyöntikilpailu päättyi" on oma merkintänsä (nähty livenä
+    // 6.9.2026, ottelu 135689, 19 s ennen "Ottelu päättyi") — myös sen ja
+    // ottelun päättämisen väli on taukoa, jos kirjuri viivyttelee. Huom:
+    // kilpojen VÄLINEN raja ei tule "päättyi"-merkintänä vaan vuoroparina,
+    // joten se ei avaa taukoa — oikein, pisteet juoksevat kilpojen yli.
+    if (
+      t &&
+      t.includes("päättyi") &&
+      (t.includes("jakso") || t.includes("Supervuoro") || t.includes("Kotiutuslyöntikilpailu"))
+    )
+      return true;
   }
   return false;
 }
