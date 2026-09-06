@@ -133,8 +133,11 @@ export interface StatusProbe {
   sourceLagMs: number | null;
   ttsEngine: string;
   elevenLabsCharsUsed: number;
-  /** null while running; set once the run's end reason is known (#123). */
+  /** null while running; set once the run's end reason is known (#123).
+   *  #301: stays null through the drain phase — see RelayStatus.endReason. */
   endReason?: SourceEndReason | null;
+  /** True during the post-source drain phase (#301). */
+  draining?: boolean;
 }
 
 export interface TelemetryOptions {
