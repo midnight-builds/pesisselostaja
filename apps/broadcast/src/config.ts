@@ -42,6 +42,11 @@ export interface RelayConfig {
    *  (ei uusia tapahtumia) vaaditaan ennen kuin päättynyt ottelu + oireileva
    *  lähde saa sammuttaa relayn. Ehto 2/3 — ks. FfmpegMixerOptions. */
   hardStopQuietMs: number;
+  /** Lopetusajon (#301) kokonaiskatto: kun lähde on päättynyt, FIFO-puskuri ja
+   *  selostusjono ajetaan tyhjäksi katvekuvan päälle ennen sammutusta —
+   *  enintään näin kauan. 0 = drain pois päältä (sammutus heti, vanha käytös).
+   *  Hard stop (#123) ohittaa drainin aina. */
+  drainMaxMs: number;
   /** Katvekuva ("EI SIGNAALIA", issue #104): kun lähdettä ei saada kiinni,
    *  RTMP-työntöä jatketaan still-kuvalla ja selostus jatkuu sen päällä.
    *
@@ -230,6 +235,10 @@ export function parseRelayConfig(): RelayConfig {
     process.env.RELAY_HARD_STOP_QUIET_MS,
     3 * 60 * 1000
   );
+  // Lopetusajon katto (#301). Oletus 8 min: 6.9.2026 kadonnut häntä oli 3,5
+  // min, joten tämä kattaa sen marginaalilla; hard stop on operaattorin
+  // ohituspolku jos drain jää jumiin. 0 = drain pois.
+  const drainMaxMs = nonNegativeNumber(process.env.RELAY_DRAIN_MAX_MS, 8 * 60 * 1000);
   // Katvekuva (issue #104). Oletus POIS, ja päälle vain täsmällisellä "true":
   // uusi ffmpeg-polku ajaa juuri silloin kun lähetys on jo vaikeuksissa, joten
   // ensimmäisen kokeilun on oltava tietoinen valinta. Kaikki muu koodi on
@@ -303,6 +312,7 @@ export function parseRelayConfig(): RelayConfig {
     maxFailureWindowMs,
     finishedFailureWindowMs,
     hardStopQuietMs,
+    drainMaxMs,
     noSignalSlate,
     noSignalSlateAfterMs,
     noSignalSlateWidth,

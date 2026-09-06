@@ -65,6 +65,25 @@ const DEFAULT_SLATE_AFTER_MS = 8000;
  *  lähdesessio työntää samaan RTMP-avaimeen. Ks. endSlateSession. */
 const SLATE_KILL_GRACE_MS = 5000;
 
+/** Lopetusajon (#301) tarkistusväli ja vaadittu vakaa jakso. Valmiusehto
+ *  (FIFO tyhjä + synteesi valmis + lopetus puhuttu) tarkistetaan tähän tahtiin,
+ *  ja sen on pädettävä kaksi peräkkäistä tarkistusta ennen purkua — yksi
+ *  tarkistus voi osua hetkeen, jossa polli on juuri toteamassa ottelun
+ *  päättyneeksi mutta ei ole vielä ehtinyt jonottaa loppuselostusta. */
+const DRAIN_CHECK_MS = 500;
+const DRAIN_SETTLE_CHECKS = 2;
+/** Kun jono on tyhjä, putkessa ja enkooderissa on silti vielä sekunteja ääntä
+ *  matkalla ulos — annetaan sen valua ennen SIGTERMiä. */
+const DRAIN_FLUSH_MS = 3000;
+/** Kuinka kauan drain odottaa ottelun `finished`-kirjausta sen jälkeen kun
+ *  jonot ovat TYHJENTYNEET. Ilman tätä lähetys, jonka ottelua ei koskaan
+ *  kirjata tulospalveluun (146998, 29.8.2026) tai jonka raakalähetys kuoli
+ *  kesken ottelun, pitäisi tyhjää slatea koko 8 min katon — vaikka mitään
+ *  sanottavaa ei ole tulossa. Tämä EI ole kolmas pakkolopetus: koko drainia
+ *  rajaa yhä maxMs ja operaattoria hard stop; tämä rajaa vain sen, kauanko
+ *  lopputulosta odotetaan tyhjin jonoin. Uusi puhe nollaa laskurin. */
+const DRAIN_FINISHED_WAIT_MS = 90_000;
+
 /** Kuinka vanha ohjaamon `sourceIngest`-havainto saa olla. Signaali saapuu jopa
  *  30 s myöhässä, joten raja on reilusti sen yli mutta silti niin tiukka ettei
  *  ottelun alussa nähty "live" jää selittämään ottelun loppua. */
@@ -160,6 +179,11 @@ export interface FfmpegMixerOptions {
    *  tämä on uusi ffmpeg-polku joka ajaa nimenomaan silloin kun lähetys on jo
    *  vaikeuksissa, eikä sitä ole koeteltu livenä. */
   slate?: NoSignalSlate | null;
+  /** Saako katvekuvaa käyttää KESKEN AJON katkojen paikkaamiseen (issue #104,
+   *  RELAY_NO_SIGNAL_SLATE). Oletus true kun slate on annettu — false tarkoittaa
+   *  että slate on valmisteltu vain lopetusajoa (#301) varten: drainAfterEnd
+   *  käyttää sitä aina, katkopolku ei koskaan. */
+  outageSlateEnabled?: boolean;
   /** Kynnysaika ennen katvekuvan käynnistystä (oletus DEFAULT_SLATE_AFTER_MS). */
   slateAfterMs?: number;
   /** Ohjaamon havainto lähteen syötteestä (control-tiedoston `sourceIngest`).
@@ -601,6 +625,16 @@ export class FfmpegMixer {
    *  WITHOUT hiding why the source is missing — issuen rajaus "ei saa peittää
    *  ongelmaa operaattorilta". */
   private slateActive = false;
+  /** Tosi lopetusajon (#301) ajan: lähde on päättynyt ja selostusjonoa ajetaan
+   *  tyhjäksi katvekuvan päälle. Telemetria näyttää tämän, jotta operaattori ei
+   *  luule sammumassa olevaa lähetystä jumittuneeksi ja hard-stoppaa juuri sitä
+   *  loppuselostusta, jota tässä pelastetaan. */
+  private drainingValue = false;
+  /** stop() nostaa tämän: drain ei saa enää spawnata mitään eikä jäädä
+   *  odottamaan. Oma lippunsa eikä `stopped`, koska ended-polulla `stopped` on
+   *  jo tosi ennen kuin drain edes alkaa — se ei siis kelpaa erottamaan
+   *  "supervisor lopetti" ja "koko relay sammutetaan nyt". */
+  private drainAborted = false;
   /** Kertakytkin: katve on epäonnistunut kerran, eikä sitä yritetä enää tässä
    *  ajossa. Uusi ffmpeg-polku, joka ajaa nimenomaan silloin kun lähetys on jo
    *  vaikeuksissa, ei saa jäädä silmukkaan yrittämään itseään uudelleen. */
@@ -738,6 +772,177 @@ export class FfmpegMixer {
    *  null before that. Never reset across respawns. */
   get firstAttachedAt(): number | null {
     return this.firstAttachedAtMs;
+  }
+
+  /** Tosi lopetusajon (#301) ajan — ks. drainingValue. */
+  get draining(): boolean {
+    return this.drainingValue;
+  }
+
+  /** Lopetusajo (#301): kun lähde on päättynyt, aja FIFO-jonossa oleva ja
+   *  vielä syntetisoimaton selostus loppuun katvekuvan päälle ennen kuin relay
+   *  sammuu. Kutsutaan start():n heiton JÄLKEEN (supervisor on jo lopettanut,
+   *  yhtään ffmpegiä ei ole ajossa) ja ennen stop():ia. Hard stop ei koskaan
+   *  kulje tästä — se on operaattorin ohituspolku.
+   *
+   *  Valmis kun KAIKKI pätee kaksi peräkkäistä tarkistusta: FIFO-jono tyhjä,
+   *  synthQueue tyhjä (pendingSynth === 0) JA — kun waitForMatchEnd —
+   *  tulospalvelu on kirjannut ottelun päättyneeksi (jolloin loppuselostus on
+   *  siinä vaiheessa jo kulkenut jonojen läpi). Selostussilmukka pollaa koko
+   *  drainin ajan, joten drainin aikana syntyvä puhe (tyypillisesti
+   *  lopputulos) puhutaan vielä. maxMs on kova kokonaiskatto: jos lopputulosta
+   *  ei koskaan kirjata, lähetys ei jää pyörimään tyhjää slatea loputtomiin. */
+  async drainAfterEnd(opts: {
+    maxMs: number;
+    /** true = odota myös ottelun kirjaamista päättyneeksi ("ended"-polku);
+     *  false = pelkkä jonojen tyhjennys riittää ("exhausted"-polku, jossa
+     *  lopputulosta ei välttämättä koskaan tule). */
+    waitForMatchEnd: boolean;
+    pendingSynth: () => number;
+    /** Testisauma: DRAIN_FINISHED_WAIT_MS:n ohitus. */
+    finishedWaitMs?: number;
+  }): Promise<void> {
+    if (opts.maxMs <= 0 || this.drainAborted) return;
+    const queuesEmpty = (): boolean => this.fifo.pendingClips === 0 && opts.pendingSynth() === 0;
+    // Lopputulosta odotetaan tyhjin jonoin enintään DRAIN_FINISHED_WAIT_MS —
+    // ottelu jota ei koskaan kirjata päättyneeksi (146998) tai kesken ottelun
+    // kuollut raakalähetys ei saa pitää tyhjää slatea koko 8 min kattoa.
+    // Laskuri nollautuu heti kun jonoihin ilmestyy jotain: uusi puhe on
+    // näyttö siitä, että lisää voi olla tulossa.
+    let emptySince: number | null = null;
+    const done = (): boolean => {
+      if (!queuesEmpty()) {
+        emptySince = null;
+        return false;
+      }
+      emptySince ??= monoNow();
+      if (!opts.waitForMatchEnd || (this.opts.isMatchFinished?.() ?? false)) return true;
+      return monoNow() - emptySince >= (opts.finishedWaitMs ?? DRAIN_FINISHED_WAIT_MS);
+    };
+    // Normaalitapaus: ottelu on kirjattu päättyneeksi ja loppuselostukset on
+    // puhuttu jo ennen raakalähetyksen loppua — silloin ei ole mitään
+    // ajettavaa eikä katvekuvaa näytetä lainkaan. Vakausvaatimus (kaksi
+    // tarkistusta) pätee tässäkin, ettei polli ehdi jonottaa juuri kun
+    // päätämme ettei mitään ole tulossa.
+    if (done()) {
+      await delay(DRAIN_CHECK_MS);
+      if (done()) return;
+    }
+    const slate = this.opts.slate;
+    const layout = slate?.layout;
+    if (!slate?.available || !layout) {
+      logWarn(
+        "ffmpeg.drain",
+        "Lähde päättyi mutta selostusjonossa on vielä puhetta — katvekuvaa ei ole " +
+          "käytettävissä, joten jono jää julkaisematta (vanha käytös)."
+      );
+      return;
+    }
+
+    this.drainingValue = true;
+    let child: ChildProcess | null = null;
+    try {
+      await this.fifo.prepare();
+      // Lopetusvaiheessa jonoa ei trimmata (#57 pois päältä): loppuselostukset
+      // ovat juuri sitä, mikä pitää säilyttää.
+      this.fifo.disableCap();
+      const recordFilePath = this.opts.recordFile
+        ? indexedRecordPath(this.opts.recordFile, this.sessionIndex++)
+        : undefined;
+      const args = buildSlateFfmpegArgs(
+        { imagePath: slate.imagePath, scoreTextPath: slate.scoreTextPath, statusTextPath: slate.statusTextPath, layout },
+        this.opts,
+        recordFilePath
+      );
+      // stop() ehti väliin (SIGTERM/systemctl stop kesken drainin valmistelun):
+      // spawnattu ffmpeg jäisi orvoksi työntämään slatea RTMP-avaimeen, kun
+      // prosessi itse kuolee 500 ms päästä eikä stop():lla ollut vielä lasta
+      // tapettavana.
+      if (this.drainAborted) return;
+      child = this.opts.spawnMixerProcess
+        ? this.opts.spawnMixerProcess(args)
+        : spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+      this.child = child;
+      const redact = (s: string): string => redactStreamKey(s, this.opts.streamKey);
+      child.stdout?.on("data", (d: Buffer) => process.stdout.write(redact(d.toString())));
+      child.stderr?.on("data", (d: Buffer) => process.stderr.write(redact(d.toString())));
+      const childDone = new Promise<void>((resolve) => {
+        child!.once("error", () => resolve());
+        child!.once("exit", () => resolve());
+      });
+      let childAlive = true;
+      void childDone.then(() => {
+        childAlive = false;
+      });
+
+      const opened = await Promise.race([
+        this.fifo.open().then(() => true),
+        childDone.then(() => false),
+      ]);
+      if (!opened) {
+        this.fifo.closeIo();
+        this.child = null;
+        logWarn("ffmpeg.drain", "Lopetusajon ffmpeg ei käynnistynyt — jono jää julkaisematta.");
+        return;
+      }
+
+      // Lukija on kiinni: selostussilmukka saa jatkaa puhumista drainin ajan.
+      this.sessionActive = true;
+      this.refreshSlateText();
+      logInfo(
+        "ffmpeg.drain",
+        `Lähde päättyi — ajetaan selostusjono loppuun katvekuvan päälle ennen sammutusta ` +
+          `(jonossa ${this.fifo.pendingClips} klippiä + ${opts.pendingSynth()} synteesissä, ` +
+          `katto ${Math.round(opts.maxMs / 60000)} min).`
+      );
+      const startedAt = monoNow();
+      const deadline = startedAt + opts.maxMs;
+      let settled = 0;
+      while (childAlive && !this.drainAborted && monoNow() < deadline) {
+        if (done()) {
+          settled++;
+          if (settled >= DRAIN_SETTLE_CHECKS) break;
+        } else {
+          settled = 0;
+        }
+        await delay(DRAIN_CHECK_MS);
+      }
+      const waitedSec = Math.round((monoNow() - startedAt) / 1000);
+      if (!childAlive) {
+        logWarn("ffmpeg.drain", `Lopetusajon ffmpeg kuoli kesken (${waitedSec} s) — sammutetaan.`);
+      } else if (settled >= DRAIN_SETTLE_CHECKS) {
+        logInfo("ffmpeg.drain", `Selostusjono ajettu loppuun (${waitedSec} s) — sammutetaan siististi.`);
+      } else {
+        logWarn(
+          "ffmpeg.drain",
+          `Lopetusajon katto (${Math.round(opts.maxMs / 60000)} min) täyttyi — ` +
+            `jonossa yhä ${this.fifo.pendingClips} klippiä + ${opts.pendingSynth()} synteesissä, sammutetaan silti.`
+        );
+      }
+      if (childAlive) {
+        // Anna putkessa ja enkooderissa olevan äänen valua ulos ennen tappoa —
+        // paitsi jos koko relay sammutetaan juuri nyt (stop() kesken drainin):
+        // silloin process.exit tulee 500 ms:ssa eikä flushille ole aikaa.
+        if (!this.drainAborted) await delay(DRAIN_FLUSH_MS);
+        child.kill("SIGTERM");
+        const diedOnTerm = await Promise.race([
+          childDone.then(() => true),
+          delay(SLATE_KILL_GRACE_MS).then(() => false),
+        ]);
+        if (!diedOnTerm) child.kill("SIGKILL");
+      }
+    } catch (err) {
+      logWarn(
+        "ffmpeg.drain",
+        `Lopetusajo epäonnistui (${err instanceof Error ? err.message : err}) — sammutetaan ilman sitä.`
+      );
+      if (child && child.exitCode === null) child.kill("SIGKILL");
+    } finally {
+      this.sessionActive = false;
+      this.drainingValue = false;
+      this.fifo.closeIo();
+      if (child && this.child === child) this.child = null;
+    }
   }
 
   async start(): Promise<void> {
@@ -1079,6 +1284,7 @@ export class FfmpegMixer {
 
   stop(): void {
     this.stopped = true;
+    this.drainAborted = true;
     this.sessionActive = false;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.fifo.stop();
@@ -1324,6 +1530,7 @@ export class FfmpegMixer {
    *  3. **Kynnysaika**: hetkellinen respawn ei saa vilkuttaa katvekuvaa. */
   private slateWarranted(): boolean {
     const slate = this.opts.slate;
+    if (this.opts.outageSlateEnabled === false) return false;
     if (!slate || this.slateDisabled || this.stopped) return false;
     if (!slate.available || !slate.layout) return false;
     if (this.opts.isMatchFinished?.() ?? false) return false;

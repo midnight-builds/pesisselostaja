@@ -396,6 +396,10 @@ export interface NarrationStatus {
    *  or null before any attach. The first-speech grace period
    *  (RELAY_FIRST_SPEECH_DELAY_MS) is measured from this. */
   firstAttachedAt(): number | null;
+  /** Lopetusajo (#301) käynnissä: tapahtumat puhutaan yhä, mutta fillerit
+   *  eivät saa venyttää drainia — jokainen filler nollaisi "jonot tyhjät"
+   *  -laskurin ja pitäisi katvekuvaa ruudussa kattoon asti. Absent = false. */
+  draining?(): boolean;
 }
 
 /** Observes a narration clip through its stages, for telemetry. Optional and
@@ -2115,6 +2119,10 @@ export class CommentaryLoop {
     // yet made / first-speech grace still running) a filler would only be
     // suppressed by speak() while still burning its dedupe/lastSpeechAt
     // bookkeeping — skip the round entirely instead.
+    // Drainin aikana (#301) katvesession lukija on kiinni ja jono tyhjenee,
+    // eli portti näyttäisi vihreää — mutta filler drainissa vain lykkäisi
+    // sammutusta puheella, jota kukaan ei jäänyt kuulemaan.
+    if (this.narrationStatus.draining?.() ?? false) return false;
     return (
       this.narrationEverReady &&
       this.narrationStatus.isReaderAttached() &&

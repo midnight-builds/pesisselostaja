@@ -97,6 +97,8 @@ async function main(): Promise<void> {
       // Dry-run reports epoch 0 = "attached long ago", so the first-speech
       // grace never delays dry-run logging.
       firstAttachedAt: () => (config.dryRun ? 0 : (mixer?.firstAttachedAt ?? null)),
+      // Lopetusajossa (#301) fillerit pois — ne vain venyttäisivät drainia.
+      draining: () => mixer?.draining ?? false,
     },
     {
       detected: (clip) => telemetry.narrationDetected(clip),
@@ -124,6 +126,7 @@ async function main(): Promise<void> {
       sourceLagMs: loop.sourceLag,
       ttsEngine: elevenLabs ? "elevenlabs" : "piper",
       elevenLabsCharsUsed: elevenLabs?.totalCharsUsed ?? 0,
+      draining: mixer?.draining ?? false,
     });
 
   // Katvekuvan tekstirivit päivitetään samalla pollin tahdilla kuin
@@ -163,15 +166,17 @@ async function main(): Promise<void> {
     // Katvekuva (issue #104) on oletuksena pois. Kun se on päällä, kuva
     // renderöidään kerran tässä: epäonnistuminen ei ole virhe vaan tarkoittaa
     // vain että katvetila ohitetaan ja respawn-silmukka toimii kuten ennen.
-    let slate: NoSignalSlate | null = null;
+    // Katve valmistellaan AINA (ei vain RELAY_NO_SIGNAL_SLATE:lla): lopetusajo
+    // (#301) tarvitsee kuvan lähteen loputtua riippumatta siitä, paikataanko
+    // katkoja kesken ajon. Katkopolun kytkin kulkee outageSlateEnabled-optiona.
+    const slate = new NoSignalSlate({
+      matchId: config.matchId,
+      runDir: config.runDir,
+      width: config.noSignalSlateWidth,
+      height: config.noSignalSlateHeight,
+    });
+    await slate.prepare();
     if (config.noSignalSlate) {
-      slate = new NoSignalSlate({
-        matchId: config.matchId,
-        runDir: config.runDir,
-        width: config.noSignalSlateWidth,
-        height: config.noSignalSlateHeight,
-      });
-      await slate.prepare();
       logInfo(
         "relay.config",
         `Katvekuva: ${slate.available ? "PÄÄLLÄ" : "PÄÄLLÄ mutta ei käytettävissä"} ` +
@@ -180,6 +185,11 @@ async function main(): Promise<void> {
           // aiheuttaa ylimääräisen katkon vaihdossa — ja se on ainoa tapa
           // huomata se jälkikäteen lokista.
           `${config.noSignalSlateWidth}x${config.noSignalSlateHeight})`
+      );
+    } else {
+      logInfo(
+        "relay.config",
+        `Katvekuva: katkopaikkaus POIS, ${slate.available ? "käytössä vain lopetusajossa (#301)" : "eikä kuvaa saatu valmisteltua — lopetusajo ohitetaan"}.`
       );
     }
     mixer = new FfmpegMixer({
@@ -203,6 +213,7 @@ async function main(): Promise<void> {
       fifoPath,
       recordFile: config.recordFile,
       slate,
+      outageSlateEnabled: config.noSignalSlate,
       slateAfterMs: config.noSignalSlateAfterMs,
       // Ohjaamon havainto on VAPAAEHTOINEN tulo: se ei laukaise katvetilaa
       // (se on relayn oma paikallinen päätös), vaan estää sen kun lähetys on
@@ -226,10 +237,10 @@ async function main(): Promise<void> {
         logError("ffmpeg.supervisor_failed", `ffmpeg-valvoja päättyi virheeseen: ${err instanceof Error ? err.message : err}`);
       }
       if (err instanceof SourceExhaustedError) {
-        endReason = err.reason;
+        const reason = err.reason;
         // "ended" = the broadcast was finished on purpose; nothing is broken,
         // and the log must not send anyone hunting for a fault (issue #103).
-        switch (err.reason) {
+        switch (reason) {
           case "ended":
             logInfo("relay.source_ended", "Lähde on päättynyt — sammutetaan relay siististi.");
             break;
@@ -242,7 +253,32 @@ async function main(): Promise<void> {
             logError("relay.source_gone", "Alkuperäinen lähde ei palautunut — sammutetaan koko relay.");
             break;
         }
-        shutdown();
+        // Lopetusajo (#301): ennen sammutusta jonossa oleva ja vielä
+        // syntetisoimaton selostus ajetaan loppuun katvekuvan päälle. Hard
+        // stop on operaattorin ohituspolku eikä koskaan odota. endReason
+        // kirjataan telemetriaan vasta drainin valmistuttua: ohjaamon
+        // hallittu lopetus (#153) laukeaa siitä, eikä se saa katkaista
+        // lähetystä katsojilta kesken loppuselostusten. Selostussilmukka
+        // pollaa drainin ajan, joten lopputulos ehtii vielä puhutuksi;
+        // loop.stop() kutsutaan vasta shutdown():ssa.
+        void (async () => {
+          if (reason !== "hard_stop") {
+            await mixer
+              ?.drainAfterEnd({
+                maxMs: config.drainMaxMs,
+                waitForMatchEnd: reason === "ended",
+                pendingSynth: () => loop.pendingSynth,
+              })
+              .catch((drainErr) => {
+                logWarn(
+                  "ffmpeg.drain",
+                  `Lopetusajo kaatui: ${drainErr instanceof Error ? drainErr.message : drainErr}`
+                );
+              });
+          }
+          endReason = reason;
+          shutdown();
+        })();
       }
     });
   } else {

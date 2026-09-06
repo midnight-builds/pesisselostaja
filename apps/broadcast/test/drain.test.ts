@@ -141,6 +141,24 @@ describe("drainAfterEnd (#301)", () => {
     expect(spawns.length).toBe(1);
   }, 30_000);
 
+  it("stops waiting for the finish once the queues have stayed empty past the sub-limit", async () => {
+    // Ottelu jota ei koskaan kirjata päättyneeksi (146998, 29.8.2026): tyhjää
+    // slatea ei saa pitää ruudussa koko 8 min kattoa, vaan lopputulosta
+    // odotetaan tyhjin jonoin vain finishedWaitMs:n verran.
+    const spawns: string[][] = [];
+    const mixer = harness({ slate: await preparedSlate(), spawns, isMatchFinished: () => false });
+    const started = Date.now();
+    await mixer.drainAfterEnd({
+      maxMs: 60_000,
+      waitForMatchEnd: true,
+      pendingSynth: () => 0,
+      finishedWaitMs: 1500,
+    });
+    const elapsed = Date.now() - started;
+    expect(elapsed).toBeGreaterThanOrEqual(1500);
+    expect(elapsed).toBeLessThan(20_000);
+  }, 30_000);
+
   it("gives up at the hard cap when the finish never arrives", async () => {
     const spawns: string[][] = [];
     const mixer = harness({ slate: await preparedSlate(), spawns, isMatchFinished: () => false });
