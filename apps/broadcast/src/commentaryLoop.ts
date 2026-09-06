@@ -2047,6 +2047,7 @@ export class CommentaryLoop {
     // The poll loop never awaits synthQueue, so the delay can't stall polling.
     const decidedAt = Date.now();
     const delayMs = this.narrationDelayMs;
+    this.pendingSynthCount++;
     this.synthQueue = this.synthQueue
       .then(async () => {
         const wait = decidedAt + delayMs - Date.now();
@@ -2056,6 +2057,9 @@ export class CommentaryLoop {
       })
       .catch((err) => {
         logError("speech.failed", `Selostusvirhe: ${err instanceof Error ? err.message : err}`);
+      })
+      .finally(() => {
+        this.pendingSynthCount--;
       });
   }
 
