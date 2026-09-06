@@ -713,6 +713,24 @@ RELAY_NO_SIGNAL_SLATE_AFTER_MS=8000   # how long the source must be gone first (
 RELAY_NO_SIGNAL_SLATE_SIZE=1280x720   # default 1920x1080 — set it to the SOURCE's resolution
 ```
 
+Huomaa: `RELAY_NO_SIGNAL_SLATE` kytkee vain **katkojen paikkauksen kesken
+ajon**. Kuva valmistellaan silti aina, koska lopetusajo (alla) käyttää sitä
+lähteen loputtua kytkimestä riippumatta.
+
+## Lopetusajo (drain, issue #301)
+
+Kun lähde päättyy (tai relay luovuttaa kuolleesta lähteestä), relay ei sammu
+heti: FIFO-jonossa oleva ja vielä syntetisoimaton selostus ajetaan loppuun
+katvekuvan päälle, ja `ended`-polulla odotetaan lisäksi että tulospalvelu
+kirjaa ottelun päättyneeksi ja lopputulos ehtii puhutuksi. Selostussilmukka
+pollaa koko drainin ajan, jononpudotus (#57) on drainissa pois päältä, ja
+`endReason` kirjoitetaan telemetriaan vasta drainin valmistuttua (ohjaamon
+hallittu lopetus #153 laukeaa siitä). Hard stop (#123) ohittaa drainin aina.
+
+```
+RELAY_DRAIN_MAX_MS=480000   # kokonaiskatto, oletus 8 min; 0 = drain pois
+```
+
 **Set the size to match the source.** The slate pushes to the same RTMP key as
 the source session, so if their resolution or frame rate differ, YouTube's
 transcoder restarts on the way in *and* on the way back — two extra viewer-side
