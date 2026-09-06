@@ -178,7 +178,7 @@ ainoa vierivä lohko, koska sen pituutta ei voi tietää etukäteen.
 - **Viiveen napit ovat suhteellisia** (±500 ms), eivät absoluuttisia:
   kalibrointi tehdään korvakuulolta kesken lähetyksen, joten nappi nimeää
   *oireen* ("Puhui liian aikaisin"), ei arvoa. Uusi arvo näkyy heti, leikattuna
-  samaan 0…15 s -väliin kuin palvelimella, ja vanhenee kymmenessä sekunnissa
+  samaan 0…30 s -väliin kuin palvelimella, ja vanhenee kymmenessä sekunnissa
   ellei palvelin vahvista sitä.
 - **Relayn tilannekuva uskotaan vain tuoreena.** `RelayTelemetry.at` verrataan
   palvelimen kelloon rajalla `TELEMETRY_STALE_MS` (`src/shared/types.ts`) —
