@@ -1212,6 +1212,24 @@ describe("jaksotauon tila (#302)", () => {
     expect(inner.buildContext().periodBreak).toBe(0);
   });
 
+
+  // Katselmuslöydös: rekonsiliaatio voi nostaa currentPeriodin uuteen jaksoon
+  // ENNEN kuin kirjurin "Ensimmäinen jakso päättyi" (period: 0, jota event-
+  // tason `period > 0` -vahti ei koske) saapuu. Breakiin on tallennuttava
+  // merkinnän oma jakso, ei currentPeriod.
+  it("tallettaa päättymismerkinnän oman jakson vaikka currentPeriod olisi jo uusi", async () => {
+    const loop = new CommentaryLoop(makeConfig(), recordingSink());
+    const inner = loop as unknown as BreakInternals & { state: { currentPeriod: number; periodBreak: number | null } };
+    inner.state.currentPeriod = 1; // rekonsiliaatio ehti ensin
+    await inner.processEventsLive(
+      [ev({ id: 5, period: 0, inning: 3, events: [periodEndSub] })],
+      META,
+      buildPlayerLookup(META)
+    );
+    await inner.synthQueue;
+    expect(inner.state.periodBreak).toBe(0);
+  });
+
   it("seuraavan jakson tapahtuma sulkee tauon", async () => {
     const loop = new CommentaryLoop(makeConfig(), recordingSink());
     const inner = loop as unknown as BreakInternals;

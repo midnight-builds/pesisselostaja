@@ -509,8 +509,11 @@ export class BrowserWatcher {
         state.seenFingerprints.add(fp);
         if (isMatchEndSubEvent(sub)) state.finished = true;
         // Jaksotauko (#302): päättymismerkintä avaa tauon; vain pelitapahtuma
-        // sulkee sen (kirjurin vaihdot tauolla eivät saa sulkea).
-        if (isPeriodEndSubEvent(sub)) state.periodBreak = state.currentPeriod;
+        // sulkee sen (kirjurin vaihdot tauolla eivät saa sulkea). Talteen
+        // event.period, EI currentPeriod: rekonsiliaatio voi olla nostanut
+        // currentPeriodin jo uuteen jaksoon, mutta päättymismerkintä kulkee
+        // aina päättyneen jakson eventillä (todennettu ottelun 136777 datasta).
+        if (isPeriodEndSubEvent(sub)) state.periodBreak = event.period;
         else if (state.periodBreak !== null && closesPeriodBreak(sub, event.period, state.periodBreak))
           state.periodBreak = null;
         if (isRunScoringSubEvent(sub)) {
@@ -632,7 +635,7 @@ export class BrowserWatcher {
 
           if (isMatchEndSubEvent(sub)) state.finished = true;
           // Jaksotauko (#302): sama sääntö kuin catchup-polussa.
-          if (isPeriodEndSubEvent(sub)) state.periodBreak = state.currentPeriod;
+          if (isPeriodEndSubEvent(sub)) state.periodBreak = event.period;
           else if (state.periodBreak !== null && closesPeriodBreak(sub, event.period, state.periodBreak))
             state.periodBreak = null;
 
