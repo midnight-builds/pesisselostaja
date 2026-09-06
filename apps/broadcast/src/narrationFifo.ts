@@ -85,6 +85,12 @@ export class NarrationQueue {
     return this.queue.length;
   }
 
+  /** Poistaa jonokaton loppuajaksi. Lopetusvaiheessa (#301) jonossa oleva puhe
+   *  on juuri se, mikä pitää säilyttää — loppuselostuksia ei saa trimmata. */
+  disableCap(): void {
+    this.maxQueuedFrames = 0;
+  }
+
   /** Frames still to be played, the partially played head counted from where
    *  playback actually is. Inter-clip gaps are NOT counted: they are 700 ms of
    *  padding the listener hears as breathing room, and counting them would
