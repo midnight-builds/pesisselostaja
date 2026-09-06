@@ -688,6 +688,13 @@ export class CommentaryLoop {
     return this.state.finished;
   }
 
+  /** Klippejä jonossa tai kesken synthQueuessa (TTS vielä tekemättä tai
+   *  narration-delay kulumassa). Lopetusajon drain (#301) odottaa tämän
+   *  nollaan ennen kuin lähetyksen saa sammuttaa. */
+  get pendingSynth(): number {
+    return this.pendingSynthCount;
+  }
+
   /** Compact poll-statistics fragment for the mixer's heartbeat line, e.g.
    *  "pollit 118 (delta 102, täyshaku 9, 304 5, hakuvirheitä 2)". A tripped
    *  delta breaker is appended so every later heartbeat still says why the
