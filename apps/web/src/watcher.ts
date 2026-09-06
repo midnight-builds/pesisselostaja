@@ -14,6 +14,7 @@ import {
   isRunScoringSubEvent,
   isOutSubEvent,
   isMatchEndSubEvent,
+  isPeriodEndSubEvent,
   runValueOfSubEvent,
   eventFingerprint,
   recomputeCurrentOutsKeyed,
@@ -506,6 +507,9 @@ export class BrowserWatcher {
         const fp = eventFingerprint(event, i);
         state.seenFingerprints.add(fp);
         if (isMatchEndSubEvent(sub)) state.finished = true;
+        // Jaksotauko (#302): päättymismerkintä avaa tauon, mikä tahansa muu
+        // merkintä (seuraavan jakson tapahtuma, ottelun loppu) sulkee sen.
+        state.periodBreak = isPeriodEndSubEvent(sub);
         if (isRunScoringSubEvent(sub)) {
           if (event.team !== null)
             addRun(
@@ -624,6 +628,8 @@ export class BrowserWatcher {
           }
 
           if (isMatchEndSubEvent(sub)) state.finished = true;
+          // Jaksotauko (#302): sama sääntö kuin catchup-polussa.
+          state.periodBreak = isPeriodEndSubEvent(sub);
 
           if (isRunScoringSubEvent(sub)) {
             if (event.team !== null) {
@@ -759,6 +765,7 @@ export class BrowserWatcher {
       currentBatTeamId: state.currentBatTeamId,
       currentInning: state.currentInning,
       currentBatTurn: state.currentBatTurn,
+      periodBreak: state.periodBreak,
     };
   }
 
