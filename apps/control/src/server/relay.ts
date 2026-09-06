@@ -58,7 +58,9 @@ const MIN_POLL_INTERVAL_MS = 2000;
  *  can't push narration minutes behind the picture. */
 const MAX_POLL_INTERVAL_MS = 60_000;
 const MIN_NARRATION_DELAY_MS = 0;
-const MAX_NARRATION_DELAY_MS = 15_000;
+/** 30 s — sama raja kuin käyttöliittymän DELAY_MAX_MS (MatchGlance.tsx),
+ *  nostettu 15 s:stä kun katto tuli livenä vastaan (#300). */
+const MAX_NARRATION_DELAY_MS = 30_000;
 /** Gainin säätöväli ohjaamossa (#244). Kapeampi kuin relayn oma yläraja (4),
  *  koska tämä on se väli jota kuulokkeilla haetaan: 0.5 vaimentaa selostuksen
  *  selvästi kentän alle, 2.0 nostaa sen selvästi yli. Relay kiinnittää arvon
