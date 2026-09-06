@@ -453,6 +453,18 @@ export function isMatchEndSubEvent(sub: SubEvent): boolean {
   return false;
 }
 
+/** Jakson (tai supervuoron) päättymismerkintä. Sama tekstiehto jolla
+ *  subEventToSpeech rikastaa "X jakso päättyi" -fraasin — nostettu predikaatiksi,
+ *  jotta tilanpäivitys voi merkitä jaksotauon alkaneeksi (#302): tauolla
+ *  täytteet eivät saa väittää kenenkään olevan sisävuorossa. */
+export function isPeriodEndSubEvent(sub: SubEvent): boolean {
+  for (const el of sub.texts) {
+    const t = getEventText(el);
+    if (t && t.includes("päättyi") && (t.includes("jakso") || t.includes("Supervuoro"))) return true;
+  }
+  return false;
+}
+
 export function formatStartupSpeech(meta: MatchMetadata, ctx: SpeechContext): string {
   const parts: string[] = [`Seurataan ottelua ${meta.home.shorthand} vastaan ${meta.away.shorthand}.`];
 
