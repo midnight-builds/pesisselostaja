@@ -48,7 +48,7 @@ function ctxWith(overrides: Partial<SpeechContext> = {}): SpeechContext {
     periodHomeRuns: 0, periodAwayRuns: 0,
     homePeriodsWon: 0, awayPeriodsWon: 0, periodsPlayed: 1,
     currentOuts: 0, currentPeriod: 0, currentBatTeamId: 100,
-    currentInning: 0, currentBatTurn: 0, periodBreak: false,
+    currentInning: 0, currentBatTurn: 0, periodBreak: null,
     ...overrides,
   };
 }

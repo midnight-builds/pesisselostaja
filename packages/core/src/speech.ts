@@ -37,11 +37,13 @@ export interface SpeechContext {
   currentBatTeamId: number | null;
   currentInning: number;
   currentBatTurn: number;
-  /** Jaksotauko (#302): jakson päättymismerkintä on nähty eikä seuraavan
-   *  jakson tapahtumia ole vielä tullut. Tauolla koosteet eivät saa puhua
-   *  käynnissä olevasta vuorosta — currentBatTeamId osoittaa silloin
-   *  menneeseen (tai seuraavan jakson aloittajaan), ei nykyhetkeen. */
-  periodBreak: boolean;
+  /** Jaksotauko (#302): PÄÄTTYNEEN jakson numero, tai null kun peli on
+   *  käynnissä. Numero eikä lippu, koska currentPeriod voi liikkua tauon
+   *  aikana (API:n vastaustason period-rekonsiliaatio nostaa sen uuteen
+   *  jaksoon ennen ensimmäistäkään merkintää) — taukofraasin on puhuttava
+   *  siitä jaksosta joka päättyi, ei siitä johon ollaan menossa. Tauolla
+   *  koosteet eivät saa puhua käynnissä olevasta vuorosta. */
+  periodBreak: number | null;
 }
 
 /** Onko `event.period` **jakso** — eli 1. tai 2. jakso?
@@ -470,6 +472,21 @@ export function isPeriodEndSubEvent(sub: SubEvent): boolean {
   return false;
 }
 
+/** Sulkeeko merkintä jaksotauon (#302). Tarkoituksella kapea: jaksotauko on
+ *  juuri se hetki jolloin kirjuri tekee vaihtoja ja korjauksia, eikä
+ *  vaihtomerkintä saa palauttaa "sisävuorossa on X" -täytteitä kesken tauon.
+ *  Tauon sulkee vain pelin jatkuminen: uuden jakson merkintä (eri period),
+ *  "alkoi"-teksti, juoksu, palo tai ottelun päättyminen. */
+export function closesPeriodBreak(sub: SubEvent, eventPeriod: number, breakPeriod: number): boolean {
+  if (eventPeriod !== breakPeriod) return true;
+  if (isRunScoringSubEvent(sub) || isOutSubEvent(sub) || isMatchEndSubEvent(sub)) return true;
+  for (const el of sub.texts) {
+    const t = getEventText(el);
+    if (t && t.includes("alkoi")) return true;
+  }
+  return false;
+}
+
 export function formatStartupSpeech(meta: MatchMetadata, ctx: SpeechContext): string {
   const parts: string[] = [`Seurataan ottelua ${meta.home.shorthand} vastaan ${meta.away.shorthand}.`];
 
@@ -535,17 +552,30 @@ export function formatBatTurnChangeSpeech(
  *  lukemin, lupaamatta mitään jatkosta — toisen jakson jälkeen seuraava vaihe
  *  (supervuoro vai loppu) ei ole vielä tiedossa tulospalvelusta. */
 function formatPeriodBreakSummary(meta: MatchMetadata, ctx: SpeechContext): string {
+  // Jakson nimi ja pisteet PÄÄTTYNEESTÄ jaksosta (ctx.periodBreak), ei
+  // currentPeriodista — rekonsiliaatio voi nostaa currentPeriodin uuteen
+  // jaksoon kesken tauon, ja silloin nimi olisi väärä ja pisteet 0, 0.
+  // buildContext antaa periodHomeRuns/periodAwayRuns taukojakson mukaan.
+  const breakPeriod = ctx.periodBreak ?? ctx.currentPeriod;
   const h = ctx.periodHomeRuns;
   const a = ctx.periodAwayRuns;
-  const period = capitalize(periodName(ctx.currentPeriod));
+  const period = capitalize(periodName(breakPeriod));
   const winner = h > a ? meta.home.shorthand : a > h ? meta.away.shorthand : null;
   const verdict = winner
     ? `${winner} voitti sen ${h}, ${a}.`
     : `Se päättyi tasan ${h}, ${a}.`;
+  // Jaksotilanne: periodsWon laskee vain jaksot p < currentPeriod, joten juuri
+  // päättynyt jakso puuttuu luvusta kun currentPeriod ei ole liikkunut, ja on
+  // jo mukana kun rekonsiliaatio ehti nostaa sen. Voittajalle lisätään yksi
+  // vain edellisessä tapauksessa, ja vain oikeista jaksoista (supervuoro ei
+  // ole jakso).
+  const counted = ctx.currentPeriod > breakPeriod;
+  const bonusHome = !counted && isJakso(breakPeriod) && h > a ? 1 : 0;
+  const bonusAway = !counted && isJakso(breakPeriod) && a > h ? 1 : 0;
+  const hWon = ctx.homePeriodsWon + bonusHome;
+  const aWon = ctx.awayPeriodsWon + bonusAway;
   const standing =
-    ctx.homePeriodsWon > 0 || ctx.awayPeriodsWon > 0
-      ? ` ${formatPeriodsWon(meta, ctx.homePeriodsWon, ctx.awayPeriodsWon)}.`
-      : "";
+    hWon > 0 || aWon > 0 ? ` ${formatPeriodsWon(meta, hWon, aWon)}.` : "";
   return pickVariant("period-break", [
     `Jaksotauko. ${period} on päättynyt, ${verdict}${standing}`,
     `${period} on pelattu. ${verdict}${standing} Odotellaan jatkoa.`,
@@ -559,7 +589,7 @@ export function formatSituationSummary(meta: MatchMetadata, ctx: SpeechContext):
   // it an occasional aside instead of a constant refrain.
   // Jaksotauolla (#302) kooste ei saa sanoa "menossa X jakso" eikä väittää
   // ketään sisävuoroon — jakso on päättynyt ja kenttä on tyhjä.
-  if (ctx.periodBreak) {
+  if (ctx.periodBreak !== null) {
     return formatPeriodBreakSummary(meta, ctx);
   }
   const lead = pickVariant("summary-attribution", ["Menossa", "Menossa", "Tulospalvelun mukaan menossa"]);
@@ -592,7 +622,7 @@ export function formatIdleSummary(meta: MatchMetadata, ctx: SpeechContext): stri
   // Jaksotauolla (#302) "tilanne edelleen X ja sisävuorossa Y" väittäisi pelin
   // olevan käynnissä — käytetään taukomuotoa. Sama teksti kuin koosteessa:
   // tauolla ei ole kahta eri asiaa kerrottavana.
-  if (ctx.periodBreak) {
+  if (ctx.periodBreak !== null) {
     return formatPeriodBreakSummary(meta, ctx);
   }
   const h = ctx.periodHomeRuns;
