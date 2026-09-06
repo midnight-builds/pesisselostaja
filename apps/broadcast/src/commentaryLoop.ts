@@ -459,6 +459,11 @@ export class CommentaryLoop {
   /** Order-preserving queue for sink calls (TTS synthesis + mix), decoupled
    *  from the poll loop — see speak(). */
   private synthQueue: Promise<void> = Promise.resolve();
+  /** Kuinka monta klippiä on jonossa tai kesken synthQueuessa (TTS +
+   *  narration-delay + mikserille anto). Lopetusajon (#301) drain lukee tätä:
+   *  FIFOn pendingClips ei näe klippiä, jonka synteesi on vielä kesken, joten
+   *  pelkkä FIFO-tarkistus lopettaisi lähetyksen puheen alta. */
+  private pendingSynthCount = 0;
   private abort: AbortController | null = null;
   /** Current effective value of the batter-change setting. Seeded from config
    *  at startup, then overridable mid-match via the control file. */
