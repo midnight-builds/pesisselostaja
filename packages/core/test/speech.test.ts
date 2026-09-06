@@ -80,7 +80,7 @@ describe("formatScore ordering (via public callers)", () => {
       periodHomeRuns: 1, periodAwayRuns: 5,
       homePeriodsWon: 0, awayPeriodsWon: 0, periodsPlayed: 1,
       currentOuts: 0, currentPeriod: 0, currentBatTeamId: null,
-      currentInning: 0, currentBatTurn: 0,
+      currentInning: 0, currentBatTurn: 0, periodBreak: false,
     };
     const speech = formatStartupSpeech(meta, ctx);
     expect(speech).toContain("1, 5, Sudet johtaa");

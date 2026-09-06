@@ -22,6 +22,9 @@ export interface WatcherState {
   currentInning: number;
   currentBatTurn: number;
   finished: boolean;
+  /** Jaksotauko (#302): jakson päättymismerkintä nähty, seuraavan jakson
+   *  tapahtumia ei vielä. Puretaan kun mikä tahansa muu merkintä saapuu. */
+  periodBreak: boolean;
   announcementCount: number;
   lastSummaryTime: number;
   /** Turn key (period:inning:batTurn:team) of the last bat-turn change spoken aloud. */
@@ -79,6 +82,7 @@ export function emptyState(): WatcherState {
     currentInning: 0,
     currentBatTurn: 0,
     finished: false,
+    periodBreak: false,
     announcementCount: 0,
     lastSummaryTime: 0,
     announcedTurnKey: null,
@@ -100,6 +104,7 @@ export function serializeWatcherState(state: WatcherState): unknown {
     currentInning: state.currentInning,
     currentBatTurn: state.currentBatTurn,
     finished: state.finished,
+    periodBreak: state.periodBreak,
     announcedTurnKey: state.announcedTurnKey,
   };
 }
@@ -121,6 +126,7 @@ export function deserializeWatcherState(raw: unknown): WatcherState {
     currentInning: (parsed.currentInning as number) ?? 0,
     currentBatTurn: (parsed.currentBatTurn as number) ?? 0,
     finished: (parsed.finished as boolean) ?? false,
+    periodBreak: (parsed.periodBreak as boolean) ?? false,
     announcementCount: 0,
     lastSummaryTime: 0,
     announcedTurnKey: (parsed.announcedTurnKey as string | null) ?? null,
