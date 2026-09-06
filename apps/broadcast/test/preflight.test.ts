@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { checkSource, parseEnvFile, summarize, type Check } from "../src/preflight.js";
+import { checkMatch, checkSource, fetchWithOneRetry, parseEnvFile, summarize, type Check } from "../src/preflight.js";
 import { ytdlpSourceArgs } from "../src/ytdlpSource.js";
 
 /** True when `needle` appears as a contiguous run inside `haystack`. */
@@ -101,5 +101,75 @@ describe("summarize", () => {
     const { text, exitCode } = summarize([check("warn"), check("fail")]);
     expect(exitCode).toBe(1);
     expect(text).toContain("älä käynnistä");
+  });
+});
+
+// #299: yksi transientti abortoitunut API-haku preflightissa ei saa julistaa
+// estettä (joka maksaa schedulerissa 5 min backoffin käynnistysikkunassa) —
+// haku yritetään kertaalleen uudelleen lyhyen viiveen jälkeen.
+describe("fetchWithOneRetry", () => {
+  const noSleep = () => Promise.resolve();
+
+  it("palauttaa tuloksen kun ensimmäinen haku abortoituu ja toinen onnistuu", async () => {
+    let calls = 0;
+    const result = await fetchWithOneRetry(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("This operation was aborted");
+      return "meta";
+    }, noSleep);
+    expect(result).toBe("meta");
+    expect(calls).toBe(2);
+  });
+
+  it("ei yritä uudelleen kun ensimmäinen haku onnistuu", async () => {
+    let calls = 0;
+    await fetchWithOneRetry(async () => {
+      calls += 1;
+      return "meta";
+    }, noSleep);
+    expect(calls).toBe(1);
+  });
+
+  it("kaatuu jälkimmäiseen virheeseen kun API on aidosti alhaalla", async () => {
+    let calls = 0;
+    await expect(
+      fetchWithOneRetry(async () => {
+        calls += 1;
+        throw new Error(`virhe ${calls}`);
+      }, noSleep)
+    ).rejects.toThrow("virhe 2");
+    expect(calls).toBe(2);
+  });
+});
+
+// Retryn KYTKENTÄ checkMatchiin — pelkkä apurin testi jäisi vihreäksi vaikka
+// checkMatch palaisi suoriin fetch-kutsuihin (katselmuslöydös, #299).
+describe("checkMatch + retry", () => {
+  const META = { home: { name: "Koti" }, away: { name: "Vieras" } };
+
+  it("transientti abortti ensimmäisessä meta-haussa ei tuota estettä", async () => {
+    let metaCalls = 0;
+    const checks = await checkMatch(123, undefined, undefined, {
+      fetchMeta: (async () => {
+        metaCalls += 1;
+        if (metaCalls === 1) throw new Error("This operation was aborted");
+        return META;
+      }) as never,
+      fetchEvents: (async () => ({ events: [] })) as never,
+      sleep: () => Promise.resolve(),
+    });
+    expect(checks.find((c) => c.name === "Ottelu")?.status).toBe("ok");
+    expect(metaCalls).toBe(2);
+  });
+
+  it("molemmilla yrityksillä kaatuva haku on yhä este", async () => {
+    const checks = await checkMatch(123, undefined, undefined, {
+      fetchMeta: (async () => {
+        throw new Error("This operation was aborted");
+      }) as never,
+      fetchEvents: (async () => ({ events: [] })) as never,
+      sleep: () => Promise.resolve(),
+    });
+    expect(checks.find((c) => c.name === "Ottelu")?.status).toBe("fail");
   });
 });

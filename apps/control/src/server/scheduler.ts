@@ -66,7 +66,8 @@ const SLOW_POLL_MS = 5 * 60_000;
 
 /** Kickoff is imminent (or already passed): this is the window in which the
  *  source actually flips. 30 s bounds how late the broadcast can start, and the
- *  real figure is 30 s + preflight (~10 s) + relay startup. Faster buys little:
+ *  real figure is 30 s + preflight (~10 s; API-virheiden retryjen kanssa
+ *  pahimmillaan ~36 s, #299) + relay startup. Faster buys little:
  *  yt-dlp itself takes seconds, and the first thing the relay does on a source
  *  that just went live is wait out its own narration delay anyway. */
 const FAST_POLL_MS = 30_000;

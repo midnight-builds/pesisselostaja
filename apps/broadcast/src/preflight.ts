@@ -102,11 +102,45 @@ async function checkTool(name: string, bin: string, args: string[]): Promise<Che
   }
 }
 
-async function checkMatch(matchId: number, apiKey?: string, apiBase?: string): Promise<Check[]> {
+/** Yksi uusintayritys lyhyellä viiveellä ennen kuin haun virhe julistetaan
+ *  esteeksi (#299): 6.9.2026 yksi transientti abortoitunut API-haku
+ *  preflightissa maksoi käynnistysikkunassa 5 minuutin backoffin, vaikka sama
+ *  haku onnistui sekunteja myöhemmin. Yksi retry riittää siihen luokkaan;
+ *  aidosti alhaalla oleva API failaa molemmat ja este jää voimaan. */
+const FETCH_RETRY_DELAY_MS = 2000;
+
+export async function fetchWithOneRetry<T>(
+  fetchOnce: () => Promise<T>,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))
+): Promise<T> {
+  try {
+    return await fetchOnce();
+  } catch {
+    await sleep(FETCH_RETRY_DELAY_MS);
+    return await fetchOnce();
+  }
+}
+
+/** Testisauma (#299): oletukset ovat oikeat core-haut, ja testi voi antaa omat.
+ *  Sauma on täällä eikä testissä siksi, että retryn KYTKENTÄ checkMatchiin on
+ *  juuri se asia jonka pitää olla regressiotestattavissa — pelkkä apurin
+ *  yksikkötesti jäisi vihreäksi vaikka kytkennän purkaisi. */
+export interface MatchFetchers {
+  fetchMeta: typeof fetchMatchMetadata;
+  fetchEvents: typeof fetchLiveEvents;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export async function checkMatch(
+  matchId: number,
+  apiKey?: string,
+  apiBase?: string,
+  fetchers: MatchFetchers = { fetchMeta: fetchMatchMetadata, fetchEvents: fetchLiveEvents }
+): Promise<Check[]> {
   const opts = { apiKey, apiBase, timeoutMs: 8000 };
   const checks: Check[] = [];
   try {
-    const meta = await fetchMatchMetadata(matchId, opts);
+    const meta = await fetchWithOneRetry(() => fetchers.fetchMeta(matchId, opts), fetchers.sleep);
     checks.push({ name: "Ottelu", status: "ok", detail: `${meta.home.name} vs ${meta.away.name}` });
   } catch (err) {
     checks.push({
@@ -117,7 +151,10 @@ async function checkMatch(matchId: number, apiKey?: string, apiBase?: string): P
     return checks;
   }
   try {
-    const events = await fetchLiveEvents(matchId, { ...opts, skipDelay: true });
+    const events = await fetchWithOneRetry(
+      () => fetchers.fetchEvents(matchId, { ...opts, skipDelay: true }),
+      fetchers.sleep
+    );
     checks.push({
       name: "Tapahtumat",
       status: "ok",
