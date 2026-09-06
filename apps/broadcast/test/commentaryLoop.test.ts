@@ -1175,8 +1175,8 @@ describe("filler failure is not a fetch failure (#288)", () => {
 describe("jaksotauon tila (#302)", () => {
   interface BreakInternals {
     processEventsLive(events: LiveEvent[], meta: MatchMetadata, lookup: PlayerLookup): Promise<void>;
-    state: { periodBreak: boolean };
-    buildContext(): { periodBreak: boolean };
+    state: { periodBreak: number | null };
+    buildContext(): { periodBreak: number | null };
     synthQueue: Promise<void>;
   }
 
@@ -1208,8 +1208,8 @@ describe("jaksotauon tila (#302)", () => {
       buildPlayerLookup(META)
     );
     await inner.synthQueue;
-    expect(inner.state.periodBreak).toBe(true);
-    expect(inner.buildContext().periodBreak).toBe(true);
+    expect(inner.state.periodBreak).toBe(0);
+    expect(inner.buildContext().periodBreak).toBe(0);
   });
 
   it("seuraavan jakson tapahtuma sulkee tauon", async () => {
@@ -1226,6 +1226,6 @@ describe("jaksotauon tila (#302)", () => {
       buildPlayerLookup(META)
     );
     await inner.synthQueue;
-    expect(inner.state.periodBreak).toBe(false);
+    expect(inner.state.periodBreak).toBe(null);
   });
 });

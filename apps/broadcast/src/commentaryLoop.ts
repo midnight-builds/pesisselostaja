@@ -14,6 +14,7 @@ import {
   isOutSubEvent,
   isMatchEndSubEvent,
   isPeriodEndSubEvent,
+  closesPeriodBreak,
   runValueOfSubEvent,
   eventFingerprint,
   recomputeCurrentOutsKeyed,
@@ -1789,9 +1790,11 @@ export class CommentaryLoop {
           }
 
           if (isMatchEndSubEvent(sub)) state.finished = true;
-          // Jaksotauko (#302): päättymismerkintä avaa tauon, mikä tahansa muu
-          // merkintä sulkee sen.
-          state.periodBreak = isPeriodEndSubEvent(sub);
+          // Jaksotauko (#302): päättymismerkintä avaa tauon; vain pelitapahtuma
+          // sulkee sen (kirjurin vaihdot tauolla eivät saa sulkea).
+          if (isPeriodEndSubEvent(sub)) state.periodBreak = state.currentPeriod;
+          else if (state.periodBreak !== null && closesPeriodBreak(sub, event.period, state.periodBreak))
+            state.periodBreak = null;
 
           if (isRunScoringSubEvent(sub) && event.team !== null) {
             addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
@@ -1866,7 +1869,9 @@ export class CommentaryLoop {
         state.seenFingerprints.add(eventFingerprint(event, i));
         if (isMatchEndSubEvent(sub)) state.finished = true;
         // Jaksotauko (#302): sama sääntö kuin live-polussa.
-        state.periodBreak = isPeriodEndSubEvent(sub);
+        if (isPeriodEndSubEvent(sub)) state.periodBreak = state.currentPeriod;
+        else if (state.periodBreak !== null && closesPeriodBreak(sub, event.period, state.periodBreak))
+          state.periodBreak = null;
         if (isRunScoringSubEvent(sub) && event.team !== null) {
           addRun(state, event.period, event.team === meta.home.id, runValueOfSubEvent(sub));
         }
@@ -1963,7 +1968,8 @@ export class CommentaryLoop {
   }
 
   private buildContext(): SpeechContext {
-    const cur = getPeriodScore(this.state, this.state.currentPeriod);
+    // Tauolla (#302) pisteet päättyneestä jaksosta, ks. web-vastine.
+    const cur = getPeriodScore(this.state, this.state.periodBreak ?? this.state.currentPeriod);
     const won = periodsWon(this.state);
     return {
       periodHomeRuns: cur.home,

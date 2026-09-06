@@ -15,6 +15,7 @@ import {
   isOutSubEvent,
   isMatchEndSubEvent,
   isPeriodEndSubEvent,
+  closesPeriodBreak,
   runValueOfSubEvent,
   eventFingerprint,
   recomputeCurrentOutsKeyed,
@@ -507,9 +508,11 @@ export class BrowserWatcher {
         const fp = eventFingerprint(event, i);
         state.seenFingerprints.add(fp);
         if (isMatchEndSubEvent(sub)) state.finished = true;
-        // Jaksotauko (#302): päättymismerkintä avaa tauon, mikä tahansa muu
-        // merkintä (seuraavan jakson tapahtuma, ottelun loppu) sulkee sen.
-        state.periodBreak = isPeriodEndSubEvent(sub);
+        // Jaksotauko (#302): päättymismerkintä avaa tauon; vain pelitapahtuma
+        // sulkee sen (kirjurin vaihdot tauolla eivät saa sulkea).
+        if (isPeriodEndSubEvent(sub)) state.periodBreak = state.currentPeriod;
+        else if (state.periodBreak !== null && closesPeriodBreak(sub, event.period, state.periodBreak))
+          state.periodBreak = null;
         if (isRunScoringSubEvent(sub)) {
           if (event.team !== null)
             addRun(
@@ -629,7 +632,9 @@ export class BrowserWatcher {
 
           if (isMatchEndSubEvent(sub)) state.finished = true;
           // Jaksotauko (#302): sama sääntö kuin catchup-polussa.
-          state.periodBreak = isPeriodEndSubEvent(sub);
+          if (isPeriodEndSubEvent(sub)) state.periodBreak = state.currentPeriod;
+          else if (state.periodBreak !== null && closesPeriodBreak(sub, event.period, state.periodBreak))
+            state.periodBreak = null;
 
           if (isRunScoringSubEvent(sub)) {
             if (event.team !== null) {
@@ -752,7 +757,9 @@ export class BrowserWatcher {
   }
 
   private buildContext(state: WatcherState): SpeechContext {
-    const cur = getPeriodScore(state, state.currentPeriod);
+    // Tauolla (#302) pisteet päättyneestä jaksosta — currentPeriod voi olla
+    // rekonsiliaation jäljiltä jo uusi jakso, jonka pisteet ovat 0, 0.
+    const cur = getPeriodScore(state, state.periodBreak ?? state.currentPeriod);
     const won = periodsWon(state);
     return {
       periodHomeRuns: cur.home,
