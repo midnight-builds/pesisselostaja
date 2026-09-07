@@ -85,9 +85,10 @@ export interface RelayStatus {
      *  mitata (#120). Null ei tarkoita nollaa: `created` on valinnainen kenttä,
      *  ja "ei mitattu" on eri asia kuin "ei viivettä". */
     sourceLagMs?: number | null;
-    /** Tulospalvelun ilmoittama alkuaika (ISO, UTC), tai null ennen metadatan
-     *  hakua (#298). Ohjaamon hälytysrivi näyttää tämän. Optional: vanhojen
-     *  deployjen snapshoteissa avainta ei ole. */
+    /** Tulospalvelun ilmoittama alkuaika (ISO offsetilla, Suomen aikaa — ei
+     *  UTC), tai null ennen metadatan hakua (#298). Ohjaamon hälytysrivi
+     *  näyttää tämän. Optional: vanhojen deployjen snapshoteissa avainta ei
+     *  ole. */
     startTime?: string | null;
     /** Kirjaus myöhässä (#298): alkuajasta on kulunut yli kynnyksen eikä
      *  tulospalvelussa ole yhtään tapahtumaa — ottelua ei (vielä) kirjata.
