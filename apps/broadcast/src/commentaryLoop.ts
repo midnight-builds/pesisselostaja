@@ -1158,6 +1158,27 @@ export class CommentaryLoop {
         );
       }
     }
+    // Hiljennys (#298): operaattorin "selostus pois / päälle". Sama kelpuutus
+    // kuin muilla: vain aito boolean kelpaa, puolikas editti ei muuta mitään.
+    if (typeof parsed.silenced === "boolean" && parsed.silenced !== this.silencedValue) {
+      this.silencedValue = parsed.silenced;
+      logInfo(
+        "control.silenced",
+        `Hiljennys ${when === "käynnistyksessä" ? "säilytetty" : "vaihdettu"} ${when}: ${this.silencedValue ? "PÄÄLLÄ (selostus pois)" : "POIS (selostus päällä)"} (control-tiedostosta).`
+      );
+      // Purku kesken ajon: katsoja on ollut pimennossa, joten puhutaan yksi
+      // tuore tilannekatsaus ennen paluuta tapahtumaselostukseen — sama malli
+      // kuin maybeLatchNarrationReadyn latch-recapissa. Käynnistyksessä
+      // säilytetty tila ei ole purku, eikä alkamattomassa ottelussa ole
+      // katsattavaa (tervetulotäyte hoitaa sen).
+      if (when === "ajon aikana" && !this.silencedValue && this.matchStarted && this.meta) {
+        const ctx = this.buildContext();
+        const recap = this.state.finished
+          ? formatMatchEnd(this.meta, ctx)
+          : formatSituationSummary(this.meta, ctx);
+        this.speak(recap, false, `silence-recap:${recap}`);
+      }
+    }
     // Delta polling on/off live — false reverts to plain full fetches on the
     // very next poll (the local history is simply rebuilt from each response).
     if (typeof parsed.deltaFetch === "boolean" && parsed.deltaFetch !== this.deltaFetch) {
