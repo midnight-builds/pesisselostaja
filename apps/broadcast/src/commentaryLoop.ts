@@ -2103,6 +2103,16 @@ export class CommentaryLoop {
     // text (which repeats: "Toinen palo" happens many times a match).
     const clip = { id: `c${++this.clipSeq}`, text };
     this.observer?.detected(clip);
+    // Hiljennys (#298): kirjanpito ajettiin yllä normaalisti (dedup,
+    // announcementCount, lastSpeechAt), mutta klippiä ei syntetisoida — ei
+    // TTS-kutsua, ei jonoa, ei ElevenLabs-merkkejä. Timeline-merkintä on
+    // spoken(muted=true), koska se tarkoittaa "kukaan ei kuullut tätä" —
+    // syy (tahto vs. irronnut ffmpeg) näkyy tästä lokirivistä.
+    if (this.silencedValue) {
+      logInfo("speech.silenced", `Selostus (hiljennetty operaattorin pyynnöstä): ${text}`);
+      this.observer?.spoken(clip, true);
+      return;
+    }
     if (!this.narrationEverReady) {
       this.suppressedBeforeAttach = true;
       logWarn("speech.muted", `Selostus (vaimennettu — ffmpeg ei vielä kytkeytynyt): ${text}`);
