@@ -27,6 +27,9 @@ const PROBE: StatusProbe = {
   lastEventAt: "2026-07-29T08:00:00.000Z",
   ttsEngine: "elevenlabs",
   elevenLabsCharsUsed: 4253,
+  silenced: false,
+  matchStartTime: "2026-07-29T07:30:00.000Z",
+  recordingLate: false,
 };
 
 function make(overrides: Partial<ConstructorParameters<typeof Telemetry>[0]> = {}): Telemetry {

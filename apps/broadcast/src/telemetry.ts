@@ -151,6 +151,12 @@ export interface StatusProbe {
   endReason?: SourceEndReason | null;
   /** True during the post-source drain phase (#301). */
   draining?: boolean;
+  /** Hiljennys voimassa (#298). */
+  silenced: boolean;
+  /** Tulospalvelun ilmoittama alkuaika (ISO) tai null (#298). */
+  matchStartTime: string | null;
+  /** Kirjaus myöhässä (#298). */
+  recordingLate: boolean;
 }
 
 export interface TelemetryOptions {
@@ -262,6 +268,8 @@ export class Telemetry {
         eventCount: probe.eventCount,
         lastEventAt: probe.lastEventAt,
         sourceLagMs: probe.sourceLagMs,
+        startTime: probe.matchStartTime,
+        recordingLate: probe.recordingLate,
       },
       narration: {
         detected: this.counts.detected,
@@ -273,6 +281,7 @@ export class Telemetry {
       lastProblem: this.lastProblem,
       ...(probe.endReason ? { endReason: probe.endReason } : {}),
       ...(probe.draining ? { draining: true } : {}),
+      ...(probe.silenced ? { silenced: true } : {}),
     };
     this.writeAtomic(this.statusPath, JSON.stringify(status, null, 2) + "\n");
   }

@@ -48,6 +48,7 @@ const KNOB_DEFAULTS: ControlKnobs = {
   narrationGain: 1.3, // config.ts: RELAY_NARRATION_GAIN default
   deltaFetch: true, // config.ts: on unless RELAY_DELTA_FETCH=false
   pollIntervalMs: 3000, // config.ts default poll interval
+  silenced: false, // #298: relay puhuu, kunnes operaattori hiljentää
 };
 
 /** Same floor commentaryLoop.ts applies (MIN_POLL_INTERVAL_MS). Clamping here
@@ -386,6 +387,7 @@ function knobsFromRaw(raw: Record<string, unknown>): ControlKnobs {
         ? clampGain(raw.narrationGain)
         : KNOB_DEFAULTS.narrationGain,
     deltaFetch: typeof raw.deltaFetch === "boolean" ? raw.deltaFetch : KNOB_DEFAULTS.deltaFetch,
+    silenced: typeof raw.silenced === "boolean" ? raw.silenced : KNOB_DEFAULTS.silenced,
     pollIntervalMs:
       typeof raw.pollIntervalMs === "number" && Number.isFinite(raw.pollIntervalMs)
         ? clamp(raw.pollIntervalMs, MIN_POLL_INTERVAL_MS, MAX_POLL_INTERVAL_MS)
@@ -433,6 +435,7 @@ async function writeKnobsUnlocked(
   }
   if (patch.narrationGain !== undefined) merged.narrationGain = clampGain(patch.narrationGain);
   if (patch.deltaFetch !== undefined) merged.deltaFetch = patch.deltaFetch;
+  if (patch.silenced !== undefined) merged.silenced = patch.silenced;
   if (patch.pollIntervalMs !== undefined) {
     merged.pollIntervalMs = clamp(patch.pollIntervalMs, MIN_POLL_INTERVAL_MS, MAX_POLL_INTERVAL_MS);
   }
