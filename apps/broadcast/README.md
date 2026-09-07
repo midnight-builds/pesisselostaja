@@ -722,7 +722,9 @@ lähteen loputtua kytkimestä riippumatta.
 Kun lähde päättyy (tai relay luovuttaa kuolleesta lähteestä), relay ei sammu
 heti: FIFO-jonossa oleva ja vielä syntetisoimaton selostus ajetaan loppuun
 katvekuvan päälle, ja `ended`-polulla odotetaan lisäksi että tulospalvelu
-kirjaa ottelun päättyneeksi ja lopputulos ehtii puhutuksi. Selostussilmukka
+kirjaa ottelun päättyneeksi ja lopputulos ehtii puhutuksi — mutta tyhjin
+jonoin vain rajatun ajan (`DRAIN_FINISHED_WAIT_MS`, `src/ffmpegMixer.ts`),
+ettei kirjaamatta jäänyt ottelu pidä tyhjää slatea ruudussa koko kattoa. Selostussilmukka
 pollaa koko drainin ajan, jononpudotus (#57) on drainissa pois päältä, ja
 `endReason` kirjoitetaan telemetriaan vasta drainin valmistuttua (ohjaamon
 hallittu lopetus #153 laukeaa siitä). Hard stop (#123) ohittaa drainin aina.
