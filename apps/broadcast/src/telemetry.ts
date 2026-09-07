@@ -123,6 +123,11 @@ export interface RelayStatus {
    *  running, and the operator must not mistake it for a hung relay. Optional:
    *  absent in snapshots from older deploys. */
   draining?: boolean;
+  /** Hiljennys (#298): operaattori on kytkenyt selostuksen pois control-
+   *  tiedoston `silenced`-avaimella. Eri asia kuin `narration.muted`-laskuri
+   *  (klippejä ffmpegin ollessa irti). Optional: vanhat deployt eivät
+   *  kirjoita tätä. */
+  silenced?: boolean;
 }
 
 /** Everything the snapshot cannot observe for itself, supplied by the relay on
