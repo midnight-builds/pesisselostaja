@@ -87,12 +87,18 @@ describe("hiljennys (#298)", () => {
     await loop.refreshRuntimeControls();
     expect(loop.silenced).toBe(true);
 
-    const before = loop.lastSpeechAt;
     loop.speak("Palo! Kotipesä.");
     await drainQueue();
-    // Klippiä ei syntetisoitu — mutta dedupe-kirjanpito eteni normaalisti.
+    // Klippiä ei syntetisoitu.
     expect(sunk).toEqual([]);
-    expect(loop.lastSpeechAt).toBeGreaterThanOrEqual(before);
+
+    // Mutta dedupe-kirjanpito eteni: sama teksti purun jälkeen on duplikaatti
+    // eikä sitä puhuta — hiljennys ei saa nollata kirjanpitoa.
+    writeFileSync(controlFile, JSON.stringify({ silenced: false }));
+    await loop.refreshRuntimeControls();
+    loop.speak("Palo! Kotipesä.");
+    await drainQueue();
+    expect(sunk).toEqual([]);
   });
 
   it("säilyy relayn restartin yli (#206-polku)", () => {
@@ -168,6 +174,20 @@ describe("kirjaus myöhässä (#298)", () => {
     // Tapahtumia on → kirjaus käynnissä, myöhästymistila poistuu.
     loop.meta = fakeMeta(new Date(Date.now() - 20 * 60_000).toISOString());
     loop.matchStarted = true;
+    expect(loop.recordingLate).toBe(false);
+  });
+
+  it("jäsentää tuotannon aikamuodon (Suomen aika offsetilla, ei UTC)", () => {
+    // API antaa esim. "2026-08-05T18:00:00+03:00" — EI Z-päätettä. Väärä
+    // UTC-oletus siirtäisi kynnystä kolme tuntia.
+    const loop = makeLoop([]);
+    const fmt = (ms: number) => {
+      const d = new Date(ms + 3 * 3_600_000);
+      return `${d.toISOString().slice(0, 19)}+03:00`;
+    };
+    loop.meta = fakeMeta(fmt(Date.now() - 20 * 60_000));
+    expect(loop.recordingLate).toBe(true);
+    loop.meta = fakeMeta(fmt(Date.now() - 5 * 60_000));
     expect(loop.recordingLate).toBe(false);
   });
 

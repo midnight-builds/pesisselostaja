@@ -209,9 +209,22 @@ bookkeeping (scores, turns, dedupe) all keep running. This is **not**
 silence. Flipping back to `false` mid-run speaks one fresh situation recap and
 resumes normal event narration. The value survives a restart the same #206 way
 as the other knobs, and the ohjaamo shows a toggle plus a persistent state-card
-row while it is on. Telemetry: top-level `silenced` in `status-<ID>.json` —
-distinct from the `narration.muted` counter, which counts clips produced while
-ffmpeg was not attached.
+row while it is on. Telemetry: top-level `silenced` in `status-<ID>.json`,
+written only when true — distinct from the `narration.muted` counter, which
+counts clips produced while ffmpeg was not attached.
+
+Two caveats worth knowing before relying on it live:
+
+- **It is not instant.** The gate sits at decision time, so clips already
+  handed to the synth queue play out — up to the queue cap (~15 s in
+  production). Silence stops *new* narration, it does not recall what was
+  already committed.
+- **Deploy skew is silent.** A relay deployed before #298 ignores the key and
+  keeps talking, while the ohjaamo's toggle happily shows "Hiljennetty" (the
+  toggle reads the control file, which accepts the key regardless). The
+  state-card row is honest — it reads the relay's telemetry — but its *absence*
+  is the only clue. Run `npm run relay:deploy` before trusting the toggle in a
+  real broadcast.
 
 Born from match 146998 (29.8.2026): the scorer never opened the match, and the
 welcome filler repeated itself for the whole game. The same incident produced
