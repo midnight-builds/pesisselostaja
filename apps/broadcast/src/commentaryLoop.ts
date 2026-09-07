@@ -931,6 +931,10 @@ export class CommentaryLoop {
       narrationGain: this.narrationGainValue,
       deltaFetch: this.deltaFetch,
       pollIntervalMs: this.pollIntervalMs,
+      // Hiljennys säilyy restartin yli samaa #206-polkua kuin muutkin säädöt:
+      // applyControlValues poimi vanhan arvon yllä, ja se kirjoitetaan tässä
+      // takaisin. Operaattori hiljensi syystä, joka ei poistu restartissa.
+      silenced: this.silencedValue,
     });
   }
 
