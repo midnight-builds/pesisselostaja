@@ -237,6 +237,27 @@ Toteutustapaa ei ole vielä suunniteltu, eikä tämä merkintä ota siihen kanta
 Termi on kirjattu tähän, jotta asiasta voi puhua yksiselitteisesti ennen kuin se
 on rakennettu.
 
+**Hiljennys**:
+Operaattorin ohjaamosta kytkemä tila, jossa relay ei tuota selostusta lainkaan:
+klippejä ei syntetisoida, mutta kuva ja kentän äänet jatkuvat ja relayn
+kirjanpito (pisteet, vuorot, dedup) elää taustalla, jotta purku voi jatkaa
+suoraan ajantasaisesta tilanteesta. Purun yhteydessä puhutaan yksi
+tilannekatsaus. Tahtotila, joka säilyy relayn restartin yli.
+_Vältä_: "mykistys" ja "muted" — lokin ja telemetrian "ei kuulunut" -merkintä
+(`NarrationLine.muted`) tarkoittaa eri asiaa: klippi tuotettiin, mutta ffmpeg
+ei ollut kytkeytynyt eikä kukaan kuullut sitä. Hiljennys on tahto, tuo on
+olosuhde.
+
+**Kirjaus myöhässä**:
+Relayn päättelemä tila: tulospalvelun ilmoittamasta alkuajasta on kulunut
+selvästi yli kynnyksen (10 min) eikä ottelulle ole kirjattu yhtään tapahtumaa —
+kirjaaja ei (ainakaan vielä) kirjaa tätä ottelua. Tilassa tervetulotäytettä ei
+toisteta vaan mennään kentän äänillä, ja ohjaamon tilakortti kertoo syyn
+operaattorille. Tapahtumaselostus alkaa silti heti, kun ensimmäinen kirjaus
+näkyy. Vain relay päättelee tämän; ohjaamo näyttää.
+_Vältä_: "ottelu ei ole alkanut" tästä tilasta — peli voi olla täydessä
+käynnissä kentällä, vain kirjaus puuttuu.
+
 ## Relayn sinnikkyys ja sen rajat
 
 **Perääntyminen**:

@@ -199,6 +199,29 @@ considered and deliberately left out: setting its response speed is an
 audio-by-ear judgement (a fast loop pumps), and that cannot be settled without
 listening to a real broadcast.
 
+### Hiljennys — `silenced` (#298)
+
+The same control file's `silenced: true` turns narration off entirely without
+touching the broadcast: no clips are synthesized (so no ElevenLabs characters
+burn and nothing queues), while the picture, field audio and the relay's
+bookkeeping (scores, turns, dedupe) all keep running. This is **not**
+`narrationGain: 0` — gain 0 still synthesizes and merely scales the audio to
+silence. Flipping back to `false` mid-run speaks one fresh situation recap and
+resumes normal event narration. The value survives a restart the same #206 way
+as the other knobs, and the ohjaamo shows a toggle plus a persistent state-card
+row while it is on. Telemetry: top-level `silenced` in `status-<ID>.json` —
+distinct from the `narration.muted` counter, which counts clips produced while
+ffmpeg was not attached.
+
+Born from match 146998 (29.8.2026): the scorer never opened the match, and the
+welcome filler repeated itself for the whole game. The same incident produced
+the **kirjaus myöhässä** state: when the metadata's announced start time is
+more than 10 minutes past and the match still has zero events, the relay drops
+the welcome filler on its own (field audio carries the broadcast) and reports
+`match.recordingLate` + `match.startTime` in telemetry, which the ohjaamo turns
+into an alert row. Event narration still starts the moment the first event
+appears.
+
 ### `sourceIngest` — what the control app publishes here
 
 The relay ignores every key it does not know, and `sourceIngest` is one of

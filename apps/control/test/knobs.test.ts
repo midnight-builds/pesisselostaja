@@ -47,6 +47,7 @@ describe("readKnobs", () => {
       narrationGain: 1.3,
       deltaFetch: true,
       pollIntervalMs: 3000,
+      silenced: false,
     });
   });
 
@@ -108,6 +109,22 @@ describe("writeKnobs", () => {
     // 1.25 + 0.05 = 1.3000000000000003 selaimessa; tiedostoon kuuluu 1.3.
     const result = await writeKnobs(MATCH_ID, { narrationGain: 1.25 + 0.05 });
     expect(result.narrationGain).toBe(1.3);
+  });
+
+  // Hiljennys (#298): boolean kulkee sellaisenaan, ja merge säilyttää muut
+  // avaimet — hiljennys ei saa nollata operaattorin gain-säätöä.
+  it("kirjoittaa hiljennyksen ja säilyttää muut avaimet", async () => {
+    await writeKnobs(MATCH_ID, { narrationGain: 0.85 });
+    const result = await writeKnobs(MATCH_ID, { silenced: true });
+    expect(result.silenced).toBe(true);
+    expect(result.narrationGain).toBe(0.85);
+    expect(readControlFile().silenced).toBe(true);
+    expect((await writeKnobs(MATCH_ID, { silenced: false })).silenced).toBe(false);
+  });
+
+  it("puuttuva hiljennysavain lukeutuu falseksi", async () => {
+    writeControlFile({ narrationGain: 0.9 });
+    expect((await readKnobs(MATCH_ID)).silenced).toBe(false);
   });
 
   it("lukee relayn kirjoittaman gainin sellaisenaan", async () => {

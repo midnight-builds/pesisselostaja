@@ -206,7 +206,16 @@ describe("parseRelayStatus", () => {
     pendingClips: 2,
     respawns: 1,
     source: { state: "live", detail: "ffmpeg käynnissä" },
-    match: { finished: false, eventCount: 412, lastEventAt: "2026-07-29T04:59:50.000Z", sourceLagMs: 12_000 },
+    match: {
+      finished: false,
+      eventCount: 412,
+      lastEventAt: "2026-07-29T04:59:50.000Z",
+      sourceLagMs: 12_000,
+      // #298: alkuaika ja kirjaus myöhässä -tila kulkevat telemetriassa,
+      // jotta hälytysrivi lukee relayn päätelmää eikä laske itse.
+      startTime: "2026-07-29T04:00:00.000Z",
+      recordingLate: false,
+    },
     narration: { detected: 90, spoken: 88, muted: 1, queued: 1 },
     tts: { engine: "piper", elevenLabsCharsUsed: 0 },
     lastProblem: null,
@@ -216,6 +225,9 @@ describe("parseRelayStatus", () => {
     // #301: lopetusajo ei ole käynnissä normaalin ajon aikana; vanhan
     // deployn snapshotista puuttuva kenttä jäsentyy falseksi.
     draining: false,
+    // #298: hiljennys — vanhan deployn snapshotista puuttuva kenttä
+    // jäsentyy falseksi.
+    silenced: false,
   };
 
   it("reads a full snapshot back verbatim", () => {
@@ -230,6 +242,25 @@ describe("parseRelayStatus", () => {
     void sourceLagMs;
     const parsed = parseRelayStatus(JSON.stringify({ ...full, match: matchWithout }));
     expect(parsed?.match.sourceLagMs).toBeNull();
+  });
+
+  it("hiljennys ja kirjaus myöhässä jäsentyvät, puuttuvina false/null (#298)", () => {
+    const parsed = parseRelayStatus(
+      JSON.stringify({ ...full, silenced: true, match: { ...full.match, recordingLate: true } })
+    );
+    expect(parsed?.silenced).toBe(true);
+    expect(parsed?.match.recordingLate).toBe(true);
+    expect(parsed?.match.startTime).toBe("2026-07-29T04:00:00.000Z");
+
+    // Vanha deploy ei kirjoita avaimia — hälytysrivit eivät saa syttyä siitä.
+    const { silenced, ...rest } = full;
+    void silenced;
+    const { startTime, recordingLate, ...matchWithout } = full.match;
+    void startTime; void recordingLate;
+    const old = parseRelayStatus(JSON.stringify({ ...rest, match: matchWithout }));
+    expect(old?.silenced).toBe(false);
+    expect(old?.match.recordingLate).toBe(false);
+    expect(old?.match.startTime).toBeNull();
   });
 
   it("a snapshot with no usable timestamp is refused — an undateable snapshot cannot be judged stale", () => {
