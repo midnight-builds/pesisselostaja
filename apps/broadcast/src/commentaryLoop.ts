@@ -498,6 +498,8 @@ export class CommentaryLoop {
    *  mitään. Eri asia kuin `NarrationLine.muted` ("ffmpeg ei ollut
    *  kytkeytynyt"): tämä on tahtotila, tuo on olosuhde. */
   private silencedValue = false;
+  /** Kirjaus myöhässä -varoitus lokitetaan kerran, ei joka täytekierroksella. */
+  private recordingLateLogged = false;
   /** Latched permanently true the first time the ffmpeg reader is seen
    *  attached (or immediately when there is no status port — dry-run/tests).
    *  Before the latch, speak() runs its bookkeeping but skips the sink handoff
@@ -1985,6 +1987,25 @@ export class CommentaryLoop {
 
   private async maybeAnnounceSummary(meta: MatchMetadata): Promise<void> {
     const now = Date.now();
+    // Hiljennettynä (#298) täytekierros ohitetaan kokonaan ENNEN
+    // ajastuspäätöstä: speak()-portti estäisi synteesin joka tapauksessa,
+    // mutta polttaisi silti dedupen ja lastSpeechAt:n 90 s välein — purun
+    // jälkeen ensimmäinen aito täyte lykkääntyisi turhaan.
+    if (this.silencedValue) return;
+    // Kirjaus myöhässä (#298): ilmoitettu alkuaika ohitettu reilusti eikä
+    // yhtään tapahtumaa — tervetulotäytteen toistaminen läpi ottelun kuulosti
+    // rikkinäiseltä (146998, 29.8.2026). Mennään kentän äänillä; ohjaamon
+    // hälytysrivi kertoo syyn. Tapahtumaselostukseen tämä ei koske.
+    if (!this.matchStarted && this.recordingLate) {
+      if (!this.recordingLateLogged) {
+        this.recordingLateLogged = true;
+        logWarn(
+          "speech.recording_late",
+          `Ottelua ei kirjata tulospalveluun (ilmoitettu alku ${this.meta?.date ?? "?"}) — tervetulotäyte pois, kentän äänet jatkuvat.`
+        );
+      }
+      return;
+    }
     // The timing decision itself lives in core (decideFiller, issue #62) —
     // it used to be duplicated here and in apps/web. Thresholds are passed in
     // because they differ on purpose between the two apps; the side effects
