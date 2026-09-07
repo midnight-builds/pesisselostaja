@@ -758,6 +758,30 @@ export class CommentaryLoop {
     return this.narrationGainValue;
   }
 
+  /** Hiljennys (#298) voimassa? Telemetria julkaisee tämän, jotta ohjaamon
+   *  kortti näyttää tahtotilan relayn suusta eikä omasta napistaan. */
+  get silenced(): boolean {
+    return this.silencedValue;
+  }
+
+  /** Tulospalvelun ilmoittama alkuaika (ISO, UTC) telemetriaa varten, tai
+   *  null ennen metadatan hakua / kun kenttä puuttuu. */
+  get matchStartTime(): string | null {
+    return this.meta?.date ?? null;
+  }
+
+  /** Kirjaus myöhässä (#298): ottelun ilmoitetusta alkuajasta on kulunut yli
+   *  RECORDING_LATE_AFTER_MS eikä tulospalvelussa ole vieläkään yhtään
+   *  tapahtumaa — kirjaaja ei (ainakaan vielä) kirjaa tätä ottelua. Laukaisee
+   *  täytteen pudotuksen ja ohjaamon hälytysrivin; tapahtumaselostus
+   *  käynnistyy silti heti kun ensimmäinen tapahtuma näkyy. */
+  get recordingLate(): boolean {
+    if (this.matchStarted || !this.meta?.date) return false;
+    const startMs = Date.parse(this.meta.date);
+    if (!Number.isFinite(startMs)) return false;
+    return Date.now() > startMs + RECORDING_LATE_AFTER_MS;
+  }
+
   /** Ikkunoitu yhteenveto jokaisesta pollista (#120).
    *
    *  Miksi yhteenveto eikä rivi per polli, jota issue ehdotti: ohjaamo johtaa
