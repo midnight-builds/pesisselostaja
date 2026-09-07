@@ -121,8 +121,9 @@ export interface RelayTelemetry {
      *  vanhempi deploy ei julkaise tätä lainkaan — kumpikin tarkoittaa "ei
      *  mitattu". Vain relay mittaa tämän; ohjaamo lukee eikä päättele (#97). */
     sourceLagMs: number | null;
-    /** Tulospalvelun ilmoittama alkuaika (ISO, UTC) tai null — optional,
-     *  koska vanhan deployn snapshotissa avainta ei ole (#298). */
+    /** Tulospalvelun ilmoittama alkuaika (ISO offsetilla, Suomen aikaa) tai
+     *  null — optional, koska vanhan deployn snapshotissa avainta ei ole
+     *  (#298). */
     startTime?: string | null;
     /** Kirjaus myöhässä (#298): alkuajasta kulunut yli relayn kynnyksen eikä
      *  yhtään tapahtumaa. Relay päättelee, ohjaamo näyttää (#97). Puuttuva
