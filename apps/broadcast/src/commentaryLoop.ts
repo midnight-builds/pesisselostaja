@@ -766,8 +766,10 @@ export class CommentaryLoop {
     return this.silencedValue;
   }
 
-  /** Tulospalvelun ilmoittama alkuaika (ISO, UTC) telemetriaa varten, tai
-   *  null ennen metadatan hakua / kun kenttä puuttuu. */
+  /** Tulospalvelun ilmoittama alkuaika telemetriaa varten, tai null ennen
+   *  metadatan hakua / kun kenttä puuttuu. HUOM: API antaa ajan Suomen aikana
+   *  offsetilla ("2026-08-05T18:00:00+03:00"), EI UTC:nä — Date.parse
+   *  käsittelee offsetin oikein, mutta älä oleta Z-päätettä. */
   get matchStartTime(): string | null {
     return this.meta?.date ?? null;
   }
