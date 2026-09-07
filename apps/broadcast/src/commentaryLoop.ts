@@ -484,6 +484,15 @@ export class CommentaryLoop {
    *  Loop omistaa tämän siksi, että loop on ainoa control-tiedoston lukija;
    *  mikseri lukee arvon takaisinkutsulla, kuten `sourceIngest`inkin. */
   private narrationGainValue: number;
+  /** Hiljennys (#298): operaattorin kytkemä selostuksen esto, control-
+   *  tiedoston `silenced`-avain. Hiljennettynä speak() ajaa kaiken
+   *  kirjanpitonsa (dedup, pisteet, vuorot) mutta EI syntetisoi klippiä —
+   *  gain 0:sta poiketen ElevenLabs-merkkejä ei kulu eikä jonoon kerry
+   *  mitään. Eri asia kuin `NarrationLine.muted` ("ffmpeg ei ollut
+   *  kytkeytynyt"): tämä on tahtotila, tuo on olosuhde. */
+  private silencedValue = false;
+  /** Purun tilannekatsaus puhutaan vasta kun hiljennys päättyy kesken ajon —
+   *  käynnistyksessä säilytetty hiljennys ei ole "purku". */
   /** Latched permanently true the first time the ffmpeg reader is seen
    *  attached (or immediately when there is no status port — dry-run/tests).
    *  Before the latch, speak() runs its bookkeeping but skips the sink handoff
