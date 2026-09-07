@@ -75,6 +75,13 @@ const SUMMARY_EVERY_N = 10;
 const IDLE_FILLER_MS = 90 * 1000;
 /** Pre-game: welcome-filler cadence while waiting for the match to start. */
 const WELCOME_FILLER_MS = 90 * 1000;
+/** Kirjaus myöhässä (#298): kun ottelua ei ole avattu tulospalveluun vielä
+ *  tämän verran ILMOITETUN alkuajan jälkeen, tervetulotäyte pudotetaan pois
+ *  ("mennään kentän äänillä") ja tila julkaistaan telemetriassa ohjaamon
+ *  hälytysriville. Ankkuri on nimenomaan tulospalvelun alkuaika, ei relayn
+ *  käynnistyshetki — relay käynnistetään usein reilusti etuajassa, ja silloin
+ *  odottelutäyte on juuri oikein. */
+const RECORDING_LATE_AFTER_MS = 10 * 60 * 1000;
 /** Full events fetch timeout (see apiTimeoutMs() for the effective value).
  *
  *  10 s, not the earlier 4 s: a full events fetch returns the WHOLE match
