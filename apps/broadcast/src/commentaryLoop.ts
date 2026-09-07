@@ -396,6 +396,10 @@ export interface NarrationStatus {
    *  or null before any attach. The first-speech grace period
    *  (RELAY_FIRST_SPEECH_DELAY_MS) is measured from this. */
   firstAttachedAt(): number | null;
+  /** Lopetusajo (#301) käynnissä: tapahtumat puhutaan yhä, mutta fillerit
+   *  eivät saa venyttää drainia — jokainen filler nollaisi "jonot tyhjät"
+   *  -laskurin ja pitäisi katvekuvaa ruudussa kattoon asti. Absent = false. */
+  draining?(): boolean;
 }
 
 /** Observes a narration clip through its stages, for telemetry. Optional and
@@ -459,6 +463,11 @@ export class CommentaryLoop {
   /** Order-preserving queue for sink calls (TTS synthesis + mix), decoupled
    *  from the poll loop — see speak(). */
   private synthQueue: Promise<void> = Promise.resolve();
+  /** Kuinka monta klippiä on jonossa tai kesken synthQueuessa (TTS +
+   *  narration-delay + mikserille anto). Lopetusajon (#301) drain lukee tätä:
+   *  FIFOn pendingClips ei näe klippiä, jonka synteesi on vielä kesken, joten
+   *  pelkkä FIFO-tarkistus lopettaisi lähetyksen puheen alta. */
+  private pendingSynthCount = 0;
   private abort: AbortController | null = null;
   /** Current effective value of the batter-change setting. Seeded from config
    *  at startup, then overridable mid-match via the control file. */
@@ -681,6 +690,13 @@ export class CommentaryLoop {
    *  (finishedFailureWindowMs) once retrying a dead source is pointless. */
   get matchFinished(): boolean {
     return this.state.finished;
+  }
+
+  /** Klippejä jonossa tai kesken synthQueuessa (TTS vielä tekemättä tai
+   *  narration-delay kulumassa). Lopetusajon drain (#301) odottaa tämän
+   *  nollaan ennen kuin lähetyksen saa sammuttaa. */
+  get pendingSynth(): number {
+    return this.pendingSynthCount;
   }
 
   /** Compact poll-statistics fragment for the mixer's heartbeat line, e.g.
@@ -2042,6 +2058,7 @@ export class CommentaryLoop {
     // The poll loop never awaits synthQueue, so the delay can't stall polling.
     const decidedAt = Date.now();
     const delayMs = this.narrationDelayMs;
+    this.pendingSynthCount++;
     this.synthQueue = this.synthQueue
       .then(async () => {
         const wait = decidedAt + delayMs - Date.now();
@@ -2051,6 +2068,9 @@ export class CommentaryLoop {
       })
       .catch((err) => {
         logError("speech.failed", `Selostusvirhe: ${err instanceof Error ? err.message : err}`);
+      })
+      .finally(() => {
+        this.pendingSynthCount--;
       });
   }
 
@@ -2099,6 +2119,10 @@ export class CommentaryLoop {
     // yet made / first-speech grace still running) a filler would only be
     // suppressed by speak() while still burning its dedupe/lastSpeechAt
     // bookkeeping — skip the round entirely instead.
+    // Drainin aikana (#301) katvesession lukija on kiinni ja jono tyhjenee,
+    // eli portti näyttäisi vihreää — mutta filler drainissa vain lykkäisi
+    // sammutusta puheella, jota kukaan ei jäänyt kuulemaan.
+    if (this.narrationStatus.draining?.() ?? false) return false;
     return (
       this.narrationEverReady &&
       this.narrationStatus.isReaderAttached() &&

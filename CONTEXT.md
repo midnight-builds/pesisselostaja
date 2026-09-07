@@ -101,6 +101,13 @@ _Vältä_: "lähde" videomerkityksessä tästä puhuttaessa.
 Katsojille jaettava viesti, jossa kolme linkkiä: raakalähetys, selostettu
 lähetys ja tulospalvelun ottelusivu.
 
+**Katvekuva** (koodissa *slate*, "EI SIGNAALIA"):
+Still-kuva, jota relay työntää selostettuun lähetykseen kun lähdekuvaa ei ole,
+selostus ja pistetilanne sen päällä. Sillä on kaksi eri käyttöä, jotka eivät
+ole sama asia: **katkopaikkaus** kesken ajon (kytkimen takana, oletuksena
+pois) ja **lopetusajon kuvitus** lähteen loputtua (aina käytössä, ei
+kytkintä). Kun kirjoitat katvekuvasta, sano kumpaa tarkoitat.
+
 ## Ottelupäivän hetket
 
 **Ajastushetki**:
@@ -120,9 +127,24 @@ raakalähetystä ja käynnistää relayn heti kun kuvaaja aloittaa lähetyksen.
 
 **Lopetus**:
 Se, miten lähetysketju päättyy. Oletus on yksi ketju: kuvaaja sulkee
-StreamLabsin → raakalähetys päättyy → relay havaitsee sen ja sammuu itse →
-ohjaamo sulkee selostetun lähetyksen **hallitusti** (#153). Raakalähetykseen
-ohjaamo ei tässä koske: se päättyi jo itse, ja juuri siitä relay tiesi sammua.
+StreamLabsin → raakalähetys päättyy → relay havaitsee sen, ajaa **lopetusajon**
+ja sammuu itse → ohjaamo sulkee selostetun lähetyksen **hallitusti** (#153).
+Raakalähetykseen ohjaamo ei tässä koske: se päättyi jo itse, ja juuri siitä
+relay tiesi sammua.
+
+**Lopetusajo** (koodissa ja lokissa *drain*, #301):
+Vaihe raakalähetyksen päättymisen ja relayn sammumisen välissä. Relay ei sammu
+heti kun lähde loppuu: jonossa oleva ja vielä syntetisoimaton selostus puhutaan
+loppuun katvekuvan päälle, ja tulospalvelun kirjaamaa lopputulosta odotetaan
+vielä, jotta se ehtii selostukseen. Lähetys elää siis tarkoituksella lähteen
+loputtua — se ei ole jumi, ja ohjaamon kortti sanoo tämän ("loppuselostus
+puhutaan vielä").
+
+Lopetusajolla on **kokonaiskatto**, ettei kuollut lähde jätä lähetystä
+pyörimään loputtomiin, ja lopputuloksen odotukselle oma lyhyempi rajansa
+tyhjin jonoin. Tarkat ajat ja säätönupit eivät ole tässä sanastossa — ne
+voivat muuttua; ne dokumentoi `apps/broadcast/README.md`:n Lopetusajo-osio ja
+arvot asuvat relayn konfiguraatiossa. Hard stop ohittaa lopetusajon aina.
 
 **Hallittu lopetus** on nimenomaan tämä: ohjaamo transitoi selostetun
 lähetyksen `complete`ksi laskevalla reunalla, kun relayn telemetria kertoo sekä
@@ -130,7 +152,9 @@ lähetyksen `complete`ksi laskevalla reunalla, kun relayn telemetria kertoo sek�
 kesken ottelun kuollut raakalähetys antaa myös `ended`in — ja liian aikainen
 `complete` katkaisisi elävän lähetyksen katsojilta. Kun ehto ei täyty, kohteen
 sulkee YouTuben oma AutoStop kuten ennenkin; se on peräytymistie, ei oletus,
-koska katsojalle AutoStopin lopetus ei erotu katkosta.
+koska katsojalle AutoStopin lopetus ei erotu katkosta. Relay kirjaa
+`endReason`in telemetriaan vasta lopetusajon valmistuttua, joten hallittu
+lopetus ei voi laueta kesken loppuselostusten.
 
 **Tämä on oletus, ei ainoa tapa, eikä ketju pääty aina kokonaisena.**
 Raakalähetys, relayn ajo, selostettu lähetys ja työ päättyvät kukin erikseen ja

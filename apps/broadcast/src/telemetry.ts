@@ -104,8 +104,17 @@ export interface RelayStatus {
    *  exits (#123). Absent while the relay is running — and absent in every
    *  snapshot older deploys wrote, so readers must treat it as optional.
    *  (The control app mirrors RelayStatus by hand and ignores unknown keys,
-   *  so adding this here is safe without touching apps/control.) */
+   *  so adding this here is safe without touching apps/control.)
+   *
+   *  #301: endReason kirjoitetaan vasta lopetusajon (drain) VALMISTUTTUA —
+   *  ohjaamon hallittu lopetus (#153) laukeaa endReasonista, eikä se saa
+   *  katkaista lähetystä kesken loppuselostusten. */
   endReason?: SourceEndReason;
+  /** True while the relay is draining the narration backlog over the slate
+   *  after the source has ended (#301) — the broadcast is deliberately still
+   *  running, and the operator must not mistake it for a hung relay. Optional:
+   *  absent in snapshots from older deploys. */
+  draining?: boolean;
 }
 
 /** Everything the snapshot cannot observe for itself, supplied by the relay on
@@ -124,8 +133,11 @@ export interface StatusProbe {
   sourceLagMs: number | null;
   ttsEngine: string;
   elevenLabsCharsUsed: number;
-  /** null while running; set once the run's end reason is known (#123). */
+  /** null while running; set once the run's end reason is known (#123).
+   *  #301: stays null through the drain phase — see RelayStatus.endReason. */
   endReason?: SourceEndReason | null;
+  /** True during the post-source drain phase (#301). */
+  draining?: boolean;
 }
 
 export interface TelemetryOptions {
@@ -247,6 +259,7 @@ export class Telemetry {
       tts: { engine: probe.ttsEngine, elevenLabsCharsUsed: probe.elevenLabsCharsUsed },
       lastProblem: this.lastProblem,
       ...(probe.endReason ? { endReason: probe.endReason } : {}),
+      ...(probe.draining ? { draining: true } : {}),
     };
     this.writeAtomic(this.statusPath, JSON.stringify(status, null, 2) + "\n");
   }

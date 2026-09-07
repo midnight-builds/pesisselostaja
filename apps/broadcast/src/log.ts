@@ -66,6 +66,7 @@ export type EventCode =
   // sijaan että sujuvalta näyttävä lähetys piilottaisi kaatuneen kameran.
   | "ffmpeg.slate_start"
   | "ffmpeg.slate_end"
+  | "ffmpeg.drain"
   | "slate.prepared"
   | "slate.unavailable"
   | "slate.write_failed"

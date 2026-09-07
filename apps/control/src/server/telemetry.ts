@@ -143,6 +143,7 @@ export function parseRelayStatus(text: string): RelayTelemetry | null {
     respawns: num(raw.respawns),
     source: { state: sourceState(source.state), detail: str(source.detail) },
     endReason: endReason(raw.endReason),
+    draining: bool(raw.draining),
     match: {
       finished: bool(match.finished),
       eventCount: num(match.eventCount),

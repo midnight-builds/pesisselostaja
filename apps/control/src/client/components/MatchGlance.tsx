@@ -111,6 +111,13 @@ function sourceFact(telemetry: RelayTelemetry | null, relayActive: boolean): Fac
   // juuri nyt katso raakalähetystä. Vihreä "kuva tulee kentältä" pysähtyneen
   // relayn vieressä olisi täsmälleen se ristiriita, jota ei ehdi lukea kahdesti.
   if (!relayActive || !telemetry) return { label, value: "Ei tietoa", tone: "warn" };
+  // Lopetusajo (#301): lähde on päättynyt ja relay puhuu selostusjonon loppuun
+  // katvekuvan päälle. Tämä VOITTAA lähdetilan: rivi joka sanoisi vain
+  // "kuvaus päättyi" saisi operaattorin sammuttamaan lähetyksen käsin juuri
+  // silloin, kun se elää tarkoituksella vielä hetken.
+  if (telemetry.draining) {
+    return { label, value: "Kuvaus päättyi — loppuselostus puhutaan vielä, älä sammuta", tone: "ok" };
+  }
   switch (telemetry.source.state) {
     case "live":
       return { label, value: "Kuva tulee kentältä", tone: "ok" };

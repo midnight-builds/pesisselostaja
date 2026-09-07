@@ -213,6 +213,9 @@ describe("parseRelayStatus", () => {
     // #123: relay kertoo miksi se lopetti. Ajossa oleva relay ei ole
     // lopettanut, joten null on normaali arvo.
     endReason: null,
+    // #301: lopetusajo ei ole käynnissä normaalin ajon aikana; vanhan
+    // deployn snapshotista puuttuva kenttä jäsentyy falseksi.
+    draining: false,
   };
 
   it("reads a full snapshot back verbatim", () => {
