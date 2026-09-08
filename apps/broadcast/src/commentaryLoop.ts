@@ -903,6 +903,15 @@ export class CommentaryLoop {
    *  Tuntemattomat avaimet säilyvät: ohjaamo kirjoittaa samaan tiedostoon
    *  `sourceIngest`in (#104), ja ylikirjoitus pyyhki senkin.
    *
+   *  Restart-käytös yhdellä rivillä (#309 selvitti tämän jo kahdesti, älä
+   *  kolmatta kertaa): operaattorin säädöt SÄILYVÄT relayn restartin yli.
+   *  Values-objektista puuttuva avain säilyy silti (`{ ...base, ...values }`
+   *  writeControlValuesissa) — ainoa tapa hukata operaattorin arvo on lisätä
+   *  avain alla olevaan values-objektiin ILMAN applyControlValues-käsittelyä,
+   *  jolloin relayn config-oletus jyrää sen käynnistyksessä. Uusi säädettävä
+   *  avain siis aina molempiin. Tarkoituksellinen poikkeus on katkaisijan
+   *  jälki (`deltaBreakerTripped`, #52), joka nollataan alla.
+   *
    *  Kirjoitus on atominen (temp + rename), kuten ohjaamon puolella
    *  (`relay.ts:writeRelayEnv`). Ei-atominen kirjoitus jätti ikkunan, jossa
    *  ohjaamon yhtaikainen säätö luki puolikkaan tiedoston. */
