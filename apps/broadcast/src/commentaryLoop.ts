@@ -1748,6 +1748,7 @@ export class CommentaryLoop {
     // väliin, koska tämä vastaus on jo koko historia (ks. resetFloorMs).
     if (explained) {
       this.resetFloorMs = Math.max(this.resetFloorMs ?? 0, resetAtMs + 1_000);
+      this.resetFloorSetAtMs = Date.now();
     }
     const firstOfStreak = this.consecutiveDeltaResets === 0;
     this.consecutiveDeltaResets++;
