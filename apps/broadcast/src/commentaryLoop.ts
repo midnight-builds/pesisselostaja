@@ -133,8 +133,9 @@ const FULL_FETCH_TIMEOUT_MS = 10_000;
  *  false aborts while still fitting inside the 3 s cadence, which is the
  *  property the 4 s → 1 s retune was really about. The honest fix — keying the
  *  loose limit on the MEASURED duration of successful deltas rather than on
- *  failures — is still the follow-up noted under DELTA_SLOW_DWELL_POLLS; this
- *  is the first match's worth of data arguing for it.
+ *  failures — landed with #303 (6.9.2026: 2 s still aborted ~11 % of polls):
+ *  this constant is now the FLOOR of the adaptive limit, see
+ *  DELTA_ADAPTIVE_TIMEOUT_MAX_MS.
  *
  *  NOT floored at `pollIntervalMs` — see apiTimeoutMs(). */
 const DELTA_FETCH_TIMEOUT_MS = 2_000;
