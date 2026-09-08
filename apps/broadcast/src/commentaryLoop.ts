@@ -1725,6 +1725,14 @@ export class CommentaryLoop {
     this.pollWindow.resets++;
     const resetAtMs = typeof res.reset === "string" ? Date.parse(res.reset) : NaN;
     const explained = Number.isFinite(resetAtMs) && resetAtMs >= afterMs;
+    // Nosta kursorin lattia leiman yli (#303): seuraava delta ei enää osu
+    // saman reset-hetken alle, joten ryöppy päättyy ensimmäiseen resettiin
+    // eikä kestä AFTER_MARGIN_MS:ää täyshakuina. +1 s koska palvelimen
+    // vertailun tiukkuutta (< vai <=) ei tunneta; tapahtumia ei voi jäädä
+    // väliin, koska tämä vastaus on jo koko historia (ks. resetFloorMs).
+    if (explained) {
+      this.resetFloorMs = Math.max(this.resetFloorMs ?? 0, resetAtMs + 1_000);
+    }
     const firstOfStreak = this.consecutiveDeltaResets === 0;
     this.consecutiveDeltaResets++;
     if (!explained) this.consecutiveUnexplainedResets++;
