@@ -188,10 +188,10 @@ const DELTA_FETCH_TIMEOUT_SLOW_MS = 4_000;
  *
  *  Honest residual: a genuinely slow API makes this settle into ~10 good polls
  *  followed by 3 aborts (23 % dropped, against 75 % with no dwell at all), not
- *  a permanently open valve. Closing that gap needs the valve to key on the
- *  MEASURED duration of successful deltas rather than on failures; that is a
- *  bigger change. 27.8.2026 (#290) delivered the first match's worth of data
- *  showing an API that behaves this way — see DELTA_FETCH_TIMEOUT_MS. */
+ *  a permanently open valve. That gap is closed by the measured-duration
+ *  valve (#303, DELTA_ADAPTIVE_TIMEOUT_MAX_MS): a slow-but-answering API now
+ *  widens the limit from its own successes, and this failure-keyed valve
+ *  remains for the case where nothing succeeds at all. */
 const DELTA_SLOW_DWELL_POLLS = 10;
 /** Adaptiivisen delta-timeoutin katto, pohja ja kerroin (#303).
  *
