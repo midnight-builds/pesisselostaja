@@ -169,6 +169,25 @@ describe("reset-lattia (#303)", () => {
     expect(nextAfter).toBe(formatHelsinkiTimestamp(new Date(resetAt.getTime() + 1000)));
   });
 
+  it("lattia vanhenee AFTER_MARGIN_MS:n kuluttua — julkaisuviiveen suoja palaa", async () => {
+    // Keskiottelun rebuildissa reset-vastaus on vain siihen mennessä
+    // JULKAISTU historia; leimaltaan vanhempi mutta myöhemmin julkaistava
+    // tapahtuma jäisi pysyvän lattian yli delta-ikkunan ulkopuolelle.
+    vi.useFakeTimers();
+    try {
+      const resetAt = new Date(T0 - 60_000);
+      const { loop } = await pollResetThenNext(resetAt.toISOString());
+      expect(loop.resetFloorMs).not.toBeNull();
+      vi.advanceTimersByTime(181_000); // > AFTER_MARGIN_MS (180 s)
+      loop.lastFullFetchAt = Date.now(); // estä resyncin täyshaku
+      fetchMock.mockResolvedValueOnce(result([ev(1), ev(2)]));
+      await loop.fetchEventsForPoll();
+      expect(loop.resetFloorMs).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("selittämätön reset EI nosta lattiaa — katkaisija hoitaa sen tapauksen", async () => {
     // Leima vanhempi kuin after: palvelin resetoi syystä jota emme näe.
     // Lattian nostaminen tässä peittäisi katkaisijan mittaaman oireen.
