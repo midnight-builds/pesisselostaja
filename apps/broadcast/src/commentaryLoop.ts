@@ -1819,6 +1819,10 @@ export class CommentaryLoop {
     // se on johdettu serverDate - AFTER_MARGIN_MS -kaavalla ja voi siksi olla
     // leimaa vanhempi. Lattian ylittävä kursori säilyy ennallaan (ja sen
     // ETag kelpaa, koska `after`-merkkijono ei muutu).
+    // Vanhenna lattia kun marginaali on ehtinyt sen ohi — ks. resetFloorMs.
+    if (this.resetFloorMs !== null && Date.now() - this.resetFloorSetAtMs > AFTER_MARGIN_MS) {
+      this.resetFloorMs = null;
+    }
     const baseMs = this.deltaCursor?.afterMs ?? this.lastServerDateMs - AFTER_MARGIN_MS;
     const afterMs = this.resetFloorMs === null ? baseMs : Math.max(baseMs, this.resetFloorMs);
     const after =
