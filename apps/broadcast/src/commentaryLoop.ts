@@ -192,6 +192,44 @@ const DELTA_FETCH_TIMEOUT_SLOW_MS = 4_000;
  *  bigger change. 27.8.2026 (#290) delivered the first match's worth of data
  *  showing an API that behaves this way — see DELTA_FETCH_TIMEOUT_MS. */
 const DELTA_SLOW_DWELL_POLLS = 10;
+/** Adaptiivisen delta-timeoutin katto, pohja ja kerroin (#303).
+ *
+ *  Tämä on se "honest fix", jota DELTA_FETCH_TIMEOUT_MS:n ja
+ *  DELTA_SLOW_DWELL_POLLS:n kommentit lupasivat: raja avautuu MITATUSTA
+ *  onnistuneiden delta-hakujen kestosta, ei epäonnistumisista. 6.9.2026
+ *  (135689 + 135680) kiinteä 2 s abortoi ~11 % polleista, vaikka onnistuneet
+ *  deltat mitattiin max 1805 ms:iin — API:lla on iltoja, joina häntä on
+ *  sekunteja, ja silloin kiinteä raja tuottaa vain hukkapolleja ja
+ *  virheryöppyjä, jotka hidastavat pollausväliä juuri kiivaissa vaiheissa.
+ *
+ *  Efektiivinen raja on clamp(pohja 2 s, p95 × 2, katto 5 s) viimeisten
+ *  onnistuneiden delta-hakujen yli:
+ *  - p95 × 2, ei max × 2: yksi 4 s poikkeama ei saa raahata rajaa kattoon
+ *    koko loppuotteluksi; p95 seuraa tasoa ja unohtuu otoksen mukana.
+ *  - Pohja on entinen kiinteä raja: terveellä ~80 ms API:lla raja EI kiristy
+ *    alle 2 s:n, eli tämä voi vain löysätä, ei koskaan kiristää nykyisestä.
+ *  - Katto 5 s on issuen #303 ehdottama suoraviivainen raja: yhä
+ *    juuttuneen yhteyden ilmaisin (ei kohtaa mitattuja onnistumisia), mutta
+ *    ylittää 3 s kadenssin — sen ylityksen hoitaa run():n ankkurointi, sama
+ *    ominaisuus jonka varassa 4 s virhesarjaraja on aina ollut.
+ *
+ *  Virhesarjaventtiili (DELTA_FETCH_TIMEOUT_SLOW_MS) säilyy pohjalla:
+ *  se reagoi tilanteeseen, jossa MIKÄÄN ei mene läpi, jolloin otoksessa ei
+ *  ole tuoreita kestoja joista adaptiivinen raja voisi oppia. */
+const DELTA_ADAPTIVE_TIMEOUT_MAX_MS = 5_000;
+const DELTA_ADAPTIVE_MULTIPLIER = 2;
+/** Otoksen koko: ~5 min oletuskadenssia — tuore taso, ei koko ottelun
+ *  historia. Rullaava (vanhin poistuu), joten hidas ilta unohtuu kun API
+ *  tervehtyy. */
+const DELTA_ADAPTIVE_SAMPLE_SIZE = 100;
+
+/** p95 pienestä otoksesta lokisilmää ja timeoutia varten — sama
+ *  interpoloimattomuusperiaate kuin formatFetchDurations. Tyhjästä 0. */
+export function p95(samples: number[]): number {
+  if (samples.length === 0) return 0;
+  const sorted = [...samples].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil((sorted.length - 1) * 0.95))] as number;
+}
 /** Metadata (roster) fetch timeout: the startup fetch and the in-match roster
  *  refresh (`maybeRefreshRoster`).
  *
