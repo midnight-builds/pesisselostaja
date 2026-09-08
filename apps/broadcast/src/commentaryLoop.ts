@@ -612,9 +612,21 @@ export class CommentaryLoop {
    *  reset-vastauksena — livenä 6.9.2026 kursori jäi useaksi ikkunaksi tilaan
    *  "ei kursoria" ja täyshakuja oli 5/8 pollista. Marginaalin tehtävän
    *  (julkaisuviivettä vanhempien tapahtumien kiinnisaanti) hoitaa tässä
-   *  tilanteessa reset-vastaus itse: se on koko historia ja adoptoidaan
-   *  sellaisenaan, joten lattian yli hyppääminen ei voi pudottaa tapahtumia. */
+   *  tilanteessa reset-vastaus itse: se on koko SIIHEN MENNESSÄ JULKAISTU
+   *  historia ja adoptoidaan sellaisenaan.
+   *
+   *  Rehellinen aukko: tapahtuma, joka on leimattu ennen reset-hetkeä mutta
+   *  julkaistaan vasta sen jälkeen (julkaisuviive 68–123 s, ks.
+   *  AFTER_MARGIN_MS), ei ole reset-vastauksessa eikä mahdu lattian yli
+   *  delta-ikkunaan. Siksi lattia VANHENEE AFTER_MARGIN_MS:n kuluttua
+   *  asettamisestaan: siihen mennessä serverDate − marginaali on noussut
+   *  lattian ohi, joten vanheneminen ei maksa mitään, ja marginaalin suoja
+   *  palaa täysimittaisena. Vanhenemisen ali-ikkunassa ainoa suoja on 60 s
+   *  resync-täyshaku (RESYNC_EVERY_MS), joka hakee ilman `after`-rajausta —
+   *  pahin seuraus on siis ≤ ~60 s lisäviive yhdelle tapahtumalle
+   *  keskiottelun rebuildissa, ei tapahtuman katoaminen. */
   private resetFloorMs: number | null = null;
+  private resetFloorSetAtMs = 0;
   /** Cumulative per-run poll statistics, surfaced on the mixer's heartbeat
    *  line — 304 skips, full-fetch fallbacks and reset
    *  answers are otherwise invisible in the log (the 304 path is deliberately
