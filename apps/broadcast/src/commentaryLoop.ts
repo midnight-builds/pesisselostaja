@@ -1744,8 +1744,8 @@ export class CommentaryLoop {
     // Nosta kursorin lattia leiman yli (#303): seuraava delta ei enää osu
     // saman reset-hetken alle, joten ryöppy päättyy ensimmäiseen resettiin
     // eikä kestä AFTER_MARGIN_MS:ää täyshakuina. +1 s koska palvelimen
-    // vertailun tiukkuutta (< vai <=) ei tunneta; tapahtumia ei voi jäädä
-    // väliin, koska tämä vastaus on jo koko historia (ks. resetFloorMs).
+    // vertailun tiukkuutta (< vai <=) ei tunneta. Julkaisujonossa vielä
+    // olevien tapahtumien aukko ja sen suoja: ks. resetFloorMs.
     if (explained) {
       this.resetFloorMs = Math.max(this.resetFloorMs ?? 0, resetAtMs + 1_000);
       this.resetFloorSetAtMs = Date.now();
