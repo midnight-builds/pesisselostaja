@@ -38,11 +38,10 @@ function fakeFfmpeg(fifoPath: string, lifetimeMs = 600_000): ChildProcess {
 }
 
 let runDir: string;
-let logSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   runDir = mkdtempSync(join(tmpdir(), "pesis-drain-"));
-  logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  vi.spyOn(console, "log").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
