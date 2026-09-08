@@ -929,7 +929,12 @@ export class CommentaryLoop {
     const result = await fetch();
     // Vasta onnistumisen jälkeen: heitto ohittaa tämän rivin, eikä
     // aikakatkaistu haku päädy otokseen. Tarkoituksella EI `finally`.
-    this.pollWindow.fetchMs[size].push(Date.now() - startedAt);
+    const durationMs = Date.now() - startedAt;
+    this.pollWindow.fetchMs[size].push(durationMs);
+    if (size === "delta") {
+      this.recentDeltaMs.push(durationMs);
+      if (this.recentDeltaMs.length > DELTA_ADAPTIVE_SAMPLE_SIZE) this.recentDeltaMs.shift();
+    }
     return result;
   }
 
