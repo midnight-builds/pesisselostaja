@@ -598,6 +598,19 @@ export class CommentaryLoop {
    *  stays the same — the base only advances when new events arrive, so quiet
    *  stretches poll a stable URL and get cheap 304s. */
   private deltaCursor: { after: string; afterMs: number; etag: string | null } | null = null;
+  /** Rullaava otos onnistuneiden delta-hakujen kestoista; ainoa syöte
+   *  adaptiiviselle timeoutille (#303). Eri asia kuin pollWindow.fetchMs,
+   *  joka nollataan joka yhteenvetoikkunassa. */
+  private recentDeltaMs: number[] = [];
+  /** Alaraja delta-kursorin `after`-arvolle: viimeisin reset-leima + 1 s
+   *  (#303). Ilman tätä jokainen AFTER_MARGIN_MS:n taakse johdettu `after`
+   *  osuu reset-hetken alle uudelleen ja jokainen polli vetää koko historian
+   *  reset-vastauksena — livenä 6.9.2026 kursori jäi useaksi ikkunaksi tilaan
+   *  "ei kursoria" ja täyshakuja oli 5/8 pollista. Marginaalin tehtävän
+   *  (julkaisuviivettä vanhempien tapahtumien kiinnisaanti) hoitaa tässä
+   *  tilanteessa reset-vastaus itse: se on koko historia ja adoptoidaan
+   *  sellaisenaan, joten lattian yli hyppääminen ei voi pudottaa tapahtumia. */
+  private resetFloorMs: number | null = null;
   /** Cumulative per-run poll statistics, surfaced on the mixer's heartbeat
    *  line — 304 skips, full-fetch fallbacks and reset
    *  answers are otherwise invisible in the log (the 304 path is deliberately
@@ -1639,7 +1652,12 @@ export class CommentaryLoop {
       // in four instead of to the state that needs it.
       const loosened =
         this.consecutiveFetchFailures >= FETCH_FAILURE_ALARM_STREAK || this.slowDeltaDwellPolls > 0;
-      return loosened ? DELTA_FETCH_TIMEOUT_SLOW_MS : DELTA_FETCH_TIMEOUT_MS;
+      // Mitatusta kestosta avautuva raja (#303) — ks. DELTA_ADAPTIVE_TIMEOUT_MAX_MS.
+      const adaptive = Math.min(
+        DELTA_ADAPTIVE_TIMEOUT_MAX_MS,
+        Math.max(DELTA_FETCH_TIMEOUT_MS, p95(this.recentDeltaMs) * DELTA_ADAPTIVE_MULTIPLIER)
+      );
+      return loosened ? Math.max(adaptive, DELTA_FETCH_TIMEOUT_SLOW_MS) : adaptive;
     }
     if (size === "meta") return META_FETCH_TIMEOUT_MS;
     return Math.max(FULL_FETCH_TIMEOUT_MS, this.pollIntervalMs);
