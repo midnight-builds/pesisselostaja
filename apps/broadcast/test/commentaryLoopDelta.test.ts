@@ -402,10 +402,13 @@ describe("CommentaryLoop match-start reset streak (issue #46 root cause)", () =>
    *  created, so the server answers every delta with that instant — and the
    *  complete history alongside it. Verified live 2026-07-28. */
   function mockStartOfMatchResets() {
+    // Palvelimen aito käytös: reset vain kun `after` on datan luontihetkeä
+    // vanhempi. sv-SE-muotoinen after on leksikografisesti vertailukelpoinen.
+    const resetThreshold = formatHelsinkiTimestamp(new Date(RESET_AT_ISO));
     fetchMock.mockImplementation(async (_id, opts) => {
       const after = (opts as { after?: string } | undefined)?.after;
       const events = [ev({ id: 1 }, [palo]), ev({ id: 2 }, [run])];
-      return after ? result(events, { reset: RESET_AT_ISO }) : result(events);
+      return after && after < resetThreshold ? result(events, { reset: RESET_AT_ISO }) : result(events);
     });
   }
 
@@ -419,12 +422,15 @@ describe("CommentaryLoop match-start reset streak (issue #46 root cause)", () =>
       fetchMock.mockClear();
       for (let i = 0; i < 20; i++) await loop.fetchEventsForPoll();
 
-      // Before the fix this was 2 requests per poll (delta + fallback full)
-      // and the breaker turned delta off after 5 of them.
+      // Before #46's fix this was 2 requests per poll (delta + fallback full)
+      // and the breaker turned delta off after 5 of them. Since #303 the
+      // streak is also SHORT: the first reset raises the cursor floor past
+      // the reset instant, so the remaining 19 polls are ordinary deltas
+      // instead of full-history reset answers.
       expect(fetchMock).toHaveBeenCalledTimes(20);
       expect(loop.deltaFetch).toBe(true);
       expect(loop.history.events.map((e) => e.id)).toEqual([1, 2]);
-      expect(loop.pollStatsSummary).toContain("reset 20");
+      expect(loop.pollStatsSummary).toContain("reset 1");
       expect(loop.pollStatsSummary).not.toContain("katkaisija");
 
       // One line for the whole streak, not one per poll.
@@ -447,7 +453,12 @@ describe("CommentaryLoop match-start reset streak (issue #46 root cause)", () =>
 
       fetchMock.mockResolvedValueOnce(result([ev({ id: 3 }, [run])], { serverDateMs: T0 + 3000 }));
       await loop.fetchEventsForPoll(); // healthy delta clears the streak
-      mockStartOfMatchResets();
+      // Palvelin resetoi uudelleen UUDELLA leimalla (data luotiin uusiksi
+      // kesken ottelun) — #303:n lattia on vanhan leiman kohdalla eikä estä
+      // tätä, koska uusi leima on kursoria uudempi.
+      fetchMock.mockResolvedValueOnce(
+        result([ev({ id: 1 }, [palo]), ev({ id: 2 }, [run]), ev({ id: 3 }, [run])], { reset: new Date(T0 + 2000).toISOString() })
+      );
       await loop.fetchEventsForPoll();
 
       const resetLines = logSpy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("reset-leiman"));
