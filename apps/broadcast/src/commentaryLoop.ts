@@ -304,7 +304,10 @@ export function formatFetchDurations(samples: number[]): string {
  *  BEFORE the instant the server created that match's online data, which is
  *  precisely when the server answers with `reset` (see LiveEventsResponse.reset
  *  and handleResetResponse). That burst is expected, self-healing and cheap —
- *  as long as the reset answer is used as the full snapshot it already is. */
+ *  as long as the reset answer is used as the full snapshot it already is.
+ *  Since #303 the burst is also SHORT: the first reset raises the cursor
+ *  floor past the reset instant (resetFloorMs), so the follow-up polls go
+ *  back to real deltas instead of resetting for the whole margin. */
 const AFTER_MARGIN_MS = 180 * 1000;
 /** Periodic full refetch that replaces the local delta-merged history —
  *  cheap insurance against anything the merge can't see (server rewrites,
