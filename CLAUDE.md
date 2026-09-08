@@ -317,6 +317,11 @@ Without git available the fields read `unknown` and the UI says "versio
 tuntematon" — deliberately, rather than showing nothing.
 
 ## After completing a feature
+0. **Aja `npm run lint` ennen PR:n avaamista.** Auto-commit-hook ajaa vain
+   typecheckin ja buildin, EI linttiä — ja CI:n ensimmäinen vaihe on lint, joka
+   kaataa koko putken yhdestä käyttämättömästä muuttujasta. Näin kävi 7.9.2026
+   (PR #308:n testitiedosto), ja CI oli punaisena kolmen mergen ajan ennen kuin
+   kukaan huomasi.
 1. Workspace `src/` changes build and commit themselves (hook above) — verify build was clean.
 2. Commit other changes (tests, configs, docs) manually.
 3. For web/server changes: `npm run build -w @pesisselostaja/web` (and `-w @pesisselostaja/server`
