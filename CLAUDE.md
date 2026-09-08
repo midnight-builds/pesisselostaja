@@ -244,6 +244,13 @@ everything is fine.
 command's return; check it separately with
 `gh api repos/.../pulls/<n> --jq '.merged'`.
 
+**Jokaisen mergen jälkeen: odota mainin CI vihreäksi ennen kuin jatkat.**
+Merge käynnistää push-ajon mainissa; katso se loppuun (`gh run list --branch
+main --limit 1`, tai `gh run watch <id> --exit-status`) ja reagoi punaiseen
+heti. Sääntö on olemassa, koska 7.9.2026 mainin CI meni punaiseksi PR #308:n
+mergessä eikä kukaan katsonut — vika huomattiin vasta kolme mergeä myöhemmin,
+jolloin jokainen välissä avattu PR näytti punaista muiden viasta.
+
 When integrating anyway:
 
 - **`git fetch` after every `gh pr merge`.** A "no conflicts" result computed against a
