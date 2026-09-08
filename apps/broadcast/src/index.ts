@@ -127,6 +127,9 @@ async function main(): Promise<void> {
       ttsEngine: elevenLabs ? "elevenlabs" : "piper",
       elevenLabsCharsUsed: elevenLabs?.totalCharsUsed ?? 0,
       draining: mixer?.draining ?? false,
+      silenced: loop.silenced,
+      matchStartTime: loop.matchStartTime,
+      recordingLate: loop.recordingLate,
     });
 
   // Katvekuvan tekstirivit päivitetään samalla pollin tahdilla kuin

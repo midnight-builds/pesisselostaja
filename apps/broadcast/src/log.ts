@@ -127,6 +127,10 @@ export type EventCode =
   | "control.narration_gain_clipping"
   | "control.delta_fetch"
   | "control.poll_interval"
+  // Hiljennys ja kirjaus myöhässä (#298)
+  | "control.silenced"
+  | "speech.silenced"
+  | "speech.recording_late"
   // narration FIFO
   | "fifo.write_failed"
   | "fifo.tick_failed"

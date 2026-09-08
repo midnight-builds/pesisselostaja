@@ -158,6 +158,7 @@ export function knobs(p: Partial<ControlKnobs> = {}): ControlKnobs {
     narrationGain: 1.3,
     deltaFetch: true,
     pollIntervalMs: 3000,
+    silenced: false,
     ...p,
   };
 }

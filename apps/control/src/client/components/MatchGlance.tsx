@@ -4,7 +4,7 @@ import { TELEMETRY_STALE_MS } from "../../shared/types";
 import { targetDeathReason } from "../../shared/targetHealth";
 import { watchUrlForVideo } from "../../shared/youtubeUrl";
 import { api } from "../api";
-import { periodName, seconds, since } from "../format";
+import { fiTime, periodName, seconds, since } from "../format";
 import { NarrationList } from "./NarrationList";
 
 /** Ottelunaikainen kertasilmäys (#186).
@@ -295,6 +295,28 @@ function alertsFor(live: LiveState): string[] {
         : "Selostettu lähetys on päättynyt YouTubessa — katsojat eivät näe eivätkä kuule lähetystä."
     );
   }
+  // #298: rivit relayn omasta telemetriasta (#97), ei napin paikallistilasta.
+  // Vanhentunut telemetria pudottaa rivit — vanha "selostus hiljennetty" olisi
+  // pelkkää arvausta relaystä, joka ei enää raportoi.
+  const telemetry = freshTelemetry(live);
+  if (telemetry?.silenced) {
+    // Tahallinen tila, mutta pysyvä rivi silti: unohtunut hiljennys on
+    // äänetön lähetys loppuotteluksi, eikä mikään muu ruudulla kerro sitä.
+    out.push("Selostus on hiljennetty — katsojat kuulevat vain kentän äänet.");
+  }
+  if (telemetry?.match.recordingLate) {
+    const start = telemetry.match.startTime ?? null;
+    const startMs = start ? Date.parse(start) : NaN;
+    const late =
+      Number.isFinite(nowMs) && Number.isFinite(startMs)
+        ? Math.max(0, Math.round((nowMs - startMs) / 60_000))
+        : null;
+    out.push(
+      `Ottelua ei kirjata tulospalveluun${
+        start ? ` (alku ${fiTime(start)}${late !== null ? `, nyt +${late} min` : ""})` : ""
+      } — selostus alkaa heti kun kirjaus alkaa.`
+    );
+  }
   return out;
 }
 
@@ -350,7 +372,8 @@ export function MatchGlance({ live, notify }: Props) {
       served != null &&
       served.narrationDelayMs === pending.knobs.narrationDelayMs &&
       served.narrationGain === pending.knobs.narrationGain &&
-      served.announceBatterChanges === pending.knobs.announceBatterChanges;
+      served.announceBatterChanges === pending.knobs.announceBatterChanges &&
+      served.silenced === pending.knobs.silenced;
     // Joko palvelin sanoi saman, tai paikallinen arvo on elänyt tarpeeksi
     // kauan ilman vahvistusta. Kumpikin päättää sen: jäätynyt luku ruudulla on
     // pahempi kuin hetken välkähdys takaisin palvelimen arvoon.
@@ -398,6 +421,15 @@ export function MatchGlance({ live, notify }: Props) {
     if (!knobs) return;
     const next = !knobs.announceBatterChanges;
     apply({ ...knobs, announceBatterChanges: next }, () => api.knobs({ announceBatterChanges: next }));
+  };
+
+  /** Hiljennys (#298). Ei varmistusdialogia: purku on yhtä halpa kuin
+   *  kytkentä (relay poimii arvon ~3 s:ssa), ja tila näkyy sekä napissa että
+   *  kortin pysyvässä hälytysrivissä. */
+  const toggleSilenced = () => {
+    if (!knobs) return;
+    const next = !knobs.silenced;
+    apply({ ...knobs, silenced: next }, () => api.knobs({ silenced: next }));
   };
 
   const telemetry = freshTelemetry(live);
@@ -525,6 +557,31 @@ export function MatchGlance({ live, notify }: Props) {
           <span className="toggle__body">
             <span className="toggle__label">Vaihtoselostus</span>
             <span className="toggle__hint">Lyöjän vaihdot kuulutetaan</span>
+          </span>
+          <span className="toggle__lamp" aria-hidden="true" />
+        </button>
+
+        {/* Hiljennys (#298): koko selostus pois ilman relayn restarttia —
+            kuva ja kentän äänet jatkuvat. Syntyi ottelusta 146998 (29.8.2026),
+            jossa kirjaaja ei avannut ottelua ja odottelutäyte toisti itseään
+            koko pelin. Lamppu palaa kun PUHE ON PÄÄLLÄ, jotta pois-tila
+            erottuu yhdellä vilkaisulla samoin päin kuin vaihtoselostuksessa. */}
+        <button
+          type="button"
+          className={`toggle ${knobs && !knobs.silenced ? "toggle--on" : ""}`}
+          role="switch"
+          aria-checked={knobs ? !knobs.silenced : true}
+          disabled={!knobs}
+          onClick={toggleSilenced}
+          data-testid="silence-toggle"
+        >
+          <span className="toggle__body">
+            <span className="toggle__label">Selostus</span>
+            <span className="toggle__hint">
+              {knobs?.silenced
+                ? "Hiljennetty — vain kentän äänet"
+                : "Tapahtumat selostetaan lähetykseen"}
+            </span>
           </span>
           <span className="toggle__lamp" aria-hidden="true" />
         </button>

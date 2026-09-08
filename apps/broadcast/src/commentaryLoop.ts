@@ -75,6 +75,13 @@ const SUMMARY_EVERY_N = 10;
 const IDLE_FILLER_MS = 90 * 1000;
 /** Pre-game: welcome-filler cadence while waiting for the match to start. */
 const WELCOME_FILLER_MS = 90 * 1000;
+/** Kirjaus myöhässä (#298): kun ottelua ei ole avattu tulospalveluun vielä
+ *  tämän verran ILMOITETUN alkuajan jälkeen, tervetulotäyte pudotetaan pois
+ *  ("mennään kentän äänillä") ja tila julkaistaan telemetriassa ohjaamon
+ *  hälytysriville. Ankkuri on nimenomaan tulospalvelun alkuaika, ei relayn
+ *  käynnistyshetki — relay käynnistetään usein reilusti etuajassa, ja silloin
+ *  odottelutäyte on juuri oikein. */
+const RECORDING_LATE_AFTER_MS = 10 * 60 * 1000;
 /** Full events fetch timeout (see apiTimeoutMs() for the effective value).
  *
  *  10 s, not the earlier 4 s: a full events fetch returns the WHOLE match
@@ -484,6 +491,15 @@ export class CommentaryLoop {
    *  Loop omistaa tämän siksi, että loop on ainoa control-tiedoston lukija;
    *  mikseri lukee arvon takaisinkutsulla, kuten `sourceIngest`inkin. */
   private narrationGainValue: number;
+  /** Hiljennys (#298): operaattorin kytkemä selostuksen esto, control-
+   *  tiedoston `silenced`-avain. Hiljennettynä speak() ajaa kaiken
+   *  kirjanpitonsa (dedup, pisteet, vuorot) mutta EI syntetisoi klippiä —
+   *  gain 0:sta poiketen ElevenLabs-merkkejä ei kulu eikä jonoon kerry
+   *  mitään. Eri asia kuin `NarrationLine.muted` ("ffmpeg ei ollut
+   *  kytkeytynyt"): tämä on tahtotila, tuo on olosuhde. */
+  private silencedValue = false;
+  /** Kirjaus myöhässä -varoitus lokitetaan kerran, ei joka täytekierroksella. */
+  private recordingLateLogged = false;
   /** Latched permanently true the first time the ffmpeg reader is seen
    *  attached (or immediately when there is no status port — dry-run/tests).
    *  Before the latch, speak() runs its bookkeeping but skips the sink handoff
@@ -744,6 +760,32 @@ export class CommentaryLoop {
     return this.narrationGainValue;
   }
 
+  /** Hiljennys (#298) voimassa? Telemetria julkaisee tämän, jotta ohjaamon
+   *  kortti näyttää tahtotilan relayn suusta eikä omasta napistaan. */
+  get silenced(): boolean {
+    return this.silencedValue;
+  }
+
+  /** Tulospalvelun ilmoittama alkuaika telemetriaa varten, tai null ennen
+   *  metadatan hakua / kun kenttä puuttuu. HUOM: API antaa ajan Suomen aikana
+   *  offsetilla ("2026-08-05T18:00:00+03:00"), EI UTC:nä — Date.parse
+   *  käsittelee offsetin oikein, mutta älä oleta Z-päätettä. */
+  get matchStartTime(): string | null {
+    return this.meta?.date ?? null;
+  }
+
+  /** Kirjaus myöhässä (#298): ottelun ilmoitetusta alkuajasta on kulunut yli
+   *  RECORDING_LATE_AFTER_MS eikä tulospalvelussa ole vieläkään yhtään
+   *  tapahtumaa — kirjaaja ei (ainakaan vielä) kirjaa tätä ottelua. Laukaisee
+   *  täytteen pudotuksen ja ohjaamon hälytysrivin; tapahtumaselostus
+   *  käynnistyy silti heti kun ensimmäinen tapahtuma näkyy. */
+  get recordingLate(): boolean {
+    if (this.matchStarted || !this.meta?.date) return false;
+    const startMs = Date.parse(this.meta.date);
+    if (!Number.isFinite(startMs)) return false;
+    return Date.now() > startMs + RECORDING_LATE_AFTER_MS;
+  }
+
   /** Ikkunoitu yhteenveto jokaisesta pollista (#120).
    *
    *  Miksi yhteenveto eikä rivi per polli, jota issue ehdotti: ohjaamo johtaa
@@ -893,6 +935,10 @@ export class CommentaryLoop {
       narrationGain: this.narrationGainValue,
       deltaFetch: this.deltaFetch,
       pollIntervalMs: this.pollIntervalMs,
+      // Hiljennys säilyy restartin yli samaa #206-polkua kuin muutkin säädöt:
+      // applyControlValues poimi vanhan arvon yllä, ja se kirjoitetaan tässä
+      // takaisin. Operaattori hiljensi syystä, joka ei poistu restartissa.
+      silenced: this.silencedValue,
     });
   }
 
@@ -1118,6 +1164,27 @@ export class CommentaryLoop {
           "control.narration_gain",
           `Selostuksen gain ${when === "käynnistyksessä" ? "säilytetty" : "vaihdettu"} ${when}: ${next} (control-tiedostosta).`
         );
+      }
+    }
+    // Hiljennys (#298): operaattorin "selostus pois / päälle". Sama kelpuutus
+    // kuin muilla: vain aito boolean kelpaa, puolikas editti ei muuta mitään.
+    if (typeof parsed.silenced === "boolean" && parsed.silenced !== this.silencedValue) {
+      this.silencedValue = parsed.silenced;
+      logInfo(
+        "control.silenced",
+        `Hiljennys ${when === "käynnistyksessä" ? "säilytetty" : "vaihdettu"} ${when}: ${this.silencedValue ? "PÄÄLLÄ (selostus pois)" : "POIS (selostus päällä)"} (control-tiedostosta).`
+      );
+      // Purku kesken ajon: katsoja on ollut pimennossa, joten puhutaan yksi
+      // tuore tilannekatsaus ennen paluuta tapahtumaselostukseen — sama malli
+      // kuin maybeLatchNarrationReadyn latch-recapissa. Käynnistyksessä
+      // säilytetty tila ei ole purku, eikä alkamattomassa ottelussa ole
+      // katsattavaa (tervetulotäyte hoitaa sen).
+      if (when === "ajon aikana" && !this.silencedValue && this.matchStarted && this.meta) {
+        const ctx = this.buildContext();
+        const recap = this.state.finished
+          ? formatMatchEnd(this.meta, ctx)
+          : formatSituationSummary(this.meta, ctx);
+        this.speak(recap, false, `silence-recap:${recap}`);
       }
     }
     // Delta polling on/off live — false reverts to plain full fetches on the
@@ -1922,6 +1989,25 @@ export class CommentaryLoop {
 
   private async maybeAnnounceSummary(meta: MatchMetadata): Promise<void> {
     const now = Date.now();
+    // Hiljennettynä (#298) täytekierros ohitetaan kokonaan ENNEN
+    // ajastuspäätöstä: speak()-portti estäisi synteesin joka tapauksessa,
+    // mutta polttaisi silti dedupen ja lastSpeechAt:n 90 s välein — purun
+    // jälkeen ensimmäinen aito täyte lykkääntyisi turhaan.
+    if (this.silencedValue) return;
+    // Kirjaus myöhässä (#298): ilmoitettu alkuaika ohitettu reilusti eikä
+    // yhtään tapahtumaa — tervetulotäytteen toistaminen läpi ottelun kuulosti
+    // rikkinäiseltä (146998, 29.8.2026). Mennään kentän äänillä; ohjaamon
+    // hälytysrivi kertoo syyn. Tapahtumaselostukseen tämä ei koske.
+    if (!this.matchStarted && this.recordingLate) {
+      if (!this.recordingLateLogged) {
+        this.recordingLateLogged = true;
+        logWarn(
+          "speech.recording_late",
+          `Ottelua ei kirjata tulospalveluun (ilmoitettu alku ${this.meta?.date ?? "?"}) — tervetulotäyte pois, kentän äänet jatkuvat.`
+        );
+      }
+      return;
+    }
     // The timing decision itself lives in core (decideFiller, issue #62) —
     // it used to be duplicated here and in apps/web. Thresholds are passed in
     // because they differ on purpose between the two apps; the side effects
@@ -2040,6 +2126,16 @@ export class CommentaryLoop {
     // text (which repeats: "Toinen palo" happens many times a match).
     const clip = { id: `c${++this.clipSeq}`, text };
     this.observer?.detected(clip);
+    // Hiljennys (#298): kirjanpito ajettiin yllä normaalisti (dedup,
+    // announcementCount, lastSpeechAt), mutta klippiä ei syntetisoida — ei
+    // TTS-kutsua, ei jonoa, ei ElevenLabs-merkkejä. Timeline-merkintä on
+    // spoken(muted=true), koska se tarkoittaa "kukaan ei kuullut tätä" —
+    // syy (tahto vs. irronnut ffmpeg) näkyy tästä lokirivistä.
+    if (this.silencedValue) {
+      logInfo("speech.silenced", `Selostus (hiljennetty operaattorin pyynnöstä): ${text}`);
+      this.observer?.spoken(clip, true);
+      return;
+    }
     if (!this.narrationEverReady) {
       this.suppressedBeforeAttach = true;
       logWarn("speech.muted", `Selostus (vaimennettu — ffmpeg ei vielä kytkeytynyt): ${text}`);

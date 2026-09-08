@@ -144,6 +144,7 @@ export function parseRelayStatus(text: string): RelayTelemetry | null {
     source: { state: sourceState(source.state), detail: str(source.detail) },
     endReason: endReason(raw.endReason),
     draining: bool(raw.draining),
+    silenced: bool(raw.silenced),
     match: {
       finished: bool(match.finished),
       eventCount: num(match.eventCount),
@@ -152,6 +153,10 @@ export function parseRelayStatus(text: string): RelayTelemetry | null {
       // väitteeksi "ei viivettä lainkaan" — tarkalleen se sekaannus, jota
       // #120 yrittää poistaa.
       sourceLagMs: optionalNum(match.sourceLagMs),
+      startTime: str(match.startTime),
+      // Puuttuva avain (vanha deploy) = false — hälytysrivi ei saa syttyä
+      // pelkän deployn iän takia.
+      recordingLate: bool(match.recordingLate),
     },
     narration: {
       detected: num(narration.detected),

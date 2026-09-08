@@ -121,6 +121,14 @@ export interface RelayTelemetry {
      *  vanhempi deploy ei julkaise tätä lainkaan — kumpikin tarkoittaa "ei
      *  mitattu". Vain relay mittaa tämän; ohjaamo lukee eikä päättele (#97). */
     sourceLagMs: number | null;
+    /** Tulospalvelun ilmoittama alkuaika (ISO offsetilla, Suomen aikaa) tai
+     *  null — optional, koska vanhan deployn snapshotissa avainta ei ole
+     *  (#298). */
+    startTime?: string | null;
+    /** Kirjaus myöhässä (#298): alkuajasta kulunut yli relayn kynnyksen eikä
+     *  yhtään tapahtumaa. Relay päättelee, ohjaamo näyttää (#97). Puuttuva
+     *  (vanha deploy) = false. */
+    recordingLate?: boolean;
   };
   narration: {
     detected: number;
@@ -161,6 +169,10 @@ export interface RelayTelemetry {
    *  vasta drainin valmistuttua, joten hallittu lopetus (#153) ei laukea
    *  tämän aikana. */
   draining?: boolean;
+  /** Hiljennys voimassa relayn omasta suusta (#298). Kortin "Selostus
+   *  hiljennetty" -rivi lukee tätä, ei nappinsa paikallista tilaa. Puuttuva
+   *  (vanha deploy) = false. */
+  silenced?: boolean;
 }
 
 /** Ohjaamon pysyväisasetukset (#133).
@@ -245,6 +257,10 @@ export interface ControlKnobs {
   narrationGain: number;
   deltaFetch: boolean;
   pollIntervalMs: number;
+  /** Hiljennys (#298): selostus kokonaan pois operaattorin pyynnöstä. Relay
+   *  estää klippisynteesin (kirjanpito jatkuu), joten tämä ei ole gain 0 —
+   *  TTS-merkkejä ei kulu eikä jonoon kerry mitään. */
+  silenced: boolean;
 }
 
 /** Ohjaamon YouTube-API-havainto LÄHTEEN sisääntulosta. Ohjaamo on ainoa jolla

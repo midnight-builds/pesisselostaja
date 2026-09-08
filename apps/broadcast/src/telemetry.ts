@@ -85,6 +85,15 @@ export interface RelayStatus {
      *  mitata (#120). Null ei tarkoita nollaa: `created` on valinnainen kenttä,
      *  ja "ei mitattu" on eri asia kuin "ei viivettä". */
     sourceLagMs?: number | null;
+    /** Tulospalvelun ilmoittama alkuaika (ISO offsetilla, Suomen aikaa — ei
+     *  UTC), tai null ennen metadatan hakua (#298). Ohjaamon hälytysrivi
+     *  näyttää tämän. Optional: vanhojen deployjen snapshoteissa avainta ei
+     *  ole. */
+    startTime?: string | null;
+    /** Kirjaus myöhässä (#298): alkuajasta on kulunut yli kynnyksen eikä
+     *  tulospalvelussa ole yhtään tapahtumaa — ottelua ei (vielä) kirjata.
+     *  Relay päättelee, ohjaamo vain näyttää (#97). Optional kuten yllä. */
+    recordingLate?: boolean;
   };
   narration: {
     detected: number;
@@ -115,6 +124,11 @@ export interface RelayStatus {
    *  running, and the operator must not mistake it for a hung relay. Optional:
    *  absent in snapshots from older deploys. */
   draining?: boolean;
+  /** Hiljennys (#298): operaattori on kytkenyt selostuksen pois control-
+   *  tiedoston `silenced`-avaimella. Eri asia kuin `narration.muted`-laskuri
+   *  (klippejä ffmpegin ollessa irti). Optional: vanhat deployt eivät
+   *  kirjoita tätä. */
+  silenced?: boolean;
 }
 
 /** Everything the snapshot cannot observe for itself, supplied by the relay on
@@ -138,6 +152,12 @@ export interface StatusProbe {
   endReason?: SourceEndReason | null;
   /** True during the post-source drain phase (#301). */
   draining?: boolean;
+  /** Hiljennys voimassa (#298). */
+  silenced: boolean;
+  /** Tulospalvelun ilmoittama alkuaika (ISO) tai null (#298). */
+  matchStartTime: string | null;
+  /** Kirjaus myöhässä (#298). */
+  recordingLate: boolean;
 }
 
 export interface TelemetryOptions {
@@ -249,6 +269,8 @@ export class Telemetry {
         eventCount: probe.eventCount,
         lastEventAt: probe.lastEventAt,
         sourceLagMs: probe.sourceLagMs,
+        startTime: probe.matchStartTime,
+        recordingLate: probe.recordingLate,
       },
       narration: {
         detected: this.counts.detected,
@@ -260,6 +282,7 @@ export class Telemetry {
       lastProblem: this.lastProblem,
       ...(probe.endReason ? { endReason: probe.endReason } : {}),
       ...(probe.draining ? { draining: true } : {}),
+      ...(probe.silenced ? { silenced: true } : {}),
     };
     this.writeAtomic(this.statusPath, JSON.stringify(status, null, 2) + "\n");
   }
