@@ -1798,8 +1798,16 @@ export class CommentaryLoop {
     ) {
       return this.fetchFullEvents();
     }
-    const afterMs = this.deltaCursor?.afterMs ?? this.lastServerDateMs - AFTER_MARGIN_MS;
-    const after = this.deltaCursor?.after ?? formatHelsinkiTimestamp(new Date(afterMs));
+    // Reset-lattia (#303) sovelletaan myös olemassa olevaan kursoriin: myös
+    // se on johdettu serverDate - AFTER_MARGIN_MS -kaavalla ja voi siksi olla
+    // leimaa vanhempi. Lattian ylittävä kursori säilyy ennallaan (ja sen
+    // ETag kelpaa, koska `after`-merkkijono ei muutu).
+    const baseMs = this.deltaCursor?.afterMs ?? this.lastServerDateMs - AFTER_MARGIN_MS;
+    const afterMs = this.resetFloorMs === null ? baseMs : Math.max(baseMs, this.resetFloorMs);
+    const after =
+      this.deltaCursor !== null && this.deltaCursor.afterMs === afterMs
+        ? this.deltaCursor.after
+        : formatHelsinkiTimestamp(new Date(afterMs));
     const res = await this.timedFetch("delta", () =>
       fetchLiveEvents(this.config.matchId, {
         apiBase: this.config.apiBase,
