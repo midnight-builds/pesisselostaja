@@ -69,7 +69,13 @@ const MAX_NARRATION_DELAY_MS = 30_000;
 const MIN_NARRATION_GAIN = 0.5;
 const MAX_NARRATION_GAIN = 2;
 /** Gain on murtoluku, joten se EI saa kulkea `clamp`in läpi — se pyöristää
- *  kokonaisluvuksi, ja 1.3 muuttuisi ykköseksi. */
+ *  kokonaisluvuksi, ja 1.3 muuttuisi ykköseksi.
+ *
+ *  VAIN KIRJOITUSPOLULLE (#323). Lukupolku palauttaa tiedoston arvon
+ *  sellaisenaan: ohjaamo lukee, se ei päättele (#97). Kun relay on mykistetty
+ *  (`narrationGain: 0`), clampattu luku näytti ohjaamossa 0.50:nä ja
+ *  "Selostus liian hiljaa" olisi kirjoittanut 0.55 — mykistys olisi purkautunut
+ *  huomaamatta kesken elävän lähetyksen. */
 function clampGain(value: number): number {
   const bounded = Math.min(MAX_NARRATION_GAIN, Math.max(MIN_NARRATION_GAIN, value));
   // Kaksi desimaalia: liukusäätimen askel on 0.05, eikä liukuluvun häntä
