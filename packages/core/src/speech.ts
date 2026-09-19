@@ -396,7 +396,7 @@ function endSentence(text: string): string {
   return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
-function isBatterChangeSubEvent(sub: SubEvent): boolean {
+function isBatterChangeSubEventInternal(sub: SubEvent): boolean {
   const firstText = sub.texts[0];
   if (typeof firstText === "string" && firstText.startsWith("Lyöntivuorossa")) return true;
   if (typeof firstText === "object" && "settling-at-bat" in firstText) return true;
@@ -1342,4 +1342,154 @@ export function outsThroughSubEvent(events: LiveEvent[], eventIdx: number, subId
     }
   }
   return outs;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Jonoutuneiden selostusten yhdistäminen (#246)
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** Yhdistelyn kannalta merkitsevä laji. `other` = kaikki muu, jota EI yhdistetä
+ *  (juoksut, harhaheitot, vuoronvaihdot, jaksotekstit, ottelun päättyminen).
+ *  Rajaus on tarkoituksellisen kapea: juoksun yhdistäminen pudottaisi tuojien
+ *  nimiä, ja nimen kuuleminen on se, mitä varten lähetystä tehdään. */
+export type QueuedNarrationKind = "palo" | "batter-change" | "other";
+
+/** Yksi jonossa oleva, vielä puhumaton selostus. `payload` on kutsujan oma
+ *  kirjanpito (dedupe-avain, prioriteetti, …) — core ei tulkitse sitä. */
+export interface QueuedNarration<T = unknown> {
+  /** Teksti sellaisenaan, jos tätä ei yhdistetä mihinkään. */
+  text: string;
+  kind: QueuedNarrationKind;
+  /** Vuoron identiteetti (`period:inning:batTurn:team`). Yhdistäminen ei
+   *  KOSKAAN ylitä tätä: palot nollautuvat joka vuoronvaihdossa, joten
+   *  vuoronvaihdon yli niputettu "toinen ja ensimmäinen palo" olisi väärin. */
+  turnKey: string;
+  /** `palo`: sisävuorojoukkueen nimi, sellaisena kuin se puhutaan. */
+  teamName?: string;
+  /** `palo`: palon järjestysluku vuorossa (1 = ensimmäinen palo). */
+  outNumber?: number;
+  /** `batter-change`: lyömään tulevan pelaajan nimi. */
+  playerName?: string;
+  payload: T;
+}
+
+/** Yhdistelyn tulos. `sources` sisältää AINA jokaisen syötteen, myös silloin
+ *  kun mitään ei yhdistetty — juuri siksi sääntö ei voi pudottaa tapahtumaa:
+ *  tulos on syötteen ositus, ei suodatus. */
+export interface MergedNarration<T = unknown> {
+  text: string;
+  kind: QueuedNarrationKind;
+  /** true vain kun tämä korvaa useamman kuin yhden jonorivin. */
+  merged: boolean;
+  sources: QueuedNarration<T>[];
+}
+
+/** "toinen ja kolmas" / "ensimmäinen, toinen ja kolmas" */
+function paloOrdinalList(outs: number[]): string {
+  return listNames(outs.map((n) => ordinalWord(n) ?? `${n}.`));
+}
+
+/** Yksi lause useammasta peräkkäisestä palosta. Jokaisen variantin on
+ *  kannettava samat faktat: joukkue, palojen lukumäärä ja jokaisen palon
+ *  järjestysluku. Mikään variantti ei saa jättää yhtäkään paloa mainitsematta
+ *  — se olisi tapahtuman pudottaminen, vaikka lause kuulostaisi ehjältä. */
+function formatMergedPalot(teamName: string, outs: number[]): string {
+  const list = paloOrdinalList(outs);
+  const count = FI_CARDINAL[outs.length] ?? String(outs.length);
+  return pickVariant("palo-merged", [
+    `Siinä tuli ${count} paloa joukkueelle ${teamName}. ${capitalize(list)} palo.`,
+    `Joukkueelle ${teamName} ${count} paloa peräkkäin. ${capitalize(list)} palo.`,
+    `Nyt paloja tuli ${count}. ${capitalize(list)} palo joukkueelle ${teamName}.`,
+  ]);
+}
+
+/** Yksi lause useammasta peräkkäisestä lyöjänvaihdosta. Vain viimeisin on se,
+ *  joka on nyt vuorossa, mutta aiemmatkin nimetään: jonoon ehtinyt
+ *  lyöjänvaihto on silti tapahtuma, jota ei saa pudottaa. "Tulospalvelusta
+ *  katsottuna" tunnustaa ääneen, että välistä jäi jotain. */
+function formatMergedBatterChanges(names: string[]): string {
+  const last = names[names.length - 1];
+  const earlier = listNames(names.slice(0, -1));
+  return pickVariant("batter-merged", [
+    `Tulospalvelusta katsottuna äsken oli lyömässä ${earlier}, ja nyt vuorossa ${last}.`,
+    `Tulospalvelun mukaan lyömässä ehti käydä ${earlier}, ja nyt vuorossa on ${last}.`,
+    `Lyöjä ehti vaihtua: ${earlier} jo lyömässä, ja nyt vuorossa ${last}.`,
+  ]);
+}
+
+/** Voiko `next` liittyä samaan nippuun kuin `run`in viimeinen rivi? */
+function joinsRun<T>(run: QueuedNarration<T>[], next: QueuedNarration<T>): boolean {
+  const prev = run[run.length - 1];
+  if (next.kind !== prev.kind) return false;
+  if (next.turnKey !== prev.turnKey) return false;
+  if (next.kind === "palo") {
+    // Sama joukkue on jo turnKeyn takana, mutta varmistetaan silti: väärään
+    // joukkueeseen liitetty palo olisi pahempi kuin yhdistämättä jättäminen.
+    if (!next.teamName || next.teamName !== prev.teamName) return false;
+    // Järjestyslukujen on kasvettava. Sama luku kahdesti on kirjurin
+    // kaksoismerkintä, ei kaksi paloa — "kolmas ja kolmas palo" olisi vale.
+    if (typeof next.outNumber !== "number" || typeof prev.outNumber !== "number") return false;
+    return next.outNumber > prev.outNumber;
+  }
+  if (next.kind === "batter-change") {
+    if (!next.playerName || !prev.playerName) return false;
+    return next.playerName !== prev.playerName;
+  }
+  return false;
+}
+
+function renderRun<T>(run: QueuedNarration<T>[]): MergedNarration<T> {
+  const first = run[0];
+  if (run.length === 1) {
+    return { text: first.text, kind: first.kind, merged: false, sources: run };
+  }
+  const text =
+    first.kind === "palo"
+      ? formatMergedPalot(first.teamName ?? "", run.map((r) => r.outNumber as number))
+      : formatMergedBatterChanges(run.map((r) => r.playerName as string));
+  return { text, kind: first.kind, merged: true, sources: run };
+}
+
+/** Niputtaa peräkkäiset samanlajiset jonorivit yhdeksi selostukseksi (#246).
+ *
+ *  Yhdistely koskee VAIN paloja ja lyöjänvaihtoja, ja vain peräkkäisiä: mikä
+ *  tahansa muu tapahtuma välissä katkaisee nipun, samoin vuoronvaihto. Tulos
+ *  on syötteen ositus — jokainen syöte on tasan yhden tuloksen `sources`-
+ *  listassa ja mainitaan yhdistetyssä lauseessa — joten sääntö ei voi pudottaa
+ *  tapahtumia, vain niputtaa ne.
+ *
+ *  Tämä EI koske syötenäkymää: feed peilaa tulospalvelua sellaisenaan, puhe
+ *  deduplikoi, ja se epäsymmetria on tarkoituksellinen. */
+export function mergeQueuedNarration<T>(items: QueuedNarration<T>[]): MergedNarration<T>[] {
+  const out: MergedNarration<T>[] = [];
+  let run: QueuedNarration<T>[] = [];
+  for (const item of items) {
+    if (run.length > 0 && joinsRun(run, item)) {
+      run.push(item);
+      continue;
+    }
+    if (run.length > 0) out.push(renderRun(run));
+    run = [item];
+  }
+  if (run.length > 0) out.push(renderRun(run));
+  return out;
+}
+
+/** Onko tämä merkintä lyöjänvaihto ("Lyöntivuorossa X")? Julkinen, jotta
+ *  jononpurku voi luokitella selostuksen ilman tekstin uudelleenjäsentämistä. */
+export function isBatterChangeSubEvent(sub: SubEvent): boolean {
+  return isBatterChangeSubEventInternal(sub);
+}
+
+/** Lyömään tulevan pelaajan nimi, tai null jos sitä ei saa ratkaistua
+ *  (kokoonpano julkaistaan myöhässä — ks. packages/core/README.md). */
+export function batterNameOfSubEvent(sub: SubEvent, lookup: PlayerLookup): string | null {
+  if (!isBatterChangeSubEventInternal(sub)) return null;
+  for (const el of sub.texts) {
+    if (typeof el === "object" && el.type === "player") {
+      const name = resolvePlayerName(lookup, el);
+      if (name) return name;
+    }
+  }
+  return null;
 }
