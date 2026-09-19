@@ -58,6 +58,13 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { logDebug, logError, logInfo, logWarn } from "./log.js";
 import type { ClipPriority } from "./narrationFifo.js";
+
+/** speak():n argumentit, kun selostus odottaa jonossa yhdistelyä (#246). */
+interface SpeakArgs {
+  countAnnouncement: boolean;
+  dedupeKey: string;
+  priority: ClipPriority;
+}
 import type { RelayConfig } from "./config.js";
 
 /** Kuinka usein pollien yhteenveto kirjataan (#120). 20 s on kompromissi:
@@ -1894,6 +1901,13 @@ export class CommentaryLoop {
   ): Promise<void> {
     const state = this.state;
     if (events.length > 0) this.matchStarted = true;
+    // Jonoutuneiden selostusten yhdistäminen (#246): tämän kierroksen
+    // selostukset kerätään ensin jonoksi ja puhutaan vasta lopuksi, jotta
+    // peräkkäiset palot ja lyöjänvaihdot voidaan niputtaa yhdeksi lauseeksi.
+    // Kaikki muu kirjanpito (pisteet, sormenjäljet, lokit) ajetaan edelleen
+    // paikallaan ja samassa järjestyksessä — vain speak() siirtyy loppuun,
+    // eikä välissä ole yhtään awaitia, joten järjestys säilyy.
+    const queued: QueuedNarration<SpeakArgs>[] = [];
     for (let ei = 0; ei < events.length; ei++) {
       const event = events[ei];
       const prevBatTeamId = state.currentBatTeamId;
@@ -1941,7 +1955,14 @@ export class CommentaryLoop {
         // Lyöjänvaihto on jonon ainoa selostus, josta vain viimeisin on
         // relevantti: jälkijunassa puhuttu "nyt vuorossa X" kertoo
         // pelaajasta, joka on jo lyönyt (#57, #246).
-        this.speak(msg, true, undefined, "droppable");
+        // Vuoronvaihto on lajiltaan "other": sitä ei yhdistetä, ja se katkaisee
+        // niput — mikä on tarkoitus, koska palot nollautuvat vuoronvaihdossa.
+        queued.push({
+          text: msg,
+          kind: "other",
+          turnKey,
+          payload: { countAnnouncement: true, dedupeKey: msg, priority: "droppable" },
+        });
         state.announcedTurnKey = turnKey;
       }
 
@@ -2026,12 +2047,57 @@ export class CommentaryLoop {
         // Same texts in the same turn and situation = a scorer double-marking.
         const dedupeKey = `${event.period}:${event.inning}:${event.batTurn}:${event.team}:` +
           `${JSON.stringify(fresh.map((i) => event.events[i].texts))}:${ctx.periodHomeRuns}:${ctx.periodAwayRuns}:${ctx.currentOuts}`;
-        this.speak(speech, true, dedupeKey);
+
+        // Luokittelu yhdistelyä varten (#246). Vain yhden merkinnän ryhmät
+        // voivat olla palo tai lyöjänvaihto — monen merkinnän ryhmä on aina
+        // yksi lyönti (#154), eikä sitä yhdistetä mihinkään.
+        let kind: QueuedNarrationKind = "other";
+        let teamName: string | undefined;
+        let outNumber: number | undefined;
+        let playerName: string | undefined;
+        if (fresh.length === 1) {
+          const only = event.events[fresh[0]];
+          if (isOutSubEvent(only) && event.team !== null && ctx.currentOuts > 0) {
+            kind = "palo";
+            teamName = getTeamName(meta, event.team);
+            outNumber = ctx.currentOuts;
+          } else if (isBatterChangeSubEvent(only)) {
+            const name = batterNameOfSubEvent(only, lookup);
+            // Ilman nimeä ei ole mitään yhdistettävää: nimetön "lyöjä vaihtui"
+            // kertoisi vähemmän kuin alkuperäinen lause.
+            if (name) {
+              kind = "batter-change";
+              playerName = name;
+            }
+          }
+        }
+        queued.push({
+          text: speech,
+          kind,
+          turnKey,
+          teamName,
+          outNumber,
+          playerName,
+          payload: { countAnnouncement: true, dedupeKey, priority: "critical" },
+        });
       }
 
       if (event.timestamp !== null && event.timestamp > state.lastTimestamp) {
         state.lastTimestamp = event.timestamp;
       }
+    }
+
+    // Jonon purku (#246). mergeQueuedNarration on syötteen ositus, ei suodatus:
+    // jokainen kerätty rivi on tasan yhden tuloksen sources-listassa, joten
+    // mitään ei voi jäädä puhumatta — niput vain puhutaan yhtenä lauseena.
+    for (const merged of mergeQueuedNarration(queued)) {
+      const last = merged.sources[merged.sources.length - 1].payload;
+      // Yhdistetyn klipin dedupe-avain on lähteiden avaimien yhdiste: yksikään
+      // niistä yksinään ei enää kuvaa sitä, mitä puhutaan.
+      const dedupeKey = merged.merged
+        ? merged.sources.map((s) => s.payload.dedupeKey).join("|")
+        : last.dedupeKey;
+      this.speak(merged.text, last.countAnnouncement, dedupeKey, last.priority);
     }
   }
 
