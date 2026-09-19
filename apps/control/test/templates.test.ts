@@ -13,8 +13,11 @@ import {
   buildShareMessage,
   normalizeShareTemplate,
   DEFAULT_SHARE_TEMPLATE,
+  buildNarratedTitle,
   buildThumbnailHeadline,
   buildTitle,
+  NARRATED_PREFIX,
+  TITLE_MAX_LENGTH,
   formatIsoInZone,
   formatScheduledLocal,
   resolveAgeGroup,
@@ -95,6 +98,40 @@ describe("otsikko", () => {
     const tight = buildTitle(long, 60);
     expect(tight).toBe("Kiri Juniorit Rautiainen - Joma Punainen, 15.7.2026 Joensuu");
     expect(tight).not.toContain("…");
+  });
+
+  // #316: selostetun otsikko on raakaotsikko + "Selostettu " (11 merkkiä).
+  // Aiemmin budjetti laskettiin vain raakaotsikosta, joten tasan 100 merkin
+  // otsikosta tuli 111 merkin selostettu otsikko — YouTube hylkää sen, ja
+  // hylkäys kaataa parin luonnin VASTA kun raakalähetys on jo luotu.
+  it("mitoittaa otsikon niin että myös selostettu mahtuu YouTuben rajaan", () => {
+    // Budjetti lasketaan tässä testissä käsin eikä lähdekoodin vakiosta, jotta
+    // testi kaatuu myös silloin kun vakio on oikein mutta sitä ei käytetä.
+    const pairBudget = TITLE_MAX_LENGTH - NARRATED_PREFIX.length;
+    const long = campMatch({
+      home: "Jyväskylän Kiri & Kirittäret Juniorit Rautiainen",
+      homeShort: "Kiri Juniorit Rautiainen",
+      homeCode: "KIR",
+      away: "Joensuun Maila Punainen",
+      awayShort: "Joma Punainen",
+      awayCode: "JOM",
+      shortVenue: "Joensuu",
+    });
+    // Raakaotsikko yksinään mahtuisi 100:aan — tämä on juuri se tapaus joka
+    // ennen korjausta läpäisi tarkistuksen ja kaatui vasta YouTubella.
+    expect(buildTitle(long).length).toBeGreaterThan(pairBudget);
+    expect(buildTitle(long).length).toBeLessThanOrEqual(TITLE_MAX_LENGTH);
+
+    const texts = buildBroadcastTexts(long);
+    expect(texts.title.length).toBeLessThanOrEqual(pairBudget);
+    expect(texts.narratedTitle.length).toBeLessThanOrEqual(TITLE_MAX_LENGTH);
+    // Pari pysyy toistensa kopioina: ero on tasan etuliite, ei mikään muu.
+    expect(texts.narratedTitle).toBe(`${NARRATED_PREFIX}${texts.title}`);
+  });
+
+  it("buildNarratedTitle on varaventtiili myös budjetin ohi tulevalle otsikolle", () => {
+    const raw = "x".repeat(TITLE_MAX_LENGTH);
+    expect(buildNarratedTitle(raw).length).toBeLessThanOrEqual(TITLE_MAX_LENGTH);
   });
 
   // #221: käyttöliittymä tarvitsee parin ERIKSEEN, ei pelkkänä "A - B"
