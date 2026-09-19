@@ -390,7 +390,9 @@ function knobsFromRaw(raw: Record<string, unknown>): ControlKnobs {
         : KNOB_DEFAULTS.narrationDelayMs,
     narrationGain:
       typeof raw.narrationGain === "number" && Number.isFinite(raw.narrationGain)
-        ? clampGain(raw.narrationGain)
+        ? // Ei clamppia: mykistys (0) ja mikä tahansa relayn oma arvo näkyvät
+          // ohjaamossa sellaisenaan (#323). Kirjoituspolku kiinnittää yhä.
+          raw.narrationGain
         : KNOB_DEFAULTS.narrationGain,
     deltaFetch: typeof raw.deltaFetch === "boolean" ? raw.deltaFetch : KNOB_DEFAULTS.deltaFetch,
     silenced: typeof raw.silenced === "boolean" ? raw.silenced : KNOB_DEFAULTS.silenced,
