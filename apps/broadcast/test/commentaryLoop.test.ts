@@ -9,6 +9,107 @@ vi.mock("@pesisselostaja/core", async (importOriginal) => {
   return { ...actual, fetchMatchMetadata: vi.fn(), fetchLiveEvents: vi.fn() };
 });
 
+// Muistissa elävä tiedostotila VAIN #52-tahtitestien poluille (`/tmp/pesis-52-…`).
+// Juurisyy flakeen (#322, aiemmin #287): tahtitestit ajavat valeajastimilla mutta
+// tekivät joka pollilla OIKEAA levy-IO:ta — refreshRuntimeControls lukee
+// control-tiedoston (commentaryLoop.ts:1207) ja sykli tallentaa tilan
+// (commentaryLoop.ts:1491 → nodeState.ts:35). Valekello ei odota levyä eikä
+// `advanceTimersToNextTimerAsync` etene kun jonossa ei ole ajastinta, joten
+// silmukan kierrosbudjetti paloi tyhjään levyä odotellessa ja pollien määrä
+// riippui levyn nopeudesta — CI:ssä yksi polli vajaaksi.
+//
+// Näillä poluilla kaikki tiedosto-IO (sekä async että sync) menee nyt muistiin,
+// jolloin kierros on deterministinen eikä riipu levystä. Kaikki muut polut
+// menevät oikealle fs:lle, joten muut testit tässä tiedostossa (jotka
+// kirjoittavat oikeita control-tiedostoja) eivät muutu. Sekä sync- että
+// async-polku käyttää SAMAA karttaa, jotta luku näkee sen mitä kirjoitus
+// kirjoitti — esim. persistBreakerState (sync) → refreshRuntimeControls (async).
+// Apurit ovat kummankin tehtaan sisällä (eivät moduulitasolla), koska vi.mock
+// nostetaan importtien yläpuolelle: moduulitason const olisi vielä TDZ:ssä kun
+// tehdas ajetaan. Jaettu kartta elää siksi globalThisillä.
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  const store = (): Map<string, string> => {
+    const g = globalThis as { __pesis52Files?: Map<string, string> };
+    return (g.__pesis52Files ??= new Map<string, string>());
+  };
+  const inMemory = (p: unknown): p is string =>
+    typeof p === "string" && p.startsWith("/tmp/pesis-52-");
+  const readFile = async (path: unknown, ...rest: unknown[]): Promise<unknown> => {
+    if (inMemory(path)) {
+      const value = store().get(path);
+      if (value === undefined) {
+        throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+          code: "ENOENT",
+        });
+      }
+      return value;
+    }
+    return (actual.readFile as unknown as (...a: unknown[]) => Promise<unknown>)(path, ...rest);
+  };
+  const writeFile = async (path: unknown, data: unknown, ...rest: unknown[]): Promise<void> => {
+    if (inMemory(path)) {
+      store().set(path, String(data));
+      return;
+    }
+    await (actual.writeFile as unknown as (...a: unknown[]) => Promise<void>)(path, data, ...rest);
+  };
+  return { ...actual, default: { ...actual, readFile, writeFile }, readFile, writeFile };
+});
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const store = (): Map<string, string> => {
+    const g = globalThis as { __pesis52Files?: Map<string, string> };
+    return (g.__pesis52Files ??= new Map<string, string>());
+  };
+  const inMemory = (p: unknown): p is string =>
+    typeof p === "string" && p.startsWith("/tmp/pesis-52-");
+  const call = (fn: unknown, ...args: unknown[]): unknown =>
+    (fn as (...a: unknown[]) => unknown)(...args);
+  const existsSync = (path: unknown, ...rest: unknown[]): boolean =>
+    inMemory(path) ? store().has(path) : (call(actual.existsSync, path, ...rest) as boolean);
+  const readFileSync = (path: unknown, ...rest: unknown[]): unknown => {
+    if (inMemory(path)) {
+      const value = store().get(path);
+      if (value === undefined) {
+        throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+          code: "ENOENT",
+        });
+      }
+      return value;
+    }
+    return call(actual.readFileSync, path, ...rest);
+  };
+  const writeFileSync = (path: unknown, data: unknown, ...rest: unknown[]): void => {
+    if (inMemory(path)) {
+      store().set(path, String(data));
+      return;
+    }
+    call(actual.writeFileSync, path, data, ...rest);
+  };
+  const renameSync = (from: unknown, to: unknown): void => {
+    if (inMemory(from) || inMemory(to)) {
+      const value = inMemory(from) ? store().get(from) : undefined;
+      if (value === undefined) throw Object.assign(new Error(`ENOENT: rename '${String(from)}'`), { code: "ENOENT" });
+      if (inMemory(from)) store().delete(from);
+      if (inMemory(to)) store().set(to, value);
+      else call(actual.writeFileSync, to, value);
+      return;
+    }
+    call(actual.renameSync, from, to);
+  };
+  const rmSync = (path: unknown, ...rest: unknown[]): void => {
+    if (inMemory(path)) {
+      store().delete(path);
+      return;
+    }
+    call(actual.rmSync, path, ...rest);
+  };
+  const patched = { existsSync, readFileSync, writeFileSync, renameSync, rmSync };
+  return { ...actual, ...patched, default: { ...actual, ...patched } };
+});
+
 import { CommentaryLoop, type NarrationStatus, type SpeechSink } from "../src/commentaryLoop.js";
 import type { RelayConfig } from "../src/config.js";
 import { buildPlayerLookup, fetchLiveEvents, fetchMatchMetadata } from "@pesisselostaja/core";
@@ -951,8 +1052,7 @@ describe("CommentaryLoop pollausvälin jousto hakuvirhesarjassa (#52 kohta 2)", 
   const codes: string[] = [];
   const tempFiles: string[] = [];
   // Otettu talteen ennen kuin vi.useFakeTimers korvaa globaalin: tällä
-  // päästetään oikea tapahtumasilmukka (ja sen levy-IO) läpi valekellosta
-  // huolimatta.
+  // päästetään oikea tapahtumasilmukka läpi valekellosta huolimatta.
   const realSetImmediate = setImmediate;
 
   interface RunInternals {
@@ -991,10 +1091,12 @@ describe("CommentaryLoop pollausvälin jousto hakuvirhesarjassa (#52 kohta 2)", 
    *    silmukka oli kesken syklin eikä yhtään ajastinta ollut jonossa. Kello oli
    *    minuutin edellä ennen kuin ensimmäistäkään pollia ehti tapahtua, ja
    *    mitatut välit olivat puhdasta roskaa.
-   *  - Sykli odottaa välissä oikeaa levy-IO:ta (tilatiedoston tallennus), jota
-   *    valekellon kelaus ei valmistele: ilman oikeaa `setImmediate`-käyntiä
-   *    silmukka jäi odottamaan IO:ta, kierrosbudjetti paloi tyhjään ja pollien
-   *    määrä vaihteli ajokerroittain. */
+   *  - Sykli odottaa välissä asynkronisia jatkoja (tilan tallennus, control-
+   *    tiedoston luku), joita valekellon kelaus ei valmistele: ilman oikeaa
+   *    `setImmediate`-käyntiä silmukka jäisi odottamaan niitä. Kun IO oli
+   *    OIKEAA levy-IO:ta, tämä riippui levyn nopeudesta ja pollien määrä
+   *    vaihteli ajokerroittain (#287, #322) — siksi näiden testien tiedostot
+   *    elävät muistissa (fs-mockit tiedoston alussa). */
   async function pollGaps(
     succeeds: (poll: number) => boolean,
     wantedPolls: number,
@@ -1034,11 +1136,11 @@ describe("CommentaryLoop pollausvälin jousto hakuvirhesarjassa (#52 kohta 2)", 
       async () => {}
     ) as unknown as RunInternals;
     const run = loop.run().catch(() => {});
-    // Kierrosbudjetti on reilu tarkoituksella: yksi polli vaatii useita
-    // kierroksia (ajastin kerrallaan + oikean IO:n läpipäästö), ja liian tiukka
-    // budjetti näkyi juuri niin kuin oikea vika näkyisi — polleja tuli liian
-    // vähän. Siksi alla oleva tarkistus vaatii pyydetyn määrän erikseen.
-    for (let i = 0; i < 500 * wantedPolls + 2000 && instants.length < wantedPolls; i++) {
+    // Yksi kierros = yksi polli, koska silmukan tiedosto-IO on tässä muistissa
+    // (ks. fs-mockit tiedoston alussa). Budjetti on silti moninkertainen
+    // tarvittavaan nähden, jottei se ole se asia joka kaatuu; sen loppuminen
+    // näkyisi alla olevassa tarkistuksessa liian pienenä pollimääränä.
+    for (let i = 0; i < 50 * wantedPolls + 100 && instants.length < wantedPolls; i++) {
       await vi.advanceTimersToNextTimerAsync();
       await new Promise((resolve) => realSetImmediate(resolve));
     }
