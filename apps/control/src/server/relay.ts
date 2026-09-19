@@ -476,6 +476,25 @@ export function nudgeDelay(matchId: number, deltaMs: number): Promise<ControlKno
   });
 }
 
+/** Voimakkuuden ± -napit (#323). Suhteellinen samasta syystä kuin viive, mutta
+ *  laskenta on palvelimella eikä selaimessa, jotta mykistyssääntö on yhdessä
+ *  paikassa ja testattavissa ilman selainta.
+ *
+ *  MYKISTETTYNÄ (`narrationGain === 0`) NUDGE ON NO-OP. Pelkkä äänenvoimakkuuden
+ *  naputtelu ei saa purkaa mykistystä: operaattori kuulee vain lopputuloksen,
+ *  ja mykistyksen huomaamaton purkautuminen kesken elävän lähetyksen on
+ *  pahempi lopputulos kuin nappi joka ei tee mitään. Purku tapahtuu vain
+ *  eksplisiittisellä toiminnolla (absoluuttinen kirjoitus /api/knobs). */
+export function nudgeGain(matchId: number, delta: number): Promise<ControlKnobs> {
+  return serializeControlWrite(async () => {
+    const current = knobsFromRaw(await readControlFile(matchId));
+    if (current.narrationGain <= 0) return current;
+    const next = clampGain(current.narrationGain + delta);
+    if (next === current.narrationGain) return current;
+    return writeKnobsUnlocked(matchId, { narrationGain: next });
+  });
+}
+
 // ------------------------------------------------------- lähteen tila (#104)
 
 /** Julkaisee ohjaamon YouTube-havainnon lähteestä samaan control-tiedostoon
