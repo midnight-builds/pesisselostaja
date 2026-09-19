@@ -101,6 +101,15 @@ export const DEFAULT_HASHTAGS = ["#pesäpallo", "#pesäysit", "#live", "#livestr
  *  Runbook sallii pitkien seuranimien lyhentämisen nimenomaan otsikossa. */
 export const TITLE_MAX_LENGTH = 100;
 
+/** Raakalähetyksen otsikon budjetti, kun otsikkoa käytetään **lähetysparin**
+ *  pohjana. Selostettu otsikko on sama teksti `NARRATED_PREFIX`illä varustettuna,
+ *  joten tasan 100 merkin raakaotsikosta tulisi 111 merkin selostettu otsikko —
+ *  jonka YouTube hylkää. Hylkäys kaataa parin luonnin puolivälissä, ja #204:n
+ *  kompensaatio poistaa jo luodun raakalähetyksen, joten operaattori menettää
+ *  molemmat (#316). Budjetti lasketaan siksi pidemmästä eli selostetusta
+ *  otsikosta, ja pari pysyy toistensa kopioina etuliitettä lukuun ottamatta. */
+export const PAIR_TITLE_MAX_LENGTH = TITLE_MAX_LENGTH - NARRATED_PREFIX.length;
+
 /** Thumbnailin otsikkorivin budjetti merkkeinä.
  *
  *  Renderöijä (tools/pesaysit-thumbnail-compose.py) piirtää otsikon 86 px
@@ -468,8 +477,13 @@ export function buildThumbnailHeadline(
   return shortenTitle(buildMatchupLabel(input, 2), maxLength);
 }
 
+/** Selostetun otsikko = sama otsikko etuliitteellä. Katkaisu on pelkkä
+ *  varaventtiili sille, että kutsuja antaa otsikon jota ei ole rakennettu
+ *  `PAIR_TITLE_MAX_LENGTH`-budjetilla: `buildBroadcastTexts`in kautta tullut
+ *  otsikko mahtuu aina sellaisenaan. Ilman tätä liian pitkä otsikko menisi
+ *  YouTubelle asti ja kaataisi parin luonnin (#316). */
 export function buildNarratedTitle(title: string): string {
-  return `${NARRATED_PREFIX}${title}`;
+  return shortenTitle(`${NARRATED_PREFIX}${title}`, TITLE_MAX_LENGTH);
 }
 
 /** Runbookin kuvausrakenne. Tyhjät rivit jätetään pois sen sijaan että
@@ -613,7 +627,7 @@ export function buildBroadcastTexts(
   shareTemplate: ShareTemplate = DEFAULT_SHARE_TEMPLATE
 ): BroadcastTexts {
   const { date, time } = localPartsOf(input);
-  const title = buildTitle(input);
+  const title = buildTitle(input, PAIR_TITLE_MAX_LENGTH);
   const pair = teamPair(input);
   // Ikäluokka luetaan ensisijaisesti OMASTA joukkueesta: vastustajan nimessä
   // voi olla oma kirjaimensa ("SuPo G mustat"), eikä video kuulu sen mukaan.
