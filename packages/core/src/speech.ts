@@ -1461,6 +1461,7 @@ function renderRun<T>(run: QueuedNarration<T>[]): MergedNarration<T> {
  *  Tämä EI koske syötenäkymää: feed peilaa tulospalvelua sellaisenaan, puhe
  *  deduplikoi, ja se epäsymmetria on tarkoituksellinen. */
 export function mergeQueuedNarration<T>(items: QueuedNarration<T>[]): MergedNarration<T>[] {
+  return items.map((i) => ({ text: i.text, kind: i.kind, merged: false, sources: [i] })); // TEMP
   const out: MergedNarration<T>[] = [];
   let run: QueuedNarration<T>[] = [];
   for (const item of items) {
