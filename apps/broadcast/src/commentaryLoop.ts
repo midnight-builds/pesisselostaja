@@ -133,8 +133,9 @@ const FULL_FETCH_TIMEOUT_MS = 10_000;
  *  false aborts while still fitting inside the 3 s cadence, which is the
  *  property the 4 s → 1 s retune was really about. The honest fix — keying the
  *  loose limit on the MEASURED duration of successful deltas rather than on
- *  failures — is still the follow-up noted under DELTA_SLOW_DWELL_POLLS; this
- *  is the first match's worth of data arguing for it.
+ *  failures — landed with #303 (6.9.2026: 2 s still aborted ~11 % of polls):
+ *  this constant is now the FLOOR of the adaptive limit, see
+ *  DELTA_ADAPTIVE_TIMEOUT_MAX_MS.
  *
  *  NOT floored at `pollIntervalMs` — see apiTimeoutMs(). */
 const DELTA_FETCH_TIMEOUT_MS = 2_000;
@@ -187,11 +188,49 @@ const DELTA_FETCH_TIMEOUT_SLOW_MS = 4_000;
  *
  *  Honest residual: a genuinely slow API makes this settle into ~10 good polls
  *  followed by 3 aborts (23 % dropped, against 75 % with no dwell at all), not
- *  a permanently open valve. Closing that gap needs the valve to key on the
- *  MEASURED duration of successful deltas rather than on failures; that is a
- *  bigger change. 27.8.2026 (#290) delivered the first match's worth of data
- *  showing an API that behaves this way — see DELTA_FETCH_TIMEOUT_MS. */
+ *  a permanently open valve. That gap is closed by the measured-duration
+ *  valve (#303, DELTA_ADAPTIVE_TIMEOUT_MAX_MS): a slow-but-answering API now
+ *  widens the limit from its own successes, and this failure-keyed valve
+ *  remains for the case where nothing succeeds at all. */
 const DELTA_SLOW_DWELL_POLLS = 10;
+/** Adaptiivisen delta-timeoutin katto, pohja ja kerroin (#303).
+ *
+ *  Tämä on se "honest fix", jota DELTA_FETCH_TIMEOUT_MS:n ja
+ *  DELTA_SLOW_DWELL_POLLS:n kommentit lupasivat: raja avautuu MITATUSTA
+ *  onnistuneiden delta-hakujen kestosta, ei epäonnistumisista. 6.9.2026
+ *  (135689 + 135680) kiinteä 2 s abortoi ~11 % polleista, vaikka onnistuneet
+ *  deltat mitattiin max 1805 ms:iin — API:lla on iltoja, joina häntä on
+ *  sekunteja, ja silloin kiinteä raja tuottaa vain hukkapolleja ja
+ *  virheryöppyjä, jotka hidastavat pollausväliä juuri kiivaissa vaiheissa.
+ *
+ *  Efektiivinen raja on clamp(pohja 2 s, p95 × 2, katto 5 s) viimeisten
+ *  onnistuneiden delta-hakujen yli:
+ *  - p95 × 2, ei max × 2: yksi 4 s poikkeama ei saa raahata rajaa kattoon
+ *    koko loppuotteluksi; p95 seuraa tasoa ja unohtuu otoksen mukana.
+ *  - Pohja on entinen kiinteä raja: terveellä ~80 ms API:lla raja EI kiristy
+ *    alle 2 s:n, eli tämä voi vain löysätä, ei koskaan kiristää nykyisestä.
+ *  - Katto 5 s on issuen #303 ehdottama suoraviivainen raja: yhä
+ *    juuttuneen yhteyden ilmaisin (ei kohtaa mitattuja onnistumisia), mutta
+ *    ylittää 3 s kadenssin — sen ylityksen hoitaa run():n ankkurointi, sama
+ *    ominaisuus jonka varassa 4 s virhesarjaraja on aina ollut.
+ *
+ *  Virhesarjaventtiili (DELTA_FETCH_TIMEOUT_SLOW_MS) säilyy pohjalla:
+ *  se reagoi tilanteeseen, jossa MIKÄÄN ei mene läpi, jolloin otoksessa ei
+ *  ole tuoreita kestoja joista adaptiivinen raja voisi oppia. */
+const DELTA_ADAPTIVE_TIMEOUT_MAX_MS = 5_000;
+const DELTA_ADAPTIVE_MULTIPLIER = 2;
+/** Otoksen koko: ~5 min oletuskadenssia — tuore taso, ei koko ottelun
+ *  historia. Rullaava (vanhin poistuu), joten hidas ilta unohtuu kun API
+ *  tervehtyy. */
+const DELTA_ADAPTIVE_SAMPLE_SIZE = 100;
+
+/** p95 pienestä otoksesta lokisilmää ja timeoutia varten — sama
+ *  interpoloimattomuusperiaate kuin formatFetchDurations. Tyhjästä 0. */
+export function p95(samples: number[]): number {
+  if (samples.length === 0) return 0;
+  const sorted = [...samples].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil((sorted.length - 1) * 0.95))] as number;
+}
 /** Metadata (roster) fetch timeout: the startup fetch and the in-match roster
  *  refresh (`maybeRefreshRoster`).
  *
@@ -265,7 +304,10 @@ export function formatFetchDurations(samples: number[]): string {
  *  BEFORE the instant the server created that match's online data, which is
  *  precisely when the server answers with `reset` (see LiveEventsResponse.reset
  *  and handleResetResponse). That burst is expected, self-healing and cheap —
- *  as long as the reset answer is used as the full snapshot it already is. */
+ *  as long as the reset answer is used as the full snapshot it already is.
+ *  Since #303 the burst is also SHORT: the first reset raises the cursor
+ *  floor past the reset instant (resetFloorMs), so the follow-up polls go
+ *  back to real deltas instead of resetting for the whole margin. */
 const AFTER_MARGIN_MS = 180 * 1000;
 /** Periodic full refetch that replaces the local delta-merged history —
  *  cheap insurance against anything the merge can't see (server rewrites,
@@ -560,6 +602,31 @@ export class CommentaryLoop {
    *  stays the same — the base only advances when new events arrive, so quiet
    *  stretches poll a stable URL and get cheap 304s. */
   private deltaCursor: { after: string; afterMs: number; etag: string | null } | null = null;
+  /** Rullaava otos onnistuneiden delta-hakujen kestoista; ainoa syöte
+   *  adaptiiviselle timeoutille (#303). Eri asia kuin pollWindow.fetchMs,
+   *  joka nollataan joka yhteenvetoikkunassa. */
+  private recentDeltaMs: number[] = [];
+  /** Alaraja delta-kursorin `after`-arvolle: viimeisin reset-leima + 1 s
+   *  (#303). Ilman tätä jokainen AFTER_MARGIN_MS:n taakse johdettu `after`
+   *  osuu reset-hetken alle uudelleen ja jokainen polli vetää koko historian
+   *  reset-vastauksena — livenä 6.9.2026 kursori jäi useaksi ikkunaksi tilaan
+   *  "ei kursoria" ja täyshakuja oli 5/8 pollista. Marginaalin tehtävän
+   *  (julkaisuviivettä vanhempien tapahtumien kiinnisaanti) hoitaa tässä
+   *  tilanteessa reset-vastaus itse: se on koko SIIHEN MENNESSÄ JULKAISTU
+   *  historia ja adoptoidaan sellaisenaan.
+   *
+   *  Rehellinen aukko: tapahtuma, joka on leimattu ennen reset-hetkeä mutta
+   *  julkaistaan vasta sen jälkeen (julkaisuviive 68–123 s, ks.
+   *  AFTER_MARGIN_MS), ei ole reset-vastauksessa eikä mahdu lattian yli
+   *  delta-ikkunaan. Siksi lattia VANHENEE AFTER_MARGIN_MS:n kuluttua
+   *  asettamisestaan: siihen mennessä serverDate − marginaali on noussut
+   *  lattian ohi, joten vanheneminen ei maksa mitään, ja marginaalin suoja
+   *  palaa täysimittaisena. Vanhenemisen ali-ikkunassa ainoa suoja on 60 s
+   *  resync-täyshaku (RESYNC_EVERY_MS), joka hakee ilman `after`-rajausta —
+   *  pahin seuraus on siis ≤ ~60 s lisäviive yhdelle tapahtumalle
+   *  keskiottelun rebuildissa, ei tapahtuman katoaminen. */
+  private resetFloorMs: number | null = null;
+  private resetFloorSetAtMs = 0;
   /** Cumulative per-run poll statistics, surfaced on the mixer's heartbeat
    *  line — 304 skips, full-fetch fallbacks and reset
    *  answers are otherwise invisible in the log (the 304 path is deliberately
@@ -878,7 +945,12 @@ export class CommentaryLoop {
     const result = await fetch();
     // Vasta onnistumisen jälkeen: heitto ohittaa tämän rivin, eikä
     // aikakatkaistu haku päädy otokseen. Tarkoituksella EI `finally`.
-    this.pollWindow.fetchMs[size].push(Date.now() - startedAt);
+    const durationMs = Date.now() - startedAt;
+    this.pollWindow.fetchMs[size].push(durationMs);
+    if (size === "delta") {
+      this.recentDeltaMs.push(durationMs);
+      if (this.recentDeltaMs.length > DELTA_ADAPTIVE_SAMPLE_SIZE) this.recentDeltaMs.shift();
+    }
     return result;
   }
 
@@ -1601,7 +1673,12 @@ export class CommentaryLoop {
       // in four instead of to the state that needs it.
       const loosened =
         this.consecutiveFetchFailures >= FETCH_FAILURE_ALARM_STREAK || this.slowDeltaDwellPolls > 0;
-      return loosened ? DELTA_FETCH_TIMEOUT_SLOW_MS : DELTA_FETCH_TIMEOUT_MS;
+      // Mitatusta kestosta avautuva raja (#303) — ks. DELTA_ADAPTIVE_TIMEOUT_MAX_MS.
+      const adaptive = Math.min(
+        DELTA_ADAPTIVE_TIMEOUT_MAX_MS,
+        Math.max(DELTA_FETCH_TIMEOUT_MS, p95(this.recentDeltaMs) * DELTA_ADAPTIVE_MULTIPLIER)
+      );
+      return loosened ? Math.max(adaptive, DELTA_FETCH_TIMEOUT_SLOW_MS) : adaptive;
     }
     if (size === "meta") return META_FETCH_TIMEOUT_MS;
     return Math.max(FULL_FETCH_TIMEOUT_MS, this.pollIntervalMs);
@@ -1664,6 +1741,15 @@ export class CommentaryLoop {
     this.pollWindow.resets++;
     const resetAtMs = typeof res.reset === "string" ? Date.parse(res.reset) : NaN;
     const explained = Number.isFinite(resetAtMs) && resetAtMs >= afterMs;
+    // Nosta kursorin lattia leiman yli (#303): seuraava delta ei enää osu
+    // saman reset-hetken alle, joten ryöppy päättyy ensimmäiseen resettiin
+    // eikä kestä AFTER_MARGIN_MS:ää täyshakuina. +1 s koska palvelimen
+    // vertailun tiukkuutta (< vai <=) ei tunneta. Julkaisujonossa vielä
+    // olevien tapahtumien aukko ja sen suoja: ks. resetFloorMs.
+    if (explained) {
+      this.resetFloorMs = Math.max(this.resetFloorMs ?? 0, resetAtMs + 1_000);
+      this.resetFloorSetAtMs = Date.now();
+    }
     const firstOfStreak = this.consecutiveDeltaResets === 0;
     this.consecutiveDeltaResets++;
     if (!explained) this.consecutiveUnexplainedResets++;
@@ -1729,8 +1815,20 @@ export class CommentaryLoop {
     ) {
       return this.fetchFullEvents();
     }
-    const afterMs = this.deltaCursor?.afterMs ?? this.lastServerDateMs - AFTER_MARGIN_MS;
-    const after = this.deltaCursor?.after ?? formatHelsinkiTimestamp(new Date(afterMs));
+    // Reset-lattia (#303) sovelletaan myös olemassa olevaan kursoriin: myös
+    // se on johdettu serverDate - AFTER_MARGIN_MS -kaavalla ja voi siksi olla
+    // leimaa vanhempi. Lattian ylittävä kursori säilyy ennallaan (ja sen
+    // ETag kelpaa, koska `after`-merkkijono ei muutu).
+    // Vanhenna lattia kun marginaali on ehtinyt sen ohi — ks. resetFloorMs.
+    if (this.resetFloorMs !== null && Date.now() - this.resetFloorSetAtMs > AFTER_MARGIN_MS) {
+      this.resetFloorMs = null;
+    }
+    const baseMs = this.deltaCursor?.afterMs ?? this.lastServerDateMs - AFTER_MARGIN_MS;
+    const afterMs = this.resetFloorMs === null ? baseMs : Math.max(baseMs, this.resetFloorMs);
+    const after =
+      this.deltaCursor !== null && this.deltaCursor.afterMs === afterMs
+        ? this.deltaCursor.after
+        : formatHelsinkiTimestamp(new Date(afterMs));
     const res = await this.timedFetch("delta", () =>
       fetchLiveEvents(this.config.matchId, {
         apiBase: this.config.apiBase,
