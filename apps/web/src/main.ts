@@ -41,7 +41,7 @@ interface Settings {
   keepScreenOn: boolean;
 }
 
-const DEFAULT_PIPER_VOICE = "fi_FI-harri-medium";
+const DEFAULT_PIPER_VOICE = "fi_FI-asmo-medium";
 
 interface FeedEntry {
   id: number;
