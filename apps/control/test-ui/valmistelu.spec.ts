@@ -144,16 +144,13 @@ test.describe("valmistelu", () => {
     const away = page.getByLabel("Vierasjoukkue");
     const venue = page.getByLabel("Paikka lyhyesti");
 
-    // Arvot ovat tyhjiä — otsikko muodostuu ilman muokkausta.
-    await expect(home).toHaveValue("");
-    await expect(away).toHaveValue("");
-    await expect(venue).toHaveValue("");
-
-    // ...ja se mitä kentissä lukee on TÄMÄN ottelun pari oikein päin
-    // (koti ensin, `teamPair`) sekä tämän ottelun paikka.
-    await expect(home).toHaveAttribute("placeholder", texts.homeTeam);
-    await expect(away).toHaveAttribute("placeholder", texts.awayTeam);
-    await expect(venue).toHaveAttribute("placeholder", texts.thumbnailVenue);
+    // #317: kentät ovat nyt esitäytettyjä eivätkä tyhjiä — nimiä yleensä vain
+    // lyhennetään, joten muokattavan pitää olla kentässä. Se mitä kentissä lukee
+    // on TÄMÄN ottelun pari oikein päin (koti ensin, `teamPair`) sekä tämän
+    // ottelun paikka.
+    await expect(home).toHaveValue(texts.homeTeam);
+    await expect(away).toHaveValue(texts.awayTeam);
+    await expect(venue).toHaveValue(texts.thumbnailVenue);
 
     // Yksikään vieraan ottelun nimi ei saa esiintyä missään kortilla.
     const body = await page.locator("body").innerText();
@@ -163,6 +160,114 @@ test.describe("valmistelu", () => {
     for (const stranger of ["Pesä Ysit F-pojat", "IPV", "Naperoleiri Liperi"]) {
       expect(await page.locator(`css=input[placeholder="${stranger}"]`).count()).toBe(0);
     }
+  });
+
+  /** #317/1: kenttä trimmattiin jokaisessa `onChange`issa, ja koska kenttä on
+   *  kontrolloitu, trimmattu arvo kirjoittui heti takaisin ruudulle. Sanan
+   *  perään ei siis saanut välilyöntiä lainkaan — seuraavaa sanaa ei voinut
+   *  aloittaa. Sanojen VÄLISSÄ välilyönti säilyi, mikä teki oireesta
+   *  hämmentävän: kenttä näytti toimivan. */
+  test("loppuvälilyönti säilyy kirjoittaessa mutta trimmataan vasta sovellettaessa", async ({
+    page,
+    api,
+    openApp,
+  }) => {
+    api.authHealth = fixture.authHealthConnected();
+    await openApp(fixture.liveState({ job: draftJob(), health: "idle", headline: "Ei aktiivista lähetystä" }));
+
+    await page.getByText("Muokkaa otsikkoa").click();
+    const home = page.getByLabel("Kotijoukkue");
+    await home.fill("");
+    await home.pressSequentially("Pesä Ysit ");
+    await expect(home).toHaveValue("Pesä Ysit ");
+
+    // ...ja seuraava sana on nyt kirjoitettavissa.
+    await home.pressSequentially("ET-kilpa");
+    await expect(home).toHaveValue("Pesä Ysit ET-kilpa");
+
+    // Trimmaus tapahtuu kerran, kun arvoa käytetään.
+    await home.pressSequentially(" ");
+    await page.getByRole("button", { name: "Päivitä esikatselu" }).click();
+    await expect.poll(() => api.calledWith("POST", "/api/youtube/templates/preview").length).toBeGreaterThan(1);
+    const calls = api.calledWith("POST", "/api/youtube/templates/preview");
+    const last = calls[calls.length - 1].body as { overrides?: Record<string, string> };
+    expect(last.overrides?.homeTeam).toBe("Pesä Ysit ET-kilpa");
+  });
+
+  /** #317/1: pelkkä perään kirjoitettu välilyönti ei ole muutos. Ilman
+   *  trimmattua vertailua "Päivitä esikatselu" avautuisi siitä. */
+  test("pelkkä loppuvälilyönti ei avaa Päivitä esikatselu -nappia", async ({ page, api, openApp }) => {
+    api.authHealth = fixture.authHealthConnected();
+    await openApp(fixture.liveState({ job: draftJob(), health: "idle", headline: "Ei aktiivista lähetystä" }));
+
+    await page.getByText("Muokkaa otsikkoa").click();
+    const update = page.getByRole("button", { name: "Päivitä esikatselu" });
+    // Esitäytetyt kentät eivät ole muutos.
+    await expect(update).toBeDisabled();
+
+    await page.getByLabel("Kotijoukkue").pressSequentially(" ");
+    await expect(update).toBeDisabled();
+  });
+
+  /** #317/2: esitäyttö ei saa hukata paluuta oletukseen, eikä koskematon kenttä
+   *  saa lähettää ohitusta — muuten jokainen työ saisi ohitukset joita kukaan ei
+   *  pyytänyt, ja #231:n käytös muuttuisi huomaamatta. */
+  test("Palauta oletukset tuo tulospalvelun nimet takaisin eikä koskematon kenttä lähetä ohitusta", async ({
+    page,
+    api,
+    openApp,
+  }) => {
+    api.authHealth = fixture.authHealthConnected();
+    await openApp(fixture.liveState({ job: draftJob(), health: "idle", headline: "Ei aktiivista lähetystä" }));
+
+    await page.getByText("Muokkaa otsikkoa").click();
+    const texts = fixture.broadcastTexts();
+    const home = page.getByLabel("Kotijoukkue");
+    const restore = page.getByTestId("restore-defaults");
+
+    // Koskemattomilla kentillä ei ole mitä palauttaa.
+    await expect(restore).toBeDisabled();
+
+    await home.fill("Veikot");
+    await expect(restore).toBeEnabled();
+    await restore.click();
+    await expect(home).toHaveValue(texts.homeTeam);
+    await expect(restore).toBeDisabled();
+
+    // Luonti lähtee ilman ohituksia, vaikka kentissä lukee nimet.
+    await page.getByRole("button", { name: CREATE }).click();
+    await page.getByRole("button", { name: CONFIRM }).click();
+    await expect.poll(() => api.calledWith("POST", "/api/youtube/broadcasts").length).toBe(1);
+    const body = api.calledWith("POST", "/api/youtube/broadcasts")[0].body as {
+      overrides?: Record<string, string | undefined>;
+    };
+    expect(body.overrides?.homeTeam).toBeUndefined();
+    expect(body.overrides?.awayTeam).toBeUndefined();
+    expect(body.overrides?.shortVenue).toBeUndefined();
+  });
+
+  /** #316/#317: 100 merkin raja kaatoi luonnin ilman varoitusta. Palvelin
+   *  lyhentää nyt itse, joten laskuri ei estä kaatumista vaan kertoo koska
+   *  automaattinen lyhennys alkaa purra — se on se hetki, jolloin operaattori
+   *  haluaa päättää lyhennyksestä itse. Raja on 89 eikä 100, koska selostetun
+   *  otsikon eteen tulee "Selostettu ". */
+  test("merkkilaskuri kertoo otsikon pituuden ja varoittaa parin budjetin ylityksestä", async ({
+    page,
+    api,
+    openApp,
+  }) => {
+    api.authHealth = fixture.authHealthConnected();
+    await openApp(fixture.liveState({ job: draftJob(), health: "idle", headline: "Ei aktiivista lähetystä" }));
+
+    await page.getByText("Muokkaa otsikkoa").click();
+    const counter = page.getByTestId("title-length");
+    const texts = fixture.broadcastTexts();
+    await expect(counter).toContainText(`${texts.title.length}/89`);
+    await expect(counter).not.toContainText("lyhentää");
+
+    await page.getByLabel("Kotijoukkue").fill("Jyväskylän Kiri & Kirittäret Juniorit Rautiainen Punainen");
+    await page.getByRole("button", { name: "Päivitä esikatselu" }).click();
+    await expect(counter).toContainText("lyhentää nimiä automaattisesti");
   });
 
   /** #225: otsikkoa ei saanut vaihdetuksi luonnin jälkeen, vaikka palvelimen

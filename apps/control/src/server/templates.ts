@@ -15,6 +15,7 @@
  *     mitä ilman omaa `run/share-template.json`ia käytetään. */
 
 import { venueDisplayName, type VenueNameOptions } from "@pesisselostaja/core";
+import { NARRATED_PREFIX, PAIR_TITLE_MAX_LENGTH, TITLE_MAX_LENGTH } from "../shared/titles.js";
 import { watchUrlForVideo } from "../shared/youtubeUrl.js";
 import type { JobShareMessage } from "../shared/types.js";
 
@@ -39,7 +40,6 @@ export type AgeGroup = "G" | "E" | "F" | "D";
  *  vastustajan nimessä voi olla oma kirjaimensa ("SuPo G mustat"). */
 export const OWN_TEAM_PATTERN = /pes[äa]\s*ysit/i;
 
-export const NARRATED_PREFIX = "Selostettu ";
 
 /** Leirimallin SKILL: viesti aloitetaan aina tällä fraasilla, merkilleen. */
 export const SHARE_MESSAGE_OPENING = "Seuraava live on ";
@@ -97,18 +97,10 @@ export const MATCH_URL_BASE = "https://www.pesistulokset.fi/ottelut/";
 
 export const DEFAULT_HASHTAGS = ["#pesäpallo", "#pesäysit", "#live", "#livestream"];
 
-/** YouTuben oma raja on 100 merkkiä; pidemmät katkeavat myös mobiilinäkymässä.
- *  Runbook sallii pitkien seuranimien lyhentämisen nimenomaan otsikossa. */
-export const TITLE_MAX_LENGTH = 100;
-
-/** Raakalähetyksen otsikon budjetti, kun otsikkoa käytetään **lähetysparin**
- *  pohjana. Selostettu otsikko on sama teksti `NARRATED_PREFIX`illä varustettuna,
- *  joten tasan 100 merkin raakaotsikosta tulisi 111 merkin selostettu otsikko —
- *  jonka YouTube hylkää. Hylkäys kaataa parin luonnin puolivälissä, ja #204:n
- *  kompensaatio poistaa jo luodun raakalähetyksen, joten operaattori menettää
- *  molemmat (#316). Budjetti lasketaan siksi pidemmästä eli selostetusta
- *  otsikosta, ja pari pysyy toistensa kopioina etuliitettä lukuun ottamatta. */
-export const PAIR_TITLE_MAX_LENGTH = TITLE_MAX_LENGTH - NARRATED_PREFIX.length;
+// Otsikon pituusrajat ovat `shared/titles.ts`:ssä, koska käyttöliittymän
+// merkkilaskuri lukee samat luvut (#317). Uudelleenvienti pitää olemassa olevat
+// tuojat ennallaan.
+export { NARRATED_PREFIX, PAIR_TITLE_MAX_LENGTH, TITLE_MAX_LENGTH };
 
 /** Thumbnailin otsikkorivin budjetti merkkeinä.
  *
