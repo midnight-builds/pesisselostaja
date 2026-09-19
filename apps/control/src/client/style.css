@@ -349,6 +349,11 @@ select.field__input {
   color: var(--muted);
   line-height: 1.4;
 }
+/* Otsikko yli parin budjetin (#316/#317): ohjaamo lyhentää itse, joten tämä on
+   varoitus eikä virhe — siksi --warn eikä --danger. */
+.field__hint--warn {
+  color: var(--warn);
+}
 
 /* ── Ottelun valinta ─────────────────────────────────────── */
 .dayrow {

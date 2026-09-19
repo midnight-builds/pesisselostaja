@@ -3,6 +3,7 @@ import type { Job, PreflightResult } from "../../shared/types";
 import { hasBroadcastPair } from "../../shared/jobState";
 import { parseYouTubeVideoId, watchUrlForVideo } from "../../shared/youtubeUrl";
 import type { BroadcastTexts } from "../../server/templates";
+import { PAIR_TITLE_MAX_LENGTH } from "../../shared/titles";
 import type { CreatedBroadcastPair, PlaylistSummary, TemplatePreview, TitleOverrides } from "../api";
 import { api, isAuthMissing } from "../api";
 import { ConfirmButton } from "./ConfirmButton";
@@ -44,6 +45,13 @@ export function PrepCard({ job, notify }: Props) {
    *  (#225): muuten nappi kirjoittaisi otsikon, jonka palvelin muodosti
    *  edellisistä arvoista. */
   const [draft, setDraft] = useState<TitleOverrides>({});
+  /** Tulospalvelun omat nimet, luettuna ENSIMMÄISESTÄ esikatselusta.
+   *
+   *  Näitä ei saa lukea kulloisestakin esikatselusta: `texts.homeTeam` on jo
+   *  ohituksen läpi käynyt nimi, joten ohituksen jälkeen oletus olisi sama kuin
+   *  ohitus — ja `appliedOverrides` pudottaisi ohituksen pois juuri sovitettuaan
+   *  sen (#317). Ensimmäinen esikatselu haetaan aina tyhjillä ohituksilla. */
+  const [defaults, setDefaults] = useState<TitleOverrides | null>(null);
   const [authMissing, setAuthMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [share, setShare] = useState<string | null>(null);
@@ -99,8 +107,39 @@ export function PrepCard({ job, notify }: Props) {
 
   const same = (a: TitleOverrides, b: TitleOverrides) =>
     a.homeTeam === b.homeTeam && a.awayTeam === b.awayTeam && a.shortVenue === b.shortVenue;
-  /** Kentissä on tekstiä, jota esikatselu ei vielä tunne. */
-  const dirty = !same(draft, overrides);
+
+  /** Kentissä oleva teksti ohituksiksi.
+   *
+   *  Trimmaus tapahtuu VASTA tässä eikä `onChange`issa: kontrolloidussa kentässä
+   *  joka painalluksella trimmattu arvo kirjoittuu heti takaisin ruudulle, eikä
+   *  sanan perään saa välilyöntiä lainkaan — seuraavaa sanaa ei siis voi aloittaa
+   *  (#317).
+   *
+   *  Oletuksen veroinen arvo lähetetään `undefined`na eikä identtisenä
+   *  merkkijonona. Koskematon kenttä näyttää nyt oletusta, ja ilman tätä jokainen
+   *  työ saisi ohitukset joita kukaan ei pyytänyt — #231:n "ohitukset eivät säily
+   *  työssä" ja alla oleva `dirty` muuttuisivat huomaamatta. */
+  const appliedOverrides = (d: TitleOverrides): TitleOverrides => {
+    const pick = (raw: string | undefined, fallback: string | undefined) => {
+      const value = raw?.trim();
+      if (!value) return undefined;
+      return value === fallback?.trim() ? undefined : value;
+    };
+    return {
+      homeTeam: pick(d.homeTeam, defaults?.homeTeam),
+      awayTeam: pick(d.awayTeam, defaults?.awayTeam),
+      shortVenue: pick(d.shortVenue, defaults?.shortVenue),
+    };
+  };
+
+  /** Kentissä on tekstiä, jota esikatselu ei vielä tunne. Vertailu tehdään
+   *  trimmatuista arvoista, tai pelkkä perään kirjoitettu välilyönti avaisi
+   *  napin turhaan. */
+  const dirty = !same(appliedOverrides(draft), overrides);
+  const applyDraft = () => setOverrides(appliedOverrides(draft));
+  const restoreDefaults = () => setDraft(defaults ?? {});
+  /** Onko kentissä mitään oletuksesta poikkeavaa — eli onko mitä palauttaa. */
+  const edited = !same(appliedOverrides(draft), {});
 
   const fail = useCallback(
     (err: unknown) => {
@@ -131,6 +170,22 @@ export function PrepCard({ job, notify }: Props) {
       cancelled = true;
     };
   }, [job.id, overrides, hasPair, fail]);
+
+  // Esitäyttö kerran, kun esikatselu saapuu ensi kertaa (#317). Nimiä yleensä
+  // vain lyhennetään ("Pesä Ysit E-tytöt kilpa" → "Pesä Ysit ET-kilpa"), joten
+  // muokattavan pitää olla kentässä eikä harmaana placeholderina. Ehto
+  // `defaults === null` on se, mikä estää naiivia efektiä kirjoittamasta kesken
+  // jäänyttä muokkausta yli seuraavalla esikatseluhaulla.
+  useEffect(() => {
+    if (!preview || defaults !== null) return;
+    const initial: TitleOverrides = {
+      homeTeam: preview.texts.homeTeam,
+      awayTeam: preview.texts.awayTeam,
+      shortVenue: preview.texts.thumbnailVenue,
+    };
+    setDefaults(initial);
+    setDraft(initial);
+  }, [preview, defaults]);
 
   // Kun ikäluokka ei ratkennut, valitsin on auki valmiiksi (#239): rivi joka
   // vain kertoo puutteesta jättäisi korjauksen yhden lisänapautuksen taakse
@@ -315,14 +370,20 @@ export function PrepCard({ job, notify }: Props) {
             </details>
             <details className="prep__edit">
               <summary>Muokkaa otsikkoa</summary>
-              <TitleFields value={draft} texts={preview.texts} onChange={setDraft} />
+              <TitleFields
+                value={draft}
+                texts={preview.texts}
+                onChange={setDraft}
+                onRestore={restoreDefaults}
+                restorable={edited}
+              />
               {/* Esikatselu päivittyy vasta napista: joka näppäimenpainalluksella
                   haettuna teksti hyppisi silmien alla juuri kun sitä luetaan. */}
               <button
                 type="button"
                 className="btn btn--ghost btn--wide"
                 disabled={busy || !dirty}
-                onClick={() => setOverrides(draft)}
+                onClick={applyDraft}
               >
                 Päivitä esikatselu
               </button>
@@ -402,7 +463,13 @@ export function PrepCard({ job, notify }: Props) {
             <dt>Raakalähetys</dt>
             <dd>{preview.texts.title}</dd>
           </dl>
-          <TitleFields value={draft} texts={preview.texts} onChange={setDraft} />
+          <TitleFields
+                value={draft}
+                texts={preview.texts}
+                onChange={setDraft}
+                onRestore={restoreDefaults}
+                restorable={edited}
+              />
           {/* Kaksi tekoa, kaksi nappia, ja kirjoitus on lukossa niin kauan kuin
               kentissä on soveltamatonta tekstiä. Yksi nappi kirjoittaisi sen
               otsikon, jonka palvelin muodosti EDELLISISTÄ arvoista — eli tekisi
@@ -412,7 +479,7 @@ export function PrepCard({ job, notify }: Props) {
             type="button"
             className="btn btn--ghost btn--wide"
             disabled={busy || !dirty}
-            onClick={() => setOverrides(draft)}
+            onClick={applyDraft}
           >
             Päivitä esikatselu
           </button>
@@ -527,12 +594,21 @@ function TitleFields({
   value,
   texts,
   onChange,
+  onRestore,
+  restorable,
 }: {
   value: TitleOverrides;
   texts: BroadcastTexts;
   onChange: (next: TitleOverrides) => void;
+  onRestore: () => void;
+  restorable: boolean;
 }) {
-  const trimmed = (v: string) => (v.trim() ? v.trim() : undefined);
+  // Arvo talletetaan sellaisenaan. Trimmaus on kutsujan `appliedOverrides`issa,
+  // eli se tapahtuu kerran kun arvoa käytetään — ei joka näppäimenpainalluksella
+  // (#317).
+  const set = (patch: Partial<TitleOverrides>) => onChange({ ...value, ...patch });
+  const titleLength = texts.title.length;
+  const overBudget = titleLength > PAIR_TITLE_MAX_LENGTH;
 
   return (
     <>
@@ -542,7 +618,7 @@ function TitleFields({
           className="field__input"
           value={value.homeTeam ?? ""}
           placeholder={texts.homeTeam}
-          onChange={(e) => onChange({ ...value, homeTeam: trimmed(e.target.value) })}
+          onChange={(e) => set({ homeTeam: e.target.value })}
         />
       </label>
       <label className="field">
@@ -551,7 +627,7 @@ function TitleFields({
           className="field__input"
           value={value.awayTeam ?? ""}
           placeholder={texts.awayTeam}
-          onChange={(e) => onChange({ ...value, awayTeam: trimmed(e.target.value) })}
+          onChange={(e) => set({ awayTeam: e.target.value })}
         />
       </label>
       <label className="field">
@@ -560,16 +636,31 @@ function TitleFields({
           className="field__input"
           value={value.shortVenue ?? ""}
           placeholder={texts.thumbnailVenue}
-          onChange={(e) => onChange({ ...value, shortVenue: trimmed(e.target.value) })}
+          onChange={(e) => set({ shortVenue: e.target.value })}
         />
       </label>
-      {/* #221:n jälkihoito: placeholder kertoo nyt totuuden, mutta EI sitä mitä
-          tyhjä kenttä tarkoittaa. Harmaa teksti on puhelimen ruudulla yhä
-          kahden lukutavan välissä ("tämä on arvo" / "tämä on esimerkki"), ja
-          juuri se epäselvyys sai operaattorin epäilemään väärää sidontaa. */}
-      <p className="field__hint">
-        Tyhjä kenttä tarkoittaa harmaana näkyvää nimeä. Kirjoita vain se, minkä haluat toisin.
+      {/* Laskuri lukee VALMIIN otsikon pituuden esikatselusta eikä laske sitä
+          kentistä: otsikon kaava (lyhennysportaat, päivä, paikka) on palvelimella,
+          ja clientissä toisinnettuna se eroaisi siitä hiljaa. Siksi luku päivittyy
+          vasta "Päivitä esikatselu" -napista, kuten otsikkokin.
+
+          Raja on 89 eikä 100, koska selostetun otsikon eteen tulee "Selostettu "
+          (#316). Ylitys ei enää kaada luontia — palvelin lyhentää nimiä itse —
+          mutta juuri se lyhennys on se, minkä operaattori haluaa tehdä mieluummin
+          itse kuin antaa automaatin pudottaa vastustajan nimen kolmeen kirjaimeen. */}
+      <p className={overBudget ? "field__hint field__hint--warn" : "field__hint"} data-testid="title-length">
+        Otsikko {titleLength}/{PAIR_TITLE_MAX_LENGTH} merkkiä
+        {overBudget ? " — ohjaamo lyhentää nimiä automaattisesti. Lyhennä itse, jos haluat päättää miten." : ""}
       </p>
+      <button
+        type="button"
+        className="btn btn--ghost btn--wide"
+        disabled={!restorable}
+        onClick={onRestore}
+        data-testid="restore-defaults"
+      >
+        Palauta oletukset
+      </button>
     </>
   );
 }
