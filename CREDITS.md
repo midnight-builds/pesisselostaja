@@ -24,8 +24,13 @@ Notes:
 - **Asmo** is **CC BY-NC 4.0**: it is a community model that is **non-commercial
   only** and **requires attribution**. Pesisselostaja is a free, non-commercial
   app, the voice is credited in the UI and here, and the model is not
-  redistributed. If you fork this project for any commercial use, **remove the
-  Asmo voice** or obtain separate permission from the author.
+  redistributed. **Asmo is the default Piper voice for new users** (not just an
+  optional pick), so the non-commercial restriction applies out of the box, not
+  only to people who go looking for it. If you fork this project for any
+  commercial use, you must either **change the default away from Asmo and
+  remove the Asmo voice entirely**, or obtain separate permission from the
+  author — leaving it selectable but not-default is not enough to satisfy the
+  license.
 
 The canonical list (id, author, license, source) lives in code in
 [`apps/web/src/piper.ts`](apps/web/src/piper.ts) so the UI, README and this file stay in sync.
