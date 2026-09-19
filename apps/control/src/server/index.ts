@@ -15,6 +15,7 @@ import {
   writeRelayEnv,
   writeKnobs,
   nudgeDelay,
+  nudgeGain,
 } from "./relay.js";
 import { readLog } from "./journal.js";
 import { logError, logInfo, reason } from "./log.js";
@@ -681,6 +682,15 @@ async function route(req: IncomingMessage, res: ServerResponse, live: LiveAggreg
     if (!job) return sendError(res, 409, "Ei aktiivista työtä — valitse ottelu ensin");
     const body = await readJsonBody<{ deltaMs: number }>(req);
     sendJson(res, 200, await nudgeDelay(job.matchId, body.deltaMs));
+    return;
+  }
+  // Voimakkuuden nudge lasketaan palvelimella (#323): mykistettynä (gain 0) se
+  // on no-op, jottei naputtelu pura mykistystä kesken lähetyksen.
+  if (pathname === "/api/knobs/gain-nudge" && method === "POST") {
+    const job = await getActiveJob();
+    if (!job) return sendError(res, 409, "Ei aktiivista työtä — valitse ottelu ensin");
+    const body = await readJsonBody<{ delta: number }>(req);
+    sendJson(res, 200, await nudgeGain(job.matchId, body.delta));
     return;
   }
 
