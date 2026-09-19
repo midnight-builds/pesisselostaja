@@ -28,6 +28,12 @@ import {
   formatIntroFiller,
   decideFiller,
   periodName,
+  getTeamName,
+  isBatterChangeSubEvent,
+  batterNameOfSubEvent,
+  mergeQueuedNarration,
+  type QueuedNarration,
+  type QueuedNarrationKind,
   type PlayerLookup,
   type SpeechContext,
 } from "@pesisselostaja/core";
