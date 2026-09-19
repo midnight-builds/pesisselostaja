@@ -214,6 +214,9 @@ export const api = {
   relay: (action: "start" | "stop" | "restart") => postJson<RelayProcess>(`/api/relay/${action}`),
   knobs: (payload: PatchKnobsRequest) => postJson<ControlKnobs>("/api/knobs", payload),
   delayNudge: (deltaMs: number) => postJson<ControlKnobs>("/api/knobs/delay-nudge", { deltaMs }),
+  /** Voimakkuuden nudge. Palvelin laskee arvon ja jättää mykistyksen (0)
+   *  koskematta (#323). */
+  gainNudge: (delta: number) => postJson<ControlKnobs>("/api/knobs/gain-nudge", { delta }),
   // ── Ajastin ─────────────────────────────────────────────────────────────
   // Kaksi reittiä, ei kolmatta: tila ulos ja kytkin sisään. Käynnistystä ei
   // voi pyytää ajastimelta — se päättää itse, ja käsikäynnistys on relay().

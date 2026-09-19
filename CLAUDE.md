@@ -337,6 +337,40 @@ tuntematon" — deliberately, rather than showing nothing.
 
 Do this automatically at the end of every successful feature, without waiting to be asked.
 
+## Kun pyydetään merge: kysy aina koko linjasta
+
+**Kun käyttäjä pyytää mergen ("mergaa", "tee merget"), esitä ENSIN
+kysymys (AskUserQuestion) siitä, tehdäänkö pelkkä merge vai koko linja.**
+Älä oleta kumpaakaan: pelkkä merge jättää ajossa olevat palvelut vanhaan
+koodiin, ja koko linja käynnistää palveluita uudelleen — kumpikin väärä
+oletus on maksanut aikaa.
+
+Kysymyksen vaihtoehdot ovat tämän repon oikeat vaiheet:
+
+1. **Vain merge** — PR(:t) mainiin, mergen varmistus (`gh api
+   repos/midnight-builds/pesisselostaja/pulls/<n> --jq '.merged'`, koska
+   `gh pr merge` ei tulosta mitään), suomenkielinen sulkusana ei sulje
+   issueta joten issue suljetaan erikseen `gh api`:lla, ja mainin CI
+   odotetaan vihreäksi (`gh run list --branch main --limit 1`).
+2. **Merge + haarojen siivous** — edellinen, ja lisäksi remote-haara pois
+   sekä paikallinen `git branch -d` (EI `-D`). Poikkeukset sanotaan
+   ääneen: pinon kantahaara jolla on lapsi-PR, ja mergaamaton työ.
+3. **Koko linja** — edelliset, ja lisäksi käyttöönotto:
+   - **web/server:** `npm run build -w @pesisselostaja/web` (ja
+     `-w @pesisselostaja/server` jos muuttui), sitten
+     `systemctl --user restart pesisselostaja.service` ja varmistus
+     `systemctl --user is-active pesisselostaja.service` → `active`.
+   - **ohjaamo (`apps/control`):** build + `systemctl --user restart
+     pesisselostaja-control.service` (portti 3002) + `is-active`-varmistus.
+   - **relay (`apps/broadcast`, `packages/core`):** `npm run relay:deploy`
+     (oletus `origin/main`) — relay ajaa pinnatusta työpuusta
+     `~/relay-deploy`, joten ilman tätä se jää mergattua koodia vanhemmaksi.
+     Skripti kieltäytyy palvelun ollessa ajossa.
+
+**Jos lähetys on kesken, kerro se kysymyksen yhteydessä** — relayn deploy ja
+palvelujen restart eivät kuulu ottelun ajaksi (ks. operatiivinen restart-lupa:
+vain rikkinäisen palauttamiseen, ei laatusäätöön kesken lähetyksen).
+
 ## Agent skills
 
 ### Issue tracker

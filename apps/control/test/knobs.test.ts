@@ -10,6 +10,7 @@ import { CONFIG } from "../src/server/config.js";
 import {
   controlFilePath,
   nudgeDelay,
+  nudgeGain,
   readKnobs,
   readRunningMatchId,
   readSourceIngest,
@@ -132,6 +133,18 @@ describe("writeKnobs", () => {
     expect((await readKnobs(MATCH_ID)).narrationGain).toBe(0.9);
   });
 
+  // #323: lukupolku ei saa clampata. Mykistetty relay (gain 0) näkyi
+  // ohjaamossa lukemana 0.50 — eri arvo kuin relay käyttää.
+  it("lukee mykistyksen (gain 0) clamppaamattomana", async () => {
+    writeControlFile({ narrationGain: 0 });
+    expect((await readKnobs(MATCH_ID)).narrationGain).toBe(0);
+  });
+
+  it("lukee myös ohjaamon säätövälin ulkopuolisen gainin sellaisenaan", async () => {
+    writeControlFile({ narrationGain: 3.5 });
+    expect((await readKnobs(MATCH_ID)).narrationGain).toBe(3.5);
+  });
+
   it("clamps pollIntervalMs to a 2000 ms floor", async () => {
     const result = await writeKnobs(MATCH_ID, { pollIntervalMs: 500 });
     expect(result.pollIntervalMs).toBe(2000);
@@ -140,6 +153,35 @@ describe("writeKnobs", () => {
   it("clamps pollIntervalMs to a 60000 ms ceiling", async () => {
     const result = await writeKnobs(MATCH_ID, { pollIntervalMs: 500_000 });
     expect(result.pollIntervalMs).toBe(60_000);
+  });
+});
+
+describe("nudgeGain", () => {
+  it("lisää askeleen nykyiseen gainiin", async () => {
+    await writeKnobs(MATCH_ID, { narrationGain: 1.2 });
+    expect((await nudgeGain(MATCH_ID, 0.05)).narrationGain).toBe(1.25);
+  });
+
+  // #323, työn vakavin seuraus: mykistettynä ylänappi laski 0.5 + askel ja
+  // kirjoitti sen → mykistys purkautui huomaamatta kesken elävän lähetyksen.
+  it("ei pura mykistystä: nudge ylös arvosta 0 on no-op", async () => {
+    writeControlFile({ narrationGain: 0 });
+    const result = await nudgeGain(MATCH_ID, 0.05);
+    expect(result.narrationGain).toBe(0);
+    expect(readControlFile().narrationGain).toBe(0);
+  });
+
+  it("myös nudge alas arvosta 0 jättää mykistyksen ennalleen", async () => {
+    writeControlFile({ narrationGain: 0 });
+    expect((await nudgeGain(MATCH_ID, -0.05)).narrationGain).toBe(0);
+  });
+
+  // Kirjoituspolun clamppaus on käyttöliittymäpolitiikkaa ja jää voimaan.
+  it("kiinnittää nudgen ohjaamon säätöväliin [0.5, 2]", async () => {
+    await writeKnobs(MATCH_ID, { narrationGain: 0.55 });
+    expect((await nudgeGain(MATCH_ID, -0.1)).narrationGain).toBe(0.5);
+    await writeKnobs(MATCH_ID, { narrationGain: 1.95 });
+    expect((await nudgeGain(MATCH_ID, 0.1)).narrationGain).toBe(2);
   });
 });
 
