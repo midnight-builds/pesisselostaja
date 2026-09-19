@@ -411,10 +411,14 @@ export function MatchGlance({ live, notify }: Props) {
    *  liukuluvun hännän verran ja jätä `pending`iä roikkumaan. */
   const nudgeGain = (delta: number) => {
     if (!knobs) return;
+    // Mykistettynä (0) nudge ei tee mitään — sama sääntö kuin palvelimella
+    // (#323). Ilman tätä ylänappi olisi kirjoittanut 0.5 + askel ja purkanut
+    // mykistyksen kesken elävän lähetyksen.
+    if (knobs.narrationGain <= 0) return;
     const raw = Math.min(GAIN_MAX, Math.max(GAIN_MIN, knobs.narrationGain + delta));
     const next = Math.round(raw * 100) / 100;
     if (next === knobs.narrationGain) return;
-    apply({ ...knobs, narrationGain: next }, () => api.knobs({ narrationGain: next }));
+    apply({ ...knobs, narrationGain: next }, () => api.gainNudge(delta));
   };
 
   const toggleBatterChanges = () => {
@@ -520,15 +524,17 @@ export function MatchGlance({ live, notify }: Props) {
         <div className="delay">
           <span className="knob__label">
             Selostuksen voimakkuus
+            {/* 0 = relay on mykistetty (#298). Se on oma tilansa, ei pieni
+                luku: clampattu "0.50" näytti säädöltä jota relay ei käytä. */}
             <span className="delay__value num">
-              {knobs ? knobs.narrationGain.toFixed(2) : "–"}
+              {!knobs ? "–" : knobs.narrationGain <= 0 ? "Mykistetty" : knobs.narrationGain.toFixed(2)}
             </span>
           </span>
           <div className="delay__buttons">
             <button
               type="button"
               className="btn btn--nudge"
-              disabled={!knobs || (knobs?.narrationGain ?? 0) <= GAIN_MIN}
+              disabled={!knobs || knobs.narrationGain <= GAIN_MIN}
               onClick={() => nudgeGain(-GAIN_STEP)}
             >
               <span className="btn__big">Kentän äänet liian hiljaa</span>
@@ -537,7 +543,7 @@ export function MatchGlance({ live, notify }: Props) {
             <button
               type="button"
               className="btn btn--nudge"
-              disabled={!knobs || (knobs?.narrationGain ?? 0) >= GAIN_MAX}
+              disabled={!knobs || knobs.narrationGain <= 0 || knobs.narrationGain >= GAIN_MAX}
               onClick={() => nudgeGain(GAIN_STEP)}
             >
               <span className="btn__big">Selostus liian hiljaa</span>

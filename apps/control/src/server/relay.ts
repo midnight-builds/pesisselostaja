@@ -69,7 +69,13 @@ const MAX_NARRATION_DELAY_MS = 30_000;
 const MIN_NARRATION_GAIN = 0.5;
 const MAX_NARRATION_GAIN = 2;
 /** Gain on murtoluku, joten se EI saa kulkea `clamp`in läpi — se pyöristää
- *  kokonaisluvuksi, ja 1.3 muuttuisi ykköseksi. */
+ *  kokonaisluvuksi, ja 1.3 muuttuisi ykköseksi.
+ *
+ *  VAIN KIRJOITUSPOLULLE (#323). Lukupolku palauttaa tiedoston arvon
+ *  sellaisenaan: ohjaamo lukee, se ei päättele (#97). Kun relay on mykistetty
+ *  (`narrationGain: 0`), clampattu luku näytti ohjaamossa 0.50:nä ja
+ *  "Selostus liian hiljaa" olisi kirjoittanut 0.55 — mykistys olisi purkautunut
+ *  huomaamatta kesken elävän lähetyksen. */
 function clampGain(value: number): number {
   const bounded = Math.min(MAX_NARRATION_GAIN, Math.max(MIN_NARRATION_GAIN, value));
   // Kaksi desimaalia: liukusäätimen askel on 0.05, eikä liukuluvun häntä
@@ -384,7 +390,9 @@ function knobsFromRaw(raw: Record<string, unknown>): ControlKnobs {
         : KNOB_DEFAULTS.narrationDelayMs,
     narrationGain:
       typeof raw.narrationGain === "number" && Number.isFinite(raw.narrationGain)
-        ? clampGain(raw.narrationGain)
+        ? // Ei clamppia: mykistys (0) ja mikä tahansa relayn oma arvo näkyvät
+          // ohjaamossa sellaisenaan (#323). Kirjoituspolku kiinnittää yhä.
+          raw.narrationGain
         : KNOB_DEFAULTS.narrationGain,
     deltaFetch: typeof raw.deltaFetch === "boolean" ? raw.deltaFetch : KNOB_DEFAULTS.deltaFetch,
     silenced: typeof raw.silenced === "boolean" ? raw.silenced : KNOB_DEFAULTS.silenced,
@@ -465,6 +473,25 @@ export function nudgeDelay(matchId: number, deltaMs: number): Promise<ControlKno
       MAX_NARRATION_DELAY_MS
     );
     return writeKnobsUnlocked(matchId, { narrationDelayMs: next });
+  });
+}
+
+/** Voimakkuuden ± -napit (#323). Suhteellinen samasta syystä kuin viive, mutta
+ *  laskenta on palvelimella eikä selaimessa, jotta mykistyssääntö on yhdessä
+ *  paikassa ja testattavissa ilman selainta.
+ *
+ *  MYKISTETTYNÄ (`narrationGain === 0`) NUDGE ON NO-OP. Pelkkä äänenvoimakkuuden
+ *  naputtelu ei saa purkaa mykistystä: operaattori kuulee vain lopputuloksen,
+ *  ja mykistyksen huomaamaton purkautuminen kesken elävän lähetyksen on
+ *  pahempi lopputulos kuin nappi joka ei tee mitään. Purku tapahtuu vain
+ *  eksplisiittisellä toiminnolla (absoluuttinen kirjoitus /api/knobs). */
+export function nudgeGain(matchId: number, delta: number): Promise<ControlKnobs> {
+  return serializeControlWrite(async () => {
+    const current = knobsFromRaw(await readControlFile(matchId));
+    if (current.narrationGain <= 0) return current;
+    const next = clampGain(current.narrationGain + delta);
+    if (next === current.narrationGain) return current;
+    return writeKnobsUnlocked(matchId, { narrationGain: next });
   });
 }
 
